@@ -185,7 +185,9 @@ public:
             nativePaintingActive(false),
             inverseScale(1),
             lastMaskTextureUsed(0),
-            translateZ(0)
+            translateZ(0),
+            vertexCoordinateVBOId(0),
+            staticVertexCoordinateVBOId(0)
     { }
 
     ~QGL2PaintEngineExPrivate();
@@ -230,6 +232,11 @@ public:
 
     void setBrush(const QBrush& brush);
     void transferMode(EngineMode newMode);
+
+    void bindStaticVBO();
+    void bindVertexVBO();
+    void fillArrayBuffer(bool staticArray, bool includeTex, bool includeOpacity);
+
     bool prepareForDraw(bool srcPixelsAreOpaque); // returns true if the program has changed
     bool prepareForCachedGlyphDraw(const QFontEngineGlyphCache &cache);
     inline void useSimpleShader();
@@ -282,11 +289,14 @@ public:
 
     QGL2PEXVertexArray vertexCoordinateArray;
     QGL2PEXVertexArray textureCoordinateArray;
+    GLuint             vertexCoordinateVBOId;
+
     QVector<GLushort> elementIndices;
     GLuint elementIndicesVBOId;
     QDataBuffer<GLfloat> opacityArray;
     GLfloat staticVertexCoordinateArray[8];
     GLfloat staticTextureCoordinateArray[8];
+    GLuint  staticVertexCoordinateVBOId;
 
     bool snapToPixelGrid;
     bool nativePaintingActive;
@@ -318,11 +328,9 @@ public:
 
 void QGL2PaintEngineExPrivate::setVertexAttributePointer(unsigned int arrayIndex, const GLfloat *pointer)
 {
+    // NOTE: We can't use vertexAttribPointers to limit state changes because
+    //       this method is called for the static, dynamic, and vector path VBOs.
     Q_ASSERT(arrayIndex < 3);
-    if (pointer == vertexAttribPointers[arrayIndex])
-        return;
-
-    vertexAttribPointers[arrayIndex] = pointer;
     if (arrayIndex == QT_OPACITY_ATTR)
         glVertexAttribPointer(arrayIndex, 1, GL_FLOAT, GL_FALSE, 0, pointer);
     else

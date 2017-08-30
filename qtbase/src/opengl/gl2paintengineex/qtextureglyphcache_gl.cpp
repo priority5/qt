@@ -44,6 +44,7 @@
 
 QT_BEGIN_NAMESPACE
 
+#define QT_USE_VBOS
 
 static int next_qgltextureglyphcache_serial_number()
 {
@@ -57,6 +58,7 @@ QGLTextureGlyphCache::QGLTextureGlyphCache(QFontEngine::GlyphFormat format, cons
     , pex(0)
     , m_blitProgram(0)
     , m_filterMode(Nearest)
+    , m_coordinateArrayVBOId(0u)
     , m_serialNumber(next_qgltextureglyphcache_serial_number())
 {
 #ifdef QT_GL_TEXTURE_GLYPH_CACHE_DEBUG
@@ -143,6 +145,40 @@ void QGLTextureGlyphCache::createTextureData(int width, int height)
     funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     m_filterMode = Nearest;
+}
+
+void QGLTextureGlyphCache::bindStaticVBO()
+{
+    QGLContext *ctx = const_cast<QGLContext *>(QGLContext::currentContext());
+    QOpenGLFunctions *funcs = ctx->contextHandle()->functions();
+
+    static const GLuint vertex_size(sizeof(GLfloat) * 8);
+    static const GLuint texture_size(sizeof(GLfloat) * 8);
+    if (0 == m_coordinateArrayVBOId)
+    {
+        // Allocate VBO and the array buffer of a known size.
+        funcs->glGenBuffers(1, &m_coordinateArrayVBOId);
+        funcs->glBindBuffer(GL_ARRAY_BUFFER, m_coordinateArrayVBOId);
+        funcs->glBufferData(GL_ARRAY_BUFFER, vertex_size + texture_size, NULL, GL_STATIC_DRAW);
+
+        // Copy the vertex and texture coordinate data into the already allocated VBO.
+        funcs->glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_size, m_vertexCoordinateArray);
+        funcs->glBufferSubData(GL_ARRAY_BUFFER, vertex_size, texture_size, m_textureCoordinateArray);
+    } else {
+        funcs->glBindBuffer(GL_ARRAY_BUFFER, m_coordinateArrayVBOId);
+    }
+
+    if (pex != NULL) {
+        pex->setVertexAttributePointer(QT_VERTEX_COORDS_ATTR, 0);
+        pex->setVertexAttributePointer(QT_TEXTURE_COORDS_ATTR, (const GLfloat *)vertex_size);
+    } else {
+        // NOTE: qglslUntransformedPositionVertexShader shader uses vec4 vertexCoordsArray,
+        //       but we specify that we are only supplying two floating floats.
+        // NOTE: We don't use setVertexAttributePointer() here because we don't have access
+        //       to the paint engine.
+        funcs->glVertexAttribPointer(QT_VERTEX_COORDS_ATTR, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        funcs->glVertexAttribPointer(QT_TEXTURE_COORDS_ATTR, 2, GL_FLOAT, GL_FALSE, 0, (const GLfloat *)vertex_size);
+    }
 }
 
 void QGLTextureGlyphCache::resizeTextureData(int width, int height)
@@ -241,8 +277,10 @@ void QGLTextureGlyphCache::resizeTextureData(int width, int height)
             m_blitProgram->link();
         }
 
+#if !defined(QT_USE_VBOS)
         funcs->glVertexAttribPointer(QT_VERTEX_COORDS_ATTR, 2, GL_FLOAT, GL_FALSE, 0, m_vertexCoordinateArray);
         funcs->glVertexAttribPointer(QT_TEXTURE_COORDS_ATTR, 2, GL_FLOAT, GL_FALSE, 0, m_textureCoordinateArray);
+#endif
 
         m_blitProgram->bind();
         m_blitProgram->enableAttributeArray(int(QT_VERTEX_COORDS_ATTR));
@@ -252,8 +290,10 @@ void QGLTextureGlyphCache::resizeTextureData(int width, int height)
         blitProgram = m_blitProgram;
 
     } else {
+#if !defined(QT_USE_VBOS)
         pex->setVertexAttributePointer(QT_VERTEX_COORDS_ATTR, m_vertexCoordinateArray);
         pex->setVertexAttributePointer(QT_TEXTURE_COORDS_ATTR, m_textureCoordinateArray);
+#endif
 
         pex->shaderManager->useBlitProgram();
         blitProgram = pex->shaderManager->blitProgram();
@@ -261,7 +301,13 @@ void QGLTextureGlyphCache::resizeTextureData(int width, int height)
 
     blitProgram->setUniformValue("imageTexture", QT_IMAGE_TEXTURE_UNIT);
 
+#if defined(QT_USE_VBOS)
+    bindStaticVBO();
     funcs->glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    funcs->glBindBuffer(GL_ARRAY_BUFFER, 0);
+#else
+    funcs->glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+#endif
 
     funcs->glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
 

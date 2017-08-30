@@ -153,6 +153,8 @@ public:
     void clear();
 
 private:
+    void bindStaticVBO();
+
     QGLGlyphTexture *m_textureResource;
 
     QGL2PaintEngineExPrivate *pex;
@@ -161,6 +163,7 @@ private:
 
     GLfloat m_vertexCoordinateArray[8];
     GLfloat m_textureCoordinateArray[8];
+    GLuint  m_coordinateArrayVBOId;
 
     int m_serialNumber;
 };
