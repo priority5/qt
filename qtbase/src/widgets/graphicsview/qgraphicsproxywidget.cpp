@@ -480,6 +480,7 @@ void QGraphicsProxyWidgetPrivate::embedSubWindow(QWidget *subWin)
     QWExtra *extra;
     if (!((extra = subWin->d_func()->extra) && extra->proxyWidget)) {
         QGraphicsProxyWidget *subProxy = new QGraphicsProxyWidget(q_func(), subWin->windowFlags());
+        subProxy->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
         subProxy->d_func()->setWidget_helper(subWin, false);
     }
 }
