@@ -609,7 +609,7 @@ void QGraphicsProxyWidgetPrivate::setWidget_helper(QWidget *newWidget, bool auto
             if (child->d_ptr->isProxyWidget()) {
                 QGraphicsProxyWidget *childProxy = static_cast<QGraphicsProxyWidget *>(child);
                 QWidget * parent = childProxy->widget();
-                while (parent->parentWidget() != 0) {
+                while (parent && parent->parentWidget() != 0) {
                     if (parent == widget)
                         break;
                     parent = parent->parentWidget();
