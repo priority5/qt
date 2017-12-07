@@ -295,7 +295,7 @@
             },
             "sources": [
                 { "type": "pkgConfig", "args": "libpng" },
-                { "libs": "-llibpng", "condition": "config.msvc" },
+                { "libs": "-llibpng16", "condition": "config.msvc" },
                 { "libs": "-lpng", "condition": "!config.msvc" }
             ],
             "use": [
