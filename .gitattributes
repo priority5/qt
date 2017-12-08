@@ -1,0 +1,23 @@
+# .pins files must use LF (unix style) line-endings.
+qtwebengine/src/3rdparty/chromium/net/http/transport_security_state_static.pins eol=lf
+
+# Large File Support (LFS)
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
+*.dll filter=lfs diff=lfs merge=lfs -text
+*.pyd filter=lfs diff=lfs merge=lfs -text
+*.lib filter=lfs diff=lfs merge=lfs -text
+*.jar filter=lfs diff=lfs merge=lfs -text
+*.exe filter=lfs diff=lfs merge=lfs -text
+*.pdb filter=lfs diff=lfs merge=lfs -text
+*.so filter=lfs diff=lfs merge=lfs -text
+*.so.* filter=lfs diff=lfs merge=lfs -text
+*.a filter=lfs diff=lfs merge=lfs -text
+
+qtvirtualkeyboard/src/virtualkeyboard/3rdparty/lipi-toolkit/projects/alphanumeric/config/default/nn.mdt filter=lfs diff=lfs merge=lfs -text
+qtwebengine/src/3rdparty/chromium/third_party/icu/common/icudtl.dat filter=lfs diff=lfs merge=lfs -text
+qtwebengine/src/3rdparty/chromium/third_party/icu/common/icudtb.dat filter=lfs diff=lfs merge=lfs -text
+qtwebengine/src/3rdparty/chromium/third_party/skia/platform_tools/android/bin/linux/perfhost filter=lfs diff=lfs merge=lfs -text
+qtwebengine/src/3rdparty/chromium/third_party/swiftshader/third_party/PowerVR_SDK/Examples/Advanced/ChameleonMan/Media/ChameleonManScene.max filter=lfs diff=lfs merge=lfs -text
+qtxmlpatterns/tests/auto/xmlpatternsschemats/Baseline.xml filter=lfs diff=lfs merge=lfs -text
+qtvirtualkeyboard/src/virtualkeyboard/3rdparty/pinyin/data/dict_pinyin.dat filter=lfs diff=lfs merge=lfs -text
