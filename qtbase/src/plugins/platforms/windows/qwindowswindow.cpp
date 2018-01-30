@@ -2066,7 +2066,13 @@ bool QWindowsWindow::handleGeometryChangingMessage(MSG *message, const QWindow *
 {
     if (!qWindow->isTopLevel()) // Implement hasHeightForWidth().
         return false;
+
     WINDOWPOS *windowPos = reinterpret_cast<WINDOWPOS *>(message->lParam);
+
+    if (qWindow->flags() & Qt::WindowStaysOnBottomHint) {
+        windowPos->hwndInsertAfter = HWND_BOTTOM;
+    }
+
     if ((windowPos->flags & (SWP_NOCOPYBITS | SWP_NOSIZE)))
         return false;
     const QRect suggestedFrameGeometry(windowPos->x, windowPos->y,
