@@ -159,7 +159,12 @@ public:
         : m_delegate(base::MessageLoopForUI::current())
         , m_explicitLoop(0)
         , m_timerId(0)
+        , m_eventCount(10)
     {
+        // Get the configured number of events to process in a single frame.
+        // NOTE: toInt() will return zero if conversion fails.
+        m_eventCount = qgetenv("QTWEBENGINE_EVENT_COUNT").toInt();
+        m_eventCount = m_eventCount > 0 ? m_eventCount : 10;
     }
 
     void Run(Delegate *delegate) override
@@ -216,25 +221,48 @@ protected:
     }
 
 private:
-    bool handleScheduledWork() {
+    bool _handleScheduledWork() {
         bool more_work_is_plausible = m_delegate->DoWork();
 
         base::TimeTicks delayed_work_time;
         more_work_is_plausible |= m_delegate->DoDelayedWork(&delayed_work_time);
 
+        // If there could be either more work or more delayed work continue
+        // in an attempt to do more.
         if (more_work_is_plausible)
             return true;
 
+        // Attempt to do idle work.
         more_work_is_plausible |= m_delegate->DoIdleWork();
+        // If we didn't complete any idle work schedule next check for
+        // delayed work and return.
         if (!more_work_is_plausible)
             ScheduleDelayedWork(delayed_work_time);
 
         return more_work_is_plausible;
     }
 
+    bool handleScheduledWork() {
+       bool did_work(false);
+
+       for(unsigned int loop_count = 0; loop_count < m_eventCount; loop_count++)
+       {
+          if (!_handleScheduledWork())
+          {
+             return did_work;
+          }
+          else
+          {
+             did_work = true;
+          }
+       }
+       return did_work;
+    }
+
     Delegate *m_delegate;
     QEventLoop *m_explicitLoop;
     int m_timerId;
+    unsigned int m_eventCount;
     base::TimeTicks m_timerScheduledTime;
 };
 
