@@ -72,7 +72,7 @@ struct ExtensionMap {
     { ".mng", "video/x-mng" },
     { ".pbm", "image/x-portable-bitmap" },
     { ".pgm", "image/x-portable-graymap" },
-    { ".pdf", "application/pdf" },
+    { ".pdf", nullptr },
     { ".png", "image/png" },
     { ".ppm", "image/x-portable-pixmap" },
     { ".rss", "application/rss+xml" },
@@ -89,8 +89,8 @@ struct ExtensionMap {
     { ".xhtml", "application/xhtml+xml" },
     { ".wml", "text/vnd.wap.wml" },
     { ".wmlc", "application/vnd.wap.wmlc" },
-    { "about:blank", 0 },
-    { 0, 0 }
+    { "about:blank", nullptr },
+    { nullptr, nullptr }
 };
 
 HelpViewer::~HelpViewer()
@@ -156,7 +156,7 @@ bool HelpViewer::launchWithExternalApp(const QUrl &url)
 
             actualTmpFile.write(helpEngine.fileData(resolvedUrl));
             actualTmpFile.close();
-            return QDesktopServices::openUrl(QUrl(actualTmpFile.fileName()));
+            return QDesktopServices::openUrl(QUrl::fromLocalFile(actualTmpFile.fileName()));
         }
         return false;
     }

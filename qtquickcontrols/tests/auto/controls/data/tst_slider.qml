@@ -136,8 +136,22 @@ Item {
             slider.destroy()
         }
 
+        Component {
+            id: fixedHandleSizeSlider
+
+            Slider {
+                style: SliderStyle {
+                    handle: Rectangle {
+                        color: "red"
+                        implicitWidth: 15
+                        implicitHeight: 15
+                    }
+                }
+            }
+        }
+
         function test_mouseWheel() {
-            var slider = Qt.createQmlObject('import QtQuick.Controls 1.2; Slider {}', container, '');
+            var slider = createTemporaryObject(fixedHandleSizeSlider, container)
             slider.forceActiveFocus()
             slider.value = 0
             slider.maximumValue = 300
@@ -182,8 +196,6 @@ Item {
             slider.wheelEnabled = false
             mouseWheel(slider, 5, 5, 4 * ratio, 0)
             compare(slider.value, 0)
-
-            slider.destroy()
         }
 
         function test_activeFocusOnPress(){
@@ -426,6 +438,39 @@ Item {
             compare(handle.mapToItem(null, 0, 0).x, maxPos);
 
             control.destroy();
+        }
+
+        Component {
+            id: mouseWheelSlider
+            Slider {
+                 property real boundValue: 10
+                 width: 300
+                 height: 50
+                 minimumValue: 0
+                 maximumValue: 200
+                 stepSize: 2
+                 value: boundValue
+             }
+        }
+
+        function test_mouseWheelWithValueBinding() {
+            var slider = createTemporaryObject(mouseWheelSlider, container)
+            slider.forceActiveFocus()
+
+            var defaultScrollSpeed = 20.0
+            var mouseStep = 15.0
+            var deltatUnit = 8.0
+            var mouseRatio = deltatUnit * mouseStep / defaultScrollSpeed;
+            var sliderDeltaRatio = 1; //(slider.maximumValue - slider.minimumValue)/slider.width
+            var ratio = mouseRatio / sliderDeltaRatio
+
+            compare(slider.value, 10)
+
+            mouseWheel(slider, 5, 5, -20 * ratio, 0)
+            compare(slider.value, 24)
+
+            slider.boundValue = 50
+            compare(slider.value, 50)
         }
     }
 }

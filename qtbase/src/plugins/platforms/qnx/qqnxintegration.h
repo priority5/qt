@@ -41,7 +41,7 @@
 #define QQNXINTEGRATION_H
 
 #include <qpa/qplatformintegration.h>
-
+#include <private/qtguiglobal_p.h>
 #include <QtCore/qmutex.h>
 
 #include <screen/screen.h>
@@ -61,7 +61,7 @@ class QQnxServices;
 
 class QSimpleDrag;
 
-#if defined(QQNX_PPS)
+#if QT_CONFIG(qqnx_pps)
 class QQnxInputContext;
 class QQnxNavigatorEventNotifier;
 class QQnxButtonEventNotifier;
@@ -81,11 +81,14 @@ public:
         NoOptions = 0x0,
         FullScreenApplication = 0x1,
         RootWindow = 0x2,
-        AlwaysFlushScreenContext = 0x4
+        AlwaysFlushScreenContext = 0x4,
+        SurfacelessEGLContext = 0x8
     };
     Q_DECLARE_FLAGS(Options, Option)
     explicit QQnxIntegration(const QStringList &paramList);
     ~QQnxIntegration();
+
+    static QQnxIntegration *instance() { return ms_instance; }
 
     bool hasCapability(QPlatformIntegration::Capability cap) const override;
 
@@ -96,7 +99,7 @@ public:
     QPlatformOpenGLContext *createPlatformOpenGLContext(QOpenGLContext *context) const override;
 #endif
 
-#if defined(QQNX_PPS)
+#if QT_CONFIG(qqnx_pps)
     QPlatformInputContext *inputContext() const override;
 #endif
 
@@ -113,22 +116,22 @@ public:
 #if !defined(QT_NO_CLIPBOARD)
     QPlatformClipboard *clipboard() const override;
 #endif
-#if !defined(QT_NO_DRAGANDDROP)
+#if QT_CONFIG(draganddrop)
     QPlatformDrag *drag() const override;
 #endif
     QVariant styleHint(StyleHint hint) const override;
 
     QPlatformServices *services() const override;
 
-    static QWindow *window(screen_window_t qnxWindow);
+    QWindow *window(screen_window_t qnxWindow);
 
     QQnxScreen *screenForNative(screen_display_t qnxScreen) const;
 
     void createDisplay(screen_display_t display, bool isPrimary);
     void removeDisplay(QQnxScreen *screen);
     QQnxScreen *primaryDisplay() const;
-    static Options options();
-    static screen_context_t screenContext();
+    Options options() const;
+    screen_context_t screenContext();
 
     QQnxNavigatorEventHandler *navigatorEventHandler();
 
@@ -136,18 +139,21 @@ private:
     void createDisplays();
     void destroyDisplays();
 
-    static void addWindow(screen_window_t qnxWindow, QWindow *window);
-    static void removeWindow(screen_window_t qnxWindow);
+    void addWindow(screen_window_t qnxWindow, QWindow *window);
+    void removeWindow(screen_window_t qnxWindow);
+    QList<screen_display_t *> sortDisplays(screen_display_t *displays,
+                                          int displayCount);
 
-    static screen_context_t ms_screenContext;
+    screen_context_t m_screenContext;
     QQnxScreenEventThread *m_screenEventThread;
     QQnxNavigatorEventHandler *m_navigatorEventHandler;
     QQnxAbstractVirtualKeyboard *m_virtualKeyboard;
-#if defined(QQNX_PPS)
+#if QT_CONFIG(qqnx_pps)
     QQnxNavigatorEventNotifier *m_navigatorEventNotifier;
     QQnxInputContext *m_inputContext;
     QQnxButtonEventNotifier *m_buttonsNotifier;
 #endif
+    QPlatformInputContext *m_qpaInputContext;
     QQnxServices *m_services;
     QPlatformFontDatabase *m_fontDatabase;
     mutable QAbstractEventDispatcher *m_eventDispatcher;
@@ -158,13 +164,15 @@ private:
     mutable QQnxClipboard* m_clipboard;
 #endif
     QQnxAbstractNavigator *m_navigator;
-#if !defined(QT_NO_DRAGANDDROP)
+#if QT_CONFIG(draganddrop)
     QSimpleDrag *m_drag;
 #endif
-    static QQnxWindowMapper ms_windowMapper;
-    static QMutex ms_windowMapperMutex;
+    QQnxWindowMapper m_windowMapper;
+    QMutex m_windowMapperMutex;
 
-    static Options ms_options;
+    Options m_options;
+
+    static QQnxIntegration *ms_instance;
 
     friend class QQnxWindow;
 };

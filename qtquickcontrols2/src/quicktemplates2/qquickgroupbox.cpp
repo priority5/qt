@@ -36,6 +36,7 @@
 
 #include "qquickgroupbox_p.h"
 #include "qquickframe_p_p.h"
+#include "qquickdeferredexecute_p_p.h"
 
 #include <QtGui/qpa/qplatformtheme.h>
 
@@ -85,16 +86,64 @@ QT_BEGIN_NAMESPACE
 
 class QQuickGroupBoxPrivate : public QQuickFramePrivate
 {
+    Q_DECLARE_PUBLIC(QQuickGroupBox)
+
 public:
-    QQuickGroupBoxPrivate() : label(nullptr) { }
+    void cancelLabel();
+    void executeLabel(bool complete = false);
+
+    void itemImplicitWidthChanged(QQuickItem *item) override;
+    void itemImplicitHeightChanged(QQuickItem *item) override;
 
     QString title;
-    QQuickItem *label;
+    QQuickDeferredPointer<QQuickItem> label;
 };
+
+static inline QString labelName() { return QStringLiteral("label"); }
+
+void QQuickGroupBoxPrivate::cancelLabel()
+{
+    Q_Q(QQuickGroupBox);
+    quickCancelDeferred(q, labelName());
+}
+
+void QQuickGroupBoxPrivate::executeLabel(bool complete)
+{
+    Q_Q(QQuickGroupBox);
+    if (label.wasExecuted())
+        return;
+
+    if (!label || complete)
+        quickBeginDeferred(q, labelName(), label);
+    if (complete)
+        quickCompleteDeferred(q, labelName(), label);
+}
+
+void QQuickGroupBoxPrivate::itemImplicitWidthChanged(QQuickItem *item)
+{
+    Q_Q(QQuickGroupBox);
+    QQuickFramePrivate::itemImplicitWidthChanged(item);
+    if (item == label)
+        emit q->implicitLabelWidthChanged();
+}
+
+void QQuickGroupBoxPrivate::itemImplicitHeightChanged(QQuickItem *item)
+{
+    Q_Q(QQuickGroupBox);
+    QQuickFramePrivate::itemImplicitHeightChanged(item);
+    if (item == label)
+        emit q->implicitLabelHeightChanged();
+}
 
 QQuickGroupBox::QQuickGroupBox(QQuickItem *parent)
     : QQuickFrame(*(new QQuickGroupBoxPrivate), parent)
 {
+}
+
+QQuickGroupBox::~QQuickGroupBox()
+{
+    Q_D(QQuickGroupBox);
+    d->removeImplicitSizeListener(d->label);
 }
 
 /*!
@@ -131,7 +180,9 @@ void QQuickGroupBox::setTitle(const QString &title)
 */
 QQuickItem *QQuickGroupBox::label() const
 {
-    Q_D(const QQuickGroupBox);
+    QQuickGroupBoxPrivate *d = const_cast<QQuickGroupBoxPrivate *>(d_func());
+    if (!d->label)
+        d->executeLabel();
     return d->label;
 }
 
@@ -141,21 +192,83 @@ void QQuickGroupBox::setLabel(QQuickItem *label)
     if (d->label == label)
         return;
 
-    QQuickControlPrivate::destroyDelegate(d->label, this);
+    if (!d->label.isExecuting())
+        d->cancelLabel();
+
+    const qreal oldImplicitLabelWidth = implicitLabelWidth();
+    const qreal oldImplicitLabelHeight = implicitLabelHeight();
+
+    d->removeImplicitSizeListener(d->label);
+    delete d->label;
     d->label = label;
-    if (label && !label->parentItem())
-        label->setParentItem(this);
-    emit labelChanged();
+
+    if (label) {
+        if (!label->parentItem())
+            label->setParentItem(this);
+        d->addImplicitSizeListener(label);
+    }
+
+    if (!qFuzzyCompare(oldImplicitLabelWidth, implicitLabelWidth()))
+        emit implicitLabelWidthChanged();
+    if (!qFuzzyCompare(oldImplicitLabelHeight, implicitLabelHeight()))
+        emit implicitLabelHeightChanged();
+    if (!d->label.isExecuting())
+        emit labelChanged();
+}
+
+/*!
+    \since QtQuick.Controls 2.5 (Qt 5.12)
+    \qmlproperty real QtQuick.Controls::GroupBox::implicitLabelWidth
+    \readonly
+
+    This property holds the implicit label width.
+
+    The value is equal to \c {label ? label.implicitWidth : 0}.
+
+    \sa implicitLabelHeight
+*/
+qreal QQuickGroupBox::implicitLabelWidth() const
+{
+    Q_D(const QQuickGroupBox);
+    if (!d->label)
+        return 0;
+    return d->label->implicitWidth();
+}
+
+/*!
+    \since QtQuick.Controls 2.5 (Qt 5.12)
+    \qmlproperty real QtQuick.Controls::GroupBox::implicitLabelHeight
+    \readonly
+
+    This property holds the implicit label height.
+
+    The value is equal to \c {label ? label.implicitHeight : 0}.
+
+    \sa implicitLabelWidth
+*/
+qreal QQuickGroupBox::implicitLabelHeight() const
+{
+    Q_D(const QQuickGroupBox);
+    if (!d->label)
+        return 0;
+    return d->label->implicitHeight();
+}
+
+void QQuickGroupBox::componentComplete()
+{
+    Q_D(QQuickGroupBox);
+    d->executeLabel(true);
+    QQuickFrame::componentComplete();
 }
 
 QFont QQuickGroupBox::defaultFont() const
 {
-    return QQuickControlPrivate::themeFont(QPlatformTheme::GroupBoxTitleFont);
+    return QQuickTheme::font(QQuickTheme::GroupBox);
 }
 
 QPalette QQuickGroupBox::defaultPalette() const
 {
-    return QQuickControlPrivate::themePalette(QPlatformTheme::GroupBoxPalette);
+    return QQuickTheme::palette(QQuickTheme::GroupBox);
 }
 
 #if QT_CONFIG(accessibility)

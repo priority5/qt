@@ -1,31 +1,26 @@
 /****************************************************************************
 **
-** Copyright (C) 2015 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
+** Copyright (C) 2018 The Qt Company Ltd.
+** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the test suite of the Qt Toolkit.
 **
-** $QT_BEGIN_LICENSE:LGPL21$
+** $QT_BEGIN_LICENSE:GPL-EXCEPT$
 ** Commercial License Usage
 ** Licensees holding valid commercial Qt licenses may use this file in
 ** accordance with the commercial license agreement provided with the
 ** Software or, alternatively, in accordance with the terms contained in
 ** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
 **
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 2.1 or version 3 as published by the Free
-** Software Foundation and appearing in the file LICENSE.LGPLv21 and
-** LICENSE.LGPLv3 included in the packaging of this file. Please review the
-** following information to ensure the GNU Lesser General Public License
-** requirements will be met: https://www.gnu.org/licenses/lgpl.html and
-** http://www.gnu.org/licenses/old-licenses/lgpl-2.1.html.
-**
-** As a special exception, The Qt Company gives you certain additional
-** rights. These rights are described in The Qt Company LGPL Exception
-** version 1.1, included in the file LGPL_EXCEPTION.txt in this package.
+** GNU General Public License Usage
+** Alternatively, this file may be used under the terms of the GNU
+** General Public License version 3 as published by the Free Software
+** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
+** included in the packaging of this file. Please review the following
+** information to ensure the GNU General Public License requirements will
+** be met: https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ** $QT_END_LICENSE$
 **
@@ -77,6 +72,9 @@ public slots:
     QObject *setZab(QObject *);
     QScriptValue getArguments();
     int getArgumentCount();
+
+    QString toString() const;
+    int valueOf() const;
 
 signals:
     void sig(int);
@@ -177,6 +175,16 @@ bool MyScriptable::isBar()
     return str.contains(QLatin1Char('@'));
 }
 
+QString MyScriptable::toString() const
+{
+    return thisObject().property("objectName").toString();
+}
+
+int MyScriptable::valueOf() const
+{
+    return thisObject().property("baz").toInt32();
+}
+
 class tst_QScriptable : public QObject
 {
     Q_OBJECT
@@ -193,6 +201,8 @@ private slots:
     void thisObject();
     void arguments();
     void throwError();
+    void stringConstructor();
+    void numberConstructor();
 
 private:
     QScriptEngine m_engine;
@@ -389,6 +399,36 @@ void tst_QScriptable::throwError()
     QCOMPARE(m_scriptable.lastEngine(), &m_engine);
     QCOMPARE(ret.isError(), true);
     QCOMPARE(ret.toString(), QString("Error: MyScriptable.foo"));
+}
+
+void tst_QScriptable::stringConstructor()
+{
+    m_scriptable.setObjectName("TestObject");
+
+    m_engine.globalObject().setProperty("js_obj", m_engine.newObject());
+    m_engine.evaluate(
+        "js_obj.str = scriptable.toString();"
+        "js_obj.toString = function() { return this.str }");
+
+    QCOMPARE(m_engine.evaluate("String(scriptable)").toString(),
+             m_engine.evaluate("String(js_obj)").toString());
+
+    QCOMPARE(m_engine.evaluate("String(scriptable)").toString(),
+             m_engine.evaluate("scriptable.toString()").toString());
+}
+
+void tst_QScriptable::numberConstructor()
+{
+    m_engine.globalObject().setProperty("js_obj", m_engine.newObject());
+    m_engine.evaluate(
+        "js_obj.num = scriptable.valueOf();"
+        "js_obj.valueOf = function() { return this.num }");
+
+    QCOMPARE(m_engine.evaluate("Number(scriptable)").toInt32(),
+             m_engine.evaluate("Number(js_obj)").toInt32());
+
+    QCOMPARE(m_engine.evaluate("Number(scriptable)").toInt32(),
+             m_engine.evaluate("scriptable.valueOf()").toInt32());
 }
 
 QTEST_MAIN(tst_QScriptable)

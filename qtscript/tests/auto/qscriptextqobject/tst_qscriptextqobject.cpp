@@ -1,31 +1,26 @@
 /****************************************************************************
 **
-** Copyright (C) 2015 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
+** Copyright (C) 2018 The Qt Company Ltd.
+** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the test suite of the Qt Toolkit.
 **
-** $QT_BEGIN_LICENSE:LGPL21$
+** $QT_BEGIN_LICENSE:GPL-EXCEPT$
 ** Commercial License Usage
 ** Licensees holding valid commercial Qt licenses may use this file in
 ** accordance with the commercial license agreement provided with the
 ** Software or, alternatively, in accordance with the terms contained in
 ** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
 **
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 2.1 or version 3 as published by the Free
-** Software Foundation and appearing in the file LICENSE.LGPLv21 and
-** LICENSE.LGPLv3 included in the packaging of this file. Please review the
-** following information to ensure the GNU Lesser General Public License
-** requirements will be met: https://www.gnu.org/licenses/lgpl.html and
-** http://www.gnu.org/licenses/old-licenses/lgpl-2.1.html.
-**
-** As a special exception, The Qt Company gives you certain additional
-** rights. These rights are described in The Qt Company LGPL Exception
-** version 1.1, included in the file LGPL_EXCEPTION.txt in this package.
+** GNU General Public License Usage
+** Alternatively, this file may be used under the terms of the GNU
+** General Public License version 3 as published by the Free Software
+** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
+** included in the packaging of this file. Please review the following
+** information to ensure the GNU General Public License requirements will
+** be met: https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ** $QT_END_LICENSE$
 **
@@ -269,9 +264,9 @@ public:
         { m_qtFunctionInvoked = 37; return BazPolicy; }
     Q_INVOKABLE MyQObject::Strategy myInvokableReturningQualifiedEnum()
         { m_qtFunctionInvoked = 38; return BazStrategy; }
-    Q_INVOKABLE QVector<int> myInvokableReturningVectorOfInt()
-        { m_qtFunctionInvoked = 11; return QVector<int>(); }
-    Q_INVOKABLE void myInvokableWithVectorOfIntArg(const QVector<int> &)
+    Q_INVOKABLE QVector<CustomType> myInvokableReturningVectorOfCustomType()
+        { m_qtFunctionInvoked = 11; return QVector<CustomType>(); }
+    Q_INVOKABLE void myInvokableWithVectorOfCustomTypeArg(const QVector<CustomType> &)
         { m_qtFunctionInvoked = 12; }
     Q_INVOKABLE QObject *myInvokableReturningQObjectStar()
         { m_qtFunctionInvoked = 13; return this; }
@@ -1359,16 +1354,17 @@ void tst_QScriptExtQObject::callQtInvokable2()
 
     // first time we expect failure because the metatype is not registered
     m_myObject->resetQtFunctionInvoked();
-    QCOMPARE(m_engine->evaluate("myObject.myInvokableReturningVectorOfInt()").isError(), true);
+    QCOMPARE(QMetaType::Type(QMetaType::type("QVector<CustomType>")), QMetaType::UnknownType); // this type should not be registered yet
+    QCOMPARE(m_engine->evaluate("myObject.myInvokableReturningVectorOfCustomType()").isError(), true);
     QCOMPARE(m_myObject->qtFunctionInvoked(), -1);
 
-    QCOMPARE(m_engine->evaluate("myObject.myInvokableWithVectorOfIntArg(0)").isError(), true);
+    QCOMPARE(m_engine->evaluate("myObject.myInvokableWithVectorOfCustomTypeArg(CustomType())").isError(), true);
     QCOMPARE(m_myObject->qtFunctionInvoked(), -1);
 
     // now we register it, and it should work
-    qScriptRegisterSequenceMetaType<QVector<int> >(m_engine);
+    qScriptRegisterSequenceMetaType<QVector<CustomType> >(m_engine);
     {
-        QScriptValue ret = m_engine->evaluate("myObject.myInvokableReturningVectorOfInt()");
+        QScriptValue ret = m_engine->evaluate("myObject.myInvokableReturningVectorOfCustomType()");
         QCOMPARE(ret.isArray(), true);
         QCOMPARE(m_myObject->qtFunctionInvoked(), 11);
     }
@@ -1377,7 +1373,8 @@ void tst_QScriptExtQObject::callQtInvokable2()
 void tst_QScriptExtQObject::callQtInvokable3()
 {
     {
-        QScriptValue ret = m_engine->evaluate("myObject.myInvokableWithVectorOfIntArg(myObject.myInvokableReturningVectorOfInt())");
+        qScriptRegisterSequenceMetaType<QVector<CustomType> >(m_engine);
+        QScriptValue ret = m_engine->evaluate("myObject.myInvokableWithVectorOfCustomTypeArg(myObject.myInvokableReturningVectorOfCustomType())");
         QCOMPARE(ret.isUndefined(), true);
         QCOMPARE(m_myObject->qtFunctionInvoked(), 12);
     }

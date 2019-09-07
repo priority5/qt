@@ -48,8 +48,6 @@ namespace Animation {
 
 EvaluateClipAnimatorJob::EvaluateClipAnimatorJob()
     : Qt3DCore::QAspectJob()
-    , m_currentGlobalTime(0.0)
-    , m_lastGlobalTime(0.0)
 {
     SET_JOB_RUN_STAT_TYPE(this, JobTypes::EvaluateClipAnimator, 0);
 }
@@ -60,25 +58,35 @@ void EvaluateClipAnimatorJob::run()
 
     ClipAnimator *clipAnimator = m_handler->clipAnimatorManager()->data(m_clipAnimatorHandle);
     Q_ASSERT(clipAnimator);
-    if (!clipAnimator->isRunning())
+    const bool running = clipAnimator->isRunning();
+    const bool seeking = clipAnimator->isSeeking();
+    if (!running && !seeking) {
+        m_handler->setClipAnimatorRunning(m_clipAnimatorHandle, false);
         return;
+    }
 
-    qint64 globalTimeNS = m_handler->simulationTime();
-    qint64 nsSincePreviousFrame = clipAnimator->nsSincePreviousFrame(globalTimeNS);
+    const qint64 globalTimeNS = m_handler->simulationTime();
 
     Clock *clock = m_handler->clockManager()->lookupResource(clipAnimator->clockId());
 
     // Evaluate the fcurves
     AnimationClip *clip = m_handler->animationClipLoaderManager()->lookupResource(clipAnimator->clipId());
     Q_ASSERT(clip);
+
+    const qint64 nsSincePreviousFrame = seeking ? toNsecs(clip->duration() * clipAnimator->normalizedLocalTime())
+                                                : clipAnimator->nsSincePreviousFrame(globalTimeNS);
+
     // Prepare for evaluation (convert global time to local time ....)
-    const AnimatorEvaluationData animatorEvaluationData = evaluationDataForAnimator(clipAnimator, clock, nsSincePreviousFrame);
+    const AnimatorEvaluationData animatorEvaluationData = evaluationDataForAnimator(clipAnimator,
+                                                                                    clock,
+                                                                                    nsSincePreviousFrame);
+
     const ClipEvaluationData preEvaluationDataForClip = evaluationDataForClip(clip, animatorEvaluationData);
-    const ClipResults rawClipResults = evaluateClipAtLocalTime(clip, preEvaluationDataForClip.localTime);
+    const ClipResults rawClipResults = evaluateClipAtPhase(clip, preEvaluationDataForClip.normalizedLocalTime);
 
     // Reformat the clip results into the layout used by this animator/blend tree
-    ComponentIndices format = clipAnimator->formatIndices();
-    ClipResults formattedClipResults = formatClipResults(rawClipResults, format);
+    const ClipFormat clipFormat = clipAnimator->clipFormat();
+    ClipResults formattedClipResults = formatClipResults(rawClipResults, clipFormat.sourceClipIndices);
 
     if (preEvaluationDataForClip.isFinalFrame)
         clipAnimator->setRunning(false);
@@ -86,12 +94,15 @@ void EvaluateClipAnimatorJob::run()
     clipAnimator->setCurrentLoop(preEvaluationDataForClip.currentLoop);
     clipAnimator->setLastGlobalTimeNS(globalTimeNS);
     clipAnimator->setLastLocalTime(preEvaluationDataForClip.localTime);
+    clipAnimator->setLastNormalizedLocalTime(preEvaluationDataForClip.normalizedLocalTime);
+    clipAnimator->setNormalizedLocalTime(-1.0f); // Re-set to something invalid.
 
     // Prepare property changes (if finalFrame it also prepares the change for the running property for the frontend)
     const QVector<Qt3DCore::QSceneChangePtr> changes = preparePropertyChanges(clipAnimator->peerId(),
                                                                               clipAnimator->mappingData(),
                                                                               formattedClipResults,
-                                                                              preEvaluationDataForClip.isFinalFrame);
+                                                                              preEvaluationDataForClip.isFinalFrame,
+                                                                              preEvaluationDataForClip.normalizedLocalTime);
 
     // Send the property changes
     clipAnimator->sendPropertyChanges(changes);

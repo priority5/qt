@@ -1,12 +1,14 @@
-[comboBoxPopupPositionAfterMove]
-*
-
-[comboBoxPopupPositionAfterChildMove]
-*
-
 [macCopyUnicodeToClipboard]
 osx
 
 [mouseMovementProperties]
-osx-10.11
-osx-10.12
+windows
+
+[getUserMediaRequestDesktopVideoManyPages]
+windows
+
+[getUserMediaRequestDesktopVideoManyRequests]
+windows
+
+[runJavaScriptFromSlot]
+osx

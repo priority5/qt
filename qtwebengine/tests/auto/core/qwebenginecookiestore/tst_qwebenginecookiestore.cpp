@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2017 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtWebEngine module of the Qt Toolkit.
@@ -32,7 +32,6 @@
 #include <QtWebEngineCore/qwebenginecookiestore.h>
 #include <QtWebEngineWidgets/qwebenginepage.h>
 #include <QtWebEngineWidgets/qwebengineprofile.h>
-#include <QtWebEngineWidgets/qwebengineview.h>
 
 class tst_QWebEngineCookieStore : public QObject
 {
@@ -52,6 +51,11 @@ private Q_SLOTS:
     void cookieSignals();
     void setAndDeleteCookie();
     void batchCookieTasks();
+    void basicFilter();
+    void html5featureFilter();
+
+private:
+    QWebEngineProfile m_profile;
 };
 
 tst_QWebEngineCookieStore::tst_QWebEngineCookieStore()
@@ -68,6 +72,7 @@ void tst_QWebEngineCookieStore::init()
 
 void tst_QWebEngineCookieStore::cleanup()
 {
+    m_profile.cookieStore()->deleteAllCookies();
 }
 
 void tst_QWebEngineCookieStore::initTestCase()
@@ -80,15 +85,15 @@ void tst_QWebEngineCookieStore::cleanupTestCase()
 
 void tst_QWebEngineCookieStore::cookieSignals()
 {
-    QWebEngineView view;
-    QWebEngineCookieStore *client = view.page()->profile()->cookieStore();
-    client->deleteAllCookies();
+    QWebEnginePage page(&m_profile);
 
-    QSignalSpy loadSpy(&view, SIGNAL(loadFinished(bool)));
+    QWebEngineCookieStore *client = m_profile.cookieStore();
+
+    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
     QSignalSpy cookieAddedSpy(client, SIGNAL(cookieAdded(const QNetworkCookie &)));
     QSignalSpy cookieRemovedSpy(client, SIGNAL(cookieRemoved(const QNetworkCookie &)));
 
-    view.load(QUrl("qrc:///resources/index.html"));
+    page.load(QUrl("qrc:///resources/index.html"));
 
     QTRY_COMPARE(loadSpy.count(), 1);
     QVariant success = loadSpy.takeFirst().takeFirst();
@@ -110,11 +115,10 @@ void tst_QWebEngineCookieStore::cookieSignals()
 
 void tst_QWebEngineCookieStore::setAndDeleteCookie()
 {
-    QWebEngineView view;
-    QWebEngineCookieStore *client = view.page()->profile()->cookieStore();
-    client->deleteAllCookies();
+    QWebEnginePage page(&m_profile);
+    QWebEngineCookieStore *client = m_profile.cookieStore();
 
-    QSignalSpy loadSpy(&view, SIGNAL(loadFinished(bool)));
+    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
     QSignalSpy cookieAddedSpy(client, SIGNAL(cookieAdded(const QNetworkCookie &)));
     QSignalSpy cookieRemovedSpy(client, SIGNAL(cookieRemoved(const QNetworkCookie &)));
 
@@ -130,7 +134,7 @@ void tst_QWebEngineCookieStore::setAndDeleteCookie()
     QTRY_COMPARE(cookieAddedSpy.count(),2);
     client->deleteCookie(cookie1);
 
-    view.load(QUrl("qrc:///resources/content.html"));
+    page.load(QUrl("qrc:///resources/content.html"));
 
     QTRY_COMPARE(loadSpy.count(), 1);
     QVariant success = loadSpy.takeFirst().takeFirst();
@@ -151,11 +155,10 @@ void tst_QWebEngineCookieStore::setAndDeleteCookie()
 
 void tst_QWebEngineCookieStore::batchCookieTasks()
 {
-    QWebEngineView view;
-    QWebEngineCookieStore *client = view.page()->profile()->cookieStore();
-    client->deleteAllCookies();
+    QWebEnginePage page(&m_profile);
+    QWebEngineCookieStore *client = m_profile.cookieStore();
 
-    QSignalSpy loadSpy(&view, SIGNAL(loadFinished(bool)));
+    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
     QSignalSpy cookieAddedSpy(client, SIGNAL(cookieAdded(const QNetworkCookie &)));
     QSignalSpy cookieRemovedSpy(client, SIGNAL(cookieRemoved(const QNetworkCookie &)));
 
@@ -167,7 +170,7 @@ void tst_QWebEngineCookieStore::batchCookieTasks()
     client->setCookie(cookie2);
     QTRY_COMPARE(cookieAddedSpy.count(), 2);
 
-    view.load(QUrl("qrc:///resources/index.html"));
+    page.load(QUrl("qrc:///resources/index.html"));
 
     QTRY_COMPARE(loadSpy.count(), 1);
     QVariant success = loadSpy.takeFirst().takeFirst();
@@ -183,6 +186,63 @@ void tst_QWebEngineCookieStore::batchCookieTasks()
 
     client->deleteAllCookies();
     QTRY_COMPARE(cookieRemovedSpy.count(), 4);
+}
+
+void tst_QWebEngineCookieStore::basicFilter()
+{
+    QWebEnginePage page(&m_profile);
+    QWebEngineCookieStore *client = m_profile.cookieStore();
+
+    QAtomicInt accessTested = 0;
+    client->setCookieFilter([&](const QWebEngineCookieStore::FilterRequest &){ ++accessTested; return true;});
+
+    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
+    QSignalSpy cookieAddedSpy(client, SIGNAL(cookieAdded(const QNetworkCookie &)));
+    QSignalSpy cookieRemovedSpy(client, SIGNAL(cookieRemoved(const QNetworkCookie &)));
+
+    page.load(QUrl("qrc:///resources/index.html"));
+
+    QTRY_COMPARE(loadSpy.count(), 1);
+    QVERIFY(loadSpy.takeFirst().takeFirst().toBool());
+    QTRY_COMPARE(cookieAddedSpy.count(), 2);
+    QTRY_COMPARE(accessTested.loadAcquire(), 2); // FIXME?
+
+    client->deleteAllCookies();
+    QTRY_COMPARE(cookieRemovedSpy.count(), 2);
+
+    client->setCookieFilter([&](const QWebEngineCookieStore::FilterRequest &){ ++accessTested; return false; });
+    page.triggerAction(QWebEnginePage::ReloadAndBypassCache);
+    QTRY_COMPARE(loadSpy.count(), 1);
+    QVERIFY(loadSpy.takeFirst().takeFirst().toBool());
+    QTRY_COMPARE(accessTested.loadAcquire(), 4); // FIXME?
+    // Test cookies are NOT added:
+    QTest::qWait(100);
+    QCOMPARE(cookieAddedSpy.count(), 2);
+}
+
+void tst_QWebEngineCookieStore::html5featureFilter()
+{
+    QWebEnginePage page(&m_profile);
+    QWebEngineCookieStore *client = m_profile.cookieStore();
+
+    QAtomicInt accessTested = 0;
+    client->setCookieFilter([&](const QWebEngineCookieStore::FilterRequest &){ ++accessTested; return false;});
+
+    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
+
+    page.load(QUrl("qrc:///resources/content.html"));
+
+    QTRY_COMPARE(loadSpy.count(), 1);
+    QVERIFY(loadSpy.takeFirst().takeFirst().toBool());
+    QCOMPARE(accessTested.loadAcquire(), 0); // FIXME?
+    QTest::ignoreMessage(QtCriticalMsg, QRegularExpression(".*Uncaught SecurityError.*sessionStorage.*"));
+    page.runJavaScript("sessionStorage.test = 5;");
+    QTRY_COMPARE(accessTested.loadAcquire(), 1);
+
+    QTest::ignoreMessage(QtCriticalMsg, QRegularExpression(".*Uncaught SecurityError.*sessionStorage.*"));
+    QAtomicInt callbackTriggered = 0;
+    page.runJavaScript("sessionStorage.test", [&](const QVariant &v) { QVERIFY(!v.isValid()); callbackTriggered = 1; });
+    QTRY_VERIFY(callbackTriggered);
 }
 
 QTEST_MAIN(tst_QWebEngineCookieStore)

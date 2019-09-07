@@ -9,13 +9,23 @@
 
             "continue": "void",
 
-            "recheck": { "type": "void", "name": "cache_use", "value": "positive" },
+            "recheck": { "type": "optionalString", "name": "cache_recheck" },
             "recheck-all": { "type": "void", "name": "cache_use", "value": "none" },
 
             "redo": { "type": "redo" },
 
             "list-features": "void",
             "list-libraries": "void"
+        }
+    },
+
+    "testTypeDependencies": {
+        "library": [ "library-paths" ]
+    },
+
+    "features": {
+        "library-paths": {
+            "output": [ "libraryPaths" ]
         }
     }
 }

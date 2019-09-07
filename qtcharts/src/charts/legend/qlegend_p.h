@@ -40,6 +40,7 @@
 #define QLEGEND_P_H
 
 #include <QtCharts/QLegend>
+#include <QtCharts/private/qchartglobal_p.h>
 
 QT_CHARTS_BEGIN_NAMESPACE
 
@@ -49,7 +50,7 @@ class QAbstractSeries;
 class LegendLayout;
 class QLegendMarker;
 
-class QLegendPrivate : public QObject
+class Q_CHARTS_PRIVATE_EXPORT QLegendPrivate : public QObject
 {
     Q_OBJECT
 public:
@@ -65,6 +66,8 @@ public:
     QList<QLegendMarker*> markers(QAbstractSeries *series = 0);
     qreal maxMarkerWidth() const;
 
+    static QObject *relatedObject(const QLegendMarker *l);
+
 public Q_SLOTS:
     void handleSeriesAdded(QAbstractSeries *series);
     void handleSeriesRemoved(QAbstractSeries *series);
@@ -73,8 +76,11 @@ public Q_SLOTS:
 
 private:
     // Internal helpers
+    void insertMarkerHelper(QLegendMarker *marker);
     void addMarkers(QList<QLegendMarker *> markers);
+    void removeMarkerHelper(QLegendMarker *marker);
     void removeMarkers(QList<QLegendMarker *> markers);
+    void decorateMarker(QLegendMarker *marker);
     void decorateMarkers(QList<QLegendMarker *> markers);
     void updateToolTips();
 

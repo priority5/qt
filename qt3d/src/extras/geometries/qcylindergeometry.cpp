@@ -192,7 +192,7 @@ public:
         , m_length(length)
     {}
 
-    QByteArray operator ()() Q_DECL_OVERRIDE
+    QByteArray operator ()() override
     {
         const int verticesCount = vertexCount(m_slices, m_rings);
         // vec3 pos, vec2 texCoord, vec3 normal
@@ -209,7 +209,7 @@ public:
         return verticesData;
     }
 
-    bool operator ==(const QBufferDataGenerator &other) const Q_DECL_OVERRIDE
+    bool operator ==(const QBufferDataGenerator &other) const override
     {
         const CylinderVertexDataFunctor *otherFunctor = functor_cast<CylinderVertexDataFunctor>(&other);
         if (otherFunctor != nullptr)
@@ -239,7 +239,7 @@ public:
     {
     }
 
-    QByteArray operator ()() Q_DECL_OVERRIDE
+    QByteArray operator ()() override
     {
         const int facesCount = faceCount(m_slices, m_rings);
         const int indicesCount = facesCount * 3;
@@ -258,7 +258,7 @@ public:
         return indicesBytes;
     }
 
-    bool operator ==(const QBufferDataGenerator &other) const Q_DECL_OVERRIDE
+    bool operator ==(const QBufferDataGenerator &other) const override
     {
         const CylinderIndexDataFunctor *otherFunctor = functor_cast<CylinderIndexDataFunctor>(&other);
         if (otherFunctor != nullptr)
@@ -409,6 +409,7 @@ void QCylinderGeometryPrivate::init()
 
 /*!
  * \class Qt3DExtras::QCylinderGeometry
+   \ingroup qt3d-extras-geometries
  * \inheaderfile Qt3DExtras/QCylinderGeometry
  * \inmodule Qt3DExtras
  * \brief The QCylinderGeometry class allows creation of a cylinder in 3D space.

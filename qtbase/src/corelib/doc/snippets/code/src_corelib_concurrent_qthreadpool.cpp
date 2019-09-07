@@ -51,11 +51,11 @@
 //! [0]
 class HelloWorldTask : public QRunnable
 {
-    void run()
+    void run() override
     {
         qDebug() << "Hello world from thread" << QThread::currentThread();
     }
-}
+};
 
 HelloWorldTask *hello = new HelloWorldTask();
 // QThreadPool takes ownership and deletes 'hello' automatically

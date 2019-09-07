@@ -81,7 +81,12 @@ class Q_WAYLAND_COMPOSITOR_EXPORT QWaylandSurface : public QWaylandObject
     Q_OBJECT
     Q_DECLARE_PRIVATE(QWaylandSurface)
     Q_PROPERTY(QWaylandClient *client READ client CONSTANT)
-    Q_PROPERTY(QSize size READ size NOTIFY sizeChanged)
+    Q_PROPERTY(QRectF sourceGeometry READ sourceGeometry NOTIFY sourceGeometryChanged REVISION 13)
+    Q_PROPERTY(QSize destinationSize READ destinationSize NOTIFY destinationSizeChanged REVISION 13)
+    Q_PROPERTY(QSize bufferSize READ bufferSize NOTIFY bufferSizeChanged REVISION 13)
+#if QT_DEPRECATED_SINCE(5, 13)
+    Q_PROPERTY(QSize size READ size NOTIFY sizeChanged) // Qt 6: Remove
+#endif
     Q_PROPERTY(int bufferScale READ bufferScale NOTIFY bufferScaleChanged)
     Q_PROPERTY(Qt::ScreenOrientation contentOrientation READ contentOrientation NOTIFY contentOrientationChanged)
     Q_PROPERTY(QWaylandSurface::Origin origin READ origin NOTIFY originChanged)
@@ -97,20 +102,25 @@ public:
 
     QWaylandSurface();
     QWaylandSurface(QWaylandCompositor *compositor, QWaylandClient *client, uint id, int version);
-    virtual ~QWaylandSurface();
+    ~QWaylandSurface() override;
 
     Q_INVOKABLE void initialize(QWaylandCompositor *compositor, QWaylandClient *client, uint id, int version);
     bool isInitialized() const;
 
     QWaylandClient *client() const;
-    struct wl_client *waylandClient() const { return client()->client(); }
+    ::wl_client *waylandClient() const;
 
     bool setRole(QWaylandSurfaceRole *role, wl_resource *errorResource, uint32_t errorCode);
     QWaylandSurfaceRole *role() const;
 
     bool hasContent() const;
 
-    QSize size() const;
+    QRectF sourceGeometry() const;
+    QSize destinationSize() const;
+#if QT_DEPRECATED_SINCE(5, 13)
+    QT_DEPRECATED QSize size() const;
+#endif
+    QSize bufferSize() const;
     int bufferScale() const;
 
     Qt::ScreenOrientation contentOrientation() const;
@@ -155,7 +165,12 @@ Q_SIGNALS:
     void damaged(const QRegion &rect);
     void parentChanged(QWaylandSurface *newParent, QWaylandSurface *oldParent);
     void childAdded(QWaylandSurface *child);
-    void sizeChanged();
+    Q_REVISION(13) void sourceGeometryChanged();
+    Q_REVISION(13) void destinationSizeChanged();
+#if QT_DEPRECATED_SINCE(5, 13)
+    QT_DEPRECATED void sizeChanged();
+#endif
+    Q_REVISION(13) void bufferSizeChanged();
     void bufferScaleChanged();
     void offsetForNextFrame(const QPoint &offset);
     void contentOrientationChanged();

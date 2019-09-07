@@ -42,8 +42,8 @@
 
 #include <Qt3DRender/qframegraphnode.h>
 #include <Qt3DRender/qrendertargetoutput.h>
-#include <QColor>
-#include <QFlags>
+#include <QtGui/QColor>
+#include <QtCore/QFlags>
 
 QT_BEGIN_NAMESPACE
 
@@ -51,7 +51,7 @@ namespace Qt3DRender {
 
 class QClearBuffersPrivate;
 
-class QT3DRENDERSHARED_EXPORT QClearBuffers : public QFrameGraphNode
+class Q_3DRENDERSHARED_EXPORT QClearBuffers : public QFrameGraphNode
 {
     Q_OBJECT
     Q_PROPERTY(BufferType buffers READ buffers WRITE setBuffers NOTIFY buffersChanged)
@@ -102,7 +102,7 @@ protected:
 
 private:
     Q_DECLARE_PRIVATE(QClearBuffers)
-    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const Q_DECL_OVERRIDE;
+    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const override;
 };
 
 } // namespace Qt3DRender

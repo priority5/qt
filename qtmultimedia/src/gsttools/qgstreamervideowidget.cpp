@@ -53,7 +53,7 @@ public:
     {
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         QPalette palette;
-        palette.setColor(QPalette::Background, Qt::black);
+        palette.setColor(QPalette::Window, Qt::black);
         setPalette(palette);
     }
 
@@ -80,7 +80,7 @@ public:
     void paint_helper()
     {
         QPainter painter(this);
-        painter.fillRect(rect(), palette().background());
+        painter.fillRect(rect(), palette().window());
     }
 
 protected:
@@ -133,6 +133,11 @@ void QGstreamerVideoWidgetControl::createVideoWidget()
 GstElement *QGstreamerVideoWidgetControl::videoSink()
 {
     return m_videoOverlay.videoSink();
+}
+
+void QGstreamerVideoWidgetControl::setVideoSink(GstElement *sink)
+{
+    m_videoOverlay.setVideoSink(sink);
 }
 
 void QGstreamerVideoWidgetControl::onOverlayActiveChanged()

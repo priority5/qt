@@ -48,12 +48,12 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.9
+import QtQuick 2.12
 import QtQuick.Window 2.2
 import QtTest 1.1
-import QtQuick.Templates 2.3 as T
-import QtQuick.Controls 2.3
-import QtQuick.Controls.Imagine 2.3
+import QtQuick.Templates 2.12 as T
+import QtQuick.Controls 2.12
+import QtQuick.Controls.Imagine 2.12
 
 TestCase {
     id: testCase
@@ -62,6 +62,11 @@ TestCase {
     visible: true
     when: windowShown
     name: "Imagine"
+
+    Component {
+        id: buttonComponent
+        Button {}
+    }
 
     Component {
         id: implicitQrcButtonComponent
@@ -93,5 +98,11 @@ TestCase {
         compare(control.Imagine.path, data.tag)
         var image = grabImage(control)
         compare(image.pixel(control.width / 2, control.height / 2), "#ff0000")
+    }
+
+    function test_fontFromConfigFile() {
+        var control = createTemporaryObject(buttonComponent, testCase)
+        verify(control)
+        compare(control.font.pixelSize, 80)
     }
 }

@@ -43,9 +43,9 @@
 #include <Qt3DCore/qcomponent.h>
 #include <Qt3DRender/qt3drender_global.h>
 
-#include <QMatrix4x4>
-#include <QQuaternion>
-#include <QVector3D>
+#include <QtGui/QMatrix4x4>
+#include <QtGui/QQuaternion>
+#include <QtGui/QVector3D>
 
 QT_BEGIN_NAMESPACE
 
@@ -53,7 +53,7 @@ namespace Qt3DRender {
 
 class QCameraLensPrivate;
 
-class QT3DRENDERSHARED_EXPORT QCameraLens : public Qt3DCore::QComponent
+class Q_3DRENDERSHARED_EXPORT QCameraLens : public Qt3DCore::QComponent
 {
     Q_OBJECT
     Q_PROPERTY(ProjectionType projectionType READ projectionType WRITE setProjectionType NOTIFY projectionTypeChanged)
@@ -140,8 +140,8 @@ protected:
 
 private:
     Q_DECLARE_PRIVATE(QCameraLens)
-    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const Q_DECL_OVERRIDE;
-    void sceneChangeEvent(const Qt3DCore::QSceneChangePtr &change) Q_DECL_OVERRIDE;
+    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const override;
+    void sceneChangeEvent(const Qt3DCore::QSceneChangePtr &change) override;
 };
 
 } // Qt3DRender

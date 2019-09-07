@@ -56,6 +56,8 @@
 #include <Qt3DRender/private/managers_p.h>
 #include <Qt3DRender/private/texture_p.h>
 #include <Qt3DRender/private/qurlhelper_p.h>
+#include <Qt3DRender/private/texturedatamanager_p.h>
+#include <Qt3DRender/private/gltexturemanager_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -315,6 +317,12 @@ const struct FourCCFormat
 { DdsFourCC<'D','X','T','5'>::value,                { QOpenGLTexture::NoSourceFormat,   QOpenGLTexture::RGBA_DXT5,      QOpenGLTexture::NoPixelType,    16, true } },
 { DdsFourCC<'A','T','I','1'>::value,                { QOpenGLTexture::NoSourceFormat,   QOpenGLTexture::R_ATI1N_UNorm,  QOpenGLTexture::NoPixelType,     8, true } },
 { DdsFourCC<'A','T','I','2'>::value,                { QOpenGLTexture::NoSourceFormat,   QOpenGLTexture::RG_ATI2N_UNorm, QOpenGLTexture::NoPixelType,    16, true } },
+{ /* DXGI_FORMAT_R16_FLOAT */         111,          { QOpenGLTexture::Red,              QOpenGLTexture::R16F,           QOpenGLTexture::Float16,        2,  false } },
+{ /* DXGI_FORMAT_R16_FLOAT */         112,          { QOpenGLTexture::RG,               QOpenGLTexture::RG16F,          QOpenGLTexture::Float16,        4,  false } },
+{ /* DXGI_FORMAT_R16G16B16A16_FLOAT */113,          { QOpenGLTexture::RGBA,             QOpenGLTexture::RGBA16F,        QOpenGLTexture::Float16,        8,  false } },
+{ /* DXGI_FORMAT_R32_FLOAT */         114,          { QOpenGLTexture::Red,              QOpenGLTexture::R32F,           QOpenGLTexture::Float32,        4,  false } },
+{ /* DXGI_FORMAT_R32G32_FLOAT */      115,          { QOpenGLTexture::RG,               QOpenGLTexture::RG32F,          QOpenGLTexture::Float32,        8,  false } },
+{ /* DXGI_FORMAT_R32G32B32A32_FLOAT */116,          { QOpenGLTexture::RGBA,             QOpenGLTexture::RGBA32F,        QOpenGLTexture::Float32,        16, false } }
 };
 
 const struct DX10Format
@@ -440,19 +448,22 @@ struct PkmHeader
     quint16 height;
 };
 
-enum CompressedFormatExtension {
-    None = 0,
+enum ImageFormat {
+    GenericImageFormat = 0,
     DDS,
-    PKM
+    PKM,
+    HDR
 };
 
-CompressedFormatExtension texturedCompressedFormat(const QString &suffix)
+ImageFormat imageFormatFromSuffix(const QString &suffix)
 {
     if (suffix == QStringLiteral("pkm"))
         return PKM;
     if (suffix == QStringLiteral("dds"))
         return DDS;
-    return None;
+    if (suffix == QStringLiteral("hdr"))
+        return HDR;
+    return GenericImageFormat;
 }
 
 QTextureImageDataPtr setPkmFile(QIODevice *source)
@@ -688,6 +699,162 @@ QTextureImageDataPtr setDdsFile(QIODevice *source)
     return imageData;
 }
 
+// Loads Radiance RGBE images into RGBA32F image data. RGBA is chosen over RGB
+// because this allows passing such images to compute shaders (image2D).
+QTextureImageDataPtr setHdrFile(QIODevice *source)
+{
+    QTextureImageDataPtr imageData;
+    char sig[256];
+    source->read(sig, 11);
+    if (strncmp(sig, "#?RADIANCE\n", 11))
+        return imageData;
+
+    QByteArray buf = source->readAll();
+    const char *p = buf.constData();
+    const char *pEnd = p + buf.size();
+
+    // Process lines until the empty one.
+    QByteArray line;
+    while (p < pEnd) {
+        char c = *p++;
+        if (c == '\n') {
+            if (line.isEmpty())
+                break;
+            if (line.startsWith(QByteArrayLiteral("FORMAT="))) {
+                const QByteArray format = line.mid(7).trimmed();
+                if (format != QByteArrayLiteral("32-bit_rle_rgbe")) {
+                    qWarning("HDR format '%s' is not supported", format.constData());
+                    return imageData;
+                }
+            }
+            line.clear();
+        } else {
+            line.append(c);
+        }
+    }
+    if (p == pEnd) {
+        qWarning("Malformed HDR image data at property strings");
+        return imageData;
+    }
+
+    // Get the resolution string.
+    while (p < pEnd) {
+        char c = *p++;
+        if (c == '\n')
+            break;
+        line.append(c);
+    }
+    if (p == pEnd) {
+        qWarning("Malformed HDR image data at resolution string");
+        return imageData;
+    }
+
+    int w = 0, h = 0;
+    // We only care about the standard orientation.
+    if (!sscanf(line.constData(), "-Y %d +X %d", &h, &w)) {
+        qWarning("Unsupported HDR resolution string '%s'", line.constData());
+        return imageData;
+    }
+    if (w <= 0 || h <= 0) {
+        qWarning("Invalid HDR resolution");
+        return imageData;
+    }
+
+    const QOpenGLTexture::TextureFormat textureFormat = QOpenGLTexture::RGBA32F;
+    const QOpenGLTexture::PixelFormat pixelFormat = QOpenGLTexture::RGBA;
+    const QOpenGLTexture::PixelType pixelType = QOpenGLTexture::Float32;
+    const int blockSize = 4 * sizeof(float);
+    QByteArray data;
+    data.resize(w * h * blockSize);
+
+    typedef unsigned char RGBE[4];
+    RGBE *scanline = new RGBE[w];
+
+    for (int y = 0; y < h; ++y) {
+        if (pEnd - p < 4) {
+            qWarning("Unexpected end of HDR data");
+            delete[] scanline;
+            return imageData;
+        }
+
+        scanline[0][0] = *p++;
+        scanline[0][1] = *p++;
+        scanline[0][2] = *p++;
+        scanline[0][3] = *p++;
+
+        if (scanline[0][0] == 2 && scanline[0][1] == 2 && scanline[0][2] < 128) {
+            // new rle, the first pixel was a dummy
+            for (int channel = 0; channel < 4; ++channel) {
+                for (int x = 0; x < w && p < pEnd; ) {
+                    unsigned char c = *p++;
+                    if (c > 128) { // run
+                        if (p < pEnd) {
+                            int repCount = c & 127;
+                            c = *p++;
+                            while (repCount--)
+                                scanline[x++][channel] = c;
+                        }
+                    } else { // not a run
+                        while (c-- && p < pEnd)
+                            scanline[x++][channel] = *p++;
+                    }
+                }
+            }
+        } else {
+            // old rle
+            scanline[0][0] = 2;
+            int bitshift = 0;
+            int x = 1;
+            while (x < w && pEnd - p >= 4) {
+                scanline[x][0] = *p++;
+                scanline[x][1] = *p++;
+                scanline[x][2] = *p++;
+                scanline[x][3] = *p++;
+
+                if (scanline[x][0] == 1 && scanline[x][1] == 1 && scanline[x][2] == 1) { // run
+                    int repCount = scanline[x][3] << bitshift;
+                    while (repCount--) {
+                        memcpy(scanline[x], scanline[x - 1], 4);
+                        ++x;
+                    }
+                    bitshift += 8;
+                } else { // not a run
+                    ++x;
+                    bitshift = 0;
+                }
+            }
+        }
+
+        // adjust for -Y orientation
+        float *fp = reinterpret_cast<float *>(data.data() + (h - 1 - y) * blockSize * w);
+        for (int x = 0; x < w; ++x) {
+            float d = qPow(2.0f, float(scanline[x][3]) - 128.0f);
+            // r, g, b, a
+            *fp++ = scanline[x][0] / 256.0f * d;
+            *fp++ = scanline[x][1] / 256.0f * d;
+            *fp++ = scanline[x][2] / 256.0f * d;
+            *fp++ = 1.0f;
+        }
+    }
+
+    delete[] scanline;
+
+    imageData = QTextureImageDataPtr::create();
+    imageData->setTarget(QOpenGLTexture::Target2D);
+    imageData->setFormat(textureFormat);
+    imageData->setWidth(w);
+    imageData->setHeight(h);
+    imageData->setLayers(1);
+    imageData->setDepth(1);
+    imageData->setFaces(1);
+    imageData->setMipLevels(1);
+    imageData->setPixelFormat(pixelFormat);
+    imageData->setPixelType(pixelType);
+    imageData->setData(data, blockSize, false);
+
+    return imageData;
+}
+
 } // anonynous
 
 QTextureImageDataPtr TextureLoadingHelper::loadTextureData(const QUrl &url, bool allow3D, bool mirrored)
@@ -712,19 +879,24 @@ QTextureImageDataPtr TextureLoadingHelper::loadTextureData(QIODevice *data, cons
                                                            bool allow3D, bool mirrored)
 {
     QTextureImageDataPtr textureData;
-    const CompressedFormatExtension formatExtension = texturedCompressedFormat(suffix);
-    switch (formatExtension) {
+    ImageFormat fmt = imageFormatFromSuffix(suffix);
+    switch (fmt) {
     case DDS:
         textureData = setDdsFile(data);
         break;
     case PKM:
         textureData = setPkmFile(data);
         break;
+    case HDR:
+        textureData = setHdrFile(data);
+        break;
     default: {
         QImage img;
         if (img.load(data, suffix.toLatin1())) {
             textureData = QTextureImageDataPtr::create();
             textureData->setImage(mirrored ? img.mirrored() : img);
+        } else {
+            qWarning() << "Failed to load textureImage data using QImage";
         }
         break;
     }
@@ -738,20 +910,21 @@ QTextureImageDataPtr TextureLoadingHelper::loadTextureData(QIODevice *data, cons
 QTextureDataPtr QTextureFromSourceGenerator::operator ()()
 {
     QTextureDataPtr generatedData = QTextureDataPtr::create();
-    m_status = QAbstractTexture::Loading;
     QTextureImageDataPtr textureData;
 
-    QRenderAspectPrivate *d_aspect = QRenderAspectPrivate::findPrivate(m_engine);
-    Render::Texture *texture = d_aspect ? d_aspect->m_nodeManagers->textureManager()->lookupResource(m_texture) : nullptr;
-    if (texture)
-        texture->notifyStatus(m_status);
-
+    // Note: First and Second call can be seen as operator() being called twice
+    // on the same object but actually call 2 will be made on a new generator
+    // which is the copy of the generator used for call 1 but with m_sourceData
+    // set.
+    // This is required because updating the same functor wouldn't be picked up
+    // by the backend texture sharing system.
     if (!Qt3DCore::QDownloadHelperService::isLocal(m_url)) {
         if (m_sourceData.isEmpty()) {
             // first time around, trigger a download
             if (m_texture) {
                 auto downloadService = Qt3DCore::QDownloadHelperService::getService(m_engine);
-                Qt3DCore::QDownloadRequestPtr request(new TextureDownloadRequest(m_texture, m_url,
+                Qt3DCore::QDownloadRequestPtr request(new TextureDownloadRequest(sharedFromThis(),
+                                                                                 m_url,
                                                                                  m_engine));
                 downloadService->submitRequest(request);
             }
@@ -772,8 +945,8 @@ QTextureDataPtr QTextureFromSourceGenerator::operator ()()
                 ext << mtype.suffixes();
             }
 
-            for (QString s: qAsConst(ext)) {
-                textureData = TextureLoadingHelper::loadTextureData(&buffer, suffix, true, m_mirrored);
+            for (const QString &s: qAsConst(ext)) {
+                textureData = TextureLoadingHelper::loadTextureData(&buffer, s, true, m_mirrored);
                 if (textureData && textureData->data().length() > 0)
                     break;
             }
@@ -783,7 +956,7 @@ QTextureDataPtr QTextureFromSourceGenerator::operator ()()
     }
 
     // Update any properties explicitly set by the user
-    if (m_format != QAbstractTexture::NoFormat && m_format != QAbstractTexture::Automatic)
+    if (textureData && m_format != QAbstractTexture::NoFormat && m_format != QAbstractTexture::Automatic)
         textureData->setFormat(static_cast<QOpenGLTexture::TextureFormat>(m_format));
 
     if (textureData && textureData->data().length() > 0) {
@@ -794,30 +967,22 @@ QTextureDataPtr QTextureFromSourceGenerator::operator ()()
         generatedData->setDepth(textureData->depth());
         generatedData->setLayers(textureData->layers());
         generatedData->addImageData(textureData);
-
-        if (texture)
-            texture->updateFromData(generatedData);
-
-        m_status = QAbstractTexture::Ready;
-    } else {
-        m_status = QAbstractTexture::Error;
     }
 
-    if (texture)
-        texture->notifyStatus(m_status);
     return generatedData;
 }
 
-TextureDownloadRequest::TextureDownloadRequest(Qt3DCore::QNodeId texture, const QUrl& source,
+TextureDownloadRequest::TextureDownloadRequest(const QTextureFromSourceGeneratorPtr &functor,
+                                               const QUrl &source,
                                                Qt3DCore::QAspectEngine *engine)
     : Qt3DCore::QDownloadRequest(source)
-    , m_texture(texture)
+    , m_functor(functor)
     , m_engine(engine)
 {
 
 }
 
-// Executed in download thread
+// Executed in aspect thread
 void TextureDownloadRequest::onCompleted()
 {
     if (cancelled() || !succeeded())
@@ -827,16 +992,46 @@ void TextureDownloadRequest::onCompleted()
     if (!d_aspect)
         return;
 
-    Render::Texture *texture = d_aspect->m_nodeManagers->textureManager()->lookupResource(m_texture);
-    if (!texture)
+    // Find all textures which share the same functor
+    // Note: this should be refactored to not pull in API specific managers
+    // but texture sharing forces us to do that currently
+    Render::TextureDataManager *textureDataManager = d_aspect->m_nodeManagers->textureDataManager();
+    const QVector<Render::GLTexture *> referencedGLTextures = textureDataManager->referencesForGenerator(m_functor);
+
+    // We should have at most 1 GLTexture referencing this
+    // Since all textures having the same source should have the same functor == same GLTexture
+    Q_ASSERT(referencedGLTextures.size() <= 1);
+
+    Render::GLTexture *glTex = referencedGLTextures.size() > 0 ? referencedGLTextures.first() : nullptr;
+    if (glTex == nullptr)
         return;
 
-    QSharedPointer<QTextureFromSourceGenerator> functor =
-            qSharedPointerCast<QTextureFromSourceGenerator>(texture->dataGenerator());
-    functor->m_sourceData = m_data;
+    Render::GLTextureManager *glTextureManager = d_aspect->m_nodeManagers->glTextureManager();
+    Qt3DCore::QNodeIdVector referencingTexturesIds = glTextureManager->referencedTextureIds(glTex);
 
-    // mark the component as dirty so that the functor runs again in the correct job
-    texture->addDirtyFlag(Render::Texture::DirtyDataGenerator);
+
+    Render::TextureManager *textureManager = d_aspect->m_nodeManagers->textureManager();
+    for (const Qt3DCore::QNodeId texId : referencingTexturesIds) {
+        Render::Texture *texture = textureManager->lookupResource(texId);
+        if (texture != nullptr) {
+            // Each texture has a QTextureFunctor which matches m_functor;
+            // Update m_sourceData on each functor as we don't know which one
+            // is used as the reference for texture sharing
+
+            QTextureFromSourceGeneratorPtr oldGenerator = qSharedPointerCast<QTextureFromSourceGenerator>(texture->dataGenerator());
+
+            // We create a new functor
+            // Which is a copy of the old one + the downloaded sourceData
+            auto newGenerator = QTextureFromSourceGeneratorPtr::create(*oldGenerator);
+
+            // Set raw data on functor so that it can really load something
+           newGenerator->m_sourceData = m_data;
+
+           // Set new generator on texture
+           // it implictely marks the texture as dirty so that the functor runs again with the downloaded data
+           texture->setDataGenerator(newGenerator);
+        }
+    }
 }
 
 /*!
@@ -1084,6 +1279,13 @@ void QTextureLoaderPrivate::updateGenerator()
    \brief Handles the texture loading and setting the texture's properties.
 */
 /*!
+   \qmltype TextureLoader
+   \instantiates Qt3DRender::QTextureLoader
+   \inqmlmodule Qt3D.Render
+
+   \brief Handles the texture loading and setting the texture's properties.
+*/
+/*!
  * Constructs a new Qt3DRender::QTextureLoader instance with \a parent as parent.
  *
  * Note that by default, if not contradicted by the file metadata, the loaded texture
@@ -1121,7 +1323,12 @@ QTextureLoader::~QTextureLoader()
 /*!
     \property QTextureLoader::source
 
-    Returns the current texture source.
+    \brief The current texture source.
+*/
+/*!
+    \qmlproperty url Qt3D.Render::TextureLoader::source
+
+    This property holds the current texture source.
 */
 QUrl QTextureLoader::source() const
 {
@@ -1157,7 +1364,12 @@ void QTextureLoader::setSource(const QUrl& source)
   This property specifies whether the texture should be mirrored when loaded. This
   is a convenience to avoid having to manipulate images to match the origin of
   the texture coordinates used by the rendering API. By default this property
-  is set to true. This has no effect when using compressed texture formats.
+  is set to true. This has no effect when using GPU compressed texture formats.
+
+  \warning This property results in a performance price payed at runtime when
+  loading uncompressed or CPU compressed image formats such as PNG. To avoid this
+  performance price it is better to set this property to false and load texture
+  assets that have been pre-mirrored.
 
   \note OpenGL specifies the origin of texture coordinates from the lower left
   hand corner whereas DirectX uses the the upper left hand corner.
@@ -1168,12 +1380,17 @@ void QTextureLoader::setSource(const QUrl& source)
 */
 
 /*!
-  \qmlproperty bool Qt3DRender::QTextureLoader::mirrored
+  \qmlproperty bool Qt3D.Render::TextureLoader::mirrored
 
   This property specifies whether the texture should be mirrored when loaded. This
   is a convenience to avoid having to manipulate images to match the origin of
   the texture coordinates used by the rendering API. By default this property
-  is set to true. This has no effect when using compressed texture formats.
+  is set to true. This has no effect when using GPU compressed texture formats.
+
+  \warning This property results in a performance price payed at runtime when
+  loading uncompressed or CPU compressed image formats such as PNG. To avoid this
+  performance price it is better to set this property to false and load texture
+  assets that have been pre-mirrored.
 
   \note OpenGL specifies the origin of texture coordinates from the lower left
   hand corner whereas DirectX uses the the upper left hand corner.
@@ -1199,7 +1416,7 @@ void QTextureLoader::setMirrored(bool mirrored)
     }
 }
 
-/*!
+/*
  * Constructs a new QTextureFromSourceGenerator::QTextureFromSourceGenerator
  * instance with properties passed in via \a textureLoader
  * \param url
@@ -1208,12 +1425,13 @@ QTextureFromSourceGenerator::QTextureFromSourceGenerator(QTextureLoader *texture
                                                          Qt3DCore::QAspectEngine *engine,
                                                          Qt3DCore::QNodeId textureId)
     : QTextureGenerator()
+    , QEnableSharedFromThis<QTextureFromSourceGenerator>()
     , m_url()
     , m_status(QAbstractTexture::None)
     , m_mirrored()
     , m_texture(textureId)
     , m_engine(engine)
-    , m_format(QAbstractTexture::RGBA8_UNorm)
+    , m_format(QAbstractTexture::NoFormat)
 {
     Q_ASSERT(textureLoader);
 
@@ -1231,7 +1449,20 @@ QTextureFromSourceGenerator::QTextureFromSourceGenerator(QTextureLoader *texture
     m_format = textureLoader->format();
 }
 
-/*!
+QTextureFromSourceGenerator::QTextureFromSourceGenerator(const QTextureFromSourceGenerator &other)
+    : QTextureGenerator()
+    , QEnableSharedFromThis<QTextureFromSourceGenerator>()
+    , m_url(other.m_url)
+    , m_status(other.m_status)
+    , m_mirrored(other.m_mirrored)
+    , m_sourceData(other.m_sourceData)
+    , m_texture(other.m_texture)
+    , m_engine(other.m_engine)
+    , m_format(other.m_format)
+{
+}
+
+/*
  * Takes in a TextureGenerator via \a other and
  * \return whether generators have the same source.
  */
@@ -1242,7 +1473,8 @@ bool QTextureFromSourceGenerator::operator ==(const QTextureGenerator &other) co
             otherFunctor->m_url == m_url &&
             otherFunctor->m_mirrored == m_mirrored &&
             otherFunctor->m_engine == m_engine &&
-            otherFunctor->m_format == m_format);
+            otherFunctor->m_format == m_format &&
+            otherFunctor->m_sourceData == m_sourceData);
 }
 
 QUrl QTextureFromSourceGenerator::url() const
@@ -1253,6 +1485,69 @@ QUrl QTextureFromSourceGenerator::url() const
 bool QTextureFromSourceGenerator::isMirrored() const
 {
     return m_mirrored;
+}
+
+/*!
+ * \class QSharedGLTexture
+ * \brief Allows to use a textureId from a separate OpenGL context in a Qt 3D scene.
+ *
+ * Depending on the rendering mode used by Qt 3D, the shared context will either be:
+ * \list
+ * \li qt_gl_global_share_context when letting Qt 3D drive the rendering. When
+ * setting the attribute Qt::AA_ShareOpenGLContexts on the QApplication class,
+ * this will automatically make QOpenGLWidget instances have their context shared
+ * with qt_gl_global_share_context.
+ * \li the shared context from the QtQuick scene. You might have to subclass
+ * QWindow or use QtQuickRenderControl to have control over what that shared
+ * context is though as of 5.13 it is qt_gl_global_share_context.
+ * \endlist
+ *
+ * \since 5.13
+ *
+ * Any 3rd party engine that shares its context with the Qt 3D renderer can now
+ * provide texture ids that will be referenced by the Qt 3D texture.
+ *
+ * You can omit specifying the texture properties, Qt 3D will try at runtime to
+ * determine what they are. If you know them, you can of course provide them,
+ * avoid additional work for Qt 3D.
+ *
+ * Keep in mind that if you are using custom materials and shaders, you need to
+ * specify the correct sampler type to be used.
+ */
+
+QSharedGLTexture::QSharedGLTexture(Qt3DCore::QNode *parent)
+    : QAbstractTexture(parent)
+{
+    QAbstractTexturePrivate *d = static_cast<QAbstractTexturePrivate *>(Qt3DCore::QNodePrivate::get(this));
+    d->m_target = TargetAutomatic;
+}
+
+QSharedGLTexture::~QSharedGLTexture()
+{
+}
+
+/*!
+ * \qmlproperty textureId
+ *
+ * The OpenGL texture id value that you want Qt3D to gain access to.
+ */
+/*!
+ *\property Qt3DRender::QSharedGLTexture::textureId
+ *
+ * The OpenGL texture id value that you want Qt3D to gain access to.
+ */
+int QSharedGLTexture::textureId() const
+{
+    return static_cast<QAbstractTexturePrivate *>(d_ptr.get())->m_sharedTextureId;
+}
+
+void QSharedGLTexture::setTextureId(int id)
+{
+    QAbstractTexturePrivate *d = static_cast<QAbstractTexturePrivate *>(Qt3DCore::QNodePrivate::get(this));
+    if (d->m_sharedTextureId != id) {
+        d->m_sharedTextureId = id;
+        emit textureIdChanged(id);
+    }
 }
 
 } // namespace Qt3DRender

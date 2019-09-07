@@ -216,6 +216,11 @@ void tst_qquickiconlabel::display()
             QCOMPARE(label->implicitHeight(), qMax(icon->implicitHeight(), text->implicitHeight()) + verticalPadding);
             break;
         }
+
+        if (text)
+            QCOMPARE(label->baselineOffset(), text->y() + text->baselineOffset());
+        else
+            QCOMPARE(label->baselineOffset(), 0);
     }
 }
 
@@ -295,6 +300,9 @@ void tst_qquickiconlabel::emptyIconSource()
 
 void tst_qquickiconlabel::colorChanges()
 {
+    if (QGuiApplication::platformName() == QLatin1String("offscreen"))
+        QSKIP("grabToImage() doesn't work on the \"offscreen\" platform plugin (QTBUG-63185)");
+
     QQuickView view(testFileUrl("colorChanges.qml"));
     QCOMPARE(view.status(), QQuickView::Ready);
     view.show();

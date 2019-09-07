@@ -219,7 +219,7 @@ void QNormalDiffuseMapMaterialPrivate::handleTextureScaleChanged(const QVariant 
     \inherits Qt3DRender::QMaterial
 
     \deprecated
-    \see Qt3DExtras::QDiffuseSpecularMaterial
+    This class is deprecated; use QDiffuseSpecularMaterial instead.
 
     The specular lighting effect is based on the combination of 3 lighting components ambient,
     diffuse and specular. The relative strengths of these components are controlled by means of
@@ -338,6 +338,10 @@ float QNormalDiffuseMapMaterial::shininess() const
 
     Holds the current texture scale. It is applied as a multiplier to texture
     coordinates at render time. Defaults to 1.0.
+
+    When used in conjunction with QTextureWrapMode::Repeat, textureScale provides a simple
+    way to tile a texture across a surface. For example, a texture scale of \c 4.0
+    would result in 16 (4x4) tiles.
 */
 float QNormalDiffuseMapMaterial::textureScale() const
 {

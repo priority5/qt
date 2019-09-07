@@ -58,6 +58,9 @@ QT_REQUIRE_CONFIG(quick_viewtransitions);
 #include <QtCore/qobject.h>
 #include <QtCore/qpoint.h>
 #include <QtQml/qqml.h>
+#include <private/qqmlguard_p.h>
+#include <private/qquicktransition_p.h>
+#include <private/qanimationjobutil_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -115,14 +118,14 @@ public:
     QList<QObject *> moveTransitionTargets;
     QList<QObject *> removeTransitionTargets;
 
-    QQuickTransition *populateTransition;
-    QQuickTransition *addTransition;
-    QQuickTransition *addDisplacedTransition;
-    QQuickTransition *moveTransition;
-    QQuickTransition *moveDisplacedTransition;
-    QQuickTransition *removeTransition;
-    QQuickTransition *removeDisplacedTransition;
-    QQuickTransition *displacedTransition;
+    QQmlGuard<QQuickTransition> populateTransition;
+    QQmlGuard<QQuickTransition> addTransition;
+    QQmlGuard<QQuickTransition> addDisplacedTransition;
+    QQmlGuard<QQuickTransition> moveTransition;
+    QQmlGuard<QQuickTransition> moveDisplacedTransition;
+    QQmlGuard<QQuickTransition> removeTransition;
+    QQmlGuard<QQuickTransition> removeDisplacedTransition;
+    QQmlGuard<QQuickTransition> displacedTransition;
 
 private:
     friend class QQuickItemViewTransitionJob;
@@ -155,6 +158,7 @@ public:
     bool prepareTransition(QQuickItemViewTransitioner *transitioner, int index, const QRectF &viewBounds);
     void startTransition(QQuickItemViewTransitioner *transitioner, int index);
 
+    SelfDeletable m_selfDeletable;
     QPointF nextTransitionTo;
     QPointF lastMovedTo;
     QPointF nextTransitionFrom;

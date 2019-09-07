@@ -40,6 +40,7 @@ protected :
         loadFinishedSpy->clear();
         page->load(QUrl("qrc:/resources/page" + QString::number(nr) + ".html"));
         QTRY_COMPARE(loadFinishedSpy->count(), 1);
+        loadFinishedSpy->clear();
     }
 
 public Q_SLOTS:
@@ -65,6 +66,7 @@ private Q_SLOTS:
     void saveAndRestore_crash_2();
     void saveAndRestore_crash_3();
     void saveAndRestore_crash_4();
+    void saveAndRestore_InternalPage();
 
     void popPushState_data();
     void popPushState();
@@ -160,7 +162,7 @@ void tst_QWebEngineHistory::forward()
     while (hist->canGoBack()) {
         hist->back();
         histBackCount++;
-        QTRY_COMPARE(loadFinishedSpy->count(), histBackCount+1);
+        QTRY_COMPARE(loadFinishedSpy->count(), histBackCount);
     }
 
     QSignalSpy titleChangedSpy(page, SIGNAL(titleChanged(const QString&)));
@@ -197,15 +199,15 @@ void tst_QWebEngineHistory::goToItem()
     QWebEngineHistoryItem current = hist->currentItem();
 
     hist->back();
-    QTRY_COMPARE(loadFinishedSpy->count(), 2);
+    QTRY_COMPARE(loadFinishedSpy->count(), 1);
 
     hist->back();
-    QTRY_COMPARE(loadFinishedSpy->count(), 3);
+    QTRY_COMPARE(loadFinishedSpy->count(), 2);
 
     QVERIFY(hist->currentItem().title() != current.title());
 
     hist->goToItem(current);
-    QTRY_COMPARE(loadFinishedSpy->count(), 3);
+    QTRY_COMPARE(loadFinishedSpy->count(), 2);
 
     QTRY_COMPARE(hist->currentItem().title(), current.title());
 }
@@ -228,10 +230,10 @@ void tst_QWebEngineHistory::items()
 void tst_QWebEngineHistory::backForwardItems()
 {
     hist->back();
-    QTRY_COMPARE(loadFinishedSpy->count(), 2);
+    QTRY_COMPARE(loadFinishedSpy->count(), 1);
 
     hist->back();
-    QTRY_COMPARE(loadFinishedSpy->count(), 3);
+    QTRY_COMPARE(loadFinishedSpy->count(), 2);
 
     QTRY_COMPARE(hist->items().size(), 5);
     QTRY_COMPARE(hist->backItems(100).size(), 2);
@@ -281,16 +283,17 @@ void tst_QWebEngineHistory::serialize_2()
 
     // Force a "same document" navigation.
     page->load(page->url().toString() + QLatin1String("#dummyAnchor"));
-    QTRY_COMPARE(loadFinishedSpy->count(), 1);
+    // "same document" navigation doesn't trigger loadFinished signal.
+    QTRY_COMPARE(evaluateJavaScriptSync(page, "location.hash").toString(), QStringLiteral("#dummyAnchor"));
 
     int initialCurrentIndex = hist->currentItemIndex();
 
     hist->back();
+    QTRY_VERIFY(evaluateJavaScriptSync(page, "location.hash").toString().isEmpty());
+    hist->back();
+    QTRY_COMPARE(loadFinishedSpy->count(), 1);
+    hist->back();
     QTRY_COMPARE(loadFinishedSpy->count(), 2);
-    hist->back();
-    QTRY_COMPARE(loadFinishedSpy->count(), 3);
-    hist->back();
-    QTRY_COMPARE(loadFinishedSpy->count(), 4);
     //check if current index was changed (make sure that it is not last item)
     QVERIFY(hist->currentItemIndex() != initialCurrentIndex);
     //save current index
@@ -301,17 +304,17 @@ void tst_QWebEngineHistory::serialize_2()
     load >> *hist;
     QVERIFY(load.status() == QDataStream::Ok);
     // Restoring the history will trigger a load.
-    QTRY_COMPARE(loadFinishedSpy->count(), 5);
+    QTRY_COMPARE(loadFinishedSpy->count(), 3);
 
     //check current index
     QTRY_COMPARE(hist->currentItemIndex(), oldCurrentIndex);
 
     hist->forward();
+    QTRY_COMPARE(loadFinishedSpy->count(), 4);
+    hist->forward();
+    QTRY_COMPARE(loadFinishedSpy->count(), 5);
+    hist->forward();
     QTRY_COMPARE(loadFinishedSpy->count(), 6);
-    hist->forward();
-    QTRY_COMPARE(loadFinishedSpy->count(), 7);
-    hist->forward();
-    QTRY_COMPARE(loadFinishedSpy->count(), 8);
     QTRY_COMPARE(hist->currentItemIndex(), initialCurrentIndex);
 }
 
@@ -420,6 +423,26 @@ void tst_QWebEngineHistory::saveAndRestore_crash_4()
     QTRY_COMPARE(loadFinishedSpy2.count(), 1);
 }
 
+void tst_QWebEngineHistory::saveAndRestore_InternalPage()
+{
+    QWebEngineView view;
+    view.show();
+    QSignalSpy loadFinishedSpy(&view, &QWebEngineView::loadFinished);
+    view.load(QUrl("view-source:http://qt.io"));
+    QTRY_LOOP_IMPL((loadFinishedSpy.size() == 1), 30000, 200)
+    if (loadFinishedSpy.size() != 1 || !loadFinishedSpy.at(0).at(0).toBool())
+         QSKIP("Couldn't load page from network, skipping test.");
+
+    // get history
+    QByteArray data;
+    QDataStream stream1(&data, QIODevice::WriteOnly);
+    stream1 << *view.history();
+
+    // restore history - this should not crash. see QTBUG-57826
+    QDataStream stream2(data);
+    stream2 >> *view.history();
+}
+
 void tst_QWebEngineHistory::popPushState_data()
 {
     QTest::addColumn<QString>("script");
@@ -462,11 +485,11 @@ void tst_QWebEngineHistory::clear()
 
 void tst_QWebEngineHistory::historyItemFromDeletedPage()
 {
-    QList<QWebEngineHistoryItem> items = page->history()->items();
+    const QList<QWebEngineHistoryItem> items = page->history()->items();
     delete page;
     page = 0;
 
-    foreach (QWebEngineHistoryItem item, items) {
+    for (const QWebEngineHistoryItem &item : items) {
         QVERIFY(!item.isValid());
         QTRY_COMPARE(item.originalUrl(), QUrl());
         QTRY_COMPARE(item.url(), QUrl());

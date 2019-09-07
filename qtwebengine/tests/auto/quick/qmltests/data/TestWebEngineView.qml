@@ -28,33 +28,34 @@
 
 import QtQuick 2.0
 import QtTest 1.1
-import QtWebEngine 1.3
+import QtWebEngine 1.7
 
 WebEngineView {
     property var loadStatus: null
     property bool windowCloseRequestedSignalEmitted: false
     settings.focusOnNavigationEnabled: true
 
-    function waitForLoadSucceeded() {
-        var success = _waitFor(function() { return loadStatus == WebEngineView.LoadSucceededStatus })
+    function waitForLoadSucceeded(timeout) {
+        var success = _waitFor(function() { return loadStatus == WebEngineView.LoadSucceededStatus }, timeout)
         loadStatus = null
         return success
     }
-    function waitForLoadFailed() {
-        var failure = _waitFor(function() { return loadStatus == WebEngineView.LoadFailedStatus })
+    function waitForLoadFailed(timeout) {
+        var failure = _waitFor(function() { return loadStatus == WebEngineView.LoadFailedStatus }, timeout)
         loadStatus = null
         return failure
     }
-    function waitForLoadStopped() {
-        var stop = _waitFor(function() { return loadStatus == WebEngineView.LoadStoppedStatus })
+    function waitForLoadStopped(timeout) {
+        var stop = _waitFor(function() { return loadStatus == WebEngineView.LoadStoppedStatus }, timeout)
         loadStatus = null
         return stop
     }
     function waitForWindowCloseRequested() {
         return _waitFor(function() { return windowCloseRequestedSignalEmitted; });
     }
-    function _waitFor(predicate) {
-        var timeout = 12000
+    function _waitFor(predicate, timeout) {
+        if (timeout === undefined)
+            timeout = 12000;
         var i = 0
         while (i < timeout && !predicate()) {
             testResult.wait(50)
@@ -80,6 +81,24 @@ WebEngineView {
     function setFocusToElement(element) {
         runJavaScript("document.getElementById('" + element + "').focus()");
         verifyElementHasFocus(element);
+    }
+
+    function getElementCenter(element) {
+            var center;
+            runJavaScript("(function() {" +
+                          "   var elem = document.getElementById('" + element + "');" +
+                          "   var rect = elem.getBoundingClientRect();" +
+                          "   return { 'x': (rect.left + rect.right) / 2, 'y': (rect.top + rect.bottom) / 2 };" +
+                          "})();", function(result) { center = result } );
+            testCase.tryVerify(function() { return center !== undefined; });
+            return center;
+    }
+
+    function getTextSelection() {
+        var textSelection;
+        runJavaScript("window.getSelection().toString()", function(result) { textSelection = result });
+        testCase.tryVerify(function() { return textSelection !== undefined; });
+        return textSelection;
     }
 
     TestResult { id: testResult }

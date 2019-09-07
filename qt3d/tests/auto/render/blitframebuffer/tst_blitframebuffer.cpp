@@ -62,11 +62,11 @@ private Q_SLOTS:
     void checkInitializeFromPeer()
     {
         // GIVEN
-        Qt3DRender::QRenderTarget sourceTarget;
-        Qt3DRender::QRenderTarget destinationTarget;
+        Qt3DRender::QRenderTarget *sourceTarget = new Qt3DRender::QRenderTarget;
+        Qt3DRender::QRenderTarget *destinationTarget = new Qt3DRender::QRenderTarget;
         Qt3DRender::QBlitFramebuffer blitFramebuffer;
-        blitFramebuffer.setSource(&sourceTarget);
-        blitFramebuffer.setDestination(&destinationTarget);
+        blitFramebuffer.setSource(sourceTarget);
+        blitFramebuffer.setDestination(destinationTarget);
         blitFramebuffer.setSourceRect(QRect(0,0,1,1));
         blitFramebuffer.setDestinationRect(QRect(0,0,1,1));
         blitFramebuffer.setSourceAttachmentPoint(Qt3DRender::QRenderTargetOutput::Color1);
@@ -81,8 +81,8 @@ private Q_SLOTS:
             // THEN
             QCOMPARE(backendBlitFramebuffer.isEnabled(), true);
             QCOMPARE(backendBlitFramebuffer.peerId(), blitFramebuffer.id());
-            QCOMPARE(backendBlitFramebuffer.sourceRenderTargetId(), sourceTarget.id());
-            QCOMPARE(backendBlitFramebuffer.destinationRenderTargetId(), destinationTarget.id());
+            QCOMPARE(backendBlitFramebuffer.sourceRenderTargetId(), sourceTarget->id());
+            QCOMPARE(backendBlitFramebuffer.destinationRenderTargetId(), destinationTarget->id());
             QCOMPARE(backendBlitFramebuffer.sourceRect(), QRect(0,0,1,1));
             QCOMPARE(backendBlitFramebuffer.destinationRect(), QRect(0,0,1,1));
             QCOMPARE(backendBlitFramebuffer.sourceAttachmentPoint(), Qt3DRender::QRenderTargetOutput::Color1);
@@ -118,6 +118,8 @@ private Q_SLOTS:
 
              // THEN
             QCOMPARE(backendBlitFramebuffer.isEnabled(), newValue);
+            QVERIFY(renderer.dirtyBits() & Qt3DRender::Render::AbstractRenderer::FrameGraphDirty);
+            renderer.clearDirtyBits(Qt3DRender::Render::AbstractRenderer::AllDirty);
         }
         {
              // WHEN
@@ -130,6 +132,8 @@ private Q_SLOTS:
 
              // THEN
             QCOMPARE(backendBlitFramebuffer.sourceRenderTargetId(), newValue);
+            QVERIFY(renderer.dirtyBits() & Qt3DRender::Render::AbstractRenderer::FrameGraphDirty);
+            renderer.clearDirtyBits(Qt3DRender::Render::AbstractRenderer::AllDirty);
         }
         {
              // WHEN
@@ -142,6 +146,8 @@ private Q_SLOTS:
 
              // THEN
             QCOMPARE(backendBlitFramebuffer.destinationRenderTargetId(), newValue);
+            QVERIFY(renderer.dirtyBits() & Qt3DRender::Render::AbstractRenderer::FrameGraphDirty);
+            renderer.clearDirtyBits(Qt3DRender::Render::AbstractRenderer::AllDirty);
         }
         {
              // WHEN
@@ -153,6 +159,8 @@ private Q_SLOTS:
 
              // THEN
             QCOMPARE(backendBlitFramebuffer.sourceRect(), newValue);
+            QVERIFY(renderer.dirtyBits() & Qt3DRender::Render::AbstractRenderer::FrameGraphDirty);
+            renderer.clearDirtyBits(Qt3DRender::Render::AbstractRenderer::AllDirty);
         }
         {
              // WHEN
@@ -164,6 +172,8 @@ private Q_SLOTS:
 
              // THEN
             QCOMPARE(backendBlitFramebuffer.destinationRect(), newValue);
+            QVERIFY(renderer.dirtyBits() & Qt3DRender::Render::AbstractRenderer::FrameGraphDirty);
+            renderer.clearDirtyBits(Qt3DRender::Render::AbstractRenderer::AllDirty);
         }
         {
              // WHEN
@@ -175,6 +185,8 @@ private Q_SLOTS:
 
              // THEN
             QCOMPARE(backendBlitFramebuffer.sourceAttachmentPoint(), newValue);
+            QVERIFY(renderer.dirtyBits() & Qt3DRender::Render::AbstractRenderer::FrameGraphDirty);
+            renderer.clearDirtyBits(Qt3DRender::Render::AbstractRenderer::AllDirty);
         }
         {
              // WHEN
@@ -186,6 +198,8 @@ private Q_SLOTS:
 
              // THEN
             QCOMPARE(backendBlitFramebuffer.destinationAttachmentPoint(), newValue);
+            QVERIFY(renderer.dirtyBits() & Qt3DRender::Render::AbstractRenderer::FrameGraphDirty);
+            renderer.clearDirtyBits(Qt3DRender::Render::AbstractRenderer::AllDirty);
         }
     }
 

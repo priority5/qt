@@ -52,13 +52,14 @@
 #include <QtLocation/private/qlocationglobal_p.h>
 
 #include <QtGui/QImage>
+#include <QPointer>
 #include <QtQuick/QQuickPaintedItem>
 
 QT_BEGIN_NAMESPACE
 
 class QTextDocument;
 class QDeclarativeGeoMap;
-
+class QDeclarativeGeoMapCopyrightNoticePrivate;
 class Q_LOCATION_PRIVATE_EXPORT QDeclarativeGeoMapCopyrightNotice : public QQuickPaintedItem
 {
     Q_OBJECT
@@ -66,12 +67,13 @@ class Q_LOCATION_PRIVATE_EXPORT QDeclarativeGeoMapCopyrightNotice : public QQuic
     Q_PROPERTY(QString styleSheet READ styleSheet WRITE setStyleSheet NOTIFY styleSheetChanged)
 
 public:
-    QDeclarativeGeoMapCopyrightNotice(QQuickItem *parent = Q_NULLPTR);
+    QDeclarativeGeoMapCopyrightNotice(QQuickItem *parent = nullptr);
     ~QDeclarativeGeoMapCopyrightNotice();
 
-    void setCopyrightsZ(int copyrightsZ);
+    void setCopyrightsZ(qreal copyrightsZ);
 
     void setCopyrightsVisible(bool visible);
+    bool copyrightsVisible() const;
     void anchorToBottomLeft();
 
     void setMapSource(QDeclarativeGeoMap *mapSource);
@@ -90,11 +92,12 @@ signals:
     void mapSourceChanged();
     void backgroundColorChanged(const QColor &color);
     void styleSheetChanged(const QString &styleSheet);
+    void copyrightsVisibleChanged();
 
 protected:
-    void paint(QPainter *painter) Q_DECL_OVERRIDE;
-    void mousePressEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
-    void mouseReleaseEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
+    void paint(QPainter *painter) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void rasterizeHtmlAndUpdate();
     void connectMap();
 
@@ -106,10 +109,13 @@ private:
     QImage m_copyrightsImage;
     QString m_activeAnchor;
     bool m_copyrightsVisible;
-    QDeclarativeGeoMap *m_mapSource;
+    QPointer<QDeclarativeGeoMap> m_mapSource;
     QColor m_backgroundColor;
     QString m_styleSheet;
     bool m_userDefinedStyleSheet;
+
+    Q_DISABLE_COPY(QDeclarativeGeoMapCopyrightNotice)
+    Q_DECLARE_PRIVATE(QDeclarativeGeoMapCopyrightNotice)
 };
 
 QT_END_NAMESPACE

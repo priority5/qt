@@ -37,6 +37,7 @@
 #include "qquickmenuitem_p.h"
 #include "qquickmenuitem_p_p.h"
 #include "qquickmenu_p.h"
+#include "qquickdeferredexecute_p_p.h"
 
 #include <QtGui/qpa/qplatformtheme.h>
 #include <QtQuick/private/qquickevents_p_p.h>
@@ -88,14 +89,6 @@ QT_BEGIN_NAMESPACE
     \sa {Customizing Menu}, Menu, {Menu Controls}
 */
 
-QQuickMenuItemPrivate::QQuickMenuItemPrivate()
-    : highlighted(false),
-      arrow(nullptr),
-      menu(nullptr),
-      subMenu(nullptr)
-{
-}
-
 void QQuickMenuItemPrivate::setMenu(QQuickMenu *newMenu)
 {
     Q_Q(QQuickMenuItem);
@@ -132,6 +125,31 @@ void QQuickMenuItemPrivate::updateEnabled()
 {
     Q_Q(QQuickMenuItem);
     q->setEnabled(subMenu && subMenu->isEnabled());
+}
+
+static inline QString arrowName() { return QStringLiteral("arrow"); }
+
+void QQuickMenuItemPrivate::cancelArrow()
+{
+    Q_Q(QQuickAbstractButton);
+    quickCancelDeferred(q, arrowName());
+}
+
+void QQuickMenuItemPrivate::executeArrow(bool complete)
+{
+    Q_Q(QQuickMenuItem);
+    if (arrow.wasExecuted())
+        return;
+
+    if (!arrow || complete)
+        quickBeginDeferred(q, arrowName(), arrow);
+    if (complete)
+        quickCompleteDeferred(q, arrowName(), arrow);
+}
+
+bool QQuickMenuItemPrivate::acceptKeyClick(Qt::Key key) const
+{
+    return key == Qt::Key_Space || key == Qt::Key_Return || key == Qt::Key_Enter;
 }
 
 /*!
@@ -183,7 +201,9 @@ void QQuickMenuItem::setHighlighted(bool highlighted)
 */
 QQuickItem *QQuickMenuItem::arrow() const
 {
-    Q_D(const QQuickMenuItem);
+    QQuickMenuItemPrivate *d = const_cast<QQuickMenuItemPrivate *>(d_func());
+    if (!d->arrow)
+        d->executeArrow();
     return d->arrow;
 }
 
@@ -193,11 +213,15 @@ void QQuickMenuItem::setArrow(QQuickItem *arrow)
     if (d->arrow == arrow)
         return;
 
-    QQuickControlPrivate::destroyDelegate(d->arrow, this);
+    if (!d->arrow.isExecuting())
+        d->cancelArrow();
+
+    delete d->arrow;
     d->arrow = arrow;
     if (arrow && !arrow->parentItem())
         arrow->setParentItem(this);
-    emit arrowChanged();
+    if (!d->arrow.isExecuting())
+        emit arrowChanged();
 }
 
 /*!
@@ -228,14 +252,21 @@ QQuickMenu *QQuickMenuItem::subMenu() const
     return d->subMenu;
 }
 
+void QQuickMenuItem::componentComplete()
+{
+    Q_D(QQuickMenuItem);
+    d->executeArrow(true);
+    QQuickAbstractButton::componentComplete();
+}
+
 QFont QQuickMenuItem::defaultFont() const
 {
-    return QQuickControlPrivate::themeFont(QPlatformTheme::MenuItemFont);
+    return QQuickTheme::font(QQuickTheme::Menu);
 }
 
 QPalette QQuickMenuItem::defaultPalette() const
 {
-    return QQuickControlPrivate::themePalette(QPlatformTheme::MenuPalette);
+    return QQuickTheme::palette(QQuickTheme::Menu);
 }
 
 #if QT_CONFIG(accessibility)

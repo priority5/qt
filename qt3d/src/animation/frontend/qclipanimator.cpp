@@ -42,7 +42,6 @@
 #include <Qt3DAnimation/qabstractanimationclip.h>
 #include <Qt3DAnimation/qchannelmapper.h>
 #include <Qt3DAnimation/qclock.h>
-#include <Qt3DAnimation/private/qanimationcallbacktrigger_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -52,6 +51,15 @@ QClipAnimatorPrivate::QClipAnimatorPrivate()
     : Qt3DAnimation::QAbstractClipAnimatorPrivate()
     , m_clip(nullptr)
 {
+}
+
+bool QClipAnimatorPrivate::canPlay() const
+{
+    if (m_clip && m_mapper)
+        return true;
+
+    qWarning("ClipAnimators need a clip and a mapper to be played");
+    return false;
 }
 
 /*!
@@ -164,19 +172,8 @@ Qt3DCore::QNodeCreatedChangeBasePtr QClipAnimator::createNodeCreationChange() co
     data.clockId = Qt3DCore::qIdForNode(d->m_clock);
     data.running = d->m_running;
     data.loops = d->m_loops;
+    data.normalizedTime = d->m_normalizedTime;
     return creationChange;
-}
-
-/*! \internal */
-void QClipAnimator::sceneChangeEvent(const Qt3DCore::QSceneChangePtr &change)
-{
-    if (change->type() == Qt3DCore::CallbackTriggered) {
-        QAnimationCallbackTriggerPtr callbackTrigger = qSharedPointerCast<Qt3DAnimation::QAnimationCallbackTrigger>(change);
-        if (callbackTrigger->callback())
-            callbackTrigger->callback()->valueChanged(callbackTrigger->value());
-    } else if (change->type() == Qt3DCore::PropertyUpdated) {
-        QAbstractClipAnimator::sceneChangeEvent(change);
-    }
 }
 
 } // namespace Qt3DAnimation

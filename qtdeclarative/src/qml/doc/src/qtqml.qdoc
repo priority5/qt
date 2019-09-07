@@ -55,11 +55,12 @@ following directive:
 #include <QtQml>
 \endcode
 
-The QML types in Qt QML are available through the \c QtQML import. To use the
+The QML types in Qt QML are available through the \c QtQml import. To use the
 types, add the following import statement to your .qml file:
-\code
-import QtQml 2.0
-\endcode
+
+\qml \QtMinorVersion
+import QtQml 2.\1
+\endqml
 
 
 To link against the module, add this line to your \l qmake \c
@@ -134,12 +135,13 @@ the QML code to interact with C++ code.
 \section1 Licenses and Attributions
 
 Qt QML is available under commercial licenses from \l{The Qt Company}.
-In addition, it is available under the
+In addition, it is available under free software licenses. Since Qt 5.4,
+these free software licenses are
 \l{GNU Lesser General Public License, version 3}, or
 the \l{GNU General Public License, version 2}.
 See \l{Qt Licensing} for further details.
 
-Furthermore Qt QML potentially contains third party
+Furthermore Qt QML in Qt \QtVersion may contain third party
 modules under following permissive licenses:
 
 \generatelist{groupsbymodule attributions-qtqml}

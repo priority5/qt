@@ -1,6 +1,6 @@
 TARGET = qtposition_cl
 
-QT = core positioning
+QT = core core-private positioning
 
 OBJECTIVE_SOURCES += \
     qgeopositioninfosource_cl.mm \
@@ -14,6 +14,10 @@ OTHER_FILES += \
     plugin.json
 
 LIBS += -framework Foundation -framework CoreLocation
+
+!darwin {
+    DISTFILES += $$OBJECTIVE_SOURCES
+}
 
 PLUGIN_TYPE = position
 PLUGIN_CLASS_NAME = QGeoPositionInfoSourceFactoryCL

@@ -26,8 +26,8 @@
 ****************************************************************************/
 
 //! [file]
-import QtQuick 2.6
-import QtQuick.Controls 2.1
+import QtQuick 2.12
+import QtQuick.Controls 2.12
 
 SwipeDelegate {
     id: control
@@ -58,8 +58,6 @@ SwipeDelegate {
         font: control.font
         color: control.enabled ? (control.down ? "#17a81a" : "#21be2b") : "#bdbebf"
         elide: Text.ElideRight
-        visible: control.text
-        horizontalAlignment: Text.AlignLeft
         verticalAlignment: Text.AlignVCenter
 
         Behavior on x {

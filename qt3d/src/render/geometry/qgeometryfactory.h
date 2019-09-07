@@ -42,7 +42,7 @@
 
 #include <Qt3DRender/qt3drender_global.h>
 #include <Qt3DRender/qabstractfunctor.h>
-#include <QSharedPointer>
+#include <QtCore/QSharedPointer>
 
 QT_BEGIN_NAMESPACE
 
@@ -50,7 +50,7 @@ namespace Qt3DRender {
 
 class QGeometry;
 
-class QT3DRENDERSHARED_EXPORT QGeometryFactory : public QAbstractFunctor
+class Q_3DRENDERSHARED_EXPORT QGeometryFactory : public QAbstractFunctor
 {
 public:
     virtual ~QGeometryFactory();

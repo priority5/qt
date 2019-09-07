@@ -44,6 +44,7 @@ private slots:
     void svg();
     void availableSizes();
     void isNull();
+    void sizeInPercent();
 
 
 private:
@@ -152,6 +153,16 @@ void tst_QIcon_Svg::isNull()
         //valid svg, we're not null
         QIcon icon(prefix + "heart.svg");
         QVERIFY(!icon.isNull());
+
+        // check for non null of serialized/deserialized valid icon
+        QByteArray buf;
+        QDataStream out(&buf, QIODevice::WriteOnly);
+        out << icon;
+
+        QIcon icon2;
+        QDataStream in(buf);
+        in >> icon2;
+        QVERIFY(!icon2.isNull());
     }
     {
         //invalid svg, but a pixmap added means we're not null
@@ -161,6 +172,17 @@ void tst_QIcon_Svg::isNull()
     }
 
 }
+
+void tst_QIcon_Svg::sizeInPercent()
+{
+    QIcon icon(prefix + "rect_size_100percent.svg");
+    QCOMPARE(icon.actualSize(QSize(16, 8)), QSize(16, 8));
+    QCOMPARE(icon.pixmap(QSize(16, 8)).size(), QSize(16, 8));
+
+    QCOMPARE(icon.actualSize(QSize(8, 8)), QSize(8, 4));
+    QCOMPARE(icon.pixmap(QSize(8, 8)).size(), QSize(8, 4));
+}
+
 
 QTEST_MAIN(tst_QIcon_Svg)
 #include "tst_qicon_svg.moc"

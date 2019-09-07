@@ -48,7 +48,6 @@
 static const int riffHeaderSize = 12; // RIFF_HEADER_SIZE from webp/format_constants.h
 
 QWebpHandler::QWebpHandler() :
-    m_lossless(false),
     m_quality(75),
     m_scanState(ScanNotScanned),
     m_features(),
@@ -175,7 +174,8 @@ bool QWebpHandler::read(QImage *image)
     if (status != VP8_STATUS_OK)
         return false;
 
-    QImage frame(m_iter.width, m_iter.height, QImage::Format_ARGB32);
+    QImage::Format format = m_features.has_alpha ? QImage::Format_ARGB32 : QImage::Format_RGB32;
+    QImage frame(m_iter.width, m_iter.height, format);
     uint8_t *output = frame.bits();
     size_t output_size = frame.sizeInBytes();
 #if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
@@ -220,13 +220,10 @@ bool QWebpHandler::write(const QImage &image)
     }
 
     QImage srcImage = image;
-#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-    if (srcImage.format() != QImage::Format_ARGB32)
-        srcImage = srcImage.convertToFormat(QImage::Format_ARGB32);
-#else /* Q_BIG_ENDIAN */
-    if (srcImage.format() != QImage::Format_RGBA8888)
-        srcImage = srcImage.convertToFormat(QImage::Format_RGBA8888);
-#endif
+    bool alpha = srcImage.hasAlphaChannel();
+    QImage::Format newFormat = alpha ? QImage::Format_RGBA8888 : QImage::Format_RGB888;
+    if (srcImage.format() != newFormat)
+        srcImage = srcImage.convertToFormat(newFormat);
 
     WebPPicture picture;
     WebPConfig config;
@@ -239,19 +236,27 @@ bool QWebpHandler::write(const QImage &image)
     picture.width = srcImage.width();
     picture.height = srcImage.height();
     picture.use_argb = 1;
-#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-    if (!WebPPictureImportBGRA(&picture, srcImage.bits(), srcImage.bytesPerLine())) {
-#else /* Q_BIG_ENDIAN */
-    if (!WebPPictureImportRGBA(&picture, srcImage.bits(), srcImage.bytesPerLine())) {
-#endif
-        qWarning() << "failed to import image data to webp picture.";
+    bool failed = false;
+    if (alpha)
+        failed = !WebPPictureImportRGBA(&picture, srcImage.bits(), srcImage.bytesPerLine());
+    else
+        failed = !WebPPictureImportRGB(&picture, srcImage.bits(), srcImage.bytesPerLine());
 
+    if (failed) {
+        qWarning() << "failed to import image data to webp picture.";
         WebPPictureFree(&picture);
         return false;
     }
 
-    config.lossless = m_lossless;
-    config.quality = m_quality;
+    int reqQuality = m_quality < 0 ? 75 : qMin(m_quality, 100);
+    if (reqQuality < 100) {
+        config.lossless = 0;
+        config.quality = reqQuality;
+    } else {
+        config.lossless = 1;
+        config.quality = 70;  // For lossless, specifies compression effort; 70 is libwebp default
+    }
+    config.alpha_quality = config.quality;
     picture.writer = pictureWriter;
     picture.custom_ptr = device();
 
@@ -289,8 +294,7 @@ void QWebpHandler::setOption(ImageOption option, const QVariant &value)
 {
     switch (option) {
     case Quality:
-        m_quality = qBound(0, value.toInt(), 100);
-        m_lossless = (m_quality >= 100);
+        m_quality = value.toInt();
         return;
     default:
         break;
@@ -306,10 +310,12 @@ bool QWebpHandler::supportsOption(ImageOption option) const
         || option == BackgroundColor;
 }
 
+#if QT_DEPRECATED_SINCE(5, 13)
 QByteArray QWebpHandler::name() const
 {
     return QByteArrayLiteral("webp");
 }
+#endif
 
 int QWebpHandler::imageCount() const
 {

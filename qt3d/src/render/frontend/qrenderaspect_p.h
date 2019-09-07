@@ -75,7 +75,7 @@ namespace Render {
 class OffscreenSurfaceHelper;
 }
 
-class QT3DRENDERSHARED_PRIVATE_EXPORT QRenderAspectPrivate : public Qt3DCore::QAbstractAspectPrivate
+class Q_3DRENDERSHARED_PRIVATE_EXPORT QRenderAspectPrivate : public Qt3DCore::QAbstractAspectPrivate
 {
 public:
     QRenderAspectPrivate(QRenderAspect::RenderType type);
@@ -90,7 +90,7 @@ public:
     void loadSceneParsers();
     void loadRenderPlugin(const QString &pluginName);
     void renderInitialize(QOpenGLContext *context);
-    void renderSynchronous();
+    void renderSynchronous(bool blocking = false);
     void renderShutdown();
     void registerBackendType(const QMetaObject &, const Qt3DCore::QBackendNodeMapperPtr &functor);
     QVector<Qt3DCore::QAspectJobPtr> createGeometryRendererJobs();

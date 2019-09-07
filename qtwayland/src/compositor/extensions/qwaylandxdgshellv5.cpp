@@ -43,6 +43,7 @@
 #ifdef QT_WAYLAND_COMPOSITOR_QUICK
 #include "qwaylandxdgshellv5integration_p.h"
 #endif
+#include <QtWaylandCompositor/private/qwaylandutils_p.h>
 
 #include <QtWaylandCompositor/QWaylandCompositor>
 #include <QtWaylandCompositor/QWaylandSurface>
@@ -60,8 +61,6 @@ QWaylandSurfaceRole QWaylandXdgSurfaceV5Private::s_role("xdg_surface");
 QWaylandSurfaceRole QWaylandXdgPopupV5Private::s_role("xdg_popup");
 
 QWaylandXdgShellV5Private::QWaylandXdgShellV5Private()
-    : QWaylandCompositorExtensionPrivate()
-    , xdg_shell()
 {
 }
 
@@ -150,7 +149,7 @@ void QWaylandXdgShellV5Private::xdg_shell_get_xdg_surface(Resource *resource, ui
     if (!surface->setRole(QWaylandXdgSurfaceV5::role(), resource->handle, XDG_SHELL_ERROR_ROLE))
         return;
 
-    QWaylandResource xdgSurfaceResource(wl_resource_create(resource->client(), &xdg_surface_interface,
+    QWaylandResource xdgSurfaceResource(wl_resource_create(resource->client(), &xdg_surface_v5_interface,
                                                            wl_resource_get_version(resource->handle), id));
 
     emit q->xdgSurfaceRequested(surface, xdgSurfaceResource);
@@ -168,10 +167,10 @@ void QWaylandXdgShellV5Private::xdg_shell_get_xdg_surface(Resource *resource, ui
 
 void QWaylandXdgShellV5Private::xdg_shell_use_unstable_version(Resource *resource, int32_t version)
 {
-    if (xdg_shell::version_current != version) {
+    if (xdg_shell_v5::version_current != version) {
         wl_resource_post_error(resource->handle, WL_DISPLAY_ERROR_INVALID_OBJECT,
                                "incompatible version, server is %d, but client wants %d",
-                               xdg_shell::version_current, version);
+                               xdg_shell_v5::version_current, version);
     }
 }
 
@@ -195,7 +194,7 @@ void QWaylandXdgShellV5Private::xdg_shell_get_xdg_popup(Resource *resource, uint
         return;
     }
 
-    QWaylandResource xdgPopupResource (wl_resource_create(resource->client(), &xdg_popup_interface,
+    QWaylandResource xdgPopupResource (wl_resource_create(resource->client(), &xdg_popup_v5_interface,
                                                           wl_resource_get_version(resource->handle), id));
     QWaylandSeat *seat = QWaylandSeat::fromSeatResource(seatResource);
     QPoint position(x, y);
@@ -223,14 +222,7 @@ void QWaylandXdgShellV5Private::xdg_shell_pong(Resource *resource, uint32_t seri
 }
 
 QWaylandXdgSurfaceV5Private::QWaylandXdgSurfaceV5Private()
-    : QWaylandCompositorExtensionPrivate()
-    , xdg_surface()
-    , m_xdgShell(nullptr)
-    , m_surface(nullptr)
-    , m_parentSurface(nullptr)
-    , m_windowType(Qt::WindowType::Window)
-    , m_unsetWindowGeometry(true)
-    , m_lastAckedConfigure({{}, QSize(0, 0), 0})
+    : m_lastAckedConfigure({{}, QSize(0, 0), 0})
 {
 }
 
@@ -258,7 +250,7 @@ QRect QWaylandXdgSurfaceV5Private::calculateFallbackWindowGeometry() const
 {
     // TODO: The unset window geometry should include subsurfaces as well, so this solution
     // won't work too well on those kinds of clients.
-    return QRect(QPoint(0, 0), m_surface->size() / m_surface->bufferScale());
+    return QRect(QPoint(), m_surface->destinationSize());
 }
 
 void QWaylandXdgSurfaceV5Private::updateFallbackWindowGeometry()
@@ -490,11 +482,6 @@ void QWaylandXdgSurfaceV5Private::xdg_surface_set_window_geometry(Resource *reso
 }
 
 QWaylandXdgPopupV5Private::QWaylandXdgPopupV5Private()
-    : QWaylandCompositorExtensionPrivate()
-    , xdg_popup()
-    , m_surface(nullptr)
-    , m_parentSurface(nullptr)
-    , m_xdgShell(nullptr)
 {
 }
 
@@ -526,15 +513,19 @@ void QWaylandXdgPopupV5Private::xdg_popup_destroy(Resource *resource)
  *
  * To provide the functionality of the shell extension in a compositor, create
  * an instance of the XdgShellV5 component and add it as a child of the
- * compositor: \code
- * import QtWayland.Compositor 1.0
+ * compositor:
+ *
+ * \qml \QtMinorVersion
+ * import QtWayland.Compositor 1.\1
  *
  * WaylandCompositor {
  *     XdgShellV5 {
  *         // ...
  *     }
  * }
- * \endcode
+ * \endqml
+ *
+ * \deprecated
  */
 
 /*!
@@ -548,6 +539,8 @@ void QWaylandXdgPopupV5Private::xdg_popup_destroy(Resource *resource)
  * can request that the surface is resized, moved, and so on.
  *
  * QWaylandXdgShellV5 corresponds to the Wayland interface \c xdg_shell.
+ *
+ * \deprecated
  */
 
 /*!
@@ -776,6 +769,8 @@ void QWaylandXdgShellV5::handleFocusChanged(QWaylandSurface *newSurface, QWaylan
  * compositors, such as resizing and moving the surface.
  *
  * It corresponds to the Wayland interface \c xdg_surface for the unstable xdg-shell protocol v5.
+ *
+ * \deprecated
  */
 
 /*!
@@ -790,6 +785,8 @@ void QWaylandXdgShellV5::handleFocusChanged(QWaylandSurface *newSurface, QWaylan
  * surface.
  *
  * It corresponds to the Wayland interface xdg_surface.
+ *
+ * \deprecated
  */
 
 /*!
@@ -825,10 +822,10 @@ QWaylandXdgSurfaceV5::QWaylandXdgSurfaceV5(QWaylandXdgShellV5 *xdgShell, QWaylan
 }
 
 /*!
- * \qmlmethod void QtWaylandCompositor::XdgSurfaceV5::initialize(object surface, object client, int id)
+ * \qmlmethod void QtWaylandCompositor::XdgSurfaceV5::initialize(XdgShellV5 xdgShell, WaylandSurface surface, WaylandResource resource)
  *
- * Initializes the XdgSurfaceV5, associating it with the given \a surface,
- * \a client, and \a id.
+ * Initializes the XdgSurfaceV5, associating it with the given \a xdgShell, \a surface,
+ * and \a resource.
  */
 
 /*!
@@ -843,7 +840,7 @@ void QWaylandXdgSurfaceV5::initialize(QWaylandXdgShellV5 *xdgShell, QWaylandSurf
     d->init(resource.resource());
     setExtensionContainer(surface);
     d->m_windowGeometry = d->calculateFallbackWindowGeometry();
-    connect(surface, &QWaylandSurface::sizeChanged, this, &QWaylandXdgSurfaceV5::handleSurfaceSizeChanged);
+    connect(surface, &QWaylandSurface::destinationSizeChanged, this, &QWaylandXdgSurfaceV5::handleSurfaceSizeChanged);
     connect(surface, &QWaylandSurface::bufferScaleChanged, this, &QWaylandXdgSurfaceV5::handleBufferScaleChanged);
     emit shellChanged();
     emit surfaceChanged();
@@ -888,11 +885,11 @@ void QWaylandXdgSurfaceV5::initialize(QWaylandXdgShellV5 *xdgShell, QWaylandSurf
  * typically in response to the window decorations being dragged by \a seat on the window borders
  * given by \a edges.
  *
- * \sa QWaylandXdgSurfaceV5::ResizeEdges
+ * \sa QWaylandXdgSurfaceV5::ResizeEdge
  */
 
 /*!
- * \fn void QWaylandXdgSurfaceV5::startResize(QWaylandSeat *seat, ResizeEdges edges)
+ * \fn void QWaylandXdgSurfaceV5::startResize(QWaylandSeat *seat, ResizeEdge edges)
  *
  * This signal is emitted when the client wants to start an interactive resize of the
  * QWaylandXdgSurfaceV5, typically in response to the window decorations being dragged by
@@ -1048,11 +1045,6 @@ QWaylandSurface *QWaylandXdgSurfaceV5::surface() const
  * This property holds the window type of the XdgSurfaceV5.
  */
 
-/*!
- * \property QWaylandXdgSurfaceV5::windowType
- *
- * This property holds the window type of the QWaylandXdgSurfaceV5.
- */
 Qt::WindowType QWaylandXdgSurfaceV5::windowType() const
 {
     Q_D(const QWaylandXdgSurfaceV5);
@@ -1190,10 +1182,9 @@ QWaylandSurfaceRole *QWaylandXdgSurfaceV5::role()
  */
 QWaylandXdgSurfaceV5 *QWaylandXdgSurfaceV5::fromResource(wl_resource *resource)
 {
-    auto xsResource = QWaylandXdgSurfaceV5Private::Resource::fromResource(resource);
-    if (!xsResource)
-        return nullptr;
-    return static_cast<QWaylandXdgSurfaceV5Private *>(xsResource->xdg_surface_object)->q_func();
+    if (auto p = QtWayland::fromResource<QWaylandXdgSurfaceV5Private *>(resource))
+        return p->q_func();
+    return nullptr;
 }
 
 QSize QWaylandXdgSurfaceV5::sizeForResize(const QSizeF &size, const QPointF &delta,
@@ -1211,7 +1202,8 @@ QSize QWaylandXdgSurfaceV5::sizeForResize(const QSizeF &size, const QPointF &del
     else if (edge & BottomEdge)
         height += delta.y();
 
-    return QSizeF(width, height).toSize();
+    QSizeF newSize(qMax(width, 1.0), qMax(height, 1.0));
+    return newSize.toSize();
 }
 
 /*!
@@ -1227,6 +1219,10 @@ QSize QWaylandXdgSurfaceV5::sizeForResize(const QSizeF &size, const QPointF &del
  */
 uint QWaylandXdgSurfaceV5::sendConfigure(const QSize &size, const QVector<uint> &states)
 {
+    if (!size.isValid()) {
+        qWarning() << "Can't configure xdg surface (v5) with an invalid size" << size;
+        return 0;
+    }
     Q_D(QWaylandXdgSurfaceV5);
     auto statesBytes = QByteArray::fromRawData((char *)states.data(), states.size() * sizeof(State));
     QWaylandSurface *surface = qobject_cast<QWaylandSurface *>(extensionContainer());
@@ -1332,19 +1328,23 @@ QWaylandQuickShellIntegration *QWaylandXdgSurfaceV5::createIntegration(QWaylandQ
  * using xdg-shell.
  *
  * It corresponds to the Wayland interface \c xdg_popup for the unstable xdg-shell protocol v5.
+ *
+ * \deprecated
  */
 
 /*!
  * \class QWaylandXdgPopupV5
  * \inmodule QtWaylandCompositor
  * \since 5.8
- * \brief The QWaylandXdgPopupV5 class provides menus for an xdg surface
+ * \brief The QWaylandXdgPopupV5 class provides menus for an xdg surface.
  *
  * This class is part of the QWaylandXdgShellV5 extension and provides a way to
  * extend the functionality of an existing QWaylandSurface with features
  * specific to desktop-style menus for an xdg surface.
  *
  * It corresponds to the Wayland interface xdg_popup.
+ *
+ * \deprecated
  */
 
 /*!
@@ -1367,10 +1367,10 @@ QWaylandXdgPopupV5::QWaylandXdgPopupV5(QWaylandXdgShellV5 *xdgShell, QWaylandSur
 }
 
 /*!
- * \qmlmethod void QtWaylandCompositor::XdgPopupV5::initialize(object surface, object parentSurface, object resource)
+ * \qmlmethod void QtWaylandCompositor::XdgPopupV5::initialize(XdgShellV5 shell, WaylandSurface surface, WaylandSurface parentSurface, point position, WaylandResource resource)
  *
  * Initializes the xdg popup, associating it with the given \a shell, \a surface,
- * \a parentSurface and \a resource.
+ * \a parentSurface, \a position and \a resource.
  */
 
 /*!
@@ -1499,10 +1499,9 @@ QWaylandSurfaceRole *QWaylandXdgPopupV5::role()
 
 QWaylandXdgPopupV5 *QWaylandXdgPopupV5::fromResource(wl_resource *resource)
 {
-    auto popupResource = QWaylandXdgPopupV5Private::Resource::fromResource(resource);
-    if (!popupResource)
-        return nullptr;
-    return static_cast<QWaylandXdgPopupV5Private *>(popupResource->xdg_popup_object)->q_func();
+    if (auto p = QtWayland::fromResource<QWaylandXdgPopupV5Private *>(resource))
+        return p->q_func();
+    return nullptr;
 }
 
 void QWaylandXdgPopupV5::sendPopupDone()

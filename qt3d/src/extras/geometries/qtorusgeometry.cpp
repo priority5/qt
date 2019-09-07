@@ -164,12 +164,12 @@ public:
     {
     }
 
-    QByteArray operator ()() Q_DECL_OVERRIDE
+    QByteArray operator ()() override
     {
         return createTorusVertexData(m_radius, m_minorRadius, m_rings, m_slices);
     }
 
-    bool operator ==(const QBufferDataGenerator &other) const Q_DECL_OVERRIDE
+    bool operator ==(const QBufferDataGenerator &other) const override
     {
         const TorusVertexDataFunctor *otherFunctor = functor_cast<TorusVertexDataFunctor>(&other);
         if (otherFunctor != nullptr)
@@ -198,12 +198,12 @@ public:
     {
     }
 
-    QByteArray operator ()() Q_DECL_OVERRIDE
+    QByteArray operator ()() override
     {
         return createTorusIndexData(m_rings, m_slices);
     }
 
-    bool operator ==(const QBufferDataGenerator &other) const Q_DECL_OVERRIDE
+    bool operator ==(const QBufferDataGenerator &other) const override
     {
         const TorusIndexDataFunctor *otherFunctor = functor_cast<TorusIndexDataFunctor>(&other);
         if (otherFunctor != nullptr)
@@ -362,6 +362,7 @@ void QTorusGeometryPrivate::init()
 
 /*!
  * \class Qt3DExtras::QTorusGeometry
+   \ingroup qt3d-extras-geometries
  * \inheaderfile Qt3DExtras/QTorusGeometry
  * \inmodule Qt3DExtras
  * \brief The QTorusGeometry class allows creation of a torus in 3D space.

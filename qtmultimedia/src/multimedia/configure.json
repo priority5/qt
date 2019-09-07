@@ -8,10 +8,11 @@
     "commandline": {
         "options": {
             "alsa": "boolean",
+            "evr": { "type": "boolean" },
+            "directshow": { "type": "boolean" },
+            "wmf": { "type": "boolean" },
             "gstreamer": { "type": "optionalString", "values": [ "no", "yes", "0.10", "1.0" ] },
-            "pulseaudio": "boolean",
-            "mediaplayer-backend": { "type": "string", "values": [ "directshow", "wmf" ] },
-            "wmf-backend": { "type": "void", "name": "mediaplayer-backend", "value": "wmf" }
+            "pulseaudio": "boolean"
         }
     },
 
@@ -52,7 +53,9 @@
             "test": "gstreamer",
             "sources": [
                 { "type": "pkgConfig",
-                  "args": "gstreamer-1.0 gstreamer-base-1.0 gstreamer-audio-1.0 gstreamer-video-1.0 gstreamer-pbutils-1.0" }
+                  "args": "gstreamer-1.0 gstreamer-base-1.0 gstreamer-audio-1.0 gstreamer-video-1.0 gstreamer-pbutils-1.0" },
+                { "libs": "-lgstreamer-1.0 -lgstbase-1.0 -lgstaudio-1.0 -lgstvideo-1.0 -lgstpbutils-1.0 -lglib-2.0 -lgobject-2.0",
+                  "condition": "config.win32 || config.macos" }
             ]
         },
         "gstreamer_app_0_10": {
@@ -70,7 +73,8 @@
             "test": "gstreamer_appsrc",
             "use": "gstreamer_1_0",
             "sources": [
-                { "type": "pkgConfig", "args": "gstreamer-app-1.0" }
+                { "type": "pkgConfig", "args": "gstreamer-app-1.0" },
+                { "libs": "-lgstapp-1.0", "condition": "config.win32 || config.macos" }
             ]
         },
         "gstreamer_photography_0_10": {
@@ -187,13 +191,6 @@
             "condition": "config.win32 && libs.directshow",
             "output": [ "feature", "privateFeature" ]
         },
-        "directshow-player": {
-            "label": "DirectShow",
-            "enable": "input.mediaplayer-backend == 'directshow'",
-            "disable": "input.mediaplayer-backend == 'wmf'",
-            "condition": "features.directshow && !features.wmf-player",
-            "output": [ "privateFeature" ]
-        },
         "evr": {
             "label": "evr.h",
             "condition": "config.win32 && tests.evr",
@@ -234,7 +231,7 @@
         },
         "gpu_vivante": {
             "label": "Vivante GPU",
-            "condition": "features.opengles2 && tests.gpu_vivante",
+            "condition": "features.gui && features.opengles2 && tests.gpu_vivante",
             "output": [ "privateFeature" ]
         },
         "resourcepolicy": {
@@ -283,13 +280,6 @@
             "label": "Windows Media Foundation",
             "condition": "config.win32 && libs.wmf",
             "output": [ "privateFeature" ]
-        },
-        "wmf-player": {
-            "label": "Windows Media Foundation",
-            "enable": "input.mediaplayer-backend == 'wmf'",
-            "disable": "input.mediaplayer-backend != 'wmf'",
-            "condition": "features.wmf",
-            "output": [ "privateFeature" ]
         }
     },
 
@@ -311,14 +301,7 @@
                 "avfoundation",
                 "wasapi",
                 "directshow",
-                "wmf",
-                {
-                    "message": "Media player backend",
-                    "type": "firstAvailableFeature",
-                    "args": "directshow-player wmf-player",
-                    "condition": "config.win32"
-                }
-
+                "wmf"
             ]
         }
     ]

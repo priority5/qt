@@ -26,8 +26,8 @@
 ****************************************************************************/
 
 //! [file]
-import QtQuick 2.6
-import QtQuick.Controls 2.1
+import QtQuick 2.12
+import QtQuick.Controls 2.12
 
 Switch {
     id: control
@@ -57,7 +57,6 @@ Switch {
         font: control.font
         opacity: enabled ? 1.0 : 0.3
         color: control.down ? "#17a81a" : "#21be2b"
-        horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         leftPadding: control.indicator.width + control.spacing
     }

@@ -44,7 +44,16 @@
 #include <QtCore/qmetatype.h>
 #include <string.h>
 
-#if defined __F16C__
+#if defined(QT_COMPILER_SUPPORTS_F16C) && defined(__AVX2__) && !defined(__F16C__)
+// All processors that support AVX2 do support F16C too. That doesn't mean
+// we're allowed to use the intrinsics directly, so we'll do it only for
+// the Intel and Microsoft's compilers.
+#  if defined(Q_CC_INTEL) || defined(Q_CC_MSVC)
+#    define __F16C__        1
+# endif
+#endif
+
+#if defined(QT_COMPILER_SUPPORTS_F16C) && defined(__F16C__)
 #include <immintrin.h>
 #endif
 
@@ -58,11 +67,9 @@ QT_BEGIN_NAMESPACE
 class qfloat16
 {
 public:
-#ifndef Q_QDOC
     Q_DECL_CONSTEXPR inline qfloat16() Q_DECL_NOTHROW : b16(0) { }
     inline qfloat16(float f) Q_DECL_NOTHROW;
     inline operator float() const Q_DECL_NOTHROW;
-#endif
 
 private:
     quint16 b16;
@@ -74,10 +81,15 @@ private:
     Q_CORE_EXPORT static const quint32 shifttable[];
 
     friend bool qIsNull(qfloat16 f) Q_DECL_NOTHROW;
+#if !defined(QT_NO_FLOAT16_OPERATORS)
     friend qfloat16 operator-(qfloat16 a) Q_DECL_NOTHROW;
+#endif
 };
 
 Q_DECLARE_TYPEINFO(qfloat16, Q_PRIMITIVE_TYPE);
+
+Q_CORE_EXPORT void qFloatToFloat16(qfloat16 *, const float *, qsizetype length) Q_DECL_NOTHROW;
+Q_CORE_EXPORT void qFloatFromFloat16(float *, const qfloat16 *, qsizetype length) Q_DECL_NOTHROW;
 
 Q_REQUIRED_RESULT Q_CORE_EXPORT bool qIsInf(qfloat16 f) Q_DECL_NOTHROW;    // complements qnumeric.h
 Q_REQUIRED_RESULT Q_CORE_EXPORT bool qIsNaN(qfloat16 f) Q_DECL_NOTHROW;    // complements qnumeric.h
@@ -111,12 +123,13 @@ Q_REQUIRED_RESULT inline bool qIsNull(qfloat16 f) Q_DECL_NOTHROW
 inline int qIntCast(qfloat16 f) Q_DECL_NOTHROW
 { return int(static_cast<float>(f)); }
 
+#ifndef Q_QDOC
 QT_WARNING_PUSH
 QT_WARNING_DISABLE_CLANG("-Wc99-extensions")
 QT_WARNING_DISABLE_GCC("-Wold-style-cast")
 inline qfloat16::qfloat16(float f) Q_DECL_NOTHROW
 {
-#if defined(QT_COMPILER_SUPPORTS_F16C) && (defined(__F16C__) || defined(__AVX2__))
+#if defined(QT_COMPILER_SUPPORTS_F16C) && defined(__F16C__)
     __m128 packsingle = _mm_set_ss(f);
     __m128i packhalf = _mm_cvtps_ph(packsingle, 0);
     b16 = _mm_extract_epi16(packhalf, 0);
@@ -134,7 +147,7 @@ QT_WARNING_POP
 
 inline qfloat16::operator float() const Q_DECL_NOTHROW
 {
-#if defined(QT_COMPILER_SUPPORTS_F16C) && (defined(__F16C__) || defined(__AVX2__))
+#if defined(QT_COMPILER_SUPPORTS_F16C) && defined(__F16C__)
     __m128i packhalf = _mm_cvtsi32_si128(b16);
     __m128 packsingle = _mm_cvtph_ps(packhalf);
     return _mm_cvtss_f32(packsingle);
@@ -150,7 +163,9 @@ inline qfloat16::operator float() const Q_DECL_NOTHROW
     return f;
 #endif
 }
+#endif
 
+#if !defined(QT_NO_FLOAT16_OPERATORS)
 inline qfloat16 operator-(qfloat16 a) Q_DECL_NOTHROW
 {
     qfloat16 f;
@@ -232,6 +247,7 @@ QF16_MAKE_BOOL_OP_INT(!=)
 #undef QF16_MAKE_BOOL_OP_INT
 
 QT_WARNING_POP
+#endif // QT_NO_FLOAT16_OPERATORS
 
 /*!
   \internal

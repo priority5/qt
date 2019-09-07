@@ -59,17 +59,30 @@ void QQuickFusionBusyIndicator::setColor(const QColor &color)
     update();
 }
 
+bool QQuickFusionBusyIndicator::isRunning() const
+{
+    return isVisible();
+}
+
+void QQuickFusionBusyIndicator::setRunning(bool running)
+{
+    if (running) {
+        setVisible(true);
+        update();
+    }
+}
+
 void QQuickFusionBusyIndicator::paint(QPainter *painter)
 {
     const qreal w = width();
     const qreal h = height();
-    if (w <= 0 || h <= 0 || !isVisible())
+    if (w <= 0 || h <= 0 || !isRunning())
         return;
 
     const qreal sz = qMin(w, h);
     const qreal dx = (w - sz) / 2;
     const qreal dy = (h - sz) / 2;
-    const int hpw = qRound(qMax(1.0, sz / 14)) & -1;
+    const int hpw = qRound(qMax(qreal(1), sz / 14)) & -1;
     const int pw = 2 * hpw;
     const QRectF bounds(dx + hpw, dy + hpw, sz - pw - 1, sz - pw - 1);
 
@@ -85,6 +98,14 @@ void QQuickFusionBusyIndicator::paint(QPainter *painter)
     painter->drawArc(bounds, 0, 360 * 16);
     painter->setPen(QPen(m_color, pw, Qt::SolidLine, Qt::RoundCap));
     painter->drawArc(bounds, 0, 20 * 16);
+}
+
+void QQuickFusionBusyIndicator::itemChange(ItemChange change, const ItemChangeData &data)
+{
+    QQuickPaintedItem::itemChange(change, data);
+
+    if (change == ItemOpacityHasChanged && qFuzzyIsNull(data.realValue))
+        setVisible(false);
 }
 
 QT_END_NAMESPACE

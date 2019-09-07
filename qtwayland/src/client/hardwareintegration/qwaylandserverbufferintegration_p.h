@@ -85,11 +85,11 @@ public:
     void *userData() const;
 
 protected:
-    Format m_format;
+    Format m_format = RGBA32;
     QSize m_size;
 
 private:
-    void *m_user_data;
+    void *m_user_data = nullptr;
 };
 
 class Q_WAYLAND_CLIENT_EXPORT QWaylandServerBufferIntegration

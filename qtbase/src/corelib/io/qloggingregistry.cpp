@@ -44,6 +44,12 @@
 #include <QtCore/qstandardpaths.h>
 #include <QtCore/qtextstream.h>
 #include <QtCore/qdir.h>
+#include <QtCore/qcoreapplication.h>
+
+#if QT_CONFIG(settings)
+#include <QtCore/qsettings.h>
+#include <QtCore/private/qsettings_p.h>
+#endif
 
 // We can't use the default macros because this would lead to recursion.
 // Instead let's define our own one that unconditionally logs...
@@ -229,7 +235,14 @@ void QLoggingSettingsParser::parseNextLine(QStringRef line)
         int equalPos = line.indexOf(QLatin1Char('='));
         if (equalPos != -1) {
             if (line.lastIndexOf(QLatin1Char('=')) == equalPos) {
-                const auto pattern = line.left(equalPos).trimmed();
+                const auto key = line.left(equalPos).trimmed();
+#if QT_CONFIG(settings)
+                QString tmp;
+                QSettingsPrivate::iniUnescapedKey(key.toUtf8(), 0, key.length(), tmp);
+                QStringRef pattern = QStringRef(&tmp, 0, tmp.length());
+#else
+                QStringRef pattern = key;
+#endif
                 const auto valueStr = line.mid(equalPos + 1).trimmed();
                 int value = -1;
                 if (valueStr == QLatin1String("true"))
@@ -255,6 +268,16 @@ void QLoggingSettingsParser::parseNextLine(QStringRef line)
 QLoggingRegistry::QLoggingRegistry()
     : categoryFilter(defaultCategoryFilter)
 {
+#if defined(Q_OS_ANDROID)
+    // Unless QCoreApplication has been constructed we can't be sure that
+    // we are on Qt's main thread. If we did allow logging here, we would
+    // potentially set Qt's main thread to Android's thread 0, which would
+    // confuse Qt later when running main().
+    if (!qApp)
+        return;
+#endif
+
+    initializeRules(); // Init on first use
 }
 
 static bool qtLoggingDebug()
@@ -283,7 +306,7 @@ static QVector<QLoggingRule> loadRulesFromFile(const QString &filePath)
     Initializes the rules database by loading
     $QT_LOGGING_CONF, $QT_LOGGING_RULES, and .config/QtProject/qtlogging.ini.
  */
-void QLoggingRegistry::init()
+void QLoggingRegistry::initializeRules()
 {
     QVector<QLoggingRule> er, qr, cr;
     // get rules from environment

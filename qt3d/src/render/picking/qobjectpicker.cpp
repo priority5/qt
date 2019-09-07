@@ -72,6 +72,8 @@ namespace Qt3DRender {
     If drag is enabled, queries also happen on each mouse move while any button is pressed.
     If hover is enabled, queries happen on every mouse move even if no button is pressed.
 
+    For generalised ray casting queries, see Qt3DRender::QRayCaster and Qt3DRender::QScreenRayCaster.
+
     \sa Qt3DRender::QPickingSettings, Qt3DRender::QGeometry, Qt3DRender::QAttribute,
         Qt3DRender::QPickEvent, Qt3DRender::QPickTriangleEvent
 
@@ -167,7 +169,7 @@ namespace Qt3DRender {
 */
 
 /*!
-    \fn QObjectPicker::clicked(Qt3DRender::QPickEvent *pick)
+    \fn Qt3DRender::QObjectPicker::clicked(Qt3DRender::QPickEvent *pick)
 
     This signal is emitted when the bounding volume defined by the pickAttribute
     property intersects with a ray on a mouse click the QPickEvent \a pick contains
@@ -175,21 +177,21 @@ namespace Qt3DRender {
 */
 
 /*!
-    \fn QObjectPicker::entered()
+    \fn Qt3DRender::QObjectPicker::entered()
 
     This signal is emitted when the bounding volume defined by the pickAttribute
     property intersects with a ray on the mouse entering the volume.
 */
 
 /*!
-    \fn QObjectPicker::exited()
+    \fn Qt3DRender::QObjectPicker::exited()
 
     This signal is emitted when the bounding volume defined by the pickAttribute
     property intersects with a ray on the ray exiting the volume.
 */
 
 /*!
-    \fn QObjectPicker::moved(Qt3DRender::QPickEvent *pick)
+    \fn Qt3DRender::QObjectPicker::moved(Qt3DRender::QPickEvent *pick)
 
     This signal is emitted when the bounding volume defined by the
     pickAttribute property intersects with a ray on a mouse move with a button
@@ -197,7 +199,7 @@ namespace Qt3DRender {
 */
 
 /*!
-    \fn QObjectPicker::pressed(Qt3DRender::QPickEvent *pick)
+    \fn Qt3DRender::QObjectPicker::pressed(Qt3DRender::QPickEvent *pick)
 
     This signal is emitted when the bounding volume defined by the
     pickAttribute property intersects with a ray on a mouse press the
@@ -205,7 +207,7 @@ namespace Qt3DRender {
 */
 
 /*!
-    \fn QObjectPicker::released(Qt3DRender::QPickEvent *pick)
+    \fn Qt3DRender::QObjectPicker::released(Qt3DRender::QPickEvent *pick)
 
     This signal is emitted when the bounding volume defined by the
     pickAttribute property intersects with a ray on a mouse release the
@@ -264,6 +266,23 @@ void QObjectPicker::setDragEnabled(bool dragEnabled)
 }
 
 /*!
+ * Sets the picker's priority to \a priority. This is used when the pick result
+ * mode on QPickingSettings is set to QPickingSettings::NearestPriorityPick.
+ * Picking results are sorted by highest priority and shortest picking
+ * distance.
+ *
+ * \since 5.13
+ */
+void QObjectPicker::setPriority(int priority)
+{
+    Q_D(QObjectPicker);
+    if (priority != d->m_priority) {
+        d->m_priority = priority;
+        emit priorityChanged(priority);
+    }
+}
+
+/*!
     \qmlproperty bool Qt3D.Render::ObjectPicker::dragEnabled
 */
 /*!
@@ -308,6 +327,25 @@ bool QObjectPicker::isPressed() const
 {
     Q_D(const QObjectPicker);
     return d->m_pressed;
+}
+
+/*!
+    \qmlproperty int Qt3D.Render::ObjectPicker::priority
+
+    The priority to be used when filtering pick results by priority when
+    PickingSettings.pickResultMode is set to PickingSettings.PriorityPick.
+*/
+/*!
+  \property Qt3DRender::QObjectPicker::priority
+
+    The priority to be used when filtering pick results by priority when
+    QPickingSettings::pickResultMode is set to
+    QPickingSettings::NearestPriorityPick.
+*/
+int QObjectPicker::priority() const
+{
+    Q_D(const QObjectPicker);
+    return d->m_priority;
 }
 
 /*! \internal */
@@ -463,6 +501,7 @@ Qt3DCore::QNodeCreatedChangeBasePtr QObjectPicker::createNodeCreationChange() co
     Q_D(const QObjectPicker);
     data.hoverEnabled = d->m_hoverEnabled;
     data.dragEnabled = d->m_dragEnabled;
+    data.priority = d->m_priority;
     return creationChange;
 }
 

@@ -37,15 +37,17 @@
 #include "qquickpopupitem_p_p.h"
 #include "qquickapplicationwindow_p.h"
 #include "qquickshortcutcontext_p_p.h"
-#include "qquickcontrol_p_p.h"
+#include "qquickpage_p_p.h"
+#include "qquickcontentitem_p.h"
 #include "qquickpopup_p_p.h"
+#include "qquickdeferredexecute_p_p.h"
 
 #include <QtGui/private/qshortcutmap_p.h>
 #include <QtGui/private/qguiapplication_p.h>
 
 QT_BEGIN_NAMESPACE
 
-class QQuickPopupItemPrivate : public QQuickControlPrivate
+class QQuickPopupItemPrivate : public QQuickPagePrivate
 {
     Q_DECLARE_PUBLIC(QQuickPopupItem)
 
@@ -60,28 +62,32 @@ public:
 
     QQuickItem *getContentItem() override;
 
-    int backId;
-    int escapeId;
-    QQuickPopup *popup;
+    void cancelContentItem() override;
+    void executeContentItem(bool complete = false) override;
+
+    void cancelBackground() override;
+    void executeBackground(bool complete = false) override;
+
+    int backId = 0;
+    int escapeId = 0;
+    QQuickPopup *popup = nullptr;
 };
 
 QQuickPopupItemPrivate::QQuickPopupItemPrivate(QQuickPopup *popup)
-    : backId(0),
-      escapeId(0),
-      popup(popup)
+    : popup(popup)
 {
     isTabFence = true;
 }
 
 void QQuickPopupItemPrivate::implicitWidthChanged()
 {
-    QQuickControlPrivate::implicitWidthChanged();
+    QQuickPagePrivate::implicitWidthChanged();
     emit popup->implicitWidthChanged();
 }
 
 void QQuickPopupItemPrivate::implicitHeightChanged()
 {
-    QQuickControlPrivate::implicitHeightChanged();
+    QQuickPagePrivate::implicitHeightChanged();
     emit popup->implicitHeightChanged();
 }
 
@@ -90,7 +96,7 @@ void QQuickPopupItemPrivate::resolveFont()
     if (QQuickApplicationWindow *window = qobject_cast<QQuickApplicationWindow *>(popup->window()))
         inheritFont(window->font());
     else
-        inheritFont(themeFont(QPlatformTheme::SystemFont));
+        inheritFont(QQuickTheme::font(QQuickTheme::System));
 }
 
 void QQuickPopupItemPrivate::resolvePalette()
@@ -98,19 +104,56 @@ void QQuickPopupItemPrivate::resolvePalette()
     if (QQuickApplicationWindow *window = qobject_cast<QQuickApplicationWindow *>(popup->window()))
         inheritPalette(window->palette());
     else
-        inheritPalette(themePalette(QPlatformTheme::SystemPalette));
+        inheritPalette(QQuickTheme::palette(QQuickTheme::System));
 }
 
 QQuickItem *QQuickPopupItemPrivate::getContentItem()
 {
     Q_Q(QQuickPopupItem);
-    if (!contentItem)
-        return new QQuickItem(q);
-    return contentItem;
+    if (QQuickItem *item = QQuickPagePrivate::getContentItem())
+        return item;
+
+    return new QQuickContentItem(popup, q);
+}
+
+static inline QString contentItemName() { return QStringLiteral("contentItem"); }
+
+void QQuickPopupItemPrivate::cancelContentItem()
+{
+    quickCancelDeferred(popup, contentItemName());
+}
+
+void QQuickPopupItemPrivate::executeContentItem(bool complete)
+{
+    if (contentItem.wasExecuted())
+        return;
+
+    if (!contentItem || complete)
+        quickBeginDeferred(popup, contentItemName(), contentItem);
+    if (complete)
+        quickCompleteDeferred(popup, contentItemName(), contentItem);
+}
+
+static inline QString backgroundName() { return QStringLiteral("background"); }
+
+void QQuickPopupItemPrivate::cancelBackground()
+{
+    quickCancelDeferred(popup, backgroundName());
+}
+
+void QQuickPopupItemPrivate::executeBackground(bool complete)
+{
+    if (background.wasExecuted())
+        return;
+
+    if (!background || complete)
+        quickBeginDeferred(popup, backgroundName(), background);
+    if (complete)
+        quickCompleteDeferred(popup, backgroundName(), background);
 }
 
 QQuickPopupItem::QQuickPopupItem(QQuickPopup *popup)
-    : QQuickControl(*(new QQuickPopupItemPrivate(popup)), nullptr)
+    : QQuickPage(*(new QQuickPopupItemPrivate(popup)), nullptr)
 {
     setParent(popup);
     setFlag(ItemIsFocusScope);
@@ -264,28 +307,35 @@ void QQuickPopupItem::wheelEvent(QWheelEvent *event)
 void QQuickPopupItem::contentItemChange(QQuickItem *newItem, QQuickItem *oldItem)
 {
     Q_D(QQuickPopupItem);
-    QQuickControl::contentItemChange(newItem, oldItem);
+    QQuickPage::contentItemChange(newItem, oldItem);
     d->popup->contentItemChange(newItem, oldItem);
+}
+
+void QQuickPopupItem::contentSizeChange(const QSizeF &newSize, const QSizeF &oldSize)
+{
+    Q_D(QQuickPopupItem);
+    QQuickPage::contentSizeChange(newSize, oldSize);
+    d->popup->contentSizeChange(newSize, oldSize);
 }
 
 void QQuickPopupItem::fontChange(const QFont &newFont, const QFont &oldFont)
 {
     Q_D(QQuickPopupItem);
-    QQuickControl::fontChange(newFont, oldFont);
+    QQuickPage::fontChange(newFont, oldFont);
     d->popup->fontChange(newFont, oldFont);
 }
 
 void QQuickPopupItem::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     Q_D(QQuickPopupItem);
-    QQuickControl::geometryChanged(newGeometry, oldGeometry);
+    QQuickPage::geometryChanged(newGeometry, oldGeometry);
     d->popup->geometryChanged(newGeometry, oldGeometry);
 }
 
 void QQuickPopupItem::localeChange(const QLocale &newLocale, const QLocale &oldLocale)
 {
     Q_D(QQuickPopupItem);
-    QQuickControl::localeChange(newLocale, oldLocale);
+    QQuickPage::localeChange(newLocale, oldLocale);
     d->popup->localeChange(newLocale, oldLocale);
 }
 
@@ -298,22 +348,35 @@ void QQuickPopupItem::mirrorChange()
 void QQuickPopupItem::itemChange(ItemChange change, const ItemChangeData &data)
 {
     Q_D(QQuickPopupItem);
-    QQuickControl::itemChange(change, data);
+    QQuickPage::itemChange(change, data);
     d->popup->itemChange(change, data);
 }
 
 void QQuickPopupItem::paddingChange(const QMarginsF &newPadding, const QMarginsF &oldPadding)
 {
     Q_D(QQuickPopupItem);
-    QQuickControl::paddingChange(newPadding, oldPadding);
+    QQuickPage::paddingChange(newPadding, oldPadding);
     d->popup->paddingChange(newPadding, oldPadding);
 }
 
 void QQuickPopupItem::paletteChange(const QPalette &newPalette, const QPalette &oldPalette)
 {
     Q_D(QQuickPopupItem);
-    QQuickControl::paletteChange(newPalette, oldPalette);
+    QQuickPage::paletteChange(newPalette, oldPalette);
     d->popup->paletteChange(newPalette, oldPalette);
+}
+
+void QQuickPopupItem::enabledChange()
+{
+    Q_D(QQuickPopupItem);
+    // Just having QQuickPopup connect our QQuickItem::enabledChanged() signal
+    // to its enabledChanged() signal is enough for the enabled property to work,
+    // but we must also ensure that its paletteChanged() signal is emitted
+    // so that bindings to palette are re-evaluated, because QQuickControl::palette()
+    // returns a different palette depending on whether or not the control is enabled.
+    // To save a connection, we also emit enabledChanged here.
+    emit d->popup->enabledChanged();
+    emit d->popup->paletteChanged();
 }
 
 QFont QQuickPopupItem::defaultFont() const
@@ -338,7 +401,7 @@ QAccessible::Role QQuickPopupItem::accessibleRole() const
 void QQuickPopupItem::accessibilityActiveChanged(bool active)
 {
     Q_D(const QQuickPopupItem);
-    QQuickControl::accessibilityActiveChanged(active);
+    QQuickPage::accessibilityActiveChanged(active);
     d->popup->accessibilityActiveChanged(active);
 }
 #endif

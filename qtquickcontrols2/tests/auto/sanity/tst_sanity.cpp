@@ -42,6 +42,10 @@
 #include <QtQml/private/qqmljsparser_p.h>
 #include <QtQml/private/qqmljsast_p.h>
 #include <QtQml/private/qqmljsastvisitor_p.h>
+#include <QtQml/private/qqmlmetatype_p.h>
+#include "../../auto/shared/visualtestutil.h"
+
+using namespace QQuickVisualTestUtil;
 
 Q_GLOBAL_STATIC(QObjectList, qt_qobjects)
 
@@ -73,6 +77,8 @@ private slots:
     void anchors_data();
     void attachedObjects();
     void attachedObjects_data();
+    void ids();
+    void ids_data();
 
 private:
     QQmlEngine engine;
@@ -131,6 +137,12 @@ protected:
         m_errors += QString("%1:%2 : %3").arg(m_fileName).arg(node->firstSourceLocation().startLine).arg(error);
     }
 
+    void throwRecursionDepthError() final
+    {
+        m_errors += QString::fromLatin1("%1: Maximum statement or expression depth exceeded")
+                            .arg(m_fileName);
+    }
+
 private:
     QString m_fileName;
     QStringList m_errors;
@@ -138,12 +150,17 @@ private:
 
 void tst_Sanity::initTestCase()
 {
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(QString("import QtQuick.Templates 2.%1; Control { }").arg(QT_VERSION_MINOR - 7).toUtf8(), QUrl());
+
+    const QStringList qmlTypeNames = QQmlMetaType::qmlTypeNames();
+
     QDirIterator it(QQC2_IMPORT_PATH, QStringList() << "*.qml" << "*.js", QDir::Files, QDirIterator::Subdirectories);
-    const QStringList excludeDirs = QStringList() << QStringLiteral("snippets") << QStringLiteral("designer") << QStringLiteral("Sketch");
     while (it.hasNext()) {
         it.next();
         QFileInfo info = it.fileInfo();
-        if (!excludeDirs.contains(info.dir().dirName()))
+        if (qmlTypeNames.contains(QStringLiteral("QtQuick.Templates/") + info.baseName()))
             files.insert(info.dir().dirName() + "/" + info.fileName(), info.filePath());
     }
 }
@@ -256,40 +273,69 @@ void tst_Sanity::anchors_data()
         QTest::newRow(qPrintable(it.key())) << it.key() << it.value();
 }
 
-static void addTestRows(QQmlEngine *engine, const QString &sourcePath, const QString &targetPath, const QStringList &skiplist = QStringList())
+class IdValidator : public BaseValidator
 {
-    // We cannot use QQmlComponent to load QML files directly from the source tree.
-    // For styles that use internal QML types (eg. material/Ripple.qml), the source
-    // dir would be added as an "implicit" import path overriding the actual import
-    // path (qtbase/qml/QtQuick/Controls.2/Material). => The QML engine fails to load
-    // the style C++ plugin from the implicit import path (the source dir).
-    //
-    // Therefore we only use the source tree for finding out the set of QML files that
-    // a particular style implements, and then we locate the respective QML files in
-    // the engine's import path. This way we can use QQmlComponent to load each QML file
-    // for benchmarking.
+public:
+    IdValidator() : m_depth(0) { }
 
-    const QFileInfoList entries = QDir(QQC2_IMPORT_PATH "/" + sourcePath).entryInfoList(QStringList("*.qml"), QDir::Files);
-    for (const QFileInfo &entry : entries) {
-        QString name = entry.baseName();
-        if (!skiplist.contains(name)) {
-            const auto importPathList = engine->importPathList();
-            for (const QString &importPath : importPathList) {
-                QString name = entry.dir().dirName() + "/" + entry.fileName();
-                QString filePath = importPath + "/" + targetPath + "/" + entry.fileName();
-                if (QFile::exists(filePath)) {
-                    QTest::newRow(qPrintable(name)) << QUrl::fromLocalFile(filePath);
-                    break;
-                } else {
-                    filePath = QQmlFile::urlToLocalFileOrQrc(filePath);
-                    if (!filePath.isEmpty() && QFile::exists(filePath)) {
-                        QTest::newRow(qPrintable(name)) << QUrl(filePath);
-                        break;
-                    }
-                }
-            }
-        }
+protected:
+    bool visit(QQmlJS::AST::UiObjectBinding *) override
+    {
+        ++m_depth;
+        return true;
     }
+
+    void endVisit(QQmlJS::AST::UiObjectBinding *) override
+    {
+        --m_depth;
+    }
+
+    bool visit(QQmlJS::AST::UiScriptBinding *node) override
+    {
+        if (m_depth == 0)
+            return true;
+
+        QQmlJS::AST::UiQualifiedId *id = node->qualifiedId;
+        if (id && id->name ==  QStringLiteral("id"))
+            addError(QString("Internal IDs are not allowed (%1)").arg(extractName(node->statement)), node);
+        return true;
+    }
+
+private:
+    QString extractName(QQmlJS::AST::Statement *statement)
+    {
+        QQmlJS::AST::ExpressionStatement *expressionStatement = static_cast<QQmlJS::AST::ExpressionStatement *>(statement);
+        if (!expressionStatement)
+            return QString();
+
+        QQmlJS::AST::IdentifierExpression *expression = static_cast<QQmlJS::AST::IdentifierExpression *>(expressionStatement->expression);
+        if (!expression)
+            return QString();
+
+        return expression->name.toString();
+    }
+
+    int m_depth;
+};
+
+void tst_Sanity::ids()
+{
+    QFETCH(QString, control);
+    QFETCH(QString, filePath);
+
+    IdValidator validator;
+    if (!validator.validate(filePath))
+        QFAIL(qPrintable(validator.errors()));
+}
+
+void tst_Sanity::ids_data()
+{
+    QTest::addColumn<QString>("control");
+    QTest::addColumn<QString>("filePath");
+
+    QMap<QString, QString>::const_iterator it;
+    for (it = files.constBegin(); it != files.constEnd(); ++it)
+        QTest::newRow(qPrintable(it.key())) << it.key() << it.value();
 }
 
 void tst_Sanity::attachedObjects()
@@ -315,11 +361,11 @@ void tst_Sanity::attachedObjects()
 void tst_Sanity::attachedObjects_data()
 {
     QTest::addColumn<QUrl>("url");
-    addTestRows(&engine, "calendar", "Qt/labs/calendar");
-    addTestRows(&engine, "controls", "QtQuick/Controls.2");
-    addTestRows(&engine, "controls/fusion", "QtQuick/Controls.2", QStringList() << "CheckIndicator" << "RadioIndicator" << "SliderGroove" << "SliderHandle" << "SwitchIndicator");
-    addTestRows(&engine, "controls/material", "QtQuick/Controls.2/Material", QStringList() << "Ripple" << "SliderHandle" << "CheckIndicator" << "RadioIndicator" << "SwitchIndicator" << "BoxShadow" << "ElevationEffect" << "CursorDelegate");
-    addTestRows(&engine, "controls/universal", "QtQuick/Controls.2/Universal", QStringList() << "CheckIndicator" << "RadioIndicator" << "SwitchIndicator");
+    addTestRowForEachControl(&engine, "calendar", "Qt/labs/calendar");
+    addTestRowForEachControl(&engine, "controls", "QtQuick/Controls.2");
+    addTestRowForEachControl(&engine, "controls/fusion", "QtQuick/Controls.2", QStringList() << "CheckIndicator" << "RadioIndicator" << "SliderGroove" << "SliderHandle" << "SwitchIndicator");
+    addTestRowForEachControl(&engine, "controls/material", "QtQuick/Controls.2/Material", QStringList() << "Ripple" << "SliderHandle" << "CheckIndicator" << "RadioIndicator" << "SwitchIndicator" << "BoxShadow" << "ElevationEffect" << "CursorDelegate");
+    addTestRowForEachControl(&engine, "controls/universal", "QtQuick/Controls.2/Universal", QStringList() << "CheckIndicator" << "RadioIndicator" << "SwitchIndicator");
 }
 
 QTEST_MAIN(tst_Sanity)

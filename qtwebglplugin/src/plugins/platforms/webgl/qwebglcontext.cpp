@@ -41,6 +41,7 @@
 #include <QtCore/qrect.h>
 #include <QtCore/qset.h>
 #include <QtGui/private/qguiapplication_p.h>
+#include <QtGui/private/qopenglcontext_p.h>
 #include <QtGui/qguiapplication.h>
 #include <QtGui/qimage.h>
 #include <QtGui/qopenglcontext.h>
@@ -48,6 +49,7 @@
 #include <QtWebSockets/qwebsocket.h>
 
 #include <cstring>
+#include <limits>
 
 QT_BEGIN_NAMESPACE
 
@@ -56,9 +58,9 @@ static Q_LOGGING_CATEGORY(lc, "qt.qpa.webgl.context")
 class QWebGLContextPrivate
 {
 public:
-    int id = -1;
     static QAtomicInt nextId;
     static QSet<int> waitingIds;
+    union { int id = -1; qintptr padded; };
     QPlatformSurface *currentSurface = nullptr;
     QSurfaceFormat surfaceFormat;
 };
@@ -82,9 +84,9 @@ struct ContextData {
 //    GLuint boundReadFramebuffer = 0;
     GLuint unpackAlignment = 4;
     struct VertexAttrib {
-        VertexAttrib() : arrayBufferBinding(0), pointer(0), enabled(false) { }
+        VertexAttrib() : arrayBufferBinding(0), pointer(nullptr), enabled(false) { }
         GLuint arrayBufferBinding;
-        void *pointer;
+        const void *pointer;
         bool enabled;
         GLint size;
         GLenum type;
@@ -171,8 +173,6 @@ inline int imageSize(GLsizei width, GLsizei height, GLenum format, GLenum type,
     return rowSize * height;
 }
 
-QByteArrayList strings;
-
 static void lockMutex()
 {
     QWebGLIntegrationPrivate::instance()->webSocketServer->mutex()->lock();
@@ -234,43 +234,49 @@ static void setVertexAttribs(QWebGLFunctionCall *event, GLsizei count)
         const ContextData::VertexAttrib &va(it.value());
         if (va.arrayBufferBinding == 0 && va.enabled) {
             int len = bufferSize(count, va.size, va.type, va.stride);
-            event->addUInt(it.key());
-            event->addInt(va.size);
-            event->addInt(va.type);
-            event->addInt(va.normalized);
-            event->addInt(va.stride);
+            event->addParameters(it.key(), va.size, int(va.type), va.normalized, va.stride);
             // found an enabled vertex attribute that was specified with a client-side pointer
-            event->addData(QByteArray((const char *)va.pointer, len));
+            event->addData(QByteArray(reinterpret_cast<const char *>(va.pointer), len));
         }
     }
 }
 
-template<class POINTER, class SIZE>
-inline QWebGLFunctionCall *addHelper(QWebGLFunctionCall *e, const QPair<POINTER*, SIZE> &elements)
+template<class POINTER, class COUNT>
+inline QWebGLFunctionCall *addHelper(QWebGLFunctionCall *event,
+                                     const QPair<POINTER, COUNT> &elements)
 {
-    if (e) {
-        for (auto i = 0; i < elements.second; ++i)
-            e->add(elements.first[i]);
-    }
-    return e;
+    QVariantList list;
+    for (auto i = 0; i < elements.second; ++i)
+        list.append(QVariant::fromValue(elements.first[i]));
+    event->addList(list);
+    return event;
+}
+
+template<class SIZE>
+inline void addHelper(QWebGLFunctionCall *event, const QPair<const float *, SIZE> &elements)
+{
+    QVariantList list;
+    for (auto i = 0; i < elements.second; ++i)
+        list.append(QVariant::fromValue<double>(elements.first[i]));
+    event->addList(list);
 }
 
 template<class T>
-inline QWebGLFunctionCall *addHelper(QWebGLFunctionCall *e, const T &value)
+inline QWebGLFunctionCall *addHelper(QWebGLFunctionCall *event, const T &value)
 {
-    if (e)
-        e->add(value);
-    return e;
+    if (event)
+        event->add(value);
+    return event;
 }
 
 template<class T, class... Ts>
-inline QWebGLFunctionCall *addHelper(QWebGLFunctionCall *e, const T &value, const Ts&... rest)
+inline QWebGLFunctionCall *addHelper(QWebGLFunctionCall *event, const T &value, const Ts&... rest)
 {
-    if (e) {
-        e->add(value);
-        addHelper(e, rest...);
+    if (event) {
+        event->add(value);
+        addHelper(event, rest...);
     }
-    return e;
+    return event;
 }
 
 template<class T>
@@ -285,9 +291,6 @@ static T queryValue(int id, const T &defaultValue = T())
     }
     return variant.value<T>();
 }
-
-struct GLFunction;
-static QHash<QString, const GLFunction *> glFunctions;
 
 template<typename T>
 struct ParameterTypeTraits {
@@ -321,6 +324,8 @@ struct GLFunction
         bool isArray;
     };
 
+    static QHash<QString, const GLFunction *> byName;
+    static QStringList remoteFunctionNames;
     using ParameterList = QVector<Parameter>;
 
     GLFunction(const QString &remoteName,
@@ -330,18 +335,25 @@ struct GLFunction
         : remoteName(remoteName), localName(localName),
           functionPointer(functionPointer), parameters(parameters)
     {
-        Q_ASSERT(!glFunctions.contains(localName));
-        glFunctions.insert(localName, this);
+        Q_ASSERT(!byName.contains(localName));
+        byName.insert(localName, this);
+        id = remoteFunctionNames.size();
+        Q_ASSERT(remoteFunctionNames.size() <= std::numeric_limits<quint8>::max());
+        remoteFunctionNames.append(remoteName);
+        Q_ASSERT(byName.size() == remoteFunctionNames.size());
     }
 
     GLFunction(const QString &name) : GLFunction(name, name, nullptr)
     {}
-
+    quint8 id;
     const QString remoteName;
     const QString localName;
     const QFunctionPointer functionPointer;
     const ParameterList parameters;
 };
+
+QHash<QString, const GLFunction *> GLFunction::byName;
+QStringList GLFunction::remoteFunctionNames;
 
 template<const GLFunction *Function>
 static QWebGLFunctionCall *createEventImpl(bool wait)
@@ -354,7 +366,7 @@ static QWebGLFunctionCall *createEventImpl(bool wait)
     if (!clientData || !clientData->socket
             || clientData->socket->state() != QAbstractSocket::ConnectedState)
         return nullptr;
-    return new QWebGLFunctionCall(Function->remoteName, handle->currentSurface(), wait);
+    return new QWebGLFunctionCall(Function->localName, handle->currentSurface(), wait);
 }
 
 static void postEventImpl(QWebGLFunctionCall *event)
@@ -365,39 +377,44 @@ static void postEventImpl(QWebGLFunctionCall *event)
 }
 
 template<const GLFunction *Function, class... Ts>
-static QWebGLFunctionCall *createEventAndPostImpl(bool wait, Ts&&... arguments)
+static int createEventAndPostImpl(bool wait, Ts&&... arguments)
 {
     auto event = createEventImpl<Function>(wait);
+    auto id = -1;
     if (event) {
+        id = event->id();
         addHelper(event, arguments...);
         postEventImpl(event);
     }
-    return event;
+    return id;
 }
 
 template<const GLFunction *Function>
-static QWebGLFunctionCall *createEventAndPostImpl(bool wait)
+static int createEventAndPostImpl(bool wait)
 {
     auto event = createEventImpl<Function>(wait);
-    if (event)
+    auto id = -1;
+    if (event) {
+        id = event->id();
         postEventImpl(event);
-    return event;
+    }
+    return id;
 }
 
 template<const GLFunction *Function, class... Ts>
-inline QWebGLFunctionCall *postEventImpl(bool wait, Ts&&... arguments)
+inline int postEventImpl(bool wait, Ts&&... arguments)
 {
     return createEventAndPostImpl<Function>(wait, arguments...);
 }
 
 template<const GLFunction *Function>
-inline QWebGLFunctionCall *postEvent(bool wait)
+inline int postEvent(bool wait)
 {
     return createEventAndPostImpl<Function>(wait);
 }
 
 template<const GLFunction *Function, class...Ts>
-inline QWebGLFunctionCall *postEvent(Ts&&... arguments)
+inline int postEvent(Ts&&... arguments)
 {
     return postEventImpl<Function>(false, arguments...);
 }
@@ -406,8 +423,8 @@ template<const GLFunction *Function, class ReturnType, class...Ts>
 static ReturnType postEventAndQuery(ReturnType defaultValue,
                                     Ts&&... arguments)
 {
-    const auto event = postEventImpl<Function>(true, arguments...);
-    return event ? queryValue(event->id(), defaultValue) : defaultValue;
+    auto id = postEventImpl<Function>(true, arguments...);
+    return id != -1 ? queryValue(id, defaultValue) : defaultValue;
 }
 
 namespace QWebGL {
@@ -455,24 +472,30 @@ namespace QWebGL {
         ParameterTypeTraits<TYPEOF(ITEM)>::isArray() \
     }
 
+#if defined(Q_CC_MSVC) && defined(Q_OS_WIN32) && !defined(Q_OS_WIN64)
+#   define WEBGL_APIENTRY __stdcall
+#else
+#   define WEBGL_APIENTRY
+#endif
+
 #define QWEBGL_FUNCTION(REMOTE_NAME, RET_TYPE, LOCAL_NAME, ...) \
-    RET_TYPE LOCAL_NAME(FOR_EACH(TYPEOF, __VA_ARGS__));\
+    RET_TYPE WEBGL_APIENTRY LOCAL_NAME(FOR_EACH(TYPEOF, __VA_ARGS__));\
     extern const GLFunction REMOTE_NAME { \
         #REMOTE_NAME, \
         #LOCAL_NAME, \
-        (QFunctionPointer) LOCAL_NAME, \
+        reinterpret_cast<QFunctionPointer>(LOCAL_NAME), \
         GLFunction::ParameterList({FOR_EACH(QWEBGL_FUNCTION_PARAMETER, __VA_ARGS__)}) \
     }; \
-    RET_TYPE LOCAL_NAME(FOR_EACH(PAIR, __VA_ARGS__))
+    RET_TYPE WEBGL_APIENTRY LOCAL_NAME(FOR_EACH(PAIR, __VA_ARGS__))
 
 #define QWEBGL_FUNCTION_NO_PARAMS(REMOTE_NAME, RET_TYPE, LOCAL_NAME) \
-    RET_TYPE LOCAL_NAME();\
+    RET_TYPE WEBGL_APIENTRY LOCAL_NAME();\
     extern const GLFunction REMOTE_NAME { \
         #REMOTE_NAME, \
         #LOCAL_NAME, \
         (QFunctionPointer) LOCAL_NAME \
     }; \
-    RET_TYPE LOCAL_NAME()
+    RET_TYPE WEBGL_APIENTRY LOCAL_NAME()
 
 #define QWEBGL_FUNCTION_POSTEVENT(REMOTE_NAME, LOCAL_NAME, ...) \
     QWEBGL_FUNCTION(REMOTE_NAME, void, LOCAL_NAME, __VA_ARGS__) { \
@@ -576,14 +599,17 @@ QWEBGL_FUNCTION(compressedTexImage2D, void, glCompressedTexImage2D,
                 (GLsizei) width, (GLsizei) height, (GLint) border,
                 (GLsizei) imageSize, (const void *) data) {
     postEvent<&compressedTexImage2D>(target, level, internalformat, width, height, border,
-                                     imageSize, QByteArray((const char *) data, imageSize));
+                                     imageSize, QByteArray(reinterpret_cast<const char *>(data),
+                                                           imageSize));
 }
 
 QWEBGL_FUNCTION(compressedTexSubImage2D, void, glCompressedTexSubImage2D,
                 (GLenum) target, (GLint) level, (GLint) xoffset, (GLint) yoffset,
                 (GLsizei) width, (GLsizei) height, (GLenum) format,
                 (GLsizei) imageSize, (const void *) data) {
-    postEvent<&compressedTexSubImage2D>(target, level, xoffset, yoffset, width, height, format, imageSize, QByteArray((const char *)data, imageSize));
+    postEvent<&compressedTexSubImage2D>(target, level, xoffset, yoffset, width, height, format,
+                                        imageSize, QByteArray(reinterpret_cast<const char *>(data),
+                                                              imageSize));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(copyTexImage2D, glCopyTexImage2D,
@@ -623,7 +649,7 @@ QWEBGL_FUNCTION(deleteBuffers, void, glDeleteBuffers,
 QWEBGL_FUNCTION(deleteFramebuffers, void, glDeleteFramebuffers,
                 (GLsizei) n, (const GLuint *) framebuffers)
 {
-    postEvent<&deleteFramebuffers>(n, qMakePair(framebuffers, n));
+    postEvent<&deleteFramebuffers>(qMakePair(framebuffers, n));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(deleteProgram, glDeleteProgram,
@@ -632,7 +658,7 @@ QWEBGL_FUNCTION_POSTEVENT(deleteProgram, glDeleteProgram,
 QWEBGL_FUNCTION(deleteRenderbuffers, void, glDeleteRenderbuffers,
                 (GLsizei) n, (const GLuint *) renderbuffers)
 {
-    postEvent<&deleteRenderbuffers>(n, qMakePair(renderbuffers, n));
+    postEvent<&deleteRenderbuffers>(qMakePair(renderbuffers, n));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(deleteShader, glDeleteShader,
@@ -641,7 +667,7 @@ QWEBGL_FUNCTION_POSTEVENT(deleteShader, glDeleteShader,
 QWEBGL_FUNCTION(deleteTextures, void, glDeleteTextures,
                 (GLsizei) n, (const GLuint *) textures)
 {
-    postEvent<&deleteTextures>(n, qMakePair(textures, n));
+    postEvent<&deleteTextures>(qMakePair(textures, n));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(depthFunc, glDepthFunc,
@@ -666,7 +692,7 @@ QWEBGL_FUNCTION(disableVertexAttribArray, void, glDisableVertexAttribArray,
 QWEBGL_FUNCTION(drawArrays, void, glDrawArrays,
                 (GLenum) mode, (GLint) first, (GLsizei) count)
 {
-    auto event = currentContext()->createEvent(QStringLiteral("drawArrays"));
+    auto event = currentContext()->createEvent(QStringLiteral("glDrawArrays"));
     if (!event)
         return;
     event->addParameters(mode, first, count);
@@ -680,16 +706,18 @@ QWEBGL_FUNCTION(drawArrays, void, glDrawArrays,
 QWEBGL_FUNCTION(drawElements, void, glDrawElements,
                 (GLenum) mode, (GLsizei) count, (GLenum) type, (const void *) indices)
 {
-    auto event = currentContext()->createEvent(QStringLiteral("drawElements"));
+    auto event = currentContext()->createEvent(QStringLiteral("glDrawElements"));
     if (!event)
         return;
     event->addParameters(mode, count, type);
     setVertexAttribs(event, count);
     ContextData *d = currentContextData();
-    if (d->boundElementArrayBuffer == 0)
-        event->addParameters(0, QByteArray((const char *) indices, count * elementSize(type)));
-    else
+    if (d->boundElementArrayBuffer == 0) {
+        event->addParameters(0, QByteArray(reinterpret_cast<const char *>(indices),
+                                           count * elementSize(type)));
+    } else {
         event->addParameters(1, uint(quintptr(indices)));
+    }
     QCoreApplication::postEvent(QWebGLIntegrationPrivate::instance()->webSocketServer, event);
 }
 
@@ -828,6 +856,7 @@ QWEBGL_FUNCTION(getAttribLocation, GLint, glGetAttribLocation,
 QWEBGL_FUNCTION(getString, const GLubyte *, glGetString,
                 (GLenum) name)
 {
+    static QByteArrayList strings;
     const auto it = currentContextData()->cachedParameters.find(name);
     if (it != currentContextData()->cachedParameters.end()) {
         auto &stringCache = currentContextData()->stringCache;
@@ -837,20 +866,24 @@ QWEBGL_FUNCTION(getString, const GLubyte *, glGetString,
             auto it = stringCache.find(string), end = stringCache.end();
             if (it == end)
                 it = stringCache.insert(string);
-            return (const GLubyte *)(it->constData());
+            return reinterpret_cast<const GLubyte *>(it->constData());
         }
     }
     const auto value = postEventAndQuery<&getString>(QByteArray(), name);
     strings.append(value);
-    return (const GLubyte *)strings.last().constData();
+    return reinterpret_cast<const GLubyte *>(strings.last().constData());
 }
 
 QWEBGL_FUNCTION(getIntegerv, void, glGetIntegerv,
                 (GLenum) pname, (GLint *) data)
 {
     if (pname == GL_MAX_TEXTURE_SIZE) {
-        *data = 512;
-        return;
+        static bool ok;
+        static auto value = qgetenv("QT_WEBGL_MAX_TEXTURE_SIZE").toUInt(&ok);
+        if (ok) {
+            *data = value;
+            return;
+        }
     }
     const auto it = currentContextData()->cachedParameters.find(pname);
     if (it != currentContextData()->cachedParameters.end()) {
@@ -860,7 +893,7 @@ QWEBGL_FUNCTION(getIntegerv, void, glGetIntegerv,
         case QVariant::List: values = it->toList(); break;
         default: values = QVariantList{ *it };
         }
-        for (const auto integer : qAsConst(values)) {
+        for (const auto &integer : qAsConst(values)) {
             bool ok;
             *data = integer.toInt(&ok);
             if (!ok)
@@ -955,7 +988,7 @@ QWEBGL_FUNCTION(getFramebufferAttachmentParameteriv, void, glGetFramebufferAttac
 QWEBGL_FUNCTION(getProgramInfoLog, void, glGetProgramInfoLog,
                 (GLuint) program, (GLsizei) bufSize, (GLsizei *) length, (GLchar *) infoLog)
 {
-    auto value = postEventAndQuery<&getProgramInfoLog>(QString(), program, bufSize);
+    auto value = postEventAndQuery<&getProgramInfoLog>(QString(), program);
     *length = value.length();
     if (bufSize >= value.length())
         std::memcpy(infoLog, value.constData(), value.length());
@@ -976,7 +1009,7 @@ QWEBGL_FUNCTION(getRenderbufferParameteriv, void, glGetRenderbufferParameteriv,
 QWEBGL_FUNCTION(getShaderInfoLog, void, glGetShaderInfoLog,
                 (GLuint) shader, (GLsizei) bufSize, (GLsizei *) length, (GLchar *) infoLog)
 {
-    const auto value = postEventAndQuery<&getShaderInfoLog>(QString(), shader, bufSize);
+    const auto value = postEventAndQuery<&getShaderInfoLog>(QString(), shader);
     *length = value.length();
     if (bufSize >= value.length())
         std::memcpy(infoLog, value.constData(), value.length());
@@ -1002,7 +1035,7 @@ QWEBGL_FUNCTION(getShaderPrecisionFormat, void, glGetShaderPrecisionFormat,
 QWEBGL_FUNCTION(getShaderSource, void, glGetShaderSource,
                 (GLuint) shader, (GLsizei) bufSize, (GLsizei *) length, (GLchar *) source)
 {
-    const auto value = postEventAndQuery<&getShaderSource>(QString(), shader, bufSize);
+    const auto value = postEventAndQuery<&getShaderSource>(QString(), shader);
     *length = value.length();
     if (bufSize >= value.length())
         std::memcpy(source, value.constData(), value.length());
@@ -1176,17 +1209,15 @@ QWEBGL_FUNCTION(shaderSource, void, glShaderSource,
                 (GLuint) shader, (GLsizei) count,
                 (const GLchar *const *) string, (const GLint *) length)
 {
-    auto event = currentContext()->createEvent(QStringLiteral("shaderSource"));
-    if (!event)
-        return;
-    event->addParameters(shader, count);
-    for (int i = 0; i < count; ++i) {
-        if (!length)
-            event->addString(QString::fromLatin1(string[i]));
-        else
-            event->addString(QString::fromLatin1(string[i], length[i]));
-    }
-    QCoreApplication::postEvent(QWebGLIntegrationPrivate::instance()->webSocketServer, event);
+    QString fullString;
+    std::function<void(int)> concat;
+    if (length)
+        concat = [&](int i) { fullString.append(QString::fromLatin1(string[i], length[i])); };
+    else
+        concat = [&](int i) { fullString.append(QString::fromLatin1(string[i])); };
+    for (int i = 0; i < count; ++i)
+        concat(i);
+    postEvent<&shaderSource>(shader, fullString);
 }
 
 QWEBGL_FUNCTION_POSTEVENT(stencilFunc, glStencilFunc,
@@ -1212,11 +1243,22 @@ QWEBGL_FUNCTION(texImage2D, void,  glTexImage2D,
                 (GLsizei) width, (GLsizei) height, (GLint) border, (GLenum) format, (GLenum) type,
                 (const void *) pixels)
 {
+    const auto data = reinterpret_cast<const char *>(pixels);
+    const auto dataSize = imageSize(width, height, format, type,
+                                    currentContextData()->pixelStorage);
+    const bool isNull = data == nullptr || [](const char *pointer, int size) {
+        const char *const end = pointer + size;
+        const unsigned int zero = 0u;
+        const char *const late = end + 1 - sizeof(zero);
+        while (pointer < late) { // we have at least sizeof(zero) more bytes to check:
+            if (*reinterpret_cast<const unsigned int *>(pointer) != zero)
+                return false;
+            pointer += sizeof(zero);
+        }
+        return pointer >= end || std::memcmp(pointer, &zero, end - pointer) == 0;
+    }(data, dataSize);
     postEvent<&texImage2D>(target, level, internalformat, width, height, border, format, type,
-                          pixels ? QByteArray((const char*)pixels,
-                                              imageSize(width, height, format, type,
-                                                        currentContextData()->pixelStorage))
-                                 : nullptr);
+                           isNull ? nullptr : QByteArray(data, dataSize));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(texParameterf, glTexParameterf,
@@ -1243,7 +1285,7 @@ QWEBGL_FUNCTION(texSubImage2D, void, glTexSubImage2D,
                 (const void *) pixels)
 {
     postEvent<&texSubImage2D>(target, level, xoffset, yoffset, width, height, format, type,
-                             pixels ? QByteArray((const char *)pixels,
+                             pixels ? QByteArray(reinterpret_cast<const char *>(pixels),
                                                  imageSize(width, height, format, type,
                                                            currentContextData()->pixelStorage))
                                     : nullptr);
@@ -1254,7 +1296,7 @@ QWEBGL_FUNCTION_POSTEVENT(uniform1f, glUniform1f, (GLint) location, (GLfloat) v0
 QWEBGL_FUNCTION(uniform1fv, void, glUniform1fv,
                 (GLint) location, (GLsizei) count, (const GLfloat *) value)
 {
-    postEvent<&uniform1fv>(location, count, qMakePair(value, count));
+    postEvent<&uniform1fv>(location, qMakePair(value, count));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(uniform1i, glUniform1i,
@@ -1263,7 +1305,7 @@ QWEBGL_FUNCTION_POSTEVENT(uniform1i, glUniform1i,
 QWEBGL_FUNCTION(uniform1iv, void, glUniform1iv,
                 (GLint) location, (GLsizei) count, (const GLint *) value)
 {
-    postEvent<&uniform1iv>(location, count, qMakePair(value, count));
+    postEvent<&uniform1iv>(location, qMakePair(value, count));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(uniform2f, glUniform2f,
@@ -1272,7 +1314,7 @@ QWEBGL_FUNCTION_POSTEVENT(uniform2f, glUniform2f,
 QWEBGL_FUNCTION(uniform2fv, void, glUniform2fv,
                 (GLint) location, (GLsizei) count, (const GLfloat *) value)
 {
-    postEvent<&uniform2fv>(location, count, qMakePair(value, count * 2));
+    postEvent<&uniform2fv>(location, qMakePair(value, count * 2));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(uniform2i, glUniform2i,
@@ -1281,17 +1323,16 @@ QWEBGL_FUNCTION_POSTEVENT(uniform2i, glUniform2i,
 QWEBGL_FUNCTION(uniform2iv, void, glUniform2iv,
                 (GLint) location, (GLsizei) count, (const GLint *) value)
 {
-    postEvent<&uniform2iv>(location, count, qMakePair(value, count * 2));
+    postEvent<&uniform2iv>(location, qMakePair(value, count * 2));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(uniform3f, glUniform3f,
                           (GLint) location, (GLfloat) v0, (GLfloat) v1, (GLfloat) v2)
 
-
 QWEBGL_FUNCTION(uniform3fv, void, glUniform3fv,
                 (GLint) location, (GLsizei) count, (const GLfloat *) value)
 {
-    postEvent<&uniform3fv>(location, count, qMakePair(value, count * 3));
+    postEvent<&uniform3fv>(location, qMakePair(value, count * 3));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(uniform3i, glUniform3i,
@@ -1300,7 +1341,7 @@ QWEBGL_FUNCTION_POSTEVENT(uniform3i, glUniform3i,
 QWEBGL_FUNCTION(uniform3iv, void, glUniform3iv,
                 (GLint) location, (GLsizei) count, (const GLint *) value)
 {
-    postEvent<&uniform3iv>(location, count, qMakePair(value, count * 3));
+    postEvent<&uniform3iv>(location, qMakePair(value, count * 3));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(uniform4f, glUniform4f,
@@ -1310,7 +1351,7 @@ QWEBGL_FUNCTION_POSTEVENT(uniform4f, glUniform4f,
 QWEBGL_FUNCTION(uniform4fv, void, glUniform4fv,
                 (GLint) location, (GLsizei) count, (const GLfloat *) value)
 {
-    postEvent<&uniform4fv>(location, count, qMakePair(value, count * 4));
+    postEvent<&uniform4fv>(location, qMakePair(value, count * 4));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(uniform4i, glUniform4i,
@@ -1319,25 +1360,25 @@ QWEBGL_FUNCTION_POSTEVENT(uniform4i, glUniform4i,
 QWEBGL_FUNCTION(uniform4iv, void, glUniform4iv,
                 (GLint) location, (GLsizei) count, (const GLint *) value)
 {
-    postEvent<&uniform4iv>(location, count, qMakePair(value, count * 4));
+    postEvent<&uniform4iv>(location, qMakePair(value, count * 4));
 }
 
 QWEBGL_FUNCTION(uniformMatrix2fv, void, glUniformMatrix2fv,
                 (GLint) location, (GLsizei) count, (GLboolean) transpose, (const GLfloat *) value)
 {
-    postEvent<&uniformMatrix2fv>(location, count, transpose, qMakePair(value, count * 4));
+    postEvent<&uniformMatrix2fv>(location, transpose, qMakePair(value, count * 4));
 }
 
 QWEBGL_FUNCTION(uniformMatrix3fv, void, glUniformMatrix3fv,
                 (GLint) location, (GLsizei) count, (GLboolean) transpose, (const GLfloat *) value)
 {
-    postEvent<&uniformMatrix3fv>(location, count, transpose, qMakePair(value, count * 9));
+    postEvent<&uniformMatrix3fv>(location, transpose, qMakePair(value, count * 9));
 }
 
 QWEBGL_FUNCTION(uniformMatrix4fv, void, glUniformMatrix4fv,
                 (GLint) location, (GLsizei) count, (GLboolean) transpose, (const GLfloat *) value)
 {
-    postEvent<&uniformMatrix4fv>(location, count, transpose, qMakePair(value, count * 16));
+    postEvent<&uniformMatrix4fv>(location, transpose, qMakePair(value, count * 16));
 }
 
 QWEBGL_FUNCTION_POSTEVENT(useProgram, glUseProgram,
@@ -1393,7 +1434,7 @@ QWEBGL_FUNCTION(vertexAttribPointer, void, glVertexAttribPointer,
     va.type = type;
     va.normalized = normalized;
     va.stride = stride;
-    va.pointer = (void *) pointer;
+    va.pointer = pointer;
     if (d->boundArrayBuffer)
         postEvent<&vertexAttribPointer>(index, size, type, normalized, stride,
                                        uint(quintptr(pointer)));
@@ -1472,17 +1513,16 @@ bool QWebGLContext::makeCurrent(QPlatformSurface *surface)
             return false;
     }
 
-    auto context = QOpenGLContext::currentContext();
-    Q_ASSERT(context);
-    auto handle = static_cast<QWebGLContext *>(context->handle());
-    handle->d_func()->currentSurface = surface;
+    QOpenGLContextPrivate::setCurrentContext(context());
+    d->currentSurface = surface;
+
     auto event = createEvent(QStringLiteral("makeCurrent"));
     if (!event)
         return false;
     event->addInt(d->id);
     if (surface->surface()->surfaceClass() == QSurface::Window) {
         auto window = static_cast<QWebGLWindow *>(surface);
-        if (s_contextData[handle->id()].cachedParameters.isEmpty()) {
+        if (s_contextData[id()].cachedParameters.isEmpty()) {
             auto future = window->d_func()->defaults.get_future();
             std::future_status status = std::future_status::timeout;
             while (status == std::future_status::timeout) {
@@ -1490,7 +1530,7 @@ bool QWebGLContext::makeCurrent(QPlatformSurface *surface)
                     return false;
                 status = future.wait_for(std::chrono::milliseconds(100));
             }
-            s_contextData[handle->id()].cachedParameters  = future.get();
+            s_contextData[id()].cachedParameters  = future.get();
         }
         event->addInt(window->window()->width());
         event->addInt(window->window()->height());
@@ -1515,8 +1555,8 @@ bool QWebGLContext::isValid() const
 
 QFunctionPointer QWebGLContext::getProcAddress(const char *procName)
 {
-    const auto it = glFunctions.find(procName);
-    return it != glFunctions.end() ? (*it)->functionPointer : nullptr;
+    const auto it = GLFunction::byName.find(procName);
+    return it != GLFunction::byName.end() ? (*it)->functionPointer : nullptr;
 }
 
 int QWebGLContext::id() const
@@ -1536,6 +1576,8 @@ QWebGLFunctionCall *QWebGLContext::createEvent(const QString &functionName, bool
     auto context = QOpenGLContext::currentContext();
     Q_ASSERT(context);
     const auto handle = static_cast<QWebGLContext *>(context->handle());
+    if (!handle)
+        return nullptr;
     auto integrationPrivate = QWebGLIntegrationPrivate::instance();
     const auto clientData = integrationPrivate->findClientData(handle->currentSurface());
     if (!clientData || !clientData->socket
@@ -1575,6 +1617,18 @@ QVariant QWebGLContext::queryValue(int id)
     }
     QWebGLContextPrivate::waitingIds.remove(id);
     return variant;
+}
+
+QStringList QWebGLContext::supportedFunctions()
+{
+    return GLFunction::remoteFunctionNames;
+}
+
+quint8 QWebGLContext::functionIndex(const QString &functionName)
+{
+    const auto it = GLFunction::byName.find(functionName);
+    Q_ASSERT(it != GLFunction::byName.end());
+    return (*it)->id;
 }
 
 QT_END_NAMESPACE

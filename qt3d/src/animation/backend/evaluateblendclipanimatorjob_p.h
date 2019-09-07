@@ -73,14 +73,11 @@ public:
     HBlendedClipAnimator blendClipAnimator() const { return m_blendClipAnimatorHandle; }
 
 protected:
-    void run() Q_DECL_OVERRIDE;
+    void run() override;
 
 private:
     HBlendedClipAnimator m_blendClipAnimatorHandle;
     Handler *m_handler;
-
-    qint64 m_currentGlobalTime;
-    qint64 m_lastGlobalTime;
 };
 
 typedef QSharedPointer<EvaluateBlendClipAnimatorJob> EvaluateBlendClipAnimatorJobPtr;

@@ -42,7 +42,7 @@
 
 #include <Qt3DCore/qnode.h>
 #include <Qt3DRender/qt3drender_global.h>
-#include <QSharedPointer>
+#include <QtCore/QSharedPointer>
 
 
 QT_BEGIN_NAMESPACE
@@ -53,7 +53,7 @@ class QBufferPrivate;
 class QBufferDataGenerator;
 typedef QSharedPointer<QBufferDataGenerator> QBufferDataGeneratorPtr;
 
-class QT3DRENDERSHARED_EXPORT QBuffer : public Qt3DCore::QNode
+class Q_3DRENDERSHARED_EXPORT QBuffer : public Qt3DCore::QNode
 {
     Q_OBJECT
     Q_PROPERTY(BufferType type READ type WRITE setType NOTIFY typeChanged)
@@ -119,7 +119,7 @@ public Q_SLOTS:
     void setAccessType(AccessType access);
 
 protected:
-    void sceneChangeEvent(const Qt3DCore::QSceneChangePtr &change) Q_DECL_OVERRIDE;
+    void sceneChangeEvent(const Qt3DCore::QSceneChangePtr &change) override;
 
 Q_SIGNALS:
     void dataChanged(const QByteArray &bytes);
@@ -131,7 +131,7 @@ Q_SIGNALS:
 
 private:
     Q_DECLARE_PRIVATE(QBuffer)
-    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const Q_DECL_OVERRIDE;
+    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const override;
 };
 
 } // namespace Qt3DRender

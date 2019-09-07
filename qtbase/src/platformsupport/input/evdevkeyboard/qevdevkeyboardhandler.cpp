@@ -49,6 +49,9 @@
 #include <qpa/qwindowsysteminterface.h>
 #include <private/qcore_unix_p.h>
 
+#include <QtGui/private/qguiapplication_p.h>
+#include <QtGui/private/qinputdevicemanager_p.h>
+
 #ifdef Q_OS_FREEBSD
 #include <dev/evdev/input.h>
 #else
@@ -71,9 +74,9 @@ void QFdContainer::reset() Q_DECL_NOTHROW
 }
 
 QEvdevKeyboardHandler::QEvdevKeyboardHandler(const QString &device, QFdContainer &fd, bool disableZap, bool enableCompose, const QString &keymapFile)
-    : m_device(device), m_fd(fd.release()), m_notify(Q_NULLPTR),
+    : m_device(device), m_fd(fd.release()), m_notify(nullptr),
       m_modifiers(0), m_composing(0), m_dead_unicode(0xffff),
-      m_no_zap(disableZap), m_do_compose(enableCompose),
+      m_langLock(0), m_no_zap(disableZap), m_do_compose(enableCompose),
       m_keymap(0), m_keymap_size(0), m_keycompose(0), m_keycompose_size(0)
 {
     qCDebug(qLcEvdevKey) << "Create keyboard handler with for device" << device;
@@ -172,7 +175,7 @@ void QEvdevKeyboardHandler::readKeycode()
                 // by the above error over and over again.
                 if (errno == ENODEV) {
                     delete m_notify;
-                    m_notify = Q_NULLPTR;
+                    m_notify = nullptr;
                     m_fd.reset();
                 }
                 return;
@@ -222,6 +225,9 @@ void QEvdevKeyboardHandler::readKeycode()
 void QEvdevKeyboardHandler::processKeyEvent(int nativecode, int unicode, int qtcode,
                                             Qt::KeyboardModifiers modifiers, bool isPress, bool autoRepeat)
 {
+    if (!autoRepeat)
+        QGuiApplicationPrivate::inputDeviceManager()->setKeyboardModifiers(QEvdevKeyboardHandler::toQtModifiers(m_modifiers));
+
     QWindowSystemInterface::handleExtendedKeyEvent(0, (isPress ? QEvent::KeyPress : QEvent::KeyRelease),
                                                    qtcode, modifiers, nativecode + 8, 0, int(modifiers),
                                                    (unicode != 0xffff ) ? QString(unicode) : QString(), autoRepeat);
@@ -247,6 +253,8 @@ QEvdevKeyboardHandler::KeycodeAction QEvdevKeyboardHandler::processKeycode(quint
             quint8 testmods = m_modifiers;
             if (m_locks[0] /*CapsLock*/ && (m->flags & QEvdevKeyboardMap::IsLetter))
                 testmods ^= QEvdevKeyboardMap::ModShift;
+            if (m_langLock)
+                testmods ^= QEvdevKeyboardMap::ModAltGr;
             if (m->modifiers == testmods)
                 map_withmod = m;
         }
@@ -403,6 +411,8 @@ QEvdevKeyboardHandler::KeycodeAction QEvdevKeyboardHandler::processKeycode(quint
             Qt::KeyboardModifiers qtmods = Qt::KeyboardModifiers(qtcode & modmask);
             qtcode &= ~modmask;
 
+            // qtmods here is the modifier state before the event, i.e. not
+            // including the current key in case it is a modifier.
             qCDebug(qLcEvdevKeyMap, "Processing: uni=%04x, qt=%08x, qtmod=%08x", unicode, qtcode, int(qtmods));
 
             // If NumLockOff and keypad key pressed remap event sent
@@ -501,6 +511,8 @@ void QEvdevKeyboardHandler::unloadKeymap()
             m_locks[2] = 1;
         qCDebug(qLcEvdevKey, "numlock=%d , capslock=%d, scrolllock=%d", m_locks[1], m_locks[0], m_locks[2]);
     }
+
+    m_langLock = 0;
 }
 
 bool QEvdevKeyboardHandler::loadKeymap(const QString &file)
@@ -545,7 +557,7 @@ bool QEvdevKeyboardHandler::loadKeymap(const QString &file)
         delete [] qmap_keymap;
         delete [] qmap_keycompose;
 
-        qWarning("Keymap file '%s' can not be loaded.", qPrintable(file));
+        qWarning("Keymap file '%s' cannot be loaded.", qPrintable(file));
         return false;
     }
 
@@ -560,6 +572,11 @@ bool QEvdevKeyboardHandler::loadKeymap(const QString &file)
     m_do_compose = true;
 
     return true;
+}
+
+void QEvdevKeyboardHandler::switchLang()
+{
+    m_langLock ^= 1;
 }
 
 QT_END_NAMESPACE

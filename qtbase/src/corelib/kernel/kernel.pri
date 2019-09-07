@@ -43,6 +43,7 @@ HEADERS += \
         kernel/qsystemerror_p.h \
         kernel/qmetatype_p.h \
         kernel/qmetatypeswitcher_p.h \
+        kernel/qtestsupport_core.h
 
 SOURCES += \
         kernel/qabstracteventdispatcher.cpp \
@@ -69,7 +70,8 @@ SOURCES += \
         kernel/qsystemsemaphore.cpp \
         kernel/qpointer.cpp \
         kernel/qmath.cpp \
-        kernel/qsystemerror.cpp
+        kernel/qsystemerror.cpp \
+        kernel/qtestsupport_core.cpp
 
 win32 {
         SOURCES += \
@@ -120,7 +122,7 @@ mac {
 
     LIBS_PRIVATE += -framework Foundation
 
-    osx: LIBS_PRIVATE += -framework CoreServices -framework AppKit
+    osx: LIBS_PRIVATE += -framework CoreServices -framework AppKit -framework Security
 
     ios|tvos {
         # We need UIKit for UIApplication in qeventdispatcher_cf.mm
@@ -188,7 +190,7 @@ vxworks {
                 kernel/qfunctions_vxworks.h
 }
 
-qqnx_pps {
+qnx:qtConfig(qqnx_pps) {
         QMAKE_USE_PRIVATE += pps
         SOURCES += \
                 kernel/qppsattribute.cpp \
@@ -200,7 +202,7 @@ qqnx_pps {
                 kernel/qppsobjectprivate_p.h
 }
 
-android {
+android:!android-embedded {
         SOURCES += \
                    kernel/qjnionload.cpp \
                    kernel/qjnihelpers.cpp \

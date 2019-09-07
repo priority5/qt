@@ -57,12 +57,16 @@ class QQuickMaterialBusyIndicator : public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(QColor color READ color WRITE setColor FINAL)
+    Q_PROPERTY(bool running READ isRunning WRITE setRunning FINAL)
 
 public:
     explicit QQuickMaterialBusyIndicator(QQuickItem *parent = nullptr);
 
     QColor color() const;
     void setColor(QColor color);
+
+    bool isRunning() const;
+    void setRunning(bool running);
 
     int elapsed() const;
 
@@ -71,8 +75,8 @@ protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override;
 
 private:
-    int m_elapsed;
-    QColor m_color;
+    int m_elapsed = 0;
+    QColor m_color = Qt::black;
 };
 
 QT_END_NAMESPACE

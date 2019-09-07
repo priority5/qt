@@ -32,7 +32,9 @@
 
 #include <functional>
 #include <cctype>
+#include <QtCore/qcoreapplication.h>
 #include <QtNetwork/qtcpserver.h>
+#include <QTcpSocket>
 
 class WebServer : public QTcpServer
 {
@@ -144,7 +146,7 @@ WebServer::WebServer(Handler handler, QObject *parent) :
 
 QUrl WebServer::url(const QString &path)
 {
-    const QString format("http://localhost:%1%2");
+    const QString format("http://127.0.0.1:%1%2");
     return QUrl(format.arg(serverPort()).arg(path.startsWith('/') ? path : "/" + path));
 }
 
@@ -197,7 +199,7 @@ bool WebServer::HttpRequest::readUrl(QTcpSocket *socket)
             qWarning("Invalid URL path %s", fragment.constData());
             return false;
         }
-        url.setUrl(QStringLiteral("http://localhost:") + QString::number(port) +
+        url.setUrl(QStringLiteral("http://127.0.0.1:") + QString::number(port) +
                    QString::fromUtf8(fragment));
         state = State::ReadingStatus;
         if (!url.isValid()) {
@@ -268,8 +270,14 @@ bool WebServer::HttpRequest::readBody(QTcpSocket *socket)
             return false;
         fragment.resize(bytesLeft);
     }
-    while (socket->bytesAvailable() && bytesLeft)
-        bytesLeft -= socket->read(&fragment.data()[fragment.size() - bytesLeft], bytesLeft);
+    while (bytesLeft) {
+        int got = socket->read(&fragment.data()[fragment.size() - bytesLeft], bytesLeft);
+        if (got < 0)
+            return false; // error
+        bytesLeft -= got;
+        if (bytesLeft)
+            qApp->processEvents();
+    }
     fragment.swap(body);
     state = State::AllDone;
     return true;

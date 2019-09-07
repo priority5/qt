@@ -40,24 +40,18 @@
 
 #include <QtGui/QOpenGLContext>
 
-static void initResources()
-{
-    Q_INIT_RESOURCE(mapboxgl);
-}
-
 QT_BEGIN_NAMESPACE
 
 QGeoServiceProviderFactoryMapboxGL::QGeoServiceProviderFactoryMapboxGL()
 {
-    initResources();
 }
 
 QGeoCodingManagerEngine *QGeoServiceProviderFactoryMapboxGL::createGeocodingManagerEngine(
     const QVariantMap &parameters, QGeoServiceProvider::Error *error, QString *errorString) const
 {
-    Q_UNUSED(parameters)
-    Q_UNUSED(error)
-    Q_UNUSED(errorString)
+    Q_UNUSED(parameters);
+    Q_UNUSED(error);
+    Q_UNUSED(errorString);
 
     return 0;
 }
@@ -65,24 +59,15 @@ QGeoCodingManagerEngine *QGeoServiceProviderFactoryMapboxGL::createGeocodingMana
 QGeoMappingManagerEngine *QGeoServiceProviderFactoryMapboxGL::createMappingManagerEngine(
     const QVariantMap &parameters, QGeoServiceProvider::Error *error, QString *errorString) const
 {
-#ifdef Q_OS_WIN
-    if (QOpenGLContext::openGLModuleType() != QOpenGLContext::LibGLES) {
-        qWarning("The Mapbox GL plugin only supports OpenGL ES on Windows. \
-            Try setting the environment variable QT_OPENGL to 'angle'.");
-
-        return 0;
-    }
-#endif
-
     return new QGeoMappingManagerEngineMapboxGL(parameters, error, errorString);
 }
 
 QGeoRoutingManagerEngine *QGeoServiceProviderFactoryMapboxGL::createRoutingManagerEngine(
     const QVariantMap &parameters, QGeoServiceProvider::Error *error, QString *errorString) const
 {
-    Q_UNUSED(parameters)
-    Q_UNUSED(error)
-    Q_UNUSED(errorString)
+    Q_UNUSED(parameters);
+    Q_UNUSED(error);
+    Q_UNUSED(errorString);
 
     return 0;
 }
@@ -90,9 +75,9 @@ QGeoRoutingManagerEngine *QGeoServiceProviderFactoryMapboxGL::createRoutingManag
 QPlaceManagerEngine *QGeoServiceProviderFactoryMapboxGL::createPlaceManagerEngine(
     const QVariantMap &parameters, QGeoServiceProvider::Error *error, QString *errorString) const
 {
-    Q_UNUSED(parameters)
-    Q_UNUSED(error)
-    Q_UNUSED(errorString)
+    Q_UNUSED(parameters);
+    Q_UNUSED(error);
+    Q_UNUSED(errorString);
 
     return 0;
 }

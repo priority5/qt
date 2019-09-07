@@ -28,6 +28,7 @@
 
 #include <QtTest/QtTest>
 #include <QQmlApplicationEngine>
+#include <QQmlAbstractUrlInterceptor>
 #include <QtQuick/qquickview.h>
 #include <QtQuick/qquickitem.h>
 #include <private/qqmlimport_p.h>
@@ -43,6 +44,8 @@ private slots:
     void uiFormatLoading();
     void completeQmldirPaths_data();
     void completeQmldirPaths();
+    void interceptQmldir();
+    void singletonVersionResolution();
     void cleanup();
 };
 
@@ -54,7 +57,7 @@ void tst_QQmlImport::cleanup()
 void tst_QQmlImport::testDesignerSupported()
 {
     QQuickView *window = new QQuickView();
-    window->engine()->addImportPath(QT_TESTCASE_BUILDDIR);
+    window->engine()->addImportPath(directory());
 
     window->setSource(testFileUrl("testfile_supported.qml"));
     QVERIFY(window->errors().isEmpty());
@@ -68,7 +71,7 @@ void tst_QQmlImport::testDesignerSupported()
     delete window;
     window = new QQuickView();
 
-    window->engine()->addImportPath(QT_TESTCASE_BUILDDIR);
+    window->engine()->addImportPath(directory());
     window->engine()->clearComponentCache();
 
     window->setSource(testFileUrl("testfile_supported.qml"));
@@ -91,7 +94,7 @@ void tst_QQmlImport::uiFormatLoading()
     int size = 0;
 
     QQmlApplicationEngine *test = new QQmlApplicationEngine(testFileUrl("TestForm.ui.qml"));
-    test->addImportPath(QT_TESTCASE_BUILDDIR);
+    test->addImportPath(directory());
     QCOMPARE(test->rootObjects().size(), ++size);
     QVERIFY(test->rootObjects()[size -1]);
     QVERIFY(test->rootObjects()[size -1]->property("success").toBool());
@@ -184,6 +187,76 @@ void tst_QQmlImport::completeQmldirPaths()
 
     QCOMPARE(QQmlImports::completeQmldirPaths(uri, basePaths, majorVersion, minorVersion), expectedPaths);
 }
+
+class QmldirUrlInterceptor : public QQmlAbstractUrlInterceptor {
+public:
+    QUrl intercept(const QUrl &url, DataType type) override
+    {
+        if (type != UrlString && !url.isEmpty() && url.isValid()) {
+            QString str = url.toString(QUrl::None);
+            return str.replace(QStringLiteral("$(INTERCEPT)"), QStringLiteral("intercepted"));
+        }
+        return url;
+    }
+};
+
+void tst_QQmlImport::interceptQmldir()
+{
+    QQmlEngine engine;
+    QmldirUrlInterceptor interceptor;
+    engine.setUrlInterceptor(&interceptor);
+
+    QQmlComponent component(&engine);
+    component.loadUrl(testFileUrl("interceptQmldir.qml"));
+    QVERIFY(component.isReady());
+    QScopedPointer<QObject> obj(component.create());
+    QVERIFY(!obj.isNull());
+}
+
+// QTBUG-77102
+void tst_QQmlImport::singletonVersionResolution()
+{
+    QQmlEngine engine;
+    engine.addImportPath(testFile("QTBUG-77102/imports"));
+    {
+        // Singleton with higher version is simply ignored when importing lower version of plugin
+        QQmlComponent component(&engine);
+        component.loadUrl(testFileUrl("QTBUG-77102/main.0.9.qml"));
+        QVERIFY(component.isReady());
+        QScopedPointer<QObject> obj(component.create());
+        QVERIFY(!obj.isNull());
+    }
+    {
+        // but the singleton is not accessible
+        QQmlComponent component(&engine);
+        QTest::ignoreMessage(QtMsgType::QtWarningMsg, QRegularExpression {".*ReferenceError: MySettings is not defined$"} );
+        component.loadUrl(testFileUrl("QTBUG-77102/main.0.9.fail.qml"));
+        QVERIFY(component.isReady());
+        QScopedPointer<QObject> obj(component.create());
+        QVERIFY(!obj.isNull());
+    }
+    {
+        // unless a version which is high enough is imported
+        QQmlComponent component(&engine);
+        component.loadUrl(testFileUrl("QTBUG-77102/main.1.0.qml"));
+        QVERIFY(component.isReady());
+        QScopedPointer<QObject> obj(component.create());
+        QVERIFY(!obj.isNull());
+        auto item = qobject_cast<QQuickItem*>(obj.get());
+        QCOMPARE(item->width(), 50);
+    }
+    {
+        // or when there is no number because we are importing from a path
+        QQmlComponent component(&engine);
+        component.loadUrl(testFileUrl("QTBUG-77102/main.nonumber.qml"));
+        QVERIFY(component.isReady());
+        QScopedPointer<QObject> obj(component.create());
+        QVERIFY(!obj.isNull());
+        auto item = qobject_cast<QQuickItem*>(obj.get());
+        QCOMPARE(item->width(), 50);
+    }
+}
+
 
 QTEST_MAIN(tst_QQmlImport)
 

@@ -39,6 +39,7 @@
 
 /*!
  * \class Qt3DExtras::QConeGeometry
+   \ingroup qt3d-extras-geometries
  * \inheaderfile Qt3DExtras/QConeGeometry
  * \inmodule Qt3DExtras
  * \brief The QConeGeometry class allows creation of a cone in 3D space.
@@ -238,7 +239,7 @@ public:
         , m_length(length)
     {}
 
-    QByteArray operator ()() Q_DECL_OVERRIDE
+    QByteArray operator ()() override
     {
         const int verticesCount =
                 vertexCount(m_slices, m_rings, (m_hasTopEndcap + m_hasBottomEndcap));
@@ -259,7 +260,7 @@ public:
         return verticesData;
     }
 
-    bool operator ==(const QBufferDataGenerator &other) const Q_DECL_OVERRIDE
+    bool operator ==(const QBufferDataGenerator &other) const override
     {
         const ConeVertexDataFunctor *otherFunctor = functor_cast<ConeVertexDataFunctor>(&other);
         if (otherFunctor != nullptr)
@@ -298,7 +299,7 @@ public:
     {
     }
 
-    QByteArray operator ()() Q_DECL_OVERRIDE
+    QByteArray operator ()() override
     {
         const int facesCount = faceCount(m_slices, m_rings, (m_hasTopEndcap + m_hasBottomEndcap));
 
@@ -319,7 +320,7 @@ public:
         return indicesBytes;
     }
 
-    bool operator ==(const QBufferDataGenerator &other) const Q_DECL_OVERRIDE
+    bool operator ==(const QBufferDataGenerator &other) const override
     {
         const ConeIndexDataFunctor *otherFunctor = functor_cast<ConeIndexDataFunctor>(&other);
         if (otherFunctor != nullptr)

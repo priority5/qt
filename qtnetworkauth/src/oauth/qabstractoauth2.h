@@ -39,6 +39,7 @@
 
 QT_BEGIN_NAMESPACE
 
+class QHttpMultiPart;
 class QAbstractOAuth2Private;
 class Q_OAUTH_EXPORT QAbstractOAuth2 : public QAbstractOAuth
 {
@@ -51,6 +52,10 @@ class Q_OAUTH_EXPORT QAbstractOAuth2 : public QAbstractOAuth
                NOTIFY clientIdentifierSharedKeyChanged)
     Q_PROPERTY(QString state READ state WRITE setState NOTIFY stateChanged)
     Q_PROPERTY(QDateTime expiration READ expirationAt NOTIFY expirationAtChanged)
+    Q_PROPERTY(QString refreshToken
+               READ refreshToken
+               WRITE setRefreshToken
+               NOTIFY refreshTokenChanged)
 
 public:
     explicit QAbstractOAuth2(QObject *parent = nullptr);
@@ -65,8 +70,12 @@ public:
                                    const QVariantMap &parameters = QVariantMap()) override;
     Q_INVOKABLE QNetworkReply *post(const QUrl &url,
                                     const QVariantMap &parameters = QVariantMap()) override;
+    Q_INVOKABLE virtual QNetworkReply *post(const QUrl &url, const QByteArray &data);
+    Q_INVOKABLE virtual QNetworkReply *post(const QUrl &url, QHttpMultiPart *multiPart);
     Q_INVOKABLE QNetworkReply *put(const QUrl &url,
                                    const QVariantMap &parameters = QVariantMap()) override;
+    Q_INVOKABLE virtual QNetworkReply *put(const QUrl &url, const QByteArray &data);
+    Q_INVOKABLE virtual QNetworkReply *put(const QUrl &url, QHttpMultiPart *multiPart);
     Q_INVOKABLE QNetworkReply *deleteResource(const QUrl &url,
                                               const QVariantMap &parameters = QVariantMap()) override;
 
@@ -96,6 +105,7 @@ Q_SIGNALS:
     void clientIdentifierSharedKeyChanged(const QString &clientIdentifierSharedKey);
     void stateChanged(const QString &state);
     void expirationAtChanged(const QDateTime &expiration);
+    void refreshTokenChanged(const QString &refreshToken);
 
     void error(const QString &error, const QString &errorDescription, const QUrl &uri);
     void authorizationCallbackReceived(const QVariantMap &data);

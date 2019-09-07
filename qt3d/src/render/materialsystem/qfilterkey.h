@@ -42,7 +42,7 @@
 
 #include <Qt3DRender/qt3drender_global.h>
 #include <Qt3DCore/qnode.h>
-#include <QVariant>
+#include <QtCore/QVariant>
 
 QT_BEGIN_NAMESPACE
 
@@ -50,7 +50,7 @@ namespace Qt3DRender {
 
 class QFilterKeyPrivate;
 
-class QT3DRENDERSHARED_EXPORT QFilterKey : public Qt3DCore::QNode
+class Q_3DRENDERSHARED_EXPORT QFilterKey : public Qt3DCore::QNode
 {
     Q_OBJECT
     Q_PROPERTY(QVariant value READ value WRITE setValue NOTIFY valueChanged)
@@ -72,7 +72,7 @@ Q_SIGNALS:
 
 private:
     Q_DECLARE_PRIVATE(QFilterKey)
-    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const Q_DECL_OVERRIDE;
+    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const override;
 };
 
 } // namespace Qt3DRender

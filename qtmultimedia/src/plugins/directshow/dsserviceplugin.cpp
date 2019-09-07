@@ -51,9 +51,7 @@
 #include <dshow.h>
 #include "dscameraservice.h"
 
-#if QT_CONFIG(directshow_player)
 #include "directshowplayerservice.h"
-#endif
 
 #include <qmediaserviceproviderplugin.h>
 
@@ -80,7 +78,7 @@ static int g_refCount = 0;
 void addRefCount()
 {
     if (++g_refCount == 1)
-        CoInitialize(NULL);
+        CoInitialize(nullptr);
 }
 
 void releaseRefCount()
@@ -95,12 +93,11 @@ QMediaService* DSServicePlugin::create(QString const& key)
         addRefCount();
         return new DSCameraService;
     }
-#if QT_CONFIG(directshow_player)
+
     if (key == QLatin1String(Q_MEDIASERVICE_MEDIAPLAYER)) {
         addRefCount();
         return new DirectShowPlayerService;
     }
-#endif
 
     return 0;
 }
@@ -114,16 +111,17 @@ void DSServicePlugin::release(QMediaService *service)
 QMediaServiceProviderHint::Features DSServicePlugin::supportedFeatures(
         const QByteArray &service) const
 {
-    if (service == Q_MEDIASERVICE_MEDIAPLAYER)
-        return QMediaServiceProviderHint::StreamPlayback | QMediaServiceProviderHint::VideoSurface;
-    else
-        return QMediaServiceProviderHint::Features();
+    return service == Q_MEDIASERVICE_MEDIAPLAYER
+        ? (QMediaServiceProviderHint::StreamPlayback | QMediaServiceProviderHint::VideoSurface)
+        : QMediaServiceProviderHint::Features();
 }
 
 QByteArray DSServicePlugin::defaultDevice(const QByteArray &service) const
 {
     if (service == Q_MEDIASERVICE_CAMERA) {
+        addRefCount();
         const QList<DSVideoDeviceInfo> &devs = DSVideoDeviceControl::availableDevices();
+        releaseRefCount();
         if (!devs.isEmpty())
             return devs.first().first;
     }
@@ -135,7 +133,9 @@ QList<QByteArray> DSServicePlugin::devices(const QByteArray &service) const
     QList<QByteArray> result;
 
     if (service == Q_MEDIASERVICE_CAMERA) {
+        addRefCount();
         const QList<DSVideoDeviceInfo> &devs = DSVideoDeviceControl::availableDevices();
+        releaseRefCount();
         for (const DSVideoDeviceInfo &info : devs)
             result.append(info.first);
     }
@@ -146,7 +146,9 @@ QList<QByteArray> DSServicePlugin::devices(const QByteArray &service) const
 QString DSServicePlugin::deviceDescription(const QByteArray &service, const QByteArray &device)
 {
     if (service == Q_MEDIASERVICE_CAMERA) {
+        addRefCount();
         const QList<DSVideoDeviceInfo> &devs = DSVideoDeviceControl::availableDevices();
+        releaseRefCount();
         for (const DSVideoDeviceInfo &info : devs) {
             if (info.first == device)
                 return info.second;

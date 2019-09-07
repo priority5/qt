@@ -72,7 +72,7 @@ class SceneDownloader : public Qt3DCore::QDownloadRequest {
 public:
     SceneDownloader(const QUrl &source, Qt3DCore::QNodeId sceneComponent, SceneManager* manager);
 
-    void onCompleted() Q_DECL_OVERRIDE;
+    void onCompleted() override;
 
 private:
     Qt3DCore::QNodeId m_sceneComponent;
@@ -85,7 +85,6 @@ typedef QSharedPointer<SceneDownloader> SceneDownloaderPtr;
 class Q_AUTOTEST_EXPORT SceneManager : public Qt3DCore::QResourceManager<
         Scene,
         Qt3DCore::QNodeId,
-        8,
         Qt3DCore::ObjectLevelLockingPolicy>
 {
 public:
@@ -96,7 +95,7 @@ public:
 
     void addSceneData(const QUrl &source, Qt3DCore::QNodeId sceneUuid,
                       const QByteArray &data = QByteArray());
-    QVector<LoadSceneJobPtr> pendingSceneLoaderJobs();
+    QVector<LoadSceneJobPtr> takePendingSceneLoaderJobs();
 
     void startSceneDownload(const QUrl &source, Qt3DCore::QNodeId sceneUuid);
     void clearSceneDownload(SceneDownloader *downloader);

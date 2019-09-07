@@ -27,6 +27,8 @@
 **
 ****************************************************************************/
 
+#include <QtNetwork/qtnetwork-config.h>
+
 #ifndef QT_NO_HTTP
 
 #include <qabstractoauth2.h>
@@ -40,6 +42,7 @@
 #include <QtNetwork/qnetworkreply.h>
 #include <QtNetwork/qnetworkrequest.h>
 #include <QtNetwork/qnetworkaccessmanager.h>
+#include <QtNetwork/qhttpmultipart.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -72,12 +75,6 @@ QT_BEGIN_NAMESPACE
     network requests.
 
     The default value is "QtOAuth/1.0 (+https://www.qt.io)".
-*/
-
-/*!
-    \property QAbstractOAuth2::clientIdentifier
-    This property holds the client identifier used to identify the
-    application in the authentication process.
 */
 
 /*!
@@ -170,6 +167,17 @@ QNetworkRequest QAbstractOAuth2Private::createRequest(QUrl url, const QVariantMa
     const QString bearer = bearerFormat.arg(token);
     request.setRawHeader("Authorization", bearer.toUtf8());
     return request;
+}
+
+void QAbstractOAuth2Private::prepareRequestImpl(QNetworkRequest *request,
+                                                const QByteArray &verb,
+                                                const QByteArray &body)
+{
+    Q_UNUSED(verb)
+    Q_UNUSED(body)
+    request->setHeader(QNetworkRequest::UserAgentHeader, userAgent);
+    const QString bearer = bearerFormat.arg(token);
+    request->setRawHeader("Authorization", bearer.toUtf8());
 }
 
 /*!
@@ -273,7 +281,45 @@ QNetworkReply *QAbstractOAuth2::post(const QUrl &url, const QVariantMap &paramet
 {
     Q_D(QAbstractOAuth2);
     const auto data = d->convertParameters(parameters);
+    return post(url, data);
+}
+
+/*!
+    \since 5.10
+
+    \overload
+
+    Sends an authenticated POST request and returns a new
+    QNetworkReply. The \a url and \a data are used to create
+    the request.
+
+    \sa post(), {https://tools.ietf.org/html/rfc2616#section-9.6}
+    {Hypertext Transfer Protocol -- HTTP/1.1: POST}
+*/
+QNetworkReply *QAbstractOAuth2::post(const QUrl &url, const QByteArray &data)
+{
+    Q_D(QAbstractOAuth2);
     QNetworkReply *reply = d->networkAccessManager()->post(d->createRequest(url), data);
+    connect(reply, &QNetworkReply::finished, [this, reply]() { emit finished(reply); });
+    return reply;
+}
+
+/*!
+    \since 5.10
+
+    \overload
+
+    Sends an authenticated POST request and returns a new
+    QNetworkReply. The \a url and \a multiPart are used to create
+    the request.
+
+    \sa post(), QHttpMultiPart, {https://tools.ietf.org/html/rfc2616#section-9.6}
+    {Hypertext Transfer Protocol -- HTTP/1.1: POST}
+*/
+QNetworkReply *QAbstractOAuth2::post(const QUrl &url, QHttpMultiPart *multiPart)
+{
+    Q_D(QAbstractOAuth2);
+    QNetworkReply *reply = d->networkAccessManager()->post(d->createRequest(url), multiPart);
     connect(reply, &QNetworkReply::finished, [this, reply]() { emit finished(reply); });
     return reply;
 }
@@ -290,7 +336,45 @@ QNetworkReply *QAbstractOAuth2::put(const QUrl &url, const QVariantMap &paramete
 {
     Q_D(QAbstractOAuth2);
     const auto data = d->convertParameters(parameters);
+    return put(url, data);
+}
+
+/*!
+    \since 5.10
+
+    \overload
+
+    Sends an authenticated PUT request and returns a new
+    QNetworkReply. The \a url and \a data are used to create
+    the request.
+
+    \sa put(), {https://tools.ietf.org/html/rfc2616#section-9.6}
+    {Hypertext Transfer Protocol -- HTTP/1.1: PUT}
+*/
+QNetworkReply *QAbstractOAuth2::put(const QUrl &url, const QByteArray &data)
+{
+    Q_D(QAbstractOAuth2);
     QNetworkReply *reply = d->networkAccessManager()->put(d->createRequest(url), data);
+    connect(reply, &QNetworkReply::finished, std::bind(&QAbstractOAuth::finished, this, reply));
+    return reply;
+}
+
+/*!
+    \since 5.10
+
+    \overload
+
+    Sends an authenticated PUT request and returns a new
+    QNetworkReply. The \a url and \a multiPart are used to create
+    the request.
+
+    \sa put(), QHttpMultiPart, {https://tools.ietf.org/html/rfc2616#section-9.6}
+    {Hypertext Transfer Protocol -- HTTP/1.1: PUT}
+*/
+QNetworkReply *QAbstractOAuth2::put(const QUrl &url, QHttpMultiPart *multiPart)
+{
+    Q_D(QAbstractOAuth2);
+    QNetworkReply *reply = d->networkAccessManager()->put(d->createRequest(url), multiPart);
     connect(reply, &QNetworkReply::finished, std::bind(&QAbstractOAuth::finished, this, reply));
     return reply;
 }
@@ -413,7 +497,10 @@ QString QAbstractOAuth2::refreshToken() const
 void QAbstractOAuth2::setRefreshToken(const QString &refreshToken)
 {
     Q_D(QAbstractOAuth2);
-    d->refreshToken = refreshToken;
+    if (d->refreshToken != refreshToken) {
+        d->refreshToken = refreshToken;
+        Q_EMIT refreshTokenChanged(refreshToken);
+    }
 }
 
 QT_END_NAMESPACE

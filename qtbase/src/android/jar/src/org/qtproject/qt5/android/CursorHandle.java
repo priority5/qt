@@ -51,6 +51,7 @@ import android.graphics.drawable.Drawable;
 import android.view.MotionEvent;
 import android.widget.PopupWindow;
 import android.app.Activity;
+import android.util.TypedValue;
 import android.view.ViewTreeObserver;
 
 /* This view represents one of the handle (selection or cursor handle) */
@@ -58,8 +59,9 @@ class CursorView extends ImageView
 {
     private CursorHandle mHandle;
     // The coordinare which where clicked
-    private int m_offsetX;
-    private int m_offsetY;
+    private float m_offsetX;
+    private float m_offsetY;
+    private boolean m_pressed = false;
 
     CursorView (Context context, CursorHandle handle) {
         super(context);
@@ -76,21 +78,23 @@ class CursorView extends ImageView
     public boolean onTouchEvent(MotionEvent ev) {
         switch (ev.getActionMasked()) {
         case MotionEvent.ACTION_DOWN: {
-            m_offsetX = Math.round(ev.getRawX());
-            m_offsetY = Math.round(ev.getRawY());
+            m_offsetX = ev.getRawX();
+            m_offsetY = ev.getRawY() + getHeight() / 2;
+            m_pressed = true;
             break;
         }
 
         case MotionEvent.ACTION_MOVE: {
-            mHandle.updatePosition(Math.round(ev.getRawX()) - m_offsetX,
-                                    Math.round(ev.getRawY()) - m_offsetY);
+            if (!m_pressed)
+                return false;
+            mHandle.updatePosition(Math.round(ev.getRawX() - m_offsetX),
+                                    Math.round(ev.getRawY() - m_offsetY));
             break;
         }
 
         case MotionEvent.ACTION_UP:
-            break;
-
         case MotionEvent.ACTION_CANCEL:
+            m_pressed = false;
             break;
         }
         return true;
@@ -113,6 +117,7 @@ public class CursorHandle implements ViewTreeObserver.OnPreDrawListener
     private int m_lastY;
     int tolerance;
     private boolean m_rtl;
+    int m_yShift;
 
     public CursorHandle(Activity activity, View layout, int id, int attr, boolean rtl) {
         m_activity = activity;
@@ -121,7 +126,8 @@ public class CursorHandle implements ViewTreeObserver.OnPreDrawListener
         m_layout = layout;
         DisplayMetrics metrics = new DisplayMetrics();
         activity.getWindowManager().getDefaultDisplay().getMetrics(metrics);
-        tolerance = Math.round(2 * metrics.density);
+        m_yShift = (int)TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_MM, 1f, metrics);
+        tolerance = Math.min(1, (int)(m_yShift / 2f));
         m_lastX = m_lastY = -1 - tolerance;
         m_rtl = rtl;
     }
@@ -136,7 +142,6 @@ public class CursorHandle implements ViewTreeObserver.OnPreDrawListener
 
             m_cursorView = new CursorView(context, this);
             m_cursorView.setImageDrawable(drawable);
-            // m_layout.addView(m_cursorView);
 
             m_popup = new PopupWindow(context, null, android.R.attr.textSelectHandleWindowStyle);
             m_popup.setSplitTouchEnabled(true);
@@ -158,14 +163,14 @@ public class CursorHandle implements ViewTreeObserver.OnPreDrawListener
         m_layout.getLocationOnScreen(location);
 
         int x2 = x + location[0];
-        int y2 = y + location[1];
+        int y2 = y + location[1] + m_yShift;
 
         if (m_id == QtNative.IdCursorHandle) {
-            x2 -= m_cursorView.getWidth() / 2 ;
+            x2 -= m_popup.getWidth() / 2 ;
         } else if ((m_id == QtNative.IdLeftHandle && !m_rtl) || (m_id == QtNative.IdRightHandle && m_rtl)) {
-            x2 -= m_cursorView.getWidth() * 3 / 4;
+            x2 -= m_popup.getWidth() * 3 / 4;
         } else {
-            x2 -= m_cursorView.getWidth() / 4;
+            x2 -= m_popup.getWidth() / 4;
         }
 
         if (m_popup.isShowing()) {
@@ -179,6 +184,14 @@ public class CursorHandle implements ViewTreeObserver.OnPreDrawListener
         m_posY = y;
     }
 
+    public int bottom()
+    {
+        initOverlay();
+        final int[] location = new int[2];
+        m_cursorView.getLocationOnScreen(location);
+        return location[1] + m_cursorView.getHeight();
+    }
+
     public void hide() {
         if (m_popup != null) {
             m_popup.dismiss();
@@ -187,6 +200,7 @@ public class CursorHandle implements ViewTreeObserver.OnPreDrawListener
 
     // The handle was dragged by a given relative position
     public void updatePosition(int x, int y) {
+        y -= m_yShift;
         if (Math.abs(m_lastX - x) > tolerance || Math.abs(m_lastY - y) > tolerance) {
             QtNative.handleLocationChanged(m_id, x + m_posX, y + m_posY);
             m_lastX = x;

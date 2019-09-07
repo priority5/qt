@@ -82,6 +82,9 @@ void FilterProximityDistanceJob::run()
         }
         m_filteredEntities = std::move(entitiesToFilter);
     }
+
+    // sort needed for set_intersection in RenderViewBuilder
+    std::sort(m_filteredEntities.begin(), m_filteredEntities.end());
 }
 
 void FilterProximityDistanceJob::selectAllEntities()
@@ -90,7 +93,7 @@ void FilterProximityDistanceJob::selectAllEntities()
     const QVector<HEntity> handles = entityManager->activeHandles();
 
     m_filteredEntities.reserve(handles.size());
-    for (const HEntity handle : handles) {
+    for (const HEntity &handle : handles) {
         Entity *e = entityManager->data(handle);
         m_filteredEntities.push_back(e);
     }

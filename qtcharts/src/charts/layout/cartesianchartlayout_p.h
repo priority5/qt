@@ -40,10 +40,11 @@
 #define CARTESIANCHARTLAYOUT_H
 
 #include <private/abstractchartlayout_p.h>
+#include <QtCharts/private/qchartglobal_p.h>
 
 QT_CHARTS_BEGIN_NAMESPACE
 
-class CartesianChartLayout : public AbstractChartLayout
+class Q_CHARTS_PRIVATE_EXPORT CartesianChartLayout : public AbstractChartLayout
 {
 public:
     CartesianChartLayout(ChartPresenter *presenter);
@@ -51,7 +52,8 @@ public:
 
     // from AbstractChartLayout
     QRectF calculateAxisMinimum(const QRectF &minimum, const QList<ChartAxisElement *> &axes) const;
-    QRectF calculateAxisGeometry(const QRectF &geometry, const QList<ChartAxisElement *> &axes) const;
+    QRectF calculateAxisGeometry(const QRectF &geometry, const QList<ChartAxisElement *> &axes,
+                                 bool update = true) const;
 };
 
 QT_CHARTS_END_NAMESPACE

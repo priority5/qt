@@ -53,8 +53,10 @@
 
 #include <Qt3DCore/qaspectjob.h>
 #include <Qt3DCore/qnodeid.h>
+#include <Qt3DRender/qsceneloader.h>
 #include <QSharedPointer>
 #include <QUrl>
+#include <functional>
 
 QT_BEGIN_NAMESPACE
 
@@ -64,6 +66,7 @@ class QSceneImporter;
 
 namespace Render {
 
+class Scene;
 class NodeManagers;
 
 class Q_AUTOTEST_EXPORT LoadSceneJob : public Qt3DCore::QAspectJob
@@ -79,7 +82,7 @@ public:
     QUrl source() const;
     Qt3DCore::QNodeId sceneComponentId() const;
 
-    void run() Q_DECL_OVERRIDE;
+    void run() override;
 
 private:
     QUrl m_source;
@@ -87,6 +90,11 @@ private:
     Qt3DCore::QNodeId m_sceneComponent;
     NodeManagers *m_managers;
     QList<QSceneImporter *> m_sceneImporters;
+
+    Qt3DCore::QEntity *tryLoadScene(Scene *scene,
+                                    QSceneLoader::Status &finalStatus,
+                                    const QStringList &extensions,
+                                    const std::function<void (QSceneImporter *)> &importerSetupFunc);
 };
 
 typedef QSharedPointer<LoadSceneJob> LoadSceneJobPtr;

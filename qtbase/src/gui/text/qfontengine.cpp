@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2018 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtGui module of the Qt Toolkit.
@@ -899,7 +899,7 @@ QImage QFontEngine::alphaRGBMapForGlyph(glyph_t glyph, QFixed /*subPixelPosition
     return rgbMask;
 }
 
-QImage QFontEngine::bitmapForGlyph(glyph_t, QFixed subPixelPosition, const QTransform&)
+QImage QFontEngine::bitmapForGlyph(glyph_t, QFixed subPixelPosition, const QTransform&, const QColor &)
 {
     Q_UNUSED(subPixelPosition);
 
@@ -992,13 +992,12 @@ void QFontEngine::removeGlyphFromCache(glyph_t)
 QFontEngine::Properties QFontEngine::properties() const
 {
     Properties p;
-    QByteArray psname = QFontEngine::convertToPostscriptFontFamilyName(fontDef.family.toUtf8());
-    psname += '-';
-    psname += QByteArray::number(fontDef.style);
-    psname += '-';
-    psname += QByteArray::number(fontDef.weight);
-
-    p.postscriptName = psname;
+    p.postscriptName
+            = QFontEngine::convertToPostscriptFontFamilyName(fontDef.family.toUtf8())
+            + '-'
+            + QByteArray::number(fontDef.style)
+            + '-'
+            + QByteArray::number(fontDef.weight);
     p.ascent = ascent();
     p.descent = descent();
     p.leading = leading();
@@ -1023,8 +1022,8 @@ void QFontEngine::getUnscaledGlyph(glyph_t glyph, QPainterPath *path, glyph_metr
     Returns \c true if the font table idetified by \a tag exists in the font;
     returns \c false otherwise.
 
-    If \a buffer is NULL, stores the size of the buffer required for the font table data,
-    in bytes, in \a length. If \a buffer is not NULL and the capacity
+    If \a buffer is \nullptr, stores the size of the buffer required for the font table data,
+    in bytes, in \a length. If \a buffer is not \nullptr and the capacity
     of the buffer, passed in \a length, is sufficient to store the font table data,
     also copies the font table data to \a buffer.
 
@@ -1076,19 +1075,25 @@ void QFontEngine::setGlyphCache(const void *context, QFontEngineGlyphCache *cach
 
 }
 
-QFontEngineGlyphCache *QFontEngine::glyphCache(const void *context, GlyphFormat format, const QTransform &transform) const
+QFontEngineGlyphCache *QFontEngine::glyphCache(const void *context,
+                                               GlyphFormat format,
+                                               const QTransform &transform,
+                                               const QColor &color) const
 {
     const QHash<const void*, GlyphCaches>::const_iterator caches = m_glyphCaches.constFind(context);
     if (caches == m_glyphCaches.cend())
-        return Q_NULLPTR;
+        return nullptr;
 
     for (GlyphCaches::const_iterator it = caches->begin(), end = caches->end(); it != end; ++it) {
         QFontEngineGlyphCache *cache = it->cache.data();
-        if (format == cache->glyphFormat() && qtransform_equals_no_translate(cache->m_transform, transform))
+        if (format == cache->glyphFormat()
+                && (format != Format_ARGB || color == cache->color())
+                && qtransform_equals_no_translate(cache->m_transform, transform)) {
             return cache;
+        }
     }
 
-    return Q_NULLPTR;
+    return nullptr;
 }
 
 static inline QFixed kerning(int left, int right, const QFontEngine::KernPair *pairs, int numPairs)
@@ -1234,7 +1239,7 @@ int QFontEngine::glyphCount() const
 
 Qt::HANDLE QFontEngine::handle() const
 {
-    return Q_NULLPTR;
+    return nullptr;
 }
 
 const uchar *QFontEngine::getCMap(const uchar *table, uint tableSize, bool *isSymbolFont, int *cmapSize)
@@ -1328,7 +1333,7 @@ const uchar *QFontEngine::getCMap(const uchar *table, uint tableSize, bool *isSy
 resolveTable:
     *isSymbolFont = (symbolTable > -1);
 
-    quint32 unicode_table;
+    quint32 unicode_table = 0;
     if (!qSafeFromBigEndian(maps + 8 * tableToUse + 4, endPtr, &unicode_table))
         return 0;
 
@@ -1756,7 +1761,7 @@ QImage QFontEngineBox::alphaMapForGlyph(glyph_t)
 // Multi engine
 // ------------------------------------------------------------------
 
-static inline uchar highByte(glyph_t glyph)
+uchar QFontEngineMulti::highByte(glyph_t glyph)
 { return glyph >> 24; }
 
 // strip high byte from glyph
@@ -1844,8 +1849,14 @@ QFontEngine *QFontEngineMulti::loadEngine(int at)
     QFontDef request(fontDef);
     request.styleStrategy |= QFont::NoFontMerging;
     request.family = fallbackFamilyAt(at - 1);
+    request.families = QStringList(request.family);
 
-    if (QFontEngine *engine = QFontDatabase::findFont(request, m_script)) {
+    // At this point, the main script of the text has already been considered
+    // when fetching the list of fallback families from the database, and the
+    // info about the actual script of the characters may have been discarded,
+    // so we do not check for writing system support, but instead just load
+    // the family indiscriminately.
+    if (QFontEngine *engine = QFontDatabase::findFont(request, QChar::Script_Common)) {
         engine->fontDef.weight = request.weight;
         if (request.style > QFont::StyleNormal)
             engine->fontDef.style = request.style;
@@ -1898,8 +1909,33 @@ bool QFontEngineMulti::stringToCMap(const QChar *str, int len,
 
     int glyph_pos = 0;
     QStringIterator it(str, str + len);
+
+    int lastFallback = -1;
     while (it.hasNext()) {
         const uint ucs4 = it.peekNext();
+
+        // If we applied a fallback font to previous glyph, and the current is either
+        // ZWJ or ZWNJ, we should also try applying the same fallback font to that, in order
+        // to get the correct shaping rules applied.
+        if (lastFallback >= 0 && (ucs4 == QChar(0x200d) || ucs4 == QChar(0x200c))) {
+            QFontEngine *engine = m_engines.at(lastFallback);
+            glyph_t glyph = engine->glyphIndex(ucs4);
+            if (glyph != 0) {
+                glyphs->glyphs[glyph_pos] = glyph;
+                if (!(flags & GlyphIndicesOnly)) {
+                    QGlyphLayout g = glyphs->mid(glyph_pos, 1);
+                    engine->recalcAdvances(&g, flags);
+                }
+
+                // set the high byte to indicate which engine the glyph came from
+                glyphs->glyphs[glyph_pos] |= (lastFallback << 24);
+            } else {
+                lastFallback = -1;
+            }
+        } else {
+            lastFallback = -1;
+        }
+
         if (glyphs->glyphs[glyph_pos] == 0
                 && ucs4 != QChar::LineSeparator
                 && ucs4 != QChar::LineFeed
@@ -1928,6 +1964,9 @@ bool QFontEngineMulti::stringToCMap(const QChar *str, int len,
                         QGlyphLayout g = glyphs->mid(glyph_pos, 1);
                         engine->recalcAdvances(&g, flags);
                     }
+
+                    lastFallback = x;
+
                     // set the high byte to indicate which engine the glyph came from
                     glyphs->glyphs[glyph_pos] |= (x << 24);
                     break;

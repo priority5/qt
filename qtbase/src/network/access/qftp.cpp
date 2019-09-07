@@ -525,7 +525,7 @@ static void _q_parseUnixDir(const QStringList &tokens, const QString &userName, 
     // Resolve the modification date by parsing all possible formats
     QDateTime dateTime;
     int n = 0;
-#ifndef QT_NO_DATESTRING
+#if QT_CONFIG(datestring)
     do {
         dateTime = QLocale::c().toDateTime(dateString, formats.at(n++));
     }  while (n < formats.size() && (!dateTime.isValid()));
@@ -600,7 +600,7 @@ static void _q_parseDosDir(const QStringList &tokens, const QString &userName, Q
     info->setWritable(info->isFile());
 
     QDateTime dateTime;
-#ifndef QT_NO_DATESTRING
+#if QT_CONFIG(datestring)
     dateTime = QLocale::c().toDateTime(tokens.at(1), QLatin1String("MM-dd-yy  hh:mmAP"));
     if (dateTime.date().year() < 1971) {
         dateTime.setDate(QDate(dateTime.date().year() + 100,
@@ -1702,8 +1702,16 @@ int QFtp::connectToHost(const QString &host, quint16 port)
 int QFtp::login(const QString &user, const QString &password)
 {
     QStringList cmds;
-    cmds << (QLatin1String("USER ") + (user.isNull() ? QLatin1String("anonymous") : user) + QLatin1String("\r\n"));
-    cmds << (QLatin1String("PASS ") + (password.isNull() ? QLatin1String("anonymous@") : password) + QLatin1String("\r\n"));
+
+    if (user.isNull() || user.compare(QLatin1String("anonymous"), Qt::CaseInsensitive) == 0) {
+        cmds << (QLatin1String("USER ") + (user.isNull() ? QLatin1String("anonymous") : user) + QLatin1String("\r\n"));
+        cmds << (QLatin1String("PASS ") + (password.isNull() ? QLatin1String("anonymous@") : password) + QLatin1String("\r\n"));
+    } else {
+        cmds << (QLatin1String("USER ") + user + QLatin1String("\r\n"));
+        if (!password.isNull())
+            cmds << (QLatin1String("PASS ") + password + QLatin1String("\r\n"));
+    }
+
     return d_func()->addCommand(new QFtpCommand(Login, cmds));
 }
 
@@ -1818,8 +1826,8 @@ int QFtp::cd(const QString &dir)
     is data available to read. You can then read the data with the
     read() or readAll() functions.
 
-    If \a dev is not 0, the data is written directly to the device \a
-    dev. Make sure that the \a dev pointer is valid for the duration
+    If \a dev is not \nullptr, the data is written directly to the device
+    \a dev. Make sure that the \a dev pointer is valid for the duration
     of the operation (it is safe to delete it when the
     commandFinished() signal is emitted). In this case the readyRead()
     signal is \e not emitted and you cannot read data with the
@@ -2146,7 +2154,7 @@ QFtp::Command QFtp::currentCommand() const
     \internal
     Returns the QIODevice pointer that is used by the FTP command to read data
     from or store data to. If there is no current FTP command being executed or
-    if the command does not use an IO device, this function returns 0.
+    if the command does not use an IO device, this function returns \nullptr.
 
     This function can be used to delete the QIODevice in the slot connected to
     the commandFinished() signal.

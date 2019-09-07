@@ -114,8 +114,6 @@ Item {
 
         function test_clicked_signals()
         {
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_1.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);
@@ -129,7 +127,7 @@ Item {
             spy.target = tree
             spy.signalName = "clicked"
             compare(spy.count, 0)
-            mouseClick(tree, semiIndent + 50, 120, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 120, Qt.LeftButton, Qt.NoModifier, 10)
             compare(spy.count, 1)
             var clickedItem = spy.signalArguments[0][0]
             verify(clickedItem.valid)
@@ -165,8 +163,6 @@ Item {
 
         function test_headerHidden()
         {
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_1.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);
@@ -205,7 +201,7 @@ Item {
 
             // expanded on click
             compare(spy.count, 0)
-            mouseClick(tree, semiIndent, 70, Qt.LeftButton)
+            mouseClick(tree, semiIndent, 70, Qt.LeftButton, Qt.NoModifier, 10)
             compare(spy.count, 1)
             var expandedIndex = spy.signalArguments[0][0]
             verify(expandedIndex.valid)
@@ -272,8 +268,9 @@ Item {
             spy.target = tree
             spy.signalName = "pressAndHold"
             compare(spy.count, 0)
-            mousePress(tree, styleIndent + 50, 70, Qt.LeftButton)
+            mousePress(tree, styleIndent + 50, 70, Qt.LeftButton, Qt.NoModifier, 10)
             mouseRelease(tree, styleIndent + 50, 70, Qt.LeftButton, Qt.NoModifier, 1000)
+            wait(20)
             compare(spy.count, 1)
             verify(spy.signalArguments[0][0].valid)
             compare(spy.signalArguments[0][0].row, 0)
@@ -282,8 +279,6 @@ Item {
 
         function test_keys_navigation()
         {
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_2.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);
@@ -294,7 +289,7 @@ Item {
 
             // select second item with no children
             verify(!tree.currentIndex.valid)
-            mouseClick(tree, semiIndent + 50, 120, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 120, Qt.LeftButton, Qt.NoModifier, 10)
             var secondTopItem = tree.currentIndex
             verify(secondTopItem.valid)
             verify(!secondTopItem.parent.valid)
@@ -338,8 +333,6 @@ Item {
 
         function test_selection_singleSelection()
         {
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_1.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);
@@ -350,27 +343,27 @@ Item {
             selectionModel.model = tree.model
 
             // Collect some model index
-            mouseClick(tree, semiIndent + 50, 20 + 50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 50, Qt.LeftButton, Qt.NoModifier, 30)
             var firstItem = tree.currentIndex
             verify(firstItem.valid)
             compare(firstItem.row, 0)
-            mouseClick(tree, semiIndent + 50, 20 + 2*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 2*50, Qt.LeftButton, Qt.NoModifier, 10)
             var secondItem = tree.currentIndex
             verify(secondItem.valid)
             compare(secondItem.row, 1)
-            mouseClick(tree, semiIndent + 50, 20 + 3*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 3*50, Qt.LeftButton, Qt.NoModifier, 10)
             var thirdItem = tree.currentIndex
             verify(thirdItem.valid)
             compare(thirdItem.row, 2)
-            mouseClick(tree, semiIndent + 50, 20 + 4*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 4*50, Qt.LeftButton, Qt.NoModifier, 10)
             var fourthItem = tree.currentIndex
             verify(fourthItem.valid)
             compare(fourthItem.row, 3)
-            mouseClick(tree, semiIndent + 50, 20 + 5*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 5*50, Qt.LeftButton, Qt.NoModifier, 10)
             var fifthItem = tree.currentIndex
             verify(fifthItem.valid)
             compare(fifthItem.row, 4)
-            mouseClick(tree, semiIndent + 50, 20 + 6*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 6*50, Qt.LeftButton, Qt.NoModifier, 10)
             var sixthItem = tree.currentIndex
             verify(sixthItem.valid)
             compare(sixthItem.row, 5)
@@ -385,7 +378,7 @@ Item {
             compare(tree.selectionMode, SelectionMode.SingleSelection)
             verify(!tree.selection.currentIndex.valid)
 
-            mouseClick(tree, semiIndent + 50, 20 + 2*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 2*50, Qt.LeftButton, Qt.NoModifier, 10)
             verify(tree.selection.currentIndex.valid)
 
             compare(secondItem.internalId, tree.currentIndex.internalId)
@@ -465,8 +458,6 @@ Item {
 
         function test_selection_multiSelection()
         {
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_1.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);
@@ -477,17 +468,17 @@ Item {
             selectionModel.model = tree.model
 
             // Collect some model index
-            mouseClick(tree, semiIndent + 50, 20 + 50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 50, Qt.LeftButton, Qt.NoModifier0, 10)
             var firstItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 2*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 2*50, Qt.LeftButton, Qt.NoModifier, 10)
             var secondItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 3*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 3*50, Qt.LeftButton, Qt.NoModifier, 10)
             var thirdItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 4*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 4*50, Qt.LeftButton, Qt.NoModifier, 10)
             var fourthItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 5*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 5*50, Qt.LeftButton, Qt.NoModifier, 10)
             var fifthItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 6*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 6*50, Qt.LeftButton, Qt.NoModifier, 10)
             var sixthItem = tree.currentIndex
 
             compare(tree.selection, null)
@@ -500,7 +491,7 @@ Item {
             tree.selectionMode = SelectionMode.MultiSelection
             compare(tree.selectionMode, SelectionMode.MultiSelection)
 
-            mouseClick(tree, semiIndent + 50, 70+50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 70+50, Qt.LeftButton, Qt.NoModifier, 10)
 
             compare(secondItem.internalId, tree.currentIndex.internalId)
             compare(tree.selection.hasSelection, true)
@@ -576,8 +567,6 @@ Item {
 
         function test_selection_extendedSelection()
         {
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_1.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);
@@ -588,17 +577,17 @@ Item {
             selectionModel.model = tree.model
 
             // Collect some model index
-            mouseClick(tree, semiIndent + 50, 20 + 50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 50, Qt.LeftButton, Qt.NoModifier, 10)
             var firstItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 2*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 2*50, Qt.LeftButton, Qt.NoModifier, 10)
             var secondItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 3*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 3*50, Qt.LeftButton, Qt.NoModifier, 10)
             var thirdItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 4*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 4*50, Qt.LeftButton, Qt.NoModifier, 10)
             var fourthItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 5*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 5*50, Qt.LeftButton, Qt.NoModifier, 10)
             var fifthItem = tree.currentIndex
-            mouseClick(tree, semiIndent + 50, 20 + 6*50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 20 + 6*50, Qt.LeftButton, Qt.NoModifier, 10)
             var sixthItem = tree.currentIndex
 
             compare(tree.selection, null)
@@ -611,7 +600,7 @@ Item {
             tree.selectionMode = SelectionMode.ExtendedSelection
             compare(tree.selectionMode, SelectionMode.ExtendedSelection)
 
-            mouseClick(tree, semiIndent + 50, 70+50, Qt.LeftButton)
+            mouseClick(tree, semiIndent + 50, 70+50, Qt.LeftButton, Qt.NoModifier, 10)
 
             compare(secondItem.internalId, tree.currentIndex.internalId)
             compare(tree.selection.hasSelection, true)
@@ -664,8 +653,6 @@ Item {
 
         function test_selection_contiguousSelection()
         {
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_1.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);
@@ -761,15 +748,13 @@ Item {
         }
 
         function test_indexAt() {
-            skip("Fails because of bug QTBUG-47523")
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_1.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);
             verify(tree !== null, "tree created is null")
             verify(waitForRendering(tree), "TreeView did not render on time")
             var model = tree.model
+            wait(50)
 
             // Sample each row and test
             for (var row = 0; row < tree.__listView.count; row++) {
@@ -781,7 +766,12 @@ Item {
                         || treeIndex.internalId !== modelIndex.internalId) {
                         console.log("Test about to fail: row = " + row + ", __listView.count =" + tree.__listView.count)
                         console.log(" . . . . . . . . .  x =" + x + ", getColumn(0).width =" + tree.getColumn(0).width)
+                        console.log("pairs of should-be-equal values: ",
+                                    treeIndex.row, modelIndex.row,
+                                    treeIndex.column, modelIndex.column,
+                                    treeIndex.internalId, modelIndex.internalId)
                     }
+
                     compare(treeIndex.row, modelIndex.row)
                     compare(treeIndex.column, modelIndex.column)
                     compare(treeIndex.internalId, modelIndex.internalId)
@@ -832,8 +822,6 @@ Item {
 
         function test_QTBUG_46891_selection_collapse_parent()
         {
-            if (Settings.hasTouchScreen)
-                skip("Fails with touch screens");
             var component = Qt.createComponent("treeview/treeview_1.qml")
             compare(component.status, Component.Ready)
             var tree = component.createObject(container);

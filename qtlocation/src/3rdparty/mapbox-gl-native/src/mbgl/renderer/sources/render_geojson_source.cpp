@@ -62,6 +62,7 @@ void RenderGeoJSONSource::update(Immutable<style::Source::Impl> baseImpl_,
                        SourceType::GeoJSON,
                        util::tileSize,
                        impl().getZoomRange(),
+                       optional<LatLngBounds>{},
                        [&] (const OverscaledTileID& tileID) {
                            return std::make_unique<GeoJSONTile>(tileID, impl().id, parameters, data->getTile(tileID.canonical));
                        });
@@ -84,16 +85,17 @@ std::unordered_map<std::string, std::vector<Feature>>
 RenderGeoJSONSource::queryRenderedFeatures(const ScreenLineString& geometry,
                                            const TransformState& transformState,
                                            const std::vector<const RenderLayer*>& layers,
-                                           const RenderedQueryOptions& options) const {
-    return tilePyramid.queryRenderedFeatures(geometry, transformState, layers, options);
+                                           const RenderedQueryOptions& options,
+                                           const mat4& projMatrix) const {
+    return tilePyramid.queryRenderedFeatures(geometry, transformState, layers, options, projMatrix);
 }
 
 std::vector<Feature> RenderGeoJSONSource::querySourceFeatures(const SourceQueryOptions& options) const {
     return tilePyramid.querySourceFeatures(options);
 }
 
-void RenderGeoJSONSource::onLowMemory() {
-    tilePyramid.onLowMemory();
+void RenderGeoJSONSource::reduceMemoryUse() {
+    tilePyramid.reduceMemoryUse();
 }
 
 void RenderGeoJSONSource::dumpDebugLogs() const {
