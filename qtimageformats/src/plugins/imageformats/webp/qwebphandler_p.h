@@ -56,7 +56,9 @@ public:
     ~QWebpHandler();
 
 public:
+#if QT_DEPRECATED_SINCE(5, 13)
     QByteArray name() const override;
+#endif
 
     bool canRead() const override;
     bool read(QImage *image) override;
@@ -85,7 +87,6 @@ private:
         ScanSuccess = 1,
     };
 
-    bool m_lossless;
     int m_quality;
     mutable ScanState m_scanState;
     WebPBitstreamFeatures m_features;

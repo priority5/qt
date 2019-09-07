@@ -29,7 +29,10 @@
 #include "../util.h"
 #include <QtCore/qbuffer.h>
 #include <QtTest/QtTest>
+#include <QtWebEngineCore/qwebengineurlrequestinterceptor.h>
 #include <QtWebEngineCore/qwebengineurlrequestjob.h>
+#include <QtWebEngineCore/qwebenginecookiestore.h>
+#include <QtWebEngineCore/qwebengineurlscheme.h>
 #include <QtWebEngineCore/qwebengineurlschemehandler.h>
 #include <QtWebEngineWidgets/qwebengineprofile.h>
 #include <QtWebEngineWidgets/qwebenginepage.h>
@@ -42,42 +45,100 @@ class tst_QWebEngineProfile : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
-    void defaultProfile();
-    void profileConstructors();
+    void initTestCase();
+    void init();
+    void cleanup();
+    void privateProfile();
+    void testProfile();
     void clearDataFromCache();
     void disableCache();
     void urlSchemeHandlers();
     void urlSchemeHandlerFailRequest();
     void urlSchemeHandlerFailOnRead();
     void urlSchemeHandlerStreaming();
+    void urlSchemeHandlerRequestHeaders();
+    void urlSchemeHandlerInstallation();
     void customUserAgent();
     void httpAcceptLanguage();
     void downloadItem();
     void changePersistentPath();
+    void initiator();
+    void badDeleteOrder();
+    void qtbug_71895(); // this should be the last test
 };
 
-void tst_QWebEngineProfile::defaultProfile()
+void tst_QWebEngineProfile::initTestCase()
 {
+    QWebEngineUrlScheme foo("foo");
+    QWebEngineUrlScheme stream("stream");
+    QWebEngineUrlScheme letterto("letterto");
+    QWebEngineUrlScheme aviancarrier("aviancarrier");
+    foo.setSyntax(QWebEngineUrlScheme::Syntax::Host);
+    stream.setSyntax(QWebEngineUrlScheme::Syntax::HostAndPort);
+    stream.setDefaultPort(8080);
+    letterto.setSyntax(QWebEngineUrlScheme::Syntax::Path);
+    aviancarrier.setSyntax(QWebEngineUrlScheme::Syntax::Path);
+    QWebEngineUrlScheme::registerScheme(foo);
+    QWebEngineUrlScheme::registerScheme(stream);
+    QWebEngineUrlScheme::registerScheme(letterto);
+    QWebEngineUrlScheme::registerScheme(aviancarrier);
+}
+
+void tst_QWebEngineProfile::init()
+{
+    //make sure defualt global profile is 'default' across all the tests
     QWebEngineProfile *profile = QWebEngineProfile::defaultProfile();
     QVERIFY(profile);
     QVERIFY(!profile->isOffTheRecord());
     QCOMPARE(profile->storageName(), QStringLiteral("Default"));
     QCOMPARE(profile->httpCacheType(), QWebEngineProfile::DiskHttpCache);
     QCOMPARE(profile->persistentCookiesPolicy(), QWebEngineProfile::AllowPersistentCookies);
+    QCOMPARE(profile->cachePath(),  QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+             + QStringLiteral("/QtWebEngine/Default"));
+    QCOMPARE(profile->persistentStoragePath(),  QStandardPaths::writableLocation(QStandardPaths::DataLocation)
+             + QStringLiteral("/QtWebEngine/Default"));
 }
 
-void tst_QWebEngineProfile::profileConstructors()
+void tst_QWebEngineProfile::cleanup()
+{
+    QWebEngineProfile *profile = QWebEngineProfile::defaultProfile();
+    profile->setCachePath(QString());
+    profile->setPersistentStoragePath(QString());
+    profile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
+    profile->removeAllUrlSchemeHandlers();
+}
+
+void tst_QWebEngineProfile::privateProfile()
 {
     QWebEngineProfile otrProfile;
-    QWebEngineProfile diskProfile(QStringLiteral("Test"));
-
     QVERIFY(otrProfile.isOffTheRecord());
-    QVERIFY(!diskProfile.isOffTheRecord());
-    QCOMPARE(diskProfile.storageName(), QStringLiteral("Test"));
     QCOMPARE(otrProfile.httpCacheType(), QWebEngineProfile::MemoryHttpCache);
-    QCOMPARE(diskProfile.httpCacheType(), QWebEngineProfile::DiskHttpCache);
     QCOMPARE(otrProfile.persistentCookiesPolicy(), QWebEngineProfile::NoPersistentCookies);
-    QCOMPARE(diskProfile.persistentCookiesPolicy(), QWebEngineProfile::AllowPersistentCookies);
+    QCOMPARE(otrProfile.cachePath(), QString());
+    QCOMPARE(otrProfile.persistentStoragePath(), QString());
+    // TBD: setters do not really work
+    otrProfile.setCachePath(QStringLiteral("/home/foo/bar"));
+    QCOMPARE(otrProfile.cachePath(), QString());
+    otrProfile.setPersistentStoragePath(QStringLiteral("/home/foo/bar"));
+    QCOMPARE(otrProfile.persistentStoragePath(), QString());
+    otrProfile.setHttpCacheType(QWebEngineProfile::DiskHttpCache);
+    QCOMPARE(otrProfile.httpCacheType(), QWebEngineProfile::MemoryHttpCache);
+    otrProfile.setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+    QCOMPARE(otrProfile.persistentCookiesPolicy(), QWebEngineProfile::NoPersistentCookies);
+}
+
+
+void tst_QWebEngineProfile::testProfile()
+{
+    QWebEngineProfile profile(QStringLiteral("Test"));
+    QVERIFY(!profile.isOffTheRecord());
+    QCOMPARE(profile.storageName(), QStringLiteral("Test"));
+    QCOMPARE(profile.httpCacheType(), QWebEngineProfile::DiskHttpCache);
+    QCOMPARE(profile.persistentCookiesPolicy(), QWebEngineProfile::AllowPersistentCookies);
+    QCOMPARE(profile.cachePath(),  QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+             + QStringLiteral("/QtWebEngine/Test"));
+    QCOMPARE(profile.persistentStoragePath(),  QStandardPaths::writableLocation(QStandardPaths::DataLocation)
+             + QStringLiteral("/QtWebEngine/Test"));
 }
 
 void tst_QWebEngineProfile::clearDataFromCache()
@@ -163,20 +224,24 @@ public:
 
 class ReplyingUrlSchemeHandler : public QWebEngineUrlSchemeHandler
 {
-    QBuffer m_buffer;
-    QByteArray m_bufferData;
 public:
     ReplyingUrlSchemeHandler(QObject *parent = nullptr)
         : QWebEngineUrlSchemeHandler(parent)
     {
-        m_buffer.setBuffer(&m_bufferData);
+    }
+    ~ReplyingUrlSchemeHandler()
+    {
     }
 
     void requestStarted(QWebEngineUrlRequestJob *job)
     {
-        m_bufferData = job->requestUrl().toString().toUtf8();
-        job->reply("text/plain;charset=utf-8", &m_buffer);
+        QBuffer *buffer = new QBuffer(job);
+        buffer->setData(job->requestUrl().toString().toUtf8());
+        m_buffers.append(buffer);
+        job->reply("text/plain;charset=utf-8", buffer);
     }
+
+    QList<QPointer<QBuffer>> m_buffers;
 };
 
 class StreamingIODevice : public QIODevice {
@@ -189,9 +254,13 @@ public:
     }
     bool isSequential() const override { return true; }
     qint64 bytesAvailable() const override
-    { return m_bytesAvailable; }
+    {
+        QMutexLocker lock(&m_mutex);
+        return m_bytesAvailable;
+    }
     bool atEnd() const override
     {
+        QMutexLocker lock(&m_mutex);
         return (m_data.size() >= 1000 && m_bytesRead >= 1000);
     }
 protected:
@@ -226,7 +295,7 @@ protected:
     }
 
 private:
-    QMutex m_mutex;
+    mutable QMutex m_mutex{QMutex::Recursive};
     QByteArray m_data;
     QBasicTimer m_timer;
     int m_bytesRead;
@@ -303,6 +372,11 @@ void tst_QWebEngineProfile::urlSchemeHandlers()
     url = QUrl(QStringLiteral("aviancarrier:inspector.mortensen@politistyrke.dk"));
     QVERIFY(loadSync(&view, url));
     QCOMPARE(toPlainTextSync(view.page()), url.toString());
+
+    // Check that all buffers got deleted
+    QCOMPARE(gopherHandler.m_buffers.count(), 2);
+    for (int i = 0; i < gopherHandler.m_buffers.count(); ++i)
+        QVERIFY(gopherHandler.m_buffers.at(i).isNull());
 }
 
 class FailingUrlSchemeHandler : public QWebEngineUrlSchemeHandler
@@ -321,17 +395,17 @@ public:
     {
     }
 
-    qint64 readData(char *, qint64) Q_DECL_OVERRIDE
+    qint64 readData(char *, qint64) override
     {
         m_job->fail(QWebEngineUrlRequestJob::RequestFailed);
         return -1;
     }
-    qint64 writeData(const char *, qint64) Q_DECL_OVERRIDE
+    qint64 writeData(const char *, qint64) override
     {
         m_job->fail(QWebEngineUrlRequestJob::RequestFailed);
         return -1;
     }
-    void close() Q_DECL_OVERRIDE
+    void close() override
     {
         QIODevice::close();
         deleteLater();
@@ -393,6 +467,105 @@ void tst_QWebEngineProfile::urlSchemeHandlerStreaming()
     QByteArray result;
     result.append(1000, 'c');
     QCOMPARE(toPlainTextSync(view.page()), QString::fromLatin1(result));
+}
+
+class ExtraHeaderInterceptor : public QWebEngineUrlRequestInterceptor
+{
+public:
+    ExtraHeaderInterceptor() { }
+
+    void setExtraHeader(const QByteArray &key, const QByteArray &value)
+    {
+        m_extraKey = key;
+        m_extraValue = value;
+    }
+
+    void interceptRequest(QWebEngineUrlRequestInfo &info) override
+    {
+        if (info.requestUrl().scheme() == QLatin1String("myscheme"))
+            info.setHttpHeader(m_extraKey, m_extraValue);
+    }
+
+    QByteArray m_extraKey;
+    QByteArray m_extraValue;
+};
+
+class RequestHeadersUrlSchemeHandler : public ReplyingUrlSchemeHandler
+{
+public:
+    void setExpectedHeader(const QByteArray &key, const QByteArray &value)
+    {
+        m_expectedKey = key;
+        m_expectedValue = value;
+    }
+    void requestStarted(QWebEngineUrlRequestJob *job) override
+    {
+        const auto requestHeaders = job->requestHeaders();
+        QVERIFY(requestHeaders.contains(m_expectedKey));
+        QCOMPARE(requestHeaders.value(m_expectedKey), m_expectedValue);
+        ReplyingUrlSchemeHandler::requestStarted(job);
+    }
+    QByteArray m_expectedKey;
+    QByteArray m_expectedValue;
+};
+
+void tst_QWebEngineProfile::urlSchemeHandlerRequestHeaders()
+{
+    RequestHeadersUrlSchemeHandler handler;
+    ExtraHeaderInterceptor interceptor;
+
+    handler.setExpectedHeader("Hello", "World");
+    interceptor.setExtraHeader("Hello", "World");
+
+    QWebEngineProfile profile;
+    profile.installUrlSchemeHandler("myscheme", &handler);
+    profile.setRequestInterceptor(&interceptor);
+
+    QWebEnginePage page(&profile);
+    QSignalSpy loadFinishedSpy(&page, SIGNAL(loadFinished(bool)));
+    page.load(QUrl(QStringLiteral("myscheme://whatever")));
+    QVERIFY(loadFinishedSpy.wait());
+}
+
+void tst_QWebEngineProfile::urlSchemeHandlerInstallation()
+{
+    FailingUrlSchemeHandler handler;
+    QWebEngineProfile profile;
+
+    // Builtin schemes that *cannot* be overridden.
+    for (auto scheme : { "about", "blob", "data", "javascript", "qrc", "https", "http", "file",
+                         "ftp", "wss", "ws", "filesystem", "FileSystem" }) {
+        QTest::ignoreMessage(
+                QtWarningMsg,
+                QRegularExpression("Cannot install a URL scheme handler overriding internal scheme.*"));
+        auto prevHandler = profile.urlSchemeHandler(scheme);
+        profile.installUrlSchemeHandler(scheme, &handler);
+        QCOMPARE(profile.urlSchemeHandler(scheme), prevHandler);
+    }
+
+    // Builtin schemes that *can* be overridden.
+    for (auto scheme : { "gopher", "GOPHER" }) {
+        profile.installUrlSchemeHandler(scheme, &handler);
+        QCOMPARE(profile.urlSchemeHandler(scheme), &handler);
+        profile.removeUrlScheme(scheme);
+    }
+
+    // Other schemes should be registered with QWebEngineUrlScheme first, but
+    // handler installation still succeeds to preserve backwards compatibility.
+    QTest::ignoreMessage(
+            QtWarningMsg,
+            QRegularExpression("Please register the custom scheme.*"));
+    profile.installUrlSchemeHandler("tst", &handler);
+    QCOMPARE(profile.urlSchemeHandler("tst"), &handler);
+
+    // Existing handler cannot be overridden.
+    FailingUrlSchemeHandler handler2;
+    QTest::ignoreMessage(
+            QtWarningMsg,
+            QRegularExpression("URL scheme handler already installed.*"));
+    profile.installUrlSchemeHandler("tst", &handler2);
+    QCOMPARE(profile.urlSchemeHandler("tst"), &handler);
+    profile.removeUrlScheme("tst");
 }
 
 void tst_QWebEngineProfile::customUserAgent()
@@ -479,6 +652,79 @@ void tst_QWebEngineProfile::changePersistentPath()
     const QString newPath = testProfile.persistentStoragePath();
     QVERIFY(newPath.endsWith(QStringLiteral("Test2")));
 }
+
+class InitiatorSpy : public QWebEngineUrlSchemeHandler
+{
+public:
+    QUrl initiator;
+    void requestStarted(QWebEngineUrlRequestJob *job) override
+    {
+        initiator = job->initiator();
+        job->fail(QWebEngineUrlRequestJob::RequestDenied);
+    }
+};
+
+void tst_QWebEngineProfile::initiator()
+{
+    InitiatorSpy handler;
+    QWebEngineProfile profile;
+    profile.installUrlSchemeHandler("foo", &handler);
+    QWebEnginePage page(&profile);
+    QSignalSpy loadFinishedSpy(&page, SIGNAL(loadFinished(bool)));
+
+    // about:blank has a unique origin, so initiator should be QUrl("null")
+    evaluateJavaScriptSync(&page, "window.location = 'foo:bar'");
+    QVERIFY(loadFinishedSpy.wait());
+    QCOMPARE(handler.initiator, QUrl("null"));
+
+    page.setHtml("", QUrl("http://test:123/foo%20bar"));
+    QVERIFY(loadFinishedSpy.wait());
+
+    // baseUrl determines the origin, so QUrl("http://test:123")
+    evaluateJavaScriptSync(&page, "window.location = 'foo:bar'");
+    QVERIFY(loadFinishedSpy.wait());
+    QCOMPARE(handler.initiator, QUrl("http://test:123"));
+
+    // Directly calling load/setUrl should have initiator QUrl(), meaning
+    // browser-initiated, trusted.
+    page.load(QUrl("foo:bar"));
+    QVERIFY(loadFinishedSpy.wait());
+    QCOMPARE(handler.initiator, QUrl());
+}
+
+void tst_QWebEngineProfile::badDeleteOrder()
+{
+    QWebEngineProfile *profile = new QWebEngineProfile();
+    QWebEngineView *view = new QWebEngineView();
+    view->resize(640, 480);
+    view->show();
+    QVERIFY(QTest::qWaitForWindowExposed(view));
+    QWebEnginePage *page = new QWebEnginePage(profile, view);
+    view->setPage(page);
+
+    QSignalSpy spyLoadFinished(page, SIGNAL(loadFinished(bool)));
+    page->setHtml(QStringLiteral("<html><body><h1>Badly handled page!</h1></body></html>"));
+    QTRY_COMPARE(spyLoadFinished.count(), 1);
+
+    delete profile;
+    delete view;
+}
+
+void tst_QWebEngineProfile::qtbug_71895()
+{
+    QWebEngineView view;
+    QSignalSpy loadSpy(view.page(), SIGNAL(loadFinished(bool)));
+    view.setUrl(QUrl("https://www.qt.io"));
+    view.show();
+    view.page()->profile()->clearHttpCache();
+    view.page()->profile()->setHttpCacheType(QWebEngineProfile::NoCache);
+    view.page()->profile()->cookieStore()->deleteAllCookies();
+    view.page()->profile()->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+    bool gotSignal = loadSpy.count() || loadSpy.wait(20000);
+    if (!gotSignal)
+        QSKIP("Couldn't load page from network, skipping test.");
+}
+
 
 QTEST_MAIN(tst_QWebEngineProfile)
 #include "tst_qwebengineprofile.moc"

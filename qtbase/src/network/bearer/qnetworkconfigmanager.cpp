@@ -233,19 +233,20 @@ QNetworkConfigurationManager::QNetworkConfigurationManager(QObject *parent)
     : QObject(parent)
 {
     QNetworkConfigurationManagerPrivate *priv = qNetworkConfigurationManagerPrivate();
+    if (priv) {
+        connect(priv, SIGNAL(configurationAdded(QNetworkConfiguration)),
+                this, SIGNAL(configurationAdded(QNetworkConfiguration)));
+        connect(priv, SIGNAL(configurationRemoved(QNetworkConfiguration)),
+                this, SIGNAL(configurationRemoved(QNetworkConfiguration)));
+        connect(priv, SIGNAL(configurationChanged(QNetworkConfiguration)),
+                this, SIGNAL(configurationChanged(QNetworkConfiguration)));
+        connect(priv, SIGNAL(onlineStateChanged(bool)),
+                this, SIGNAL(onlineStateChanged(bool)));
+        connect(priv, SIGNAL(configurationUpdateComplete()),
+                this, SIGNAL(updateCompleted()));
 
-    connect(priv, SIGNAL(configurationAdded(QNetworkConfiguration)),
-            this, SIGNAL(configurationAdded(QNetworkConfiguration)));
-    connect(priv, SIGNAL(configurationRemoved(QNetworkConfiguration)),
-            this, SIGNAL(configurationRemoved(QNetworkConfiguration)));
-    connect(priv, SIGNAL(configurationChanged(QNetworkConfiguration)),
-            this, SIGNAL(configurationChanged(QNetworkConfiguration)));
-    connect(priv, SIGNAL(onlineStateChanged(bool)),
-            this, SIGNAL(onlineStateChanged(bool)));
-    connect(priv, SIGNAL(configurationUpdateComplete()),
-            this, SIGNAL(updateCompleted()));
-
-    priv->enablePolling();
+        priv->enablePolling();
+    }
 }
 
 /*!
@@ -378,8 +379,8 @@ void QNetworkConfigurationManager::updateConfigurations()
         priv->performAsyncConfigurationUpdate();
 }
 
-#include "moc_qnetworkconfigmanager.cpp"
-
 QT_END_NAMESPACE
+
+#include "moc_qnetworkconfigmanager.cpp"
 
 #endif // QT_NO_BEARERMANAGEMENT

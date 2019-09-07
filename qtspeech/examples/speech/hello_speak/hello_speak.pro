@@ -1,6 +1,8 @@
 TEMPLATE = app
 
 QT += widgets texttospeech
+requires(qtHaveModule(gui))
+qtHaveModule(gui): requires(qtConfig(combobox))
 
 SOURCES = main.cpp \
           mainwindow.cpp

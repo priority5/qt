@@ -48,12 +48,12 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.2
+import QtQuick 2.12
 import QtQuick.Window 2.2
 import QtTest 1.0
-import QtQuick.Templates 2.1 as T
-import QtQuick.Controls 2.1
-import QtQuick.Controls.Material 2.1
+import QtQuick.Templates 2.12 as T
+import QtQuick.Controls 2.12
+import QtQuick.Controls.Material 2.12
 
 TestCase {
     id: testCase
@@ -714,5 +714,40 @@ TestCase {
         compare(control.contentItem.color.toString(), Material.color(Material.Pink, Material.Shade200))
 
         control.destroy()
+    }
+
+    Component {
+        id: testResizeBackground
+        Item {
+            width: 200
+            height: 200
+            property alias textArea: textArea
+            ScrollView {
+                anchors.fill: parent
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                TextArea {
+                    id: textArea
+                    wrapMode : TextEdit.WordWrap
+                    readOnly: false
+                    selectByMouse: true
+                    focus: true
+                    text: "test message"
+                }
+            }
+        }
+    }
+
+    function test_resize_background() {
+        var control = testCase.createTemporaryObject(testResizeBackground, testCase)
+        compare(control.textArea.background.height, 1)
+        compare(control.textArea.background.width, control.width)
+        control.width = 400
+        control.height = 400
+        compare(control.textArea.background.height, 1)
+        compare(control.textArea.background.width, control.width)
+        control.width = 200
+        control.height = 200
+        compare(control.textArea.background.height, 1)
+        compare(control.textArea.background.width, control.width)
     }
 }

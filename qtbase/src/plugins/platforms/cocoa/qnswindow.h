@@ -48,18 +48,22 @@
 
 QT_FORWARD_DECLARE_CLASS(QCocoaWindow)
 
+// @compatibility_alias doesn't work with categories or their methods
+#define FullScreenProperty QT_MANGLE_NAMESPACE(FullScreenProperty)
+#define qt_fullScreen QT_MANGLE_NAMESPACE(qt_fullScreen)
+
 @interface NSWindow (FullScreenProperty)
 @property(readonly) BOOL qt_fullScreen;
 @end
 
+// @compatibility_alias doesn't work with protocols
+#define QNSWindowProtocol QT_MANGLE_NAMESPACE(QNSWindowProtocol)
+
 @protocol QNSWindowProtocol
-@optional
-- (BOOL)canBecomeKeyWindow;
-- (void)sendEvent:(NSEvent*)theEvent;
+- (instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style
+    backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag screen:(NSScreen *)screen
+    platformWindow:(QCocoaWindow*)window;
 - (void)closeAndRelease;
-- (void)dealloc;
-- (BOOL)isOpaque;
-- (NSColor *)backgroundColor;
 @property (nonatomic, readonly) QCocoaWindow *platformWindow;
 @end
 

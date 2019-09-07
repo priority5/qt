@@ -77,12 +77,14 @@ public:
     bool isRunning() const { return m_running; }
     void setLoops(int loops) { m_loops = loops; }
     int loops() const { return m_loops; }
+    void setNormalizedLocalTime(float normalizedLocalTime);
+    float normalizedLocalTime() const { return m_normalizedLocalTime; }
 
-    void sceneChangeEvent(const Qt3DCore::QSceneChangePtr &e) Q_DECL_OVERRIDE;
+    void sceneChangeEvent(const Qt3DCore::QSceneChangePtr &e) override;
     void setHandler(Handler *handler) { m_handler = handler; }
 
     // Called by jobs
-    bool canRun() const { return !m_clipId.isNull() && !m_mapperId.isNull() && m_running; }
+    bool canRun() const { return !m_clipId.isNull() && !m_mapperId.isNull(); }
     void setMappingData(const QVector<MappingData> &mappingData) { m_mappingData = mappingData; }
     QVector<MappingData> mappingData() const { return m_mappingData; }
 
@@ -96,8 +98,8 @@ public:
 
     void animationClipMarkedDirty() { setDirty(Handler::ClipAnimatorDirty); }
 
-    void setFormatIndices(const ComponentIndices &formatIndices) { m_formatIndices = formatIndices; }
-    ComponentIndices formatIndices() const { return m_formatIndices; }
+    void setClipFormat(const ClipFormat &clipFormat) { m_clipFormat = clipFormat; }
+    ClipFormat clipFormat() const { return m_clipFormat; }
 
     qint64 nsSincePreviousFrame(qint64 currentGlobalTimeNS);
     void setLastGlobalTimeNS(qint64 lastGlobalTimeNS);
@@ -105,8 +107,16 @@ public:
     double lastLocalTime() const;
     void setLastLocalTime(double lastLocalTime);
 
+    float lastNormalizedLocalTime() { return m_lastNormalizedLocalTime; }
+    void setLastNormalizedLocalTime(float normalizedLocalTime);
+    bool isSeeking() const
+    {
+        return isValidNormalizedTime(m_normalizedLocalTime)
+                && !qFuzzyCompare(m_lastNormalizedLocalTime, m_normalizedLocalTime);
+    }
+
 private:
-    void initializeFromPeer(const Qt3DCore::QNodeCreatedChangeBasePtr &change) Q_DECL_FINAL;
+    void initializeFromPeer(const Qt3DCore::QNodeCreatedChangeBasePtr &change) final;
 
     Qt3DCore::QNodeId m_clipId;
     Qt3DCore::QNodeId m_mapperId;
@@ -120,7 +130,10 @@ private:
     QVector<MappingData> m_mappingData;
 
     int m_currentLoop;
-    ComponentIndices m_formatIndices;
+    ClipFormat m_clipFormat;
+
+    float m_normalizedLocalTime;
+    float m_lastNormalizedLocalTime;
 };
 
 } // namespace Animation

@@ -42,6 +42,7 @@
 #include <QtCharts/QAbstractAxis>
 #include <private/chartaxiselement_p.h>
 #include <QtCharts/QChart>
+#include <QtCharts/private/qchartglobal_p.h>
 #include <QtCore/QDebug>
 
 QT_BEGIN_NAMESPACE
@@ -57,7 +58,7 @@ class QAbstractSeries;
 class ChartTheme;
 class ChartElement;
 
-class Q_AUTOTEST_EXPORT QAbstractAxisPrivate : public QObject
+class Q_CHARTS_PRIVATE_EXPORT QAbstractAxisPrivate : public QObject
 {
     Q_OBJECT
 public:
@@ -116,6 +117,7 @@ private:
     QPen m_minorGridLinePen;
 
     bool m_labelsVisible;
+    bool m_labelsEditable;
     QBrush m_labelsBrush;
     QFont m_labelsFont;
     int m_labelsAngle;

@@ -41,7 +41,7 @@
 #define QT3DRENDER_QTEXTUREIMAGEDATAGENERATOR_H
 
 #include <Qt3DRender/qabstractfunctor.h>
-#include <QSharedPointer>
+#include <QtCore/QSharedPointer>
 
 // TO DO TexImageDataPtr -> QImageDataPtr + d_ptr
 // We might also get rid of the layer, face, mipmap level from
@@ -55,7 +55,7 @@ namespace Qt3DRender {
 class QTextureImageData;
 typedef QSharedPointer<QTextureImageData> QTextureImageDataPtr;
 
-class QT3DRENDERSHARED_EXPORT QTextureImageDataGenerator : public QAbstractFunctor
+class Q_3DRENDERSHARED_EXPORT QTextureImageDataGenerator : public QAbstractFunctor
 {
 public:
     virtual ~QTextureImageDataGenerator() {}

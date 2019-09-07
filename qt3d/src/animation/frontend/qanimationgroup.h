@@ -37,7 +37,7 @@
 #ifndef QT3DANIMATION_QANIMATIONGROUP_H
 #define QT3DANIMATION_QANIMATIONGROUP_H
 
-#include <qobject.h>
+#include <QtCore/qobject.h>
 
 #include <Qt3DAnimation/qabstractanimation.h>
 
@@ -49,7 +49,7 @@ namespace Qt3DAnimation {
 
 class QAnimationGroupPrivate;
 
-class QT3DANIMATIONSHARED_EXPORT QAnimationGroup : public QObject
+class Q_3DANIMATIONSHARED_EXPORT QAnimationGroup : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged)

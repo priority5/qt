@@ -88,7 +88,7 @@ public:
 
     bool multisample() const;
     void setMultisample(bool enable);
-    Q_INVOKABLE void setItemArea(QSize area);
+    Q_INVOKABLE void setItemAreaAndDevicePixelRatio(QSize area, qreal devicePixelRatio);
     bool isHoverEnabled() const;
 
     enum CameraAspectRatioMode {
@@ -115,11 +115,11 @@ private Q_SLOTS:
     void applyRootEntityChange();
 
 private:
-    QSGNode *updatePaintNode(QSGNode *node, UpdatePaintNodeData *nodeData) Q_DECL_OVERRIDE;
+    QSGNode *updatePaintNode(QSGNode *node, UpdatePaintNodeData *nodeData) override;
     void setWindowSurface(QObject *rootObject);
     void setCameraAspectModeHelper();
     void updateCameraAspectRatio();
-    void mousePressEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
+    void mousePressEvent(QMouseEvent *event) override;
 
     QStringList m_aspects;
     Qt3DCore::QEntity *m_entity;

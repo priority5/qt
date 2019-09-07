@@ -81,6 +81,12 @@ void BookmarkManager::BookmarkTreeView::subclassKeyPressEvent(QKeyEvent *event)
     QTreeView::keyPressEvent(event);
 }
 
+void BookmarkManager::BookmarkTreeView::commitData(QWidget *editor)
+{
+    QTreeView::commitData(editor);
+    emit editingDone();
+}
+
 void BookmarkManager::BookmarkTreeView::setExpandedData(const QModelIndex &index)
 {
     TRACE_OBJ
@@ -91,7 +97,7 @@ void BookmarkManager::BookmarkTreeView::setExpandedData(const QModelIndex &index
 // -- BookmarkManager
 
 QMutex BookmarkManager::mutex;
-BookmarkManager* BookmarkManager::bookmarkManager = 0;
+BookmarkManager* BookmarkManager::bookmarkManager = nullptr;
 
 // -- public
 
@@ -110,7 +116,7 @@ void BookmarkManager::destroy()
 {
     TRACE_OBJ
     delete bookmarkManager;
-    bookmarkManager = 0;
+    bookmarkManager = nullptr;
 }
 
 QWidget* BookmarkManager::bookmarkDockWidget() const
@@ -118,7 +124,7 @@ QWidget* BookmarkManager::bookmarkDockWidget() const
     TRACE_OBJ
     if (bookmarkWidget)
         return bookmarkWidget;
-    return 0;
+    return nullptr;
 }
 
 void BookmarkManager::setBookmarksMenu(QMenu* menu)
@@ -142,20 +148,16 @@ void BookmarkManager::addBookmark(const QString &title, const QString &url)
     TRACE_OBJ
     showBookmarkDialog(title.isEmpty() ? tr("Untitled") : title,
         url.isEmpty() ? QLatin1String("about:blank") : url);
+
+    storeBookmarks();
 }
 
 // -- private
 
 BookmarkManager::BookmarkManager()
-    : typeAndSearch(false)
-    , bookmarkMenu(0)
-    , m_toolBar(0)
-    , bookmarkModel(new BookmarkModel)
-    , bookmarkFilterModel(0)
-    , typeAndSearchModel(0)
+    : bookmarkModel(new BookmarkModel)
     , bookmarkWidget(new BookmarkWidget)
     , bookmarkTreeView(new BookmarkTreeView)
-    , bookmarkManagerWidget(0)
 {
     TRACE_OBJ
     bookmarkWidget->installEventFilter(this);
@@ -175,9 +177,11 @@ BookmarkManager::BookmarkManager()
     bookmarkWidget->ui.stackedWidget->addWidget(bookmarkTreeView);
 
     connect(bookmarkTreeView, &QAbstractItemView::activated,
-            [this](const QModelIndex &index) { setSourceFromIndex(index, false); });
+            this, [this](const QModelIndex &index) { setSourceFromIndex(index, false); });
     connect(bookmarkTreeView, &QWidget::customContextMenuRequested,
             this, &BookmarkManager::customContextMenuRequested);
+    connect(bookmarkTreeView, &BookmarkTreeView::editingDone,
+            this, &BookmarkManager::storeBookmarks);
 
     connect(&HelpEngineWrapper::instance(), &HelpEngineWrapper::setupFinished,
             this, &BookmarkManager::setupFinished);
@@ -195,13 +199,14 @@ BookmarkManager::BookmarkManager()
             this, &BookmarkManager::refreshBookmarkToolBar);
     connect(bookmarkModel, &QAbstractItemModel::dataChanged,
             this, &BookmarkManager::refreshBookmarkToolBar);
+
 }
 
 BookmarkManager::~BookmarkManager()
 {
     TRACE_OBJ
     delete bookmarkManagerWidget;
-    HelpEngineWrapper::instance().setBookmarks(bookmarkModel->bookmarks());
+    storeBookmarks();
     delete bookmarkModel;
 }
 
@@ -225,6 +230,8 @@ void BookmarkManager::removeItem(const QModelIndex &index)
             return;
     }
     bookmarkModel->removeItem(current);
+
+    storeBookmarks();
 }
 
 bool BookmarkManager::eventFilter(QObject *object, QEvent *event)
@@ -238,24 +245,23 @@ bool BookmarkManager::eventFilter(QObject *object, QEvent *event)
     if (event->type() == QEvent::KeyPress) {
         QKeyEvent *ke = static_cast<QKeyEvent*>(event);
         switch (ke->key()) {
-            case Qt::Key_F2: {
+            case Qt::Key_F2:
                 renameBookmark(bookmarkTreeView->currentIndex());
-            }   break;
+                break;
 
-            case Qt::Key_Delete: {
+            case Qt::Key_Delete:
                 removeItem(bookmarkTreeView->currentIndex());
                 return true;
-            }   break;
 
-            case Qt::Key_Up: {    // needs event filter on widget
+            case Qt::Key_Up:    // needs event filter on widget
             case Qt::Key_Down:
                 if (isWidget)
                     bookmarkTreeView->subclassKeyPressEvent(ke);
-            }   break;
+                break;
 
-            case Qt::Key_Escape: {
+            case Qt::Key_Escape:
                 emit escapePressed();
-            }   break;
+                break;
 
             default: break;
         }
@@ -332,6 +338,11 @@ void BookmarkManager::setupFinished()
     typeAndSearchModel->setSourceModel(bookmarkFilterModel);
 }
 
+void BookmarkManager::storeBookmarks()
+{
+    HelpEngineWrapper::instance().setBookmarks(bookmarkModel->bookmarks());
+}
+
 void BookmarkManager::addBookmarkActivated()
 {
     TRACE_OBJ
@@ -348,7 +359,7 @@ void BookmarkManager::removeBookmarkActivated()
 void BookmarkManager::manageBookmarks()
 {
     TRACE_OBJ
-    if (bookmarkManagerWidget == 0) {
+    if (bookmarkManagerWidget == nullptr) {
         bookmarkManagerWidget = new BookmarkManagerWidget(bookmarkModel);
         connect(bookmarkManagerWidget, &BookmarkManagerWidget::setSource,
                 this, &BookmarkManager::setSource);
@@ -479,10 +490,10 @@ void BookmarkManager::customContextMenuRequested(const QPoint &point)
     if (!typeAndSearch && !bookmarkModel->parent(index).isValid())
         return;
 
-    QAction *remove = 0;
-    QAction *rename = 0;
-    QAction *showItem = 0;
-    QAction *showItemInNewTab = 0;
+    QAction *remove = nullptr;
+    QAction *rename = nullptr;
+    QAction *showItem = nullptr;
+    QAction *showItemInNewTab = nullptr;
 
     QMenu menu;
     if (!typeAndSearch && bookmarkModel->data(index, UserRoleFolder).toBool()) {
@@ -515,8 +526,11 @@ void BookmarkManager::focusInEventOccurred()
 
 void BookmarkManager::managerWidgetAboutToClose()
 {
-    delete bookmarkManagerWidget;
-    bookmarkManagerWidget = 0;
+    if (bookmarkManagerWidget)
+        bookmarkManagerWidget->deleteLater();
+    bookmarkManagerWidget = nullptr;
+
+    storeBookmarks();
 }
 
 void BookmarkManager::textChanged(const QString &text)

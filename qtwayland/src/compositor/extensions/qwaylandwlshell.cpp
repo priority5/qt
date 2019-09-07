@@ -44,6 +44,7 @@
 #ifdef QT_WAYLAND_COMPOSITOR_QUICK
 #include "qwaylandwlshellintegration_p.h"
 #endif
+#include <QtWaylandCompositor/private/qwaylandutils_p.h>
 
 #include <QtWaylandCompositor/QWaylandCompositor>
 #include <QtWaylandCompositor/QWaylandView>
@@ -58,8 +59,6 @@ QT_BEGIN_NAMESPACE
 QWaylandSurfaceRole QWaylandWlShellSurfacePrivate::s_role("wl_shell_surface");
 
 QWaylandWlShellPrivate::QWaylandWlShellPrivate()
-    : QWaylandCompositorExtensionPrivate()
-    , wl_shell()
 {
 }
 
@@ -102,11 +101,6 @@ void QWaylandWlShellPrivate::unregisterShellSurface(QWaylandWlShellSurface *shel
 }
 
 QWaylandWlShellSurfacePrivate::QWaylandWlShellSurfacePrivate()
-    : QWaylandCompositorExtensionPrivate()
-    , wl_shell_surface()
-    , m_shell(Q_NULLPTR)
-    , m_surface(Q_NULLPTR)
-    , m_windowType(Qt::WindowType::Window)
 {
 }
 
@@ -195,7 +189,7 @@ void QWaylandWlShellSurfacePrivate::shell_surface_set_fullscreen(Resource *resou
     Q_Q(QWaylandWlShellSurface);
     QWaylandOutput *output = output_resource
             ? QWaylandOutput::fromResource(output_resource)
-            : Q_NULLPTR;
+            : nullptr;
     setWindowType(Qt::WindowType::Window);
     emit q->setFullScreen(QWaylandWlShellSurface::FullScreenMethod(method), framerate, output);
 }
@@ -220,7 +214,7 @@ void QWaylandWlShellSurfacePrivate::shell_surface_set_maximized(Resource *resour
     Q_Q(QWaylandWlShellSurface);
     QWaylandOutput *output = output_resource
             ? QWaylandOutput::fromResource(output_resource)
-            : Q_NULLPTR;
+            : nullptr;
     setWindowType(Qt::WindowType::Window);
     emit q->setMaximized(output);
 }
@@ -273,15 +267,16 @@ void QWaylandWlShellSurfacePrivate::shell_surface_set_class(Resource *resource,
  * To provide the functionality of the shell extension in a compositor, create
  * an instance of the WlShell component and add it to the list of extensions
  * supported by the compositor:
- * \code
- * import QtWayland.Compositor 1.0
+ *
+ * \qml \QtMinorVersion
+ * import QtWayland.Compositor 1.\1
  *
  * WaylandCompositor {
  *     WlShell {
  *         // ...
  *     }
  * }
- * \endcode
+ * \endqml
  */
 
 /*!
@@ -475,9 +470,9 @@ QWaylandWlShellSurface::~QWaylandWlShellSurface()
 }
 
 /*!
- * \qmlmethod void QtWaylandCompositor::WlShellSurface::initialize(object shell, object surface, object client, int id)
+ * \qmlmethod void QtWaylandCompositor::WlShellSurface::initialize(WlShell shell, WaylandSurface surface, WaylandResource resource)
  *
- * Initializes the WlShellSurface with \a id and associates it with the given \a shell, \a surface, and \a client.
+ * Initializes the WlShellSurface and associates it with the given \a shell, \a surface, and \a resource.
  */
 
 /*!
@@ -530,7 +525,8 @@ QSize QWaylandWlShellSurface::sizeForResize(const QSizeF &size, const QPointF &d
     else if (edge & BottomEdge)
         height += delta.y();
 
-    return QSizeF(width, height).toSize();
+    QSizeF newSize(qMax(width, 1.0), qMax(height, 1.0));
+    return newSize.toSize();
 }
 
 /*!
@@ -566,6 +562,10 @@ QSize QWaylandWlShellSurface::sizeForResize(const QSizeF &size, const QPointF &d
 void QWaylandWlShellSurface::sendConfigure(const QSize &size, ResizeEdge edges)
 {
     Q_D(QWaylandWlShellSurface);
+    if (!size.isValid()) {
+        qWarning() << "Can't configure wl_shell_surface with an invalid size" << size;
+        return;
+    }
     d->send_configure(edges, size.width(), size.height());
 }
 
@@ -633,11 +633,6 @@ QWaylandWlShell *QWaylandWlShellSurface::shell() const
  * This property holds the window type of the WlShellSurface.
  */
 
-/*!
- * \property QWaylandWlShellSurface::windowType
- *
- * This property holds the window type of the QWaylandWlShellSurface.
- */
 Qt::WindowType QWaylandWlShellSurface::windowType() const
 {
     Q_D(const QWaylandWlShellSurface);
@@ -706,10 +701,9 @@ void QWaylandWlShellSurface::ping()
  */
 QWaylandWlShellSurface *QWaylandWlShellSurface::fromResource(wl_resource *resource)
 {
-    QWaylandWlShellSurfacePrivate::Resource *res = QWaylandWlShellSurfacePrivate::Resource::fromResource(resource);
-    if (res)
-        return static_cast<QWaylandWlShellSurfacePrivate *>(res->shell_surface_object)->q_func();
-    return 0;
+    if (auto p = QtWayland::fromResource<QWaylandWlShellSurfacePrivate *>(resource))
+        return p->q_func();
+    return nullptr;
 }
 
 QT_END_NAMESPACE

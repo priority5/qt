@@ -42,6 +42,7 @@
 #include "qquickmenubaritem_p.h"
 
 #include <QtGui/qguiapplication.h>
+#include <QtQuick/qquickrendercontrol.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -75,15 +76,19 @@ bool QQuickShortcutContext::matcher(QObject *obj, Qt::ShortcutContext context)
         return true;
     case Qt::WindowShortcut:
         while (obj && !obj->isWindowType()) {
-            obj = obj->parent();
             item = qobject_cast<QQuickItem *>(obj);
-            if (item) {
+            if (item && item->window()) {
                 obj = item->window();
+                break;
             } else if (QQuickPopup *popup = qobject_cast<QQuickPopup *>(obj)) {
                 obj = popup->window();
                 item = popup->popupItem();
+                break;
             }
+            obj = obj->parent();
         }
+        if (QWindow *renderWindow = QQuickRenderControl::renderWindowFor(qobject_cast<QQuickWindow *>(obj)))
+            obj = renderWindow;
         return obj && obj == QGuiApplication::focusWindow() && !isBlockedByPopup(item);
     default:
         return false;

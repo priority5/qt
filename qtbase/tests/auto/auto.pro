@@ -23,19 +23,19 @@ uikit: SUBDIRS  = corelib gui
 
 cross_compile:                              SUBDIRS -= tools cmake installed_cmake
 else:!qtConfig(process):                    SUBDIRS -= tools
-!qtHaveModule(opengl):                      SUBDIRS -= opengl
+winrt|!qtHaveModule(opengl):                SUBDIRS -= opengl
 !qtHaveModule(gui):                         SUBDIRS -= gui
 !qtHaveModule(widgets):                     SUBDIRS -= widgets
 !qtHaveModule(printsupport):                SUBDIRS -= printsupport
 !qtHaveModule(concurrent):                  SUBDIRS -= concurrent
-!qtHaveModule(network):                     SUBDIRS -= network
+winrt|!qtHaveModule(network):               SUBDIRS -= network
 !qtHaveModule(dbus):                        SUBDIRS -= dbus
 !qtHaveModule(xml):                         SUBDIRS -= xml
 !qtHaveModule(sql):                         SUBDIRS -= sql
 
 # Disable the QtDBus tests if we can't connect to the session bus
 !cross_compile:qtHaveModule(dbus) {
-    !system("dbus-send --session --type=signal / local.AutotestCheck.Hello >/dev/null 2>&1") {
+    !system("dbus-send --session --type=signal / local.AutotestCheck.Hello >$$QMAKE_SYSTEM_NULL_DEVICE 2>&1") {
         qtConfig(dbus-linked): \
             error("QtDBus is enabled but session bus is not available. Please check the installation.")
         else: \

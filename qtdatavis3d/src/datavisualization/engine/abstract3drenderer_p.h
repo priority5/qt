@@ -191,6 +191,7 @@ Q_SIGNALS:
 protected:
     Abstract3DRenderer(Abstract3DController *controller);
 
+    virtual void contextCleanup();
     virtual void initializeOpenGL();
 
     void reInitShaders();
@@ -242,9 +243,6 @@ protected:
     void queriedGraphPosition(const QMatrix4x4 &projectionViewMatrix, const QVector3D &scaling,
                               GLuint defaultFboHandle);
 
-    void fixContextBeforeDelete();
-    void restoreContextAfterDelete();
-
     bool m_hasNegativeValues;
     Q3DTheme *m_cachedTheme;
     Drawer *m_drawer;
@@ -267,6 +265,7 @@ protected:
     QPoint m_inputPosition;
     QHash<QAbstract3DSeries *, SeriesRenderCache *> m_renderCacheList;
     CustomRenderItemArray m_customRenderCache;
+    QList<QCustom3DItem *> m_customItemDrawOrder;
     QRect m_primarySubViewport;
     QRect m_secondarySubViewport;
     float m_devicePixelRatio;
@@ -338,7 +337,6 @@ protected:
     QOpenGLFunctions_2_1 *m_funcs_2_1;  // Not owned
 #endif
     QPointer<QOpenGLContext> m_context; // Not owned
-    QOffscreenSurface *m_dummySurfaceAtDelete;
     bool m_isOpenGLES;
 
 private:

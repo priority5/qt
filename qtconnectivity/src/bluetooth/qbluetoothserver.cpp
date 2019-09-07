@@ -66,6 +66,9 @@ QT_BEGIN_NAMESPACE
     If the \l QBluetoothServiceInfo::Protocol is not supported by a platform, \l listen() will return \c false.
     Android and WinRT only support RFCOMM for example.
 
+    On iOS, this class cannot be used because the platform does not expose
+    an API which may permit access to QBluetoothServer related features.
+
     \sa QBluetoothServiceInfo, QBluetoothSocket
 */
 
@@ -186,7 +189,7 @@ QBluetoothServer::~QBluetoothServer()
     required to call \l QBluetoothServiceInfo::unregisterService() and \l close() on this
     server object.
 
-    Returns a registered QBluetoothServiceInfo instance if sucessful otherwise an
+    Returns a registered QBluetoothServiceInfo instance if successful otherwise an
     invalid QBluetoothServiceInfo. This function always assumes that the default Bluetooth adapter
     should be used.
 
@@ -214,13 +217,18 @@ QBluetoothServiceInfo QBluetoothServer::listen(const QBluetoothUuid &uuid, const
     serviceInfo.setAttribute(QBluetoothServiceInfo::BrowseGroupList,
                              browseSequence);
 
+    QBluetoothServiceInfo::Sequence profileSequence;
     QBluetoothServiceInfo::Sequence classId;
     classId << QVariant::fromValue(QBluetoothUuid(QBluetoothUuid::SerialPort));
+    classId << QVariant::fromValue(quint16(0x100));
+    profileSequence.append(QVariant::fromValue(classId));
     serviceInfo.setAttribute(QBluetoothServiceInfo::BluetoothProfileDescriptorList,
-                             classId);
+                             profileSequence);
 
+    classId.clear();
     //Android requires custom uuid to be set as service class
-    classId.prepend(QVariant::fromValue(uuid));
+    classId << QVariant::fromValue(uuid);
+    classId << QVariant::fromValue(QBluetoothUuid(QBluetoothUuid::SerialPort));
     serviceInfo.setAttribute(QBluetoothServiceInfo::ServiceClassIds, classId);
     serviceInfo.setServiceUuid(uuid);
 
@@ -315,6 +323,6 @@ QBluetoothServer::Error QBluetoothServer::error() const
     return d->m_lastError;
 }
 
-#include "moc_qbluetoothserver.cpp"
-
 QT_END_NAMESPACE
+
+#include "moc_qbluetoothserver.cpp"

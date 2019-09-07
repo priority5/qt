@@ -52,8 +52,11 @@
 //
 
 #include <private/qsimd_p.h>
+#include <Qt3DCore/private/qt3dcore-config_p.h>
 
-#if (defined(__AVX2__) || defined(__SSE2__)) && defined(QT_COMPILER_SUPPORTS_SSE2)
+// We check if sse config option was enabled as it could
+// be disabled even though a given platform supports SSE2 instructions
+#if QT_CONFIG(qt3d_simd_sse2) && (defined(__AVX2__) || defined(__SSE2__)) && defined(QT_COMPILER_SUPPORTS_SSE2)
 
 #include <Qt3DCore/private/vector3d_sse_p.h>
 
@@ -70,5 +73,17 @@ using Vector3D = QVector3D;
 QT_END_NAMESPACE
 
 #endif
+
+template<typename UsingType>
+Q_ALWAYS_INLINE QVector3D convertToQVector3D(const UsingType &v)
+{
+    return v.toQVector3D();
+}
+
+template<>
+Q_ALWAYS_INLINE QVector3D convertToQVector3D<QVector3D>(const QVector3D &v)
+{
+    return v;
+}
 
 #endif // QT3DCORE_VECTOR3D_P_H

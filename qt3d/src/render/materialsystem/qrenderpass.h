@@ -47,7 +47,7 @@
 #include <Qt3DRender/qrenderstate.h>
 #include <Qt3DRender/qfilterkey.h>
 
-#include <QHash>
+#include <QtCore/QHash>
 
 QT_BEGIN_NAMESPACE
 
@@ -59,7 +59,7 @@ typedef QVector<QParameter*> ParameterList;
 
 class QRenderPassPrivate;
 
-class QT3DRENDERSHARED_EXPORT QRenderPass : public Qt3DCore::QNode
+class Q_3DRENDERSHARED_EXPORT QRenderPass : public Qt3DCore::QNode
 {
     Q_OBJECT
     Q_PROPERTY(Qt3DRender::QShaderProgram *shaderProgram READ shaderProgram WRITE setShaderProgram NOTIFY shaderProgramChanged)
@@ -93,7 +93,7 @@ protected:
 
 private:
     Q_DECLARE_PRIVATE(QRenderPass)
-    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const Q_DECL_OVERRIDE;
+    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const override;
 };
 
 }

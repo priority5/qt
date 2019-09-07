@@ -50,6 +50,7 @@ private slots:
     {
         // ensure a clean environment
         QStandardPaths::setTestModeEnabled(true);
+        qputenv("XDG_CONFIG_DIRS", "/does/not/exist");
         qunsetenv("QT_LOGGING_CONF");
         qunsetenv("QT_LOGGING_RULES");
     }
@@ -186,6 +187,13 @@ private slots:
                           "default=false");
         QCOMPARE(parser.rules().size(), 1);
 
+        // QSettings escapes * to %2A when writing.
+        parser.setContent("[Rules]\n"
+                          "module.%2A=false");
+        QCOMPARE(parser.rules().size(), 1);
+        QCOMPARE(parser.rules().first().category, QString("module."));
+        QCOMPARE(parser.rules().first().flags, QLoggingRule::LeftFilter);
+
         parser.setContent("[OtherSection]\n"
                           "default=false");
         QCOMPARE(parser.rules().size(), 0);
@@ -197,10 +205,22 @@ private slots:
         // Check whether QT_LOGGING_CONF is picked up from environment
         //
 
-        qputenv("QT_LOGGING_CONF", QFINDTESTDATA("qtlogging.ini").toLocal8Bit());
+        Q_ASSERT(!qApp); // Rules should not require an app to resolve
 
-        QLoggingRegistry registry;
-        registry.init();
+        qputenv("QT_LOGGING_RULES", "qt.foo.bar=true");
+        QLoggingCategory qtEnabledByLoggingRule("qt.foo.bar");
+        QCOMPARE(qtEnabledByLoggingRule.isDebugEnabled(), true);
+        QLoggingCategory qtDisabledByDefault("qt.foo.baz");
+        QCOMPARE(qtDisabledByDefault.isDebugEnabled(), false);
+
+        QLoggingRegistry &registry = *QLoggingRegistry::instance();
+        QCOMPARE(registry.ruleSets[QLoggingRegistry::ApiRules].size(), 0);
+        QCOMPARE(registry.ruleSets[QLoggingRegistry::ConfigRules].size(), 0);
+        QCOMPARE(registry.ruleSets[QLoggingRegistry::EnvironmentRules].size(), 1);
+
+        qunsetenv("QT_LOGGING_RULES");
+        qputenv("QT_LOGGING_CONF", QFINDTESTDATA("qtlogging.ini").toLocal8Bit());
+        registry.initializeRules();
 
         QCOMPARE(registry.ruleSets[QLoggingRegistry::ApiRules].size(), 0);
         QCOMPARE(registry.ruleSets[QLoggingRegistry::ConfigRules].size(), 0);
@@ -208,7 +228,7 @@ private slots:
 
         // check that QT_LOGGING_RULES take precedence
         qputenv("QT_LOGGING_RULES", "Digia.*=true");
-        registry.init();
+        registry.initializeRules();
         QCOMPARE(registry.ruleSets[QLoggingRegistry::EnvironmentRules].size(), 2);
         QCOMPARE(registry.ruleSets[QLoggingRegistry::EnvironmentRules].at(1).enabled, true);
     }
@@ -234,7 +254,7 @@ private slots:
         file.close();
 
         QLoggingRegistry registry;
-        registry.init();
+        registry.initializeRules();
         QCOMPARE(registry.ruleSets[QLoggingRegistry::ConfigRules].size(), 1);
 
         // remove file again
@@ -300,6 +320,6 @@ private slots:
     }
 };
 
-QTEST_MAIN(tst_QLoggingRegistry)
+QTEST_APPLESS_MAIN(tst_QLoggingRegistry)
 
 #include "tst_qloggingregistry.moc"

@@ -35,6 +35,7 @@
 ****************************************************************************/
 
 #include "qquickapplicationwindow_p.h"
+#include "qquickcontentitem_p.h"
 #include "qquickoverlay_p.h"
 #include "qquickpopup_p_p.h"
 #include "qquickcontrol_p_p.h"
@@ -43,6 +44,8 @@
 #include "qquicktoolbar_p.h"
 #include "qquicktabbar_p.h"
 #include "qquickdialogbuttonbox_p.h"
+#include "qquickdeferredexecute_p_p.h"
+#include "qquickdeferredpointer_p_p.h"
 
 #include <QtCore/private/qobject_p.h>
 #include <QtQuick/private/qquickitem_p.h>
@@ -57,6 +60,7 @@ QT_BEGIN_NAMESPACE
     \inqmlmodule QtQuick.Controls
     \since 5.7
     \ingroup qtquickcontrols2-containers
+    \ingroup qtquickcontrols2-focusscopes
     \brief Styled top-level window with support for a header and footer.
 
     ApplicationWindow is a \l Window which makes it convenient to add
@@ -69,7 +73,7 @@ QT_BEGIN_NAMESPACE
     \image qtquickcontrols2-applicationwindow-wireframe.png
 
     \qml
-    import QtQuick.Controls 2.3
+    import QtQuick.Controls 2.12
 
     ApplicationWindow {
         visible: true
@@ -108,7 +112,8 @@ QT_BEGIN_NAMESPACE
     certain window \c id. A QML component that uses the ApplicationWindow
     attached properties works in any window regardless of its \c id.
 
-    \sa {Customizing ApplicationWindow}, Overlay, Page, {Container Controls}
+    \sa {Customizing ApplicationWindow}, Overlay, Page, {Container Controls},
+        {Focus Management in Qt Quick Controls 2}
 */
 
 static const QQuickItemPrivate::ChangeTypes ItemChanges = QQuickItemPrivate::Visibility
@@ -119,22 +124,12 @@ class QQuickApplicationWindowPrivate : public QQuickItemChangeListener
     Q_DECLARE_PUBLIC(QQuickApplicationWindow)
 
 public:
-    QQuickApplicationWindowPrivate()
-        : complete(true),
-          background(nullptr),
-          contentItem(nullptr),
-          menuBar(nullptr),
-          header(nullptr),
-          footer(nullptr),
-          overlay(nullptr),
-          activeFocusControl(nullptr)
-    {
-    }
-
     static QQuickApplicationWindowPrivate *get(QQuickApplicationWindow *window)
     {
         return window->d_func();
     }
+
+    QQmlListProperty<QObject> contentData();
 
     void relayout();
 
@@ -164,18 +159,21 @@ public:
 
     static void contentData_append(QQmlListProperty<QObject> *prop, QObject *obj);
 
-    bool complete;
-    QQuickItem *background;
-    QQuickItem *contentItem;
-    QQuickItem *menuBar;
-    QQuickItem *header;
-    QQuickItem *footer;
-    QQuickOverlay *overlay;
+    void cancelBackground();
+    void executeBackground(bool complete = false);
+
+    bool complete = true;
+    QQuickDeferredPointer<QQuickItem> background;
+    QQuickItem *contentItem = nullptr;
+    QQuickItem *menuBar = nullptr;
+    QQuickItem *header = nullptr;
+    QQuickItem *footer = nullptr;
+    QQuickOverlay *overlay = nullptr;
     QFont font;
     QLocale locale;
     QPalette palette;
-    QQuickItem *activeFocusControl;
-    QQuickApplicationWindow *q_ptr;
+    QQuickItem *activeFocusControl = nullptr;
+    QQuickApplicationWindow *q_ptr = nullptr;
 };
 
 static void layoutItem(QQuickItem *item, qreal y, qreal width)
@@ -267,7 +265,7 @@ void QQuickApplicationWindowPrivate::updateFont(const QFont &f)
 
 void QQuickApplicationWindowPrivate::resolveFont()
 {
-    QFont resolvedFont = font.resolve(QQuickControlPrivate::themeFont(QPlatformTheme::SystemFont));
+    QFont resolvedFont = font.resolve(QQuickTheme::font(QQuickTheme::System));
     setFont_helper(resolvedFont);
 }
 
@@ -289,7 +287,7 @@ void QQuickApplicationWindowPrivate::updatePalette(const QPalette &p)
 
 void QQuickApplicationWindowPrivate::resolvePalette()
 {
-    QPalette resolvedPalette = palette.resolve(QQuickControlPrivate::themePalette(QPlatformTheme::SystemPalette));
+    QPalette resolvedPalette = palette.resolve(QQuickTheme::palette(QQuickTheme::System));
     setPalette_helper(resolvedPalette);
 }
 
@@ -326,6 +324,26 @@ void QQuickApplicationWindowPrivate::contentData_append(QQmlListProperty<QObject
     // associate "top-level" popups with the window as soon as they are added to the default property
     if (QQuickPopup *popup = qobject_cast<QQuickPopup *>(obj))
         QQuickPopupPrivate::get(popup)->setWindow(static_cast<QQuickApplicationWindow *>(prop->data));
+}
+
+static inline QString backgroundName() { return QStringLiteral("background"); }
+
+void QQuickApplicationWindowPrivate::cancelBackground()
+{
+    Q_Q(QQuickApplicationWindow);
+    quickCancelDeferred(q, backgroundName());
+}
+
+void QQuickApplicationWindowPrivate::executeBackground(bool complete)
+{
+    Q_Q(QQuickApplicationWindow);
+    if (background.wasExecuted())
+        return;
+
+    if (!background || complete)
+        quickBeginDeferred(q, backgroundName(), background);
+    if (complete)
+        quickCompleteDeferred(q, backgroundName(), background);
 }
 
 QQuickApplicationWindow::QQuickApplicationWindow(QWindow *parent)
@@ -374,7 +392,9 @@ QQuickApplicationWindowAttached *QQuickApplicationWindow::qmlAttachedProperties(
 */
 QQuickItem *QQuickApplicationWindow::background() const
 {
-    Q_D(const QQuickApplicationWindow);
+    QQuickApplicationWindowPrivate *d = const_cast<QQuickApplicationWindowPrivate *>(d_func());
+    if (!d->background)
+        d->executeBackground();
     return d->background;
 }
 
@@ -384,7 +404,10 @@ void QQuickApplicationWindow::setBackground(QQuickItem *background)
     if (d->background == background)
         return;
 
-    QQuickControlPrivate::destroyDelegate(d->background, this);
+    if (!d->background.isExecuting())
+        d->cancelBackground();
+
+    delete d->background;
     d->background = background;
     if (background) {
         background->setParentItem(QQuickWindow::contentItem());
@@ -393,7 +416,8 @@ void QQuickApplicationWindow::setBackground(QQuickItem *background)
         if (isComponentComplete())
             d->relayout();
     }
-    emit backgroundChanged();
+    if (!d->background.isExecuting())
+        emit backgroundChanged();
 }
 
 /*!
@@ -527,9 +551,10 @@ void QQuickApplicationWindow::setFooter(QQuickItem *footer)
 
     \sa contentItem
 */
-QQmlListProperty<QObject> QQuickApplicationWindow::contentData()
+QQmlListProperty<QObject> QQuickApplicationWindowPrivate::contentData()
 {
-    return QQmlListProperty<QObject>(contentItem(), this,
+    Q_Q(QQuickApplicationWindow);
+    return QQmlListProperty<QObject>(q->contentItem(), q,
                                      QQuickApplicationWindowPrivate::contentData_append,
                                      QQuickItemPrivate::data_count,
                                      QQuickItemPrivate::data_at,
@@ -551,7 +576,7 @@ QQuickItem *QQuickApplicationWindow::contentItem() const
 {
     QQuickApplicationWindowPrivate *d = const_cast<QQuickApplicationWindowPrivate *>(d_func());
     if (!d->contentItem) {
-        d->contentItem = new QQuickItem(QQuickWindow::contentItem());
+        d->contentItem = new QQuickContentItem(this, QQuickWindow::contentItem());
         d->contentItem->setFlag(QQuickItem::ItemIsFocusScope);
         d->contentItem->setFocus(true);
         d->relayout();
@@ -658,7 +683,7 @@ void QQuickApplicationWindow::setFont(const QFont &font)
     if (d->font.resolve() == font.resolve() && d->font == font)
         return;
 
-    QFont resolvedFont = font.resolve(QQuickControlPrivate::themeFont(QPlatformTheme::SystemFont));
+    QFont resolvedFont = font.resolve(QQuickTheme::font(QQuickTheme::System));
     d->setFont_helper(resolvedFont);
 }
 
@@ -737,7 +762,7 @@ void QQuickApplicationWindow::setPalette(const QPalette &palette)
     if (d->palette.resolve() == palette.resolve() && d->palette == palette)
         return;
 
-    QPalette resolvedPalette = palette.resolve(QQuickControlPrivate::themePalette(QPlatformTheme::SystemPalette));
+    QPalette resolvedPalette = palette.resolve(QQuickTheme::palette(QQuickTheme::System));
     d->setPalette_helper(resolvedPalette);
 }
 
@@ -812,6 +837,7 @@ void QQuickApplicationWindow::componentComplete()
 {
     Q_D(QQuickApplicationWindow);
     d->complete = true;
+    d->executeBackground(true);
     QQuickWindowQmlImpl::componentComplete();
     d->relayout();
 }
@@ -828,17 +854,11 @@ class QQuickApplicationWindowAttachedPrivate : public QObjectPrivate
     Q_DECLARE_PUBLIC(QQuickApplicationWindowAttached)
 
 public:
-    QQuickApplicationWindowAttachedPrivate()
-        : window(nullptr),
-          activeFocusControl(nullptr)
-    {
-    }
-
     void windowChange(QQuickWindow *wnd);
     void activeFocusChange();
 
-    QQuickWindow *window;
-    QQuickItem *activeFocusControl;
+    QQuickWindow *window = nullptr;
+    QQuickItem *activeFocusControl = nullptr;
 };
 
 void QQuickApplicationWindowAttachedPrivate::windowChange(QQuickWindow *wnd)

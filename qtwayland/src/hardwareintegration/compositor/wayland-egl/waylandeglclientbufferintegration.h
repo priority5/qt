@@ -53,6 +53,7 @@ class WaylandEglClientBufferIntegration : public QtWayland::ClientBufferIntegrat
     Q_DECLARE_PRIVATE(WaylandEglClientBufferIntegration)
 public:
     WaylandEglClientBufferIntegration();
+    ~WaylandEglClientBufferIntegration() override;
 
     void initializeHardware(struct ::wl_display *display) override;
 
@@ -68,6 +69,8 @@ struct BufferState;
 class WaylandEglClientBuffer : public QtWayland::ClientBuffer
 {
 public:
+    ~WaylandEglClientBuffer() override;
+
     QWaylandBufferRef::BufferFormatEgl bufferFormatEgl() const override;
     QSize size() const override;
     QWaylandSurface::Origin origin() const override;
@@ -82,8 +85,8 @@ private:
 
     WaylandEglClientBuffer(WaylandEglClientBufferIntegration* integration, wl_resource *bufferResource);
 
-    BufferState *d;
-    WaylandEglClientBufferIntegration *m_integration;
+    BufferState *d = nullptr;
+    WaylandEglClientBufferIntegration *m_integration = nullptr;
 };
 
 QT_END_NAMESPACE

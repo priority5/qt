@@ -40,7 +40,7 @@
 #ifndef QT3DRENDER_QPARAMETER_H
 #define QT3DRENDER_QPARAMETER_H
 
-#include <QVariant>
+#include <QtCore/QVariant>
 #include <Qt3DCore/qnode.h>
 #include <Qt3DRender/qt3drender_global.h>
 
@@ -51,7 +51,7 @@ namespace Qt3DRender {
 class QParameterPrivate;
 class QAbstractTexture;
 
-class QT3DRENDERSHARED_EXPORT QParameter : public Qt3DCore::QNode
+class Q_3DRENDERSHARED_EXPORT QParameter : public Qt3DCore::QNode
 {
     Q_OBJECT
     Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged)
@@ -79,7 +79,7 @@ protected:
 
 private:
     Q_DECLARE_PRIVATE(QParameter)
-    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const Q_DECL_OVERRIDE;
+    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const override;
 };
 
 } // namespace Qt3DRender

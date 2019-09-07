@@ -58,6 +58,9 @@ QT_BEGIN_NAMESPACE
  */
 QPlatformPixmap *QPlatformPixmap::create(int w, int h, PixelType type)
 {
+    if (Q_UNLIKELY(!QGuiApplicationPrivate::platformIntegration()))
+        qFatal("QPlatformPixmap: QGuiApplication required");
+
     QPlatformPixmap *data = QGuiApplicationPrivate::platformIntegration()->createPlatformPixmap(static_cast<QPlatformPixmap::PixelType>(type));
     data->resize(w, h);
     return data;
@@ -175,6 +178,7 @@ QBitmap QPlatformPixmap::mask() const
     if (mask.isNull()) // allocation failed
         return QBitmap();
 
+    mask.setDevicePixelRatio(devicePixelRatio());
     mask.setColorCount(2);
     mask.setColor(0, QColor(Qt::color0).rgba());
     mask.setColor(1, QColor(Qt::color1).rgba());

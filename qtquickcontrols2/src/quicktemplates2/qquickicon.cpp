@@ -41,18 +41,25 @@ QT_BEGIN_NAMESPACE
 class QQuickIconPrivate : public QSharedData
 {
 public:
-    QQuickIconPrivate()
-        : width(0),
-          height(0),
-          color(Qt::transparent)
-    {
-    }
-
     QString name;
     QUrl source;
-    int width;
-    int height;
-    QColor color;
+    int width = 0;
+    int height = 0;
+    QColor color = Qt::transparent;
+    bool cache = true;
+
+    enum ResolveProperties {
+        NameResolved = 0x0001,
+        SourceResolved = 0x0002,
+        WidthResolved = 0x0004,
+        HeightResolved = 0x0008,
+        ColorResolved = 0x0010,
+        CacheResolved = 0x0020,
+        AllPropertiesResolved = 0x1ffff
+    };
+
+    // This is based on QFont's resolve_mask.
+    int resolveMask = 0;
 };
 
 QQuickIcon::QQuickIcon()
@@ -81,7 +88,8 @@ bool QQuickIcon::operator==(const QQuickIcon &other) const
                             && d->source == other.d->source
                             && d->width == other.d->width
                             && d->height == other.d->height
-                            && d->color == other.d->color);
+                            && d->color == other.d->color
+                            && d->cache == other.d->cache);
 }
 
 bool QQuickIcon::operator!=(const QQuickIcon &other) const
@@ -101,7 +109,17 @@ QString QQuickIcon::name() const
 
 void QQuickIcon::setName(const QString &name)
 {
+    if ((d->resolveMask & QQuickIconPrivate::NameResolved) && d->name == name)
+        return;
+
     d->name = name;
+    d->resolveMask |= QQuickIconPrivate::NameResolved;
+}
+
+void QQuickIcon::resetName()
+{
+    d->name = QString();
+    d->resolveMask &= ~QQuickIconPrivate::NameResolved;
 }
 
 QUrl QQuickIcon::source() const
@@ -111,7 +129,17 @@ QUrl QQuickIcon::source() const
 
 void QQuickIcon::setSource(const QUrl &source)
 {
+    if ((d->resolveMask & QQuickIconPrivate::SourceResolved) && d->source == source)
+        return;
+
     d->source = source;
+    d->resolveMask |= QQuickIconPrivate::SourceResolved;
+}
+
+void QQuickIcon::resetSource()
+{
+    d->source = QString();
+    d->resolveMask &= ~QQuickIconPrivate::SourceResolved;
 }
 
 int QQuickIcon::width() const
@@ -121,7 +149,17 @@ int QQuickIcon::width() const
 
 void QQuickIcon::setWidth(int width)
 {
+    if ((d->resolveMask & QQuickIconPrivate::WidthResolved) && d->width == width)
+        return;
+
     d->width = width;
+    d->resolveMask |= QQuickIconPrivate::WidthResolved;
+}
+
+void QQuickIcon::resetWidth()
+{
+    d->width = 0;
+    d->resolveMask &= ~QQuickIconPrivate::WidthResolved;
 }
 
 int QQuickIcon::height() const
@@ -131,7 +169,17 @@ int QQuickIcon::height() const
 
 void QQuickIcon::setHeight(int height)
 {
+    if ((d->resolveMask & QQuickIconPrivate::HeightResolved) && d->height == height)
+        return;
+
     d->height = height;
+    d->resolveMask |= QQuickIconPrivate::HeightResolved;
+}
+
+void QQuickIcon::resetHeight()
+{
+    d->height = 0;
+    d->resolveMask &= ~QQuickIconPrivate::HeightResolved;
 }
 
 QColor QQuickIcon::color() const
@@ -141,12 +189,62 @@ QColor QQuickIcon::color() const
 
 void QQuickIcon::setColor(const QColor &color)
 {
+    if ((d->resolveMask & QQuickIconPrivate::ColorResolved) && d->color == color)
+        return;
+
     d->color = color;
+    d->resolveMask |= QQuickIconPrivate::ColorResolved;
 }
 
 void QQuickIcon::resetColor()
 {
     d->color = Qt::transparent;
+    d->resolveMask &= ~QQuickIconPrivate::ColorResolved;
+}
+
+bool QQuickIcon::cache() const
+{
+    return d->cache;
+}
+
+void QQuickIcon::setCache(bool cache)
+{
+    if ((d->resolveMask & QQuickIconPrivate::CacheResolved) && d->cache == cache)
+        return;
+
+    d->cache = cache;
+    d->resolveMask |= QQuickIconPrivate::CacheResolved;
+}
+
+void QQuickIcon::resetCache()
+{
+    d->cache = true;
+    d->resolveMask &= ~QQuickIconPrivate::CacheResolved;
+}
+
+QQuickIcon QQuickIcon::resolve(const QQuickIcon &other) const
+{
+    QQuickIcon resolved = *this;
+
+    if (!(d->resolveMask & QQuickIconPrivate::NameResolved))
+        resolved.setName(other.name());
+
+    if (!(d->resolveMask & QQuickIconPrivate::SourceResolved))
+        resolved.setSource(other.source());
+
+    if (!(d->resolveMask & QQuickIconPrivate::WidthResolved))
+        resolved.setWidth(other.width());
+
+    if (!(d->resolveMask & QQuickIconPrivate::HeightResolved))
+        resolved.setHeight(other.height());
+
+    if (!(d->resolveMask & QQuickIconPrivate::ColorResolved))
+        resolved.setColor(other.color());
+
+    if (!(d->resolveMask & QQuickIconPrivate::CacheResolved))
+        resolved.setCache(other.cache());
+
+    return resolved;
 }
 
 QT_END_NAMESPACE

@@ -238,21 +238,16 @@ void QWindowsAudioDeviceInfo::updateLists()
     if (!sizez.isEmpty())
         return;
 
-    bool hasCaps = false;
     DWORD fmt = 0;
 
     if(mode == QAudio::AudioOutput) {
         WAVEOUTCAPS woc;
-        if (waveOutGetDevCaps(devId, &woc, sizeof(WAVEOUTCAPS)) == MMSYSERR_NOERROR) {
-            hasCaps = true;
+        if (waveOutGetDevCaps(devId, &woc, sizeof(WAVEOUTCAPS)) == MMSYSERR_NOERROR)
             fmt = woc.dwFormats;
-        }
     } else {
         WAVEINCAPS woc;
-        if (waveInGetDevCaps(devId, &woc, sizeof(WAVEINCAPS)) == MMSYSERR_NOERROR) {
-            hasCaps = true;
+        if (waveInGetDevCaps(devId, &woc, sizeof(WAVEINCAPS)) == MMSYSERR_NOERROR)
             fmt = woc.dwFormats;
-        }
     }
 
     sizez.clear();
@@ -260,7 +255,7 @@ void QWindowsAudioDeviceInfo::updateLists()
     channelz.clear();
     typez.clear();
 
-    if (hasCaps) {
+    if (fmt) {
         // Check sample size
         if ((fmt & WAVE_FORMAT_1M08)
             || (fmt & WAVE_FORMAT_1S08)
@@ -401,7 +396,7 @@ QList<QByteArray> QWindowsAudioDeviceInfo::availableDevices(QAudio::Mode mode)
 
     QList<QByteArray> devices;
     //enumerate device fullnames through directshow api
-    CoInitialize(NULL);
+    auto hrCoInit = CoInitialize(nullptr);
     ICreateDevEnum *pDevEnum = NULL;
     IEnumMoniker *pEnum = NULL;
     // Create the System device enumerator
@@ -452,7 +447,8 @@ QList<QByteArray> QWindowsAudioDeviceInfo::availableDevices(QAudio::Mode mode)
         }
         pDevEnum->Release();
     }
-    CoUninitialize();
+    if (SUCCEEDED(hrCoInit))
+        CoUninitialize();
 
     return devices;
 }

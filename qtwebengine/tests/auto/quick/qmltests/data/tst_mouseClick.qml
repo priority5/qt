@@ -57,30 +57,16 @@ TestWebEngineView {
         function mouseTripleClick(item, x, y) {
             mouseMultiClick(item, x, y, 3);
         }
+
+        function mouseQuadraClick(item, x, y) {
+            mouseMultiClick(item, x, y, 4);
+        }
     }
 
 
     TestCase {
         name: "WebEngineViewMouseClick"
         when: windowShown
-
-        function getElementCenter(element) {
-            var center;
-            runJavaScript("(function() {" +
-                          "   var elem = document.getElementById('" + element + "');" +
-                          "   var rect = elem.getBoundingClientRect();" +
-                          "   return { 'x': (rect.left + rect.right) / 2, 'y': (rect.top + rect.bottom) / 2 };" +
-                          "})();", function(result) { center = result } );
-            tryVerify(function() { return center != undefined; });
-            return center;
-        }
-
-        function getTextSelection() {
-            var textSelection;
-            runJavaScript("window.getSelection().toString()", function(result) { textSelection = result });
-            tryVerify(function() { return textSelection != undefined; });
-            return textSelection;
-        }
 
         function test_singleClick() {
             webEngineView.settings.focusOnNavigationEnabled = false;
@@ -125,6 +111,19 @@ TestWebEngineView {
             tryVerify(function() { return getTextSelection() == "The Qt Company" });
 
             mouseClick(webEngineView, center.x, center.y);
+            tryVerify(function() { return getTextSelection() == "" });
+        }
+
+        function test_quadraClick() {
+            webEngineView.settings.focusOnNavigationEnabled = true;
+            webEngineView.loadHtml("<html><body onload='document.getElementById(\"input\").focus()'>" +
+                                   "<form><input id='input' width='150' type='text' value='The Qt Company' /></form>" +
+                                   "</body></html>");
+            verify(webEngineView.waitForLoadSucceeded());
+
+            var center = getElementCenter("input");
+            webEngineView.testSupport.mouseQuadraClick(webEngineView, center.x, center.y);
+            verifyElementHasFocus("input");
             tryVerify(function() { return getTextSelection() == "" });
         }
     }

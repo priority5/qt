@@ -36,6 +36,7 @@
 
 #include "qquicktumbler_p.h"
 
+#include <QtCore/qloggingcategory.h>
 #include <QtGui/qpa/qplatformtheme.h>
 #include <QtQml/qqmlinfo.h>
 #include <QtQuick/private/qquickflickable_p.h>
@@ -43,6 +44,8 @@
 #include <QtQuickTemplates2/private/qquicktumbler_p_p.h>
 
 QT_BEGIN_NAMESPACE
+
+Q_LOGGING_CATEGORY(lcTumbler, "qt.quick.controls.tumbler")
 
 /*!
     \qmltype Tumbler
@@ -70,7 +73,8 @@ QT_BEGIN_NAMESPACE
 
     The API is similar to that of views like \l ListView and \l PathView; a
     \l model and \l delegate can be set, and the \l count and \l currentItem
-    properties provide read-only access to information about the view.
+    properties provide read-only access to information about the view. To
+    position the view at a certain index, use \l positionViewAtIndex().
 
     Unlike views like \l PathView and \l ListView, however, there is always a
     current item (when the model isn't empty). This means that when \l count is
@@ -86,27 +90,6 @@ QT_BEGIN_NAMESPACE
     \sa {Customizing Tumbler}, {Input Controls}
 */
 
-QQuickTumblerPrivate::QQuickTumblerPrivate()
-    : delegate(nullptr),
-      visibleItemCount(5),
-      wrap(true),
-      explicitWrap(false),
-      ignoreWrapChanges(false),
-      view(nullptr),
-      viewContentItem(nullptr),
-      viewContentItemType(UnsupportedContentItemType),
-      currentIndex(-1),
-      pendingCurrentIndex(-1),
-      ignoreCurrentIndexChanges(false),
-      count(0),
-      ignoreSignals(false)
-{
-}
-
-QQuickTumblerPrivate::~QQuickTumblerPrivate()
-{
-}
-
 namespace {
     static inline qreal delegateHeight(const QQuickTumbler *tumbler)
     {
@@ -120,17 +103,24 @@ namespace {
 */
 QQuickItem *QQuickTumblerPrivate::determineViewType(QQuickItem *contentItem)
 {
+    if (!contentItem) {
+        resetViewData();
+        return nullptr;
+    }
+
     if (contentItem->inherits("QQuickPathView")) {
         view = contentItem;
         viewContentItem = contentItem;
         viewContentItemType = PathViewContentItem;
         viewOffset = 0;
+
         return contentItem;
     } else if (contentItem->inherits("QQuickListView")) {
         view = contentItem;
         viewContentItem = qobject_cast<QQuickFlickable*>(contentItem)->contentItem();
         viewContentItemType = ListViewContentItem;
         viewContentY = 0;
+
         return contentItem;
     } else {
         const auto childItems = contentItem->childItems();
@@ -142,6 +132,7 @@ QQuickItem *QQuickTumblerPrivate::determineViewType(QQuickItem *contentItem)
     }
 
     resetViewData();
+    viewContentItemType = UnsupportedContentItemType;
     return nullptr;
 }
 
@@ -153,7 +144,7 @@ void QQuickTumblerPrivate::resetViewData()
         viewOffset = 0;
     else if (viewContentItemType == ListViewContentItem)
         viewContentY = 0;
-    viewContentItemType = UnsupportedContentItemType;
+    viewContentItemType = NoContentItem;
 }
 
 QList<QQuickItem *> QQuickTumblerPrivate::viewContentItemChildItems() const
@@ -198,17 +189,34 @@ void QQuickTumblerPrivate::_q_updateItemWidths()
 void QQuickTumblerPrivate::_q_onViewCurrentIndexChanged()
 {
     Q_Q(QQuickTumbler);
-    if (view && !ignoreCurrentIndexChanges) {
-        const int oldCurrentIndex = currentIndex;
-        currentIndex = view->property("currentIndex").toInt();
-        if (oldCurrentIndex != currentIndex)
-            emit q->currentIndexChanged();
+    if (!view || ignoreCurrentIndexChanges || currentIndexSetDuringModelChange) {
+        // If the user set currentIndex in the onModelChanged handler,
+        // we have to respect that currentIndex by ignoring changes in the view
+        // until the model has finished being set.
+        qCDebug(lcTumbler).nospace() << "view currentIndex changed to "
+            << (view ? view->property("currentIndex").toString() : QStringLiteral("unknown index (no view)"))
+            << ", but we're ignoring it because one or more of the following conditions are true:"
+            << "\n- !view: " << !view
+            << "\n- ignoreCurrentIndexChanges: " << ignoreCurrentIndexChanges
+            << "\n- currentIndexSetDuringModelChange: " << currentIndexSetDuringModelChange;
+        return;
     }
+
+    const int oldCurrentIndex = currentIndex;
+    currentIndex = view->property("currentIndex").toInt();
+
+    qCDebug(lcTumbler).nospace() << "view currentIndex changed to "
+        << (view ? view->property("currentIndex").toString() : QStringLiteral("unknown index (no view)"))
+        << ", our old currentIndex was " << oldCurrentIndex;
+
+    if (oldCurrentIndex != currentIndex)
+        emit q->currentIndexChanged();
 }
 
 void QQuickTumblerPrivate::_q_onViewCountChanged()
 {
     Q_Q(QQuickTumbler);
+    qCDebug(lcTumbler) << "view count changed - ignoring signals?" << ignoreSignals;
     if (ignoreSignals)
         return;
 
@@ -218,20 +226,20 @@ void QQuickTumblerPrivate::_q_onViewCountChanged()
         if (pendingCurrentIndex != -1) {
             // If there was an attempt to set currentIndex at creation, try to finish that attempt now.
             // componentComplete() is too early, because the count might only be known sometime after completion.
-            q->setCurrentIndex(pendingCurrentIndex);
+            setCurrentIndex(pendingCurrentIndex);
             // If we could successfully set the currentIndex, consider it done.
             // Otherwise, we'll try again later in updatePolish().
             if (currentIndex == pendingCurrentIndex)
-                pendingCurrentIndex = -1;
+                setPendingCurrentIndex(-1);
             else
                 q->polish();
         } else if (currentIndex == -1) {
             // If new items were added and our currentIndex was -1, we must
             // enforce our rule of a non-negative currentIndex when count > 0.
-            q->setCurrentIndex(0);
+            setCurrentIndex(0);
         }
     } else {
-        q->setCurrentIndex(-1);
+        setCurrentIndex(-1);
     }
 }
 
@@ -257,28 +265,21 @@ void QQuickTumblerPrivate::calculateDisplacements()
     }
 }
 
-void QQuickTumblerPrivate::itemChildAdded(QQuickItem *, QQuickItem *child)
+void QQuickTumblerPrivate::itemChildAdded(QQuickItem *, QQuickItem *)
 {
     _q_updateItemWidths();
     _q_updateItemHeights();
-
-    QQuickTumblerAttached *attached = qobject_cast<QQuickTumblerAttached *>(qmlAttachedPropertiesObject<QQuickTumbler>(child, false));
-    if (attached)
-        QQuickTumblerAttachedPrivate::get(attached)->calculateDisplacement();
 }
 
-void QQuickTumblerPrivate::itemChildRemoved(QQuickItem *, QQuickItem *child)
+void QQuickTumblerPrivate::itemChildRemoved(QQuickItem *, QQuickItem *)
 {
     _q_updateItemWidths();
     _q_updateItemHeights();
-
-    QQuickTumblerAttached *attached = qobject_cast<QQuickTumblerAttached *>(qmlAttachedPropertiesObject<QQuickTumbler>(child, false));
-    if (attached)
-        QQuickTumblerAttachedPrivate::get(attached)->calculateDisplacement();
 }
 
-void QQuickTumblerPrivate::itemGeometryChanged(QQuickItem *, QQuickGeometryChange change, const QRectF &)
+void QQuickTumblerPrivate::itemGeometryChanged(QQuickItem *item, QQuickGeometryChange change, const QRectF &diff)
 {
+    QQuickControlPrivate::itemGeometryChanged(item, change, diff);
     if (change.sizeChange())
         calculateDisplacements();
 }
@@ -318,17 +319,19 @@ void QQuickTumbler::setModel(const QVariant &model)
     if (model == d->model)
         return;
 
-    d->lockWrap();
+    d->beginSetModel();
 
     d->model = model;
     emit modelChanged();
 
-    d->unlockWrap();
+    d->endSetModel();
+
+    d->currentIndexSetDuringModelChange = false;
 
     // Don't try to correct the currentIndex if count() isn't known yet.
     // We can check in setupViewData() instead.
     if (isComponentComplete() && d->view && count() == 0)
-        setCurrentIndex(-1);
+        d->setCurrentIndex(-1);
 }
 
 /*!
@@ -350,6 +353,8 @@ int QQuickTumbler::count() const
 
     The value of this property is \c -1 when \l count is equal to \c 0. In all
     other cases, it will be greater than or equal to \c 0.
+
+    \sa currentItem, positionViewAtIndex()
 */
 int QQuickTumbler::currentIndex() const
 {
@@ -360,49 +365,9 @@ int QQuickTumbler::currentIndex() const
 void QQuickTumbler::setCurrentIndex(int currentIndex)
 {
     Q_D(QQuickTumbler);
-    if (currentIndex == d->currentIndex || currentIndex < -1)
-        return;
-
-    if (!isComponentComplete()) {
-        // Views can't set currentIndex until they're ready.
-        d->pendingCurrentIndex = currentIndex;
-        return;
-    }
-
-    // -1 doesn't make sense for a non-empty Tumbler, because unlike
-    // e.g. ListView, there's always one item selected.
-    // Wait until the component has finished before enforcing this rule, though,
-    // because the count might not be known yet.
-    if ((d->count > 0 && currentIndex == -1) || (currentIndex >= d->count)) {
-        return;
-    }
-
-    // The view might not have been created yet, as is the case
-    // if you create a Tumbler component and pass e.g. { currentIndex: 2 }
-    // to createObject().
-    if (d->view) {
-        // Only actually set our currentIndex if the view was able to set theirs.
-        bool couldSet = false;
-        if (d->count == 0 && currentIndex == -1) {
-            // PathView insists on using 0 as the currentIndex when there are no items.
-            couldSet = true;
-        } else {
-            d->ignoreCurrentIndexChanges = true;
-            d->ignoreSignals = true;
-            d->view->setProperty("currentIndex", currentIndex);
-            d->ignoreSignals = false;
-            d->ignoreCurrentIndexChanges = false;
-
-            couldSet = d->view->property("currentIndex").toInt() == currentIndex;
-        }
-
-        if (couldSet) {
-            // The view's currentIndex might not have actually changed, but ours has,
-            // and that's what user code sees.
-            d->currentIndex = currentIndex;
-            emit currentIndexChanged();
-        }
-    }
+    if (d->modelBeingSet)
+        d->currentIndexSetDuringModelChange = true;
+    d->setCurrentIndex(currentIndex, QQuickTumblerPrivate::UserChange);
 }
 
 /*!
@@ -410,6 +375,8 @@ void QQuickTumbler::setCurrentIndex(int currentIndex)
     \readonly
 
     This property holds the item at the current index.
+
+    \sa currentIndex, positionViewAtIndex()
 */
 QQuickItem *QQuickTumbler::currentItem() const
 {
@@ -511,6 +478,41 @@ bool QQuickTumbler::isMoving() const
     return d->view && d->view->property("moving").toBool();
 }
 
+/*!
+    \qmlmethod void QtQuick.Controls::Tumbler::positionViewAtIndex(int index, PositionMode mode)
+    \since QtQuick.Controls 2.5 (Qt 5.12)
+
+    Positions the view so that the \a index is at the position specified by \a mode.
+
+    For example:
+
+    \code
+    positionViewAtIndex(10, Tumbler.Center)
+    \endcode
+
+    If \l wrap is true (the default), the modes available to \l {PathView}'s
+    \l {PathView::}{positionViewAtIndex()} function
+    are available, otherwise the modes available to \l {ListView}'s
+    \l {ListView::}{positionViewAtIndex()} function
+    are available.
+
+    \note There is a known limitation that using \c Tumbler.Beginning when \l
+    wrap is \c true will result in the wrong item being positioned at the top
+    of view. As a workaround, pass \c {index - 1}.
+
+    \sa currentIndex
+*/
+void QQuickTumbler::positionViewAtIndex(int index, QQuickTumbler::PositionMode mode)
+{
+    Q_D(QQuickTumbler);
+    if (!d->view) {
+        d->warnAboutIncorrectContentItem();
+        return;
+    }
+
+    QMetaObject::invokeMethod(d->view, "positionViewAtIndex", Q_ARG(int, index), Q_ARG(int, mode));
+}
+
 void QQuickTumbler::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     Q_D(QQuickTumbler);
@@ -526,16 +528,29 @@ void QQuickTumbler::geometryChanged(const QRectF &newGeometry, const QRectF &old
 void QQuickTumbler::componentComplete()
 {
     Q_D(QQuickTumbler);
+    qCDebug(lcTumbler) << "componentComplete()";
     QQuickControl::componentComplete();
-    d->_q_updateItemHeights();
-    d->_q_updateItemWidths();
 
     if (!d->view) {
         // Force the view to be created.
+        qCDebug(lcTumbler) << "emitting wrapChanged() to force view to be created";
         emit wrapChanged();
         // Determine the type of view for attached properties, etc.
         d->setupViewData(d->contentItem);
     }
+
+    // If there was no contentItem or it was of an unsupported type,
+    // we don't have anything else to do.
+    if (!d->view)
+        return;
+
+    // Update item heights after we've populated the model,
+    // otherwise ignoreSignals will cause these functions to return early.
+    d->_q_updateItemHeights();
+    d->_q_updateItemWidths();
+    d->_q_onViewCountChanged();
+
+    qCDebug(lcTumbler) << "componentComplete() is done";
 }
 
 void QQuickTumbler::contentItemChange(QQuickItem *newItem, QQuickItem *oldItem)
@@ -554,6 +569,9 @@ void QQuickTumbler::contentItemChange(QQuickItem *newItem, QQuickItem *oldItem)
             // Make sure we use the new content item and not the current one, as that won't
             // be changed until after contentItemChange() has finished.
             d->setupViewData(newItem);
+
+            d->_q_updateItemHeights();
+            d->_q_updateItemWidths();
         }
     }
 }
@@ -593,8 +611,11 @@ void QQuickTumblerPrivate::setupViewData(QQuickItem *newControlContentItem)
 
     determineViewType(newControlContentItem);
 
+    if (viewContentItemType == QQuickTumblerPrivate::NoContentItem)
+        return;
+
     if (viewContentItemType == QQuickTumblerPrivate::UnsupportedContentItemType) {
-        qWarning() << "Tumbler: contentItem must contain either a PathView or a ListView";
+        warnAboutIncorrectContentItem();
         return;
     }
 
@@ -617,6 +638,14 @@ void QQuickTumblerPrivate::setupViewData(QQuickItem *newControlContentItem)
 
     // Sync the view's currentIndex with ours.
     syncCurrentIndex();
+
+    calculateDisplacements();
+}
+
+void QQuickTumblerPrivate::warnAboutIncorrectContentItem()
+{
+    Q_Q(QQuickTumbler);
+    qmlWarning(q) << "Tumbler: contentItem must contain either a PathView or a ListView";
 }
 
 void QQuickTumblerPrivate::syncCurrentIndex()
@@ -624,21 +653,111 @@ void QQuickTumblerPrivate::syncCurrentIndex()
     const int actualViewIndex = view->property("currentIndex").toInt();
     Q_Q(QQuickTumbler);
 
+    const bool isPendingCurrentIndex = pendingCurrentIndex != -1;
+    const int indexToSet = isPendingCurrentIndex ? pendingCurrentIndex : currentIndex;
+
     // Nothing to do.
-    if (actualViewIndex == currentIndex)
+    if (actualViewIndex == indexToSet) {
+        setPendingCurrentIndex(-1);
         return;
+    }
 
     // PathView likes to use 0 as currentIndex for empty models, but we use -1 for that.
     if (q->count() == 0 && actualViewIndex == 0)
         return;
 
     ignoreCurrentIndexChanges = true;
-    view->setProperty("currentIndex", currentIndex);
+    view->setProperty("currentIndex", QVariant(indexToSet));
     ignoreCurrentIndexChanges = false;
+
+    if (view->property("currentIndex").toInt() == indexToSet)
+        setPendingCurrentIndex(-1);
+    else if (isPendingCurrentIndex)
+        q->polish();
+}
+
+void QQuickTumblerPrivate::setPendingCurrentIndex(int index)
+{
+    qCDebug(lcTumbler) << "setting pendingCurrentIndex to" << index;
+    pendingCurrentIndex = index;
+}
+
+QString QQuickTumblerPrivate::propertyChangeReasonToString(
+    QQuickTumblerPrivate::PropertyChangeReason changeReason)
+{
+    return changeReason == UserChange ? QStringLiteral("UserChange") : QStringLiteral("InternalChange");
+}
+
+void QQuickTumblerPrivate::setCurrentIndex(int newCurrentIndex,
+    QQuickTumblerPrivate::PropertyChangeReason changeReason)
+{
+    Q_Q(QQuickTumbler);
+    qCDebug(lcTumbler).nospace() << "setting currentIndex to " << newCurrentIndex
+        << ", old currentIndex was " << currentIndex
+        << ", changeReason is " << propertyChangeReasonToString(changeReason);
+    if (newCurrentIndex == currentIndex || newCurrentIndex < -1)
+        return;
+
+    if (!q->isComponentComplete()) {
+        // Views can't set currentIndex until they're ready.
+        qCDebug(lcTumbler) << "we're not complete; setting pendingCurrentIndex instead";
+        setPendingCurrentIndex(newCurrentIndex);
+        return;
+    }
+
+    if (modelBeingSet && changeReason == UserChange) {
+        // If modelBeingSet is true and the user set the currentIndex,
+        // the model is in the process of being set and the user has set
+        // the currentIndex in onModelChanged. We have to queue the currentIndex
+        // change until we're ready.
+        qCDebug(lcTumbler) << "a model is being set; setting pendingCurrentIndex instead";
+        setPendingCurrentIndex(newCurrentIndex);
+        return;
+    }
+
+    // -1 doesn't make sense for a non-empty Tumbler, because unlike
+    // e.g. ListView, there's always one item selected.
+    // Wait until the component has finished before enforcing this rule, though,
+    // because the count might not be known yet.
+    if ((count > 0 && newCurrentIndex == -1) || (newCurrentIndex >= count)) {
+        return;
+    }
+
+    // The view might not have been created yet, as is the case
+    // if you create a Tumbler component and pass e.g. { currentIndex: 2 }
+    // to createObject().
+    if (view) {
+        // Only actually set our currentIndex if the view was able to set theirs.
+        bool couldSet = false;
+        if (count == 0 && newCurrentIndex == -1) {
+            // PathView insists on using 0 as the currentIndex when there are no items.
+            couldSet = true;
+        } else {
+            ignoreCurrentIndexChanges = true;
+            ignoreSignals = true;
+            view->setProperty("currentIndex", newCurrentIndex);
+            ignoreSignals = false;
+            ignoreCurrentIndexChanges = false;
+
+            couldSet = view->property("currentIndex").toInt() == newCurrentIndex;
+        }
+
+        if (couldSet) {
+            // The view's currentIndex might not have actually changed, but ours has,
+            // and that's what user code sees.
+            currentIndex = newCurrentIndex;
+            emit q->currentIndexChanged();
+        }
+
+        qCDebug(lcTumbler) << "view's currentIndex is now" << view->property("currentIndex").toInt()
+            << "and ours is" << currentIndex;
+    }
 }
 
 void QQuickTumblerPrivate::setCount(int newCount)
 {
+    qCDebug(lcTumbler).nospace() << "setting count to " << newCount
+        << ", old count was " << count;
     if (newCount == count)
         return;
 
@@ -652,7 +771,7 @@ void QQuickTumblerPrivate::setCount(int newCount)
 
 void QQuickTumblerPrivate::setWrapBasedOnCount()
 {
-    if (count == 0 || explicitWrap || ignoreWrapChanges)
+    if (count == 0 || explicitWrap || modelBeingSet)
         return;
 
     setWrap(count >= visibleItemCount, false);
@@ -660,6 +779,7 @@ void QQuickTumblerPrivate::setWrapBasedOnCount()
 
 void QQuickTumblerPrivate::setWrap(bool shouldWrap, bool isExplicit)
 {
+    qCDebug(lcTumbler) << "setting wrap to" << shouldWrap << "- exlicit?" << isExplicit;
     if (isExplicit)
         explicitWrap = true;
 
@@ -685,23 +805,29 @@ void QQuickTumblerPrivate::setWrap(bool shouldWrap, bool isExplicit)
 
     ignoreCurrentIndexChanges = false;
 
-    // The view should have been created now, so we can start determining its type, etc.
-    // If the delegates use attached properties, this will have already been called,
-    // in which case it will return early. If the delegate doesn't use attached properties,
-    // we need to call it here.
-    setupViewData(contentItem);
+    // If isComponentComplete() is true, we require a contentItem. If it's not
+    // true, it might not have been created yet, so we wait until
+    // componentComplete() is called.
+    //
+    // When the contentItem (usually QQuickTumblerView) has been created, we
+    // can start determining its type, etc. If the delegates use attached
+    // properties, this will have already been called, in which case it will
+    // return early. If the delegate doesn't use attached properties, we need
+    // to call it here.
+    if (q->isComponentComplete() || contentItem)
+        setupViewData(contentItem);
 
-    q->setCurrentIndex(oldCurrentIndex);
+    setCurrentIndex(oldCurrentIndex);
 }
 
-void QQuickTumblerPrivate::lockWrap()
+void QQuickTumblerPrivate::beginSetModel()
 {
-    ignoreWrapChanges = true;
+    modelBeingSet = true;
 }
 
-void QQuickTumblerPrivate::unlockWrap()
+void QQuickTumblerPrivate::endSetModel()
 {
-    ignoreWrapChanges = false;
+    modelBeingSet = false;
     setWrapBasedOnCount();
 }
 
@@ -724,42 +850,39 @@ void QQuickTumbler::updatePolish()
 {
     Q_D(QQuickTumbler);
     if (d->pendingCurrentIndex != -1) {
+        // Update our count, as ignoreSignals might have been true
+        // when _q_onViewCountChanged() was last called.
+        d->setCount(d->view->property("count").toInt());
+
         // If the count is still 0, it's not going to happen.
         if (d->count == 0) {
-            d->pendingCurrentIndex = -1;
+            d->setPendingCurrentIndex(-1);
             return;
         }
 
         // If there is a pending currentIndex at this stage, it means that
         // the view wouldn't set our currentIndex in _q_onViewCountChanged
         // because it wasn't ready. Try one last time here.
-        setCurrentIndex(d->pendingCurrentIndex);
+        d->setCurrentIndex(d->pendingCurrentIndex);
 
         if (d->currentIndex != d->pendingCurrentIndex && d->currentIndex == -1) {
             // If we *still* couldn't set it, it's probably invalid.
             // See if we can at least enforce our rule of "non-negative currentIndex when count > 0" instead.
-            setCurrentIndex(0);
+            d->setCurrentIndex(0);
         }
 
-        d->pendingCurrentIndex = -1;
+        d->setPendingCurrentIndex(-1);
     }
 }
 
 QFont QQuickTumbler::defaultFont() const
 {
-    return QQuickControlPrivate::themeFont(QPlatformTheme::ItemViewFont);
+    return QQuickTheme::font(QQuickTheme::Tumbler);
 }
 
 QPalette QQuickTumbler::defaultPalette() const
 {
-    return QQuickControlPrivate::themePalette(QPlatformTheme::ItemViewPalette);
-}
-
-QQuickTumblerAttachedPrivate::QQuickTumblerAttachedPrivate()
-    : tumbler(nullptr),
-      index(-1),
-      displacement(0)
-{
+    return QQuickTheme::palette(QQuickTheme::Tumbler);
 }
 
 void QQuickTumblerAttachedPrivate::init(QQuickItem *delegateItem)
@@ -786,12 +909,12 @@ void QQuickTumblerAttachedPrivate::init(QQuickItem *delegateItem)
 
 void QQuickTumblerAttachedPrivate::calculateDisplacement()
 {
-    const int previousDisplacement = displacement;
+    const qreal previousDisplacement = displacement;
     displacement = 0;
 
-    // Can happen if the attached properties are accessed on the wrong type of item or the tumbler was destroyed.
     if (!tumbler) {
-        emitIfDisplacementChanged(previousDisplacement, displacement);
+        // Can happen if the attached properties are accessed on the wrong type of item or the tumbler was destroyed.
+        // We don't want to emit the change signal though, as this could cause warnings about Tumbler.tumbler being null.
         return;
     }
 
@@ -860,10 +983,12 @@ QQuickTumblerAttached::QQuickTumblerAttached(QObject *parent)
         QQuickTumblerPrivate *tumblerPrivate = QQuickTumblerPrivate::get(d->tumbler);
         tumblerPrivate->setupViewData(tumblerPrivate->contentItem);
 
-        if (!tumblerPrivate->viewContentItem)
-            return;
-
-        d->calculateDisplacement();
+        if (delegateItem->parentItem() == tumblerPrivate->viewContentItem) {
+            // This item belongs to the "new" view, meaning that the tumbler's contentItem
+            // was probably assigned declaratively. If they're not equal, calling
+            // calculateDisplacement() would use the old contentItem data, which is bad.
+            d->calculateDisplacement();
+        }
     }
 }
 

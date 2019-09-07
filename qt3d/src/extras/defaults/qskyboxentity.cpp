@@ -40,6 +40,7 @@
 #include "qskyboxentity.h"
 #include "qskyboxentity_p.h"
 
+#include <QtCore/qtimer.h>
 #include <Qt3DRender/qfilterkey.h>
 #include <Qt3DRender/qeffect.h>
 #include <Qt3DRender/qtexture.h>
@@ -86,6 +87,7 @@ QSkyboxEntityPrivate::QSkyboxEntityPrivate()
     , m_negYImage(new QTextureImage())
     , m_negZImage(new QTextureImage())
     , m_extension(QStringLiteral(".png"))
+    , m_hasPendingReloadTextureCall(false)
 {
     m_loadedTexture->setGenerateMipMaps(false);
 }
@@ -102,17 +104,17 @@ void QSkyboxEntityPrivate::init()
 
     m_gl3Technique->graphicsApiFilter()->setApi(QGraphicsApiFilter::OpenGL);
     m_gl3Technique->graphicsApiFilter()->setMajorVersion(3);
-    m_gl3Technique->graphicsApiFilter()->setMajorVersion(1);
+    m_gl3Technique->graphicsApiFilter()->setMinorVersion(3);
     m_gl3Technique->graphicsApiFilter()->setProfile(QGraphicsApiFilter::CoreProfile);
 
     m_gl2Technique->graphicsApiFilter()->setApi(QGraphicsApiFilter::OpenGL);
     m_gl2Technique->graphicsApiFilter()->setMajorVersion(2);
-    m_gl2Technique->graphicsApiFilter()->setMajorVersion(0);
+    m_gl2Technique->graphicsApiFilter()->setMinorVersion(0);
     m_gl2Technique->graphicsApiFilter()->setProfile(QGraphicsApiFilter::NoProfile);
 
     m_es2Technique->graphicsApiFilter()->setApi(QGraphicsApiFilter::OpenGLES);
     m_es2Technique->graphicsApiFilter()->setMajorVersion(2);
-    m_es2Technique->graphicsApiFilter()->setMajorVersion(0);
+    m_es2Technique->graphicsApiFilter()->setMinorVersion(0);
     m_es2Technique->graphicsApiFilter()->setProfile(QGraphicsApiFilter::NoProfile);
 
     m_filterKey->setParent(m_effect);
@@ -191,17 +193,23 @@ void QSkyboxEntityPrivate::init()
  */
 void QSkyboxEntityPrivate::reloadTexture()
 {
-    if (m_extension == QStringLiteral(".dds")) {
-        m_loadedTexture->setSource(QUrl(m_baseName + m_extension));
-        m_textureParameter->setValue(QVariant::fromValue(m_loadedTexture));
-    } else {
-        m_posXImage->setSource(QUrl(m_baseName + QStringLiteral("_posx") + m_extension));
-        m_posYImage->setSource(QUrl(m_baseName + QStringLiteral("_posy") + m_extension));
-        m_posZImage->setSource(QUrl(m_baseName + QStringLiteral("_posz") + m_extension));
-        m_negXImage->setSource(QUrl(m_baseName + QStringLiteral("_negx") + m_extension));
-        m_negYImage->setSource(QUrl(m_baseName + QStringLiteral("_negy") + m_extension));
-        m_negZImage->setSource(QUrl(m_baseName + QStringLiteral("_negz") + m_extension));
-        m_textureParameter->setValue(QVariant::fromValue(m_skyboxTexture));
+    if (!m_hasPendingReloadTextureCall) {
+        m_hasPendingReloadTextureCall = true;
+        QTimer::singleShot(0, [this] {
+            if (m_extension == QStringLiteral(".dds")) {
+                m_loadedTexture->setSource(QUrl(m_baseName + m_extension));
+                m_textureParameter->setValue(QVariant::fromValue(m_loadedTexture));
+            } else {
+                m_posXImage->setSource(QUrl(m_baseName + QStringLiteral("_posx") + m_extension));
+                m_posYImage->setSource(QUrl(m_baseName + QStringLiteral("_posy") + m_extension));
+                m_posZImage->setSource(QUrl(m_baseName + QStringLiteral("_posz") + m_extension));
+                m_negXImage->setSource(QUrl(m_baseName + QStringLiteral("_negx") + m_extension));
+                m_negYImage->setSource(QUrl(m_baseName + QStringLiteral("_negy") + m_extension));
+                m_negZImage->setSource(QUrl(m_baseName + QStringLiteral("_negz") + m_extension));
+                m_textureParameter->setValue(QVariant::fromValue(m_skyboxTexture));
+            }
+            m_hasPendingReloadTextureCall = false;
+        });
     }
 }
 
@@ -217,6 +225,30 @@ void QSkyboxEntityPrivate::reloadTexture()
  * will take care of building a TextureCubeMap to be rendered at runtime. The
  * images in the source directory should match the pattern:
  * \b base name + * "_posx|_posy|_posz|_negx|_negy|_negz" + extension
+ *
+ * By default the extension defaults to .png.
+ *
+ * Be sure to disable frustum culling in the FrameGraph through which the
+ * skybox rendering happens.
+ *
+ * \note Please note that you shouldn't try to render a skybox with an
+ * orthographic projection.
+ *
+ * \since 5.5
+ */
+
+/*!
+ * \qmltype SkyboxEntity
+ * \instantiates Qt3DExtras::QSkyboxEntity
+   \inqmlmodule Qt3D.Extras
+ *
+ * \brief SkyboxEntity is a convenience Entity subclass that can be used to
+ * insert a skybox in a 3D scene.
+ *
+ * By specifying a base name and an extension, SkyboxEntity will take care of
+ * building a TextureCubeMap to be rendered at runtime. The images in the
+ * source directory should match the pattern: \b base name + *
+ * "_posx|_posy|_posz|_negx|_negy|_negz" + extension
  *
  * By default the extension defaults to .png.
  *
@@ -261,6 +293,11 @@ void QSkyboxEntity::setBaseName(const QString &baseName)
     Contains the base name of the Skybox.
 */
 /*!
+    \qmlproperty string QSkyboxEntity::baseName
+
+    Contains the base name of the Skybox.
+*/
+/*!
  * Returns the base name of the Skybox.
  */
 QString QSkyboxEntity::baseName() const
@@ -285,7 +322,19 @@ void QSkyboxEntity::setExtension(const QString &extension)
 /*!
     \property QSkyboxEntity::extension
 
-    Contains the extension of the Skybox.
+    Contains the extension of the filename for the skybox image, including the
+    leading '.'.
+
+    The default value is: .png
+*/
+
+/*!
+    \qmlproperty string QSkyboxEntity::extension
+
+    Contains the extension of the filename for the skybox image, including the
+    leading '.'.
+
+    The default value is: .png
 */
 /*!
  * Returns the extension
@@ -325,5 +374,12 @@ bool QSkyboxEntity::isGammaCorrectEnabled() const
     \property QSkyboxEntity::gammaCorrect
 
     A boolean indicating whether gamma correction is enabled.
+    \since 5.9
+*/
+/*!
+    \qmlproperty bool QSkyboxEntity::gammaCorrect
+
+    A boolean indicating whether gamma correction is enabled.
+    \since 5.9
 */
 QT_END_NAMESPACE

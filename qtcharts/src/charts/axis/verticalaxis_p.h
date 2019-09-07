@@ -40,19 +40,20 @@
 #define VERTICALAXIS_P_H
 
 #include <private/cartesianchartaxis_p.h>
+#include <QtCharts/private/qchartglobal_p.h>
 
 QT_CHARTS_BEGIN_NAMESPACE
 
-class VerticalAxis : public CartesianChartAxis
+class Q_CHARTS_PRIVATE_EXPORT VerticalAxis : public CartesianChartAxis
 {
 public:
     VerticalAxis(QAbstractAxis *axis, QGraphicsItem *item = nullptr, bool intervalAxis = false);
     ~VerticalAxis();
 
-    QSizeF sizeHint(Qt::SizeHint which, const QSizeF &constraint = QSizeF()) const Q_DECL_OVERRIDE;
+    QSizeF sizeHint(Qt::SizeHint which, const QSizeF &constraint = QSizeF()) const override;
 
 protected:
-    void updateGeometry() Q_DECL_OVERRIDE;
+    void updateGeometry() override;
 
 private:
     void updateMinorTickGeometry();

@@ -43,12 +43,12 @@ public:
     ~MeshFunctorA()
     {}
 
-    Qt3DRender::QGeometry *operator ()() Q_DECL_OVERRIDE
+    Qt3DRender::QGeometry *operator ()() override
     {
         return nullptr;
     }
 
-    bool operator ==(const Qt3DRender::QGeometryFactory &other) const Q_DECL_OVERRIDE
+    bool operator ==(const Qt3DRender::QGeometryFactory &other) const override
     {
         return Qt3DRender::functor_cast<MeshFunctorA>(&other);
     }
@@ -65,12 +65,12 @@ public:
     ~MeshFunctorB()
     {}
 
-    Qt3DRender::QGeometry *operator ()() Q_DECL_OVERRIDE
+    Qt3DRender::QGeometry *operator ()() override
     {
         return nullptr;
     }
 
-    bool operator ==(const Qt3DRender::QGeometryFactory &other) const Q_DECL_OVERRIDE
+    bool operator ==(const Qt3DRender::QGeometryFactory &other) const override
     {
         return Qt3DRender::functor_cast<MeshFunctorB>(&other);
     }
@@ -87,7 +87,7 @@ public:
     ~MeshFunctorASub()
     {}
 
-    bool operator ==(const Qt3DRender::QGeometryFactory &other) const Q_DECL_OVERRIDE
+    bool operator ==(const Qt3DRender::QGeometryFactory &other) const override
     {
         return Qt3DRender::functor_cast<MeshFunctorASub>(&other);
     }
@@ -100,6 +100,25 @@ class tst_MeshFunctors : public QObject
 {
     Q_OBJECT
 private Q_SLOTS:
+
+    void checkInitialState()
+    {
+        // GIVEN
+        Qt3DRender::QMesh mesh;
+        mesh.setSource(QUrl(QStringLiteral("./some_path.obj")));
+
+        // WHEN
+        const Qt3DRender::MeshLoaderFunctor functor(&mesh);
+
+        // THEN
+        QVERIFY(functor.nodeManagers() == nullptr);
+        QVERIFY(functor.downloaderService() == nullptr);
+        QVERIFY(functor.sourceData().isEmpty());
+        QCOMPARE(functor.mesh(), mesh.id());
+        QCOMPARE(functor.sourcePath(), mesh.source());
+        QCOMPARE(functor.status(), Qt3DRender::QMesh::None);
+    }
+
     void functorComparison()
     {
         // GIVEN
@@ -125,7 +144,6 @@ private Q_SLOTS:
     void checkMeshFunctorEquality()
     {
         // GIVEN
-        Qt3DCore::QAspectEngine engine;
         auto meshA = new Qt3DRender::QMesh();
         meshA->setSource(QUrl::fromLocalFile(QLatin1String("/foo")));
         meshA->setMeshName(QLatin1String("bar"));
@@ -142,10 +160,10 @@ private Q_SLOTS:
         meshD->setSource(QUrl::fromLocalFile(QLatin1String("/foo")));
         meshD->setMeshName(QLatin1String("bar"));
 
-        const Qt3DRender::MeshLoaderFunctor functorA(meshA, &engine);
-        const Qt3DRender::MeshLoaderFunctor functorB(meshB, &engine);
-        const Qt3DRender::MeshLoaderFunctor functorC(meshC, &engine);
-        const Qt3DRender::MeshLoaderFunctor functorD(meshD, &engine);
+        const Qt3DRender::MeshLoaderFunctor functorA(meshA);
+        const Qt3DRender::MeshLoaderFunctor functorB(meshB);
+        const Qt3DRender::MeshLoaderFunctor functorC(meshC);
+        const Qt3DRender::MeshLoaderFunctor functorD(meshD);
 
         // WHEN
         const bool selfEquality = (functorA == functorA);
@@ -158,6 +176,50 @@ private Q_SLOTS:
         QCOMPARE(sameSource, false);
         QCOMPARE(sameMeshName, false);
         QCOMPARE(perfectMatch, true);
+    }
+
+    void checkExecution()
+    {
+        {
+            // GIVEN
+            Qt3DRender::QMesh mesh;
+            Qt3DRender::MeshLoaderFunctor functor(&mesh);
+
+            // WHEN
+            const Qt3DRender::QGeometry *g = functor();
+
+            // THEN
+            QVERIFY(g == nullptr);
+            QCOMPARE(functor.status(), Qt3DRender::QMesh::Error);
+        }
+
+        {
+            // GIVEN
+            Qt3DRender::QMesh mesh;
+            mesh.setSource(QUrl(QStringLiteral("./non_existing.obj")));
+            Qt3DRender::MeshLoaderFunctor functor(&mesh);
+
+            // WHEN
+            const Qt3DRender::QGeometry *g = functor();
+
+            // THEN
+            QVERIFY(g == nullptr);
+            QCOMPARE(functor.status(), Qt3DRender::QMesh::Error);
+        }
+
+        {
+            // GIVEN
+            Qt3DRender::QMesh mesh;
+            mesh.setSource(QUrl(QStringLiteral("http://www.somedomain.org/non_exisiting.obj")));
+            Qt3DRender::MeshLoaderFunctor functor(&mesh);
+
+            // WHEN
+            const Qt3DRender::QGeometry *g = functor();
+
+            // THEN
+            QVERIFY(g == nullptr);
+            QCOMPARE(functor.status(), Qt3DRender::QMesh::Error);
+        }
     }
 };
 

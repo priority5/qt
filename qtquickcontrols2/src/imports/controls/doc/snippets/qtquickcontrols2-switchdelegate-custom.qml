@@ -26,8 +26,8 @@
 ****************************************************************************/
 
 //! [file]
-import QtQuick 2.6
-import QtQuick.Controls 2.1
+import QtQuick 2.12
+import QtQuick.Controls 2.12
 
 SwitchDelegate {
     id: control
@@ -41,7 +41,6 @@ SwitchDelegate {
         opacity: enabled ? 1.0 : 0.3
         color: control.down ? "#17a81a" : "#21be2b"
         elide: Text.ElideRight
-        horizontalAlignment: Text.AlignLeft
         verticalAlignment: Text.AlignVCenter
     }
 

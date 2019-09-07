@@ -28,6 +28,7 @@
 
 #include "option.h"
 #include "cachekeys.h"
+#include <ioutils.h>
 #include <qdir.h>
 #include <qregexp.h>
 #include <qhash.h>
@@ -37,6 +38,8 @@
 #include <stdarg.h>
 
 QT_BEGIN_NAMESPACE
+
+using namespace QMakeInternal;
 
 EvalHandler Option::evalHandler;
 QMakeGlobals *Option::globals;
@@ -325,7 +328,7 @@ Option::init(int argc, char **argv)
 #endif
         if(Option::qmake_mode == Option::QMAKE_GENERATE_NOTHING)
             Option::qmake_mode = default_mode(argv0);
-        if(!argv0.isEmpty() && !QFileInfo(argv0).isRelative()) {
+        if (!argv0.isEmpty() && IoUtils::isAbsolutePath(argv0)) {
             globals->qmake_abslocation = argv0;
         } else if (argv0.contains(QLatin1Char('/'))
 #ifdef Q_OS_WIN
@@ -504,7 +507,7 @@ QString
 Option::fixString(QString string, uchar flags)
 {
     //const QString orig_string = string;
-    static QHash<FixStringCacheKey, QString> *cache = 0;
+    static QHash<FixStringCacheKey, QString> *cache = nullptr;
     if(!cache) {
         cache = new QHash<FixStringCacheKey, QString>;
         qmakeAddCacheClear(qmakeDeleteCacheClear<QHash<FixStringCacheKey, QString> >, (void**)&cache);
@@ -632,7 +635,7 @@ public:
     QMakeCacheClearItem(qmakeCacheClearFunc f, void **d) : func(f), data(d) { }
     ~QMakeCacheClearItem() {
         (*func)(*data);
-        *data = 0;
+        *data = nullptr;
     }
 };
 static QList<QMakeCacheClearItem*> cache_items;

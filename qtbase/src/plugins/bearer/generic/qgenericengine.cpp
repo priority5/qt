@@ -132,7 +132,7 @@ static QNetworkConfiguration::BearerType qGetInterfaceType(const QString &interf
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
 
     ifreq request;
-    strncpy(request.ifr_name, interface.toLocal8Bit().data(), sizeof(request.ifr_name));
+    strncpy(request.ifr_name, interface.toLocal8Bit().data(), sizeof(request.ifr_name) - 1);
     request.ifr_name[sizeof(request.ifr_name) - 1] = '\0';
     int result = ioctl(sock, SIOCGIFHWADDR, &request);
     close(sock);
@@ -300,7 +300,7 @@ void QGenericEngine::doRequestUpdate()
         if (interface.flags() & QNetworkInterface::IsLoopBack)
             continue;
 
-#ifndef Q_OS_WINRT
+#ifndef Q_OS_WIN
         // ignore WLAN interface handled in separate engine
         if (qGetInterfaceType(interface.name()) == QNetworkConfiguration::BearerWLAN)
             continue;

@@ -39,8 +39,9 @@
 #include "qquickabstractbutton_p.h"
 #include "qquickabstractbutton_p_p.h"
 #include "qquickpopup_p_p.h"
+#include "qquickdeferredexecute_p_p.h"
 
-#include <QtCore/qregexp.h>
+#include <QtCore/qregularexpression.h>
 #include <QtCore/qabstractitemmodel.h>
 #include <QtGui/qinputmethod.h>
 #include <QtGui/qguiapplication.h>
@@ -62,6 +63,7 @@ QT_BEGIN_NAMESPACE
     \inqmlmodule QtQuick.Controls
     \since 5.7
     \ingroup qtquickcontrols2-input
+    \ingroup qtquickcontrols2-focusscopes
     \brief Combined button and popup list for selecting options.
 
     \image qtquickcontrols2-combobox.gif
@@ -132,7 +134,7 @@ QT_BEGIN_NAMESPACE
     \l textRole is not defined, ComboBox is unable to visualize it and throws a
     \c {ReferenceError: modelData is not defined}.
 
-    \sa {Customizing ComboBox}, {Input Controls}
+    \sa {Customizing ComboBox}, {Input Controls}, {Focus Management in Qt Quick Controls 2}
 */
 
 /*!
@@ -166,7 +168,7 @@ QT_BEGIN_NAMESPACE
 
     This signal is emitted when the \uicontrol Return or \uicontrol Enter key is pressed
     on an \l editable combo box. If the confirmed string is not currently in the model,
-    the \l currentIndex will be set to \c -1 and the \c currentText will be updated
+    the \l currentIndex will be set to \c -1 and the \l currentText will be updated
     accordingly.
 
     \note If there is a \l validator set on the combo box, the signal will only be
@@ -185,7 +187,7 @@ public:
     QString stringValue(int index, const QString &role) override;
 
 private:
-    QQuickComboBox *combo;
+    QQuickComboBox *combo = nullptr;
 };
 
 QQuickComboBoxDelegateModel::QQuickComboBoxDelegateModel(QQuickComboBox *combo)
@@ -218,8 +220,6 @@ class QQuickComboBoxPrivate : public QQuickControlPrivate
     Q_DECLARE_PUBLIC(QQuickComboBox)
 
 public:
-    QQuickComboBoxPrivate();
-
     bool isPopupVisible() const;
     void showPopup();
     void hidePopup(bool accept);
@@ -255,61 +255,45 @@ public:
     void handleRelease(const QPointF &point) override;
     void handleUngrab() override;
 
-    bool flat;
-    bool down;
-    bool hasDown;
-    bool pressed;
-    bool ownModel;
-    bool keyNavigating;
-    bool hasDisplayText;
-    bool hasCurrentIndex;
-    int highlightedIndex;
-    int currentIndex;
+    void cancelIndicator();
+    void executeIndicator(bool complete = false);
+
+    void cancelPopup();
+    void executePopup(bool complete = false);
+
+    void itemImplicitWidthChanged(QQuickItem *item) override;
+    void itemImplicitHeightChanged(QQuickItem *item) override;
+
+    bool flat = false;
+    bool down = false;
+    bool hasDown = false;
+    bool pressed = false;
+    bool ownModel = false;
+    bool keyNavigating = false;
+    bool hasDisplayText = false;
+    bool hasCurrentIndex = false;
+    int highlightedIndex = -1;
+    int currentIndex = -1;
     QVariant model;
     QString textRole;
     QString currentText;
     QString displayText;
-    QQuickItem *pressedItem;
-    QQmlInstanceModel *delegateModel;
-    QQmlComponent *delegate;
-    QQuickItem *indicator;
-    QQuickPopup *popup;
+    QQuickItem *pressedItem = nullptr;
+    QQmlInstanceModel *delegateModel = nullptr;
+    QQmlComponent *delegate = nullptr;
+    QQuickDeferredPointer<QQuickItem> indicator;
+    QQuickDeferredPointer<QQuickPopup> popup;
 
     struct ExtraData {
-        ExtraData()
-            : editable(false),
-              accepting(false),
-              allowComplete(false),
-              inputMethodHints(Qt::ImhNone),
-              validator(nullptr) { }
-
-        bool editable;
-        bool accepting;
-        bool allowComplete;
-        Qt::InputMethodHints inputMethodHints;
+        bool editable = false;
+        bool accepting = false;
+        bool allowComplete = false;
+        Qt::InputMethodHints inputMethodHints = Qt::ImhNone;
         QString editText;
-        QValidator *validator;
+        QValidator *validator = nullptr;
     };
     QLazilyAllocated<ExtraData> extra;
 };
-
-QQuickComboBoxPrivate::QQuickComboBoxPrivate()
-    : flat(false),
-      down(false),
-      hasDown(false),
-      pressed(false),
-      ownModel(false),
-      keyNavigating(false),
-      hasDisplayText(false),
-      hasCurrentIndex(false),
-      highlightedIndex(-1),
-      currentIndex(-1),
-      delegateModel(nullptr),
-      delegate(nullptr),
-      indicator(nullptr),
-      popup(nullptr)
-{
-}
 
 bool QQuickComboBoxPrivate::isPopupVisible() const
 {
@@ -318,6 +302,9 @@ bool QQuickComboBoxPrivate::isPopupVisible() const
 
 void QQuickComboBoxPrivate::showPopup()
 {
+    if (!popup)
+        executePopup(true);
+
     if (popup && !popup->isVisible())
         popup->open();
 }
@@ -335,13 +322,10 @@ void QQuickComboBoxPrivate::hidePopup(bool accept)
 
 void QQuickComboBoxPrivate::togglePopup(bool accept)
 {
-    if (!popup)
-        return;
-
-    if (popup->isVisible())
-        hidePopup(accept);
-    else
+    if (!popup || !popup->isVisible())
         showPopup();
+    else
+        hidePopup(accept);
 }
 
 void QQuickComboBoxPrivate::popupVisibleChanged()
@@ -398,8 +382,11 @@ void QQuickComboBoxPrivate::createdItem(int index, QObject *object)
 {
     Q_Q(QQuickComboBox);
     QQuickItem *item = qobject_cast<QQuickItem *>(object);
-    if (popup && item && !item->parentItem()) {
-        item->setParentItem(popup->contentItem());
+    if (item && !item->parentItem()) {
+        if (popup)
+            item->setParentItem(popup->contentItem());
+        else
+            item->setParentItem(q);
         QQuickItemPrivate::get(item)->setCulled(true);
     }
 
@@ -570,9 +557,14 @@ void QQuickComboBoxPrivate::setHighlightedIndex(int index, Highlighting highligh
 
 void QQuickComboBoxPrivate::keySearch(const QString &text)
 {
-    int index = match(currentIndex + 1, text, Qt::MatchStartsWith | Qt::MatchWrap);
-    if (index != -1)
-        setCurrentIndex(index, Activate);
+    const int startIndex = isPopupVisible() ? highlightedIndex : currentIndex;
+    const int index = match(startIndex + 1, text, Qt::MatchStartsWith | Qt::MatchWrap);
+    if (index != -1) {
+        if (isPopupVisible())
+            setHighlightedIndex(index, Highlight);
+        else
+            setCurrentIndex(index, Activate);
+    }
 }
 
 int QQuickComboBoxPrivate::match(int start, const QString &text, Qt::MatchFlags flags) const
@@ -581,6 +573,8 @@ int QQuickComboBoxPrivate::match(int start, const QString &text, Qt::MatchFlags 
     uint matchType = flags & 0x0F;
     bool wrap = flags & Qt::MatchWrap;
     Qt::CaseSensitivity cs = flags & Qt::MatchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    QRegularExpression::PatternOptions options = flags & Qt::MatchCaseSensitive ? QRegularExpression::NoPatternOption
+                                                                                : QRegularExpression::CaseInsensitiveOption;
     int from = start;
     int to = q->count();
 
@@ -593,14 +587,19 @@ int QQuickComboBoxPrivate::match(int start, const QString &text, Qt::MatchFlags 
                 if (t == text)
                     return idx;
                 break;
-            case Qt::MatchRegExp:
-                if (QRegExp(text, cs).exactMatch(t))
+            case Qt::MatchRegExp: {
+                QRegularExpression rx(QRegularExpression::anchoredPattern(text), options);
+                if (rx.match(t).hasMatch())
                     return idx;
                 break;
-            case Qt::MatchWildcard:
-                if (QRegExp(text, cs, QRegExp::Wildcard).exactMatch(t))
+            }
+            case Qt::MatchWildcard: {
+                QRegularExpression rx(QRegularExpression::wildcardToRegularExpression(text),
+                                      options);
+                if (rx.match(t).hasMatch())
                     return idx;
                 break;
+            }
             case Qt::MatchStartsWith:
                 if (t.startsWith(text, cs))
                     return idx;
@@ -695,6 +694,62 @@ void QQuickComboBoxPrivate::handleUngrab()
     q->setPressed(false);
 }
 
+static inline QString indicatorName() { return QStringLiteral("indicator"); }
+
+void QQuickComboBoxPrivate::cancelIndicator()
+{
+    Q_Q(QQuickComboBox);
+    quickCancelDeferred(q, indicatorName());
+}
+
+void QQuickComboBoxPrivate::executeIndicator(bool complete)
+{
+    Q_Q(QQuickComboBox);
+    if (indicator.wasExecuted())
+        return;
+
+    if (!indicator || complete)
+        quickBeginDeferred(q, indicatorName(), indicator);
+    if (complete)
+        quickCompleteDeferred(q, indicatorName(), indicator);
+}
+
+static inline QString popupName() { return QStringLiteral("popup"); }
+
+void QQuickComboBoxPrivate::cancelPopup()
+{
+    Q_Q(QQuickComboBox);
+    quickCancelDeferred(q, popupName());
+}
+
+void QQuickComboBoxPrivate::executePopup(bool complete)
+{
+    Q_Q(QQuickComboBox);
+    if (popup.wasExecuted())
+        return;
+
+    if (!popup || complete)
+        quickBeginDeferred(q, popupName(), popup);
+    if (complete)
+        quickCompleteDeferred(q, popupName(), popup);
+}
+
+void QQuickComboBoxPrivate::itemImplicitWidthChanged(QQuickItem *item)
+{
+    Q_Q(QQuickComboBox);
+    QQuickControlPrivate::itemImplicitWidthChanged(item);
+    if (item == indicator)
+        emit q->implicitIndicatorWidthChanged();
+}
+
+void QQuickComboBoxPrivate::itemImplicitHeightChanged(QQuickItem *item)
+{
+    Q_Q(QQuickComboBox);
+    QQuickControlPrivate::itemImplicitHeightChanged(item);
+    if (item == indicator)
+        emit q->implicitIndicatorHeightChanged();
+}
+
 QQuickComboBox::QQuickComboBox(QQuickItem *parent)
     : QQuickControl(*(new QQuickComboBoxPrivate), parent)
 {
@@ -710,14 +765,14 @@ QQuickComboBox::QQuickComboBox(QQuickItem *parent)
 QQuickComboBox::~QQuickComboBox()
 {
     Q_D(QQuickComboBox);
-    // Disconnect visibleChanged() to avoid a spurious highlightedIndexChanged() signal
-    // emission during the destruction of the (visible) popup. (QTBUG-57650)
-    QObjectPrivate::disconnect(d->popup, &QQuickPopup::visibleChanged, d, &QQuickComboBoxPrivate::popupVisibleChanged);
-
-    // Delete the popup directly instead of calling setPopup(nullptr) to avoid calling
-    // destroyDelegate(popup) and potentially accessing a destroyed QML context. (QTBUG-50992)
-    delete d->popup;
-    d->popup = nullptr;
+    d->removeImplicitSizeListener(d->indicator);
+    if (d->popup) {
+        // Disconnect visibleChanged() to avoid a spurious highlightedIndexChanged() signal
+        // emission during the destruction of the (visible) popup. (QTBUG-57650)
+        QObjectPrivate::disconnect(d->popup.data(), &QQuickPopup::visibleChanged, d, &QQuickComboBoxPrivate::popupVisibleChanged);
+        delete d->popup;
+        d->popup = nullptr;
+    }
 }
 
 /*!
@@ -773,6 +828,7 @@ void QQuickComboBox::setModel(const QVariant& m)
 
     d->model = model;
     d->createDelegateModel();
+    emit countChanged();
     if (isComponentComplete()) {
         setCurrentIndex(count() > 0 ? 0 : -1);
         d->updateCurrentText();
@@ -845,6 +901,8 @@ int QQuickComboBox::highlightedIndex() const
 
     This property holds the index of the current item in the combo box.
 
+    The default value is \c -1 when \l count is \c 0, and \c 0 otherwise.
+
     \sa activated(), currentText, highlightedIndex
 */
 int QQuickComboBox::currentIndex() const
@@ -866,7 +924,7 @@ void QQuickComboBox::setCurrentIndex(int index)
 
     This property holds the text of the current item in the combo box.
 
-    \sa currentIndex, displayText, textRole
+    \sa currentIndex, displayText, textRole, editText
 */
 QString QQuickComboBox::currentText() const
 {
@@ -1002,7 +1060,9 @@ void QQuickComboBox::setDelegate(QQmlComponent* delegate)
 */
 QQuickItem *QQuickComboBox::indicator() const
 {
-    Q_D(const QQuickComboBox);
+    QQuickComboBoxPrivate *d = const_cast<QQuickComboBoxPrivate *>(d_func());
+    if (!d->indicator)
+        d->executeIndicator();
     return d->indicator;
 }
 
@@ -1012,13 +1072,27 @@ void QQuickComboBox::setIndicator(QQuickItem *indicator)
     if (d->indicator == indicator)
         return;
 
-    QQuickControlPrivate::destroyDelegate(d->indicator, this);
+    if (!d->indicator.isExecuting())
+        d->cancelIndicator();
+
+    const qreal oldImplicitIndicatorWidth = implicitIndicatorWidth();
+    const qreal oldImplicitIndicatorHeight = implicitIndicatorHeight();
+
+    d->removeImplicitSizeListener(d->indicator);
+    delete d->indicator;
     d->indicator = indicator;
     if (indicator) {
         if (!indicator->parentItem())
             indicator->setParentItem(this);
+        d->addImplicitSizeListener(indicator);
     }
-    emit indicatorChanged();
+
+    if (!qFuzzyCompare(oldImplicitIndicatorWidth, implicitIndicatorWidth()))
+        emit implicitIndicatorWidthChanged();
+    if (!qFuzzyCompare(oldImplicitIndicatorHeight, implicitIndicatorHeight()))
+        emit implicitIndicatorHeightChanged();
+    if (!d->indicator.isExecuting())
+        emit indicatorChanged();
 }
 
 /*!
@@ -1036,7 +1110,9 @@ void QQuickComboBox::setIndicator(QQuickItem *indicator)
 */
 QQuickPopup *QQuickComboBox::popup() const
 {
-    Q_D(const QQuickComboBox);
+    QQuickComboBoxPrivate *d = const_cast<QQuickComboBoxPrivate *>(d_func());
+    if (!d->popup)
+        d->executePopup(isComponentComplete());
     return d->popup;
 }
 
@@ -1046,9 +1122,12 @@ void QQuickComboBox::setPopup(QQuickPopup *popup)
     if (d->popup == popup)
         return;
 
+    if (!d->popup.isExecuting())
+        d->cancelPopup();
+
     if (d->popup) {
-        QObjectPrivate::disconnect(d->popup, &QQuickPopup::visibleChanged, d, &QQuickComboBoxPrivate::popupVisibleChanged);
-        QQuickControlPrivate::destroyDelegate(d->popup, this);
+        QObjectPrivate::disconnect(d->popup.data(), &QQuickPopup::visibleChanged, d, &QQuickComboBoxPrivate::popupVisibleChanged);
+        delete d->popup;
     }
     if (popup) {
         QQuickPopupPrivate::get(popup)->allowVerticalFlip = true;
@@ -1059,7 +1138,8 @@ void QQuickComboBox::setPopup(QQuickPopup *popup)
             itemView->setHighlightRangeMode(QQuickItemView::NoHighlightRange);
     }
     d->popup = popup;
-    emit popupChanged();
+    if (!d->popup.isExecuting())
+        emit popupChanged();
 }
 
 /*!
@@ -1187,7 +1267,7 @@ void QQuickComboBox::setEditable(bool editable)
 
     This property holds the text in the text field of an editable combo box.
 
-    \sa editable
+    \sa editable, currentText, displayText
 */
 QString QQuickComboBox::editText() const
 {
@@ -1322,6 +1402,50 @@ bool QQuickComboBox::hasAcceptableInput() const
 }
 
 /*!
+    \since QtQuick.Controls 2.5 (Qt 5.12)
+    \qmlproperty real QtQuick.Controls::ComboBox::implicitIndicatorWidth
+    \readonly
+
+    This property holds the implicit indicator width.
+
+    The value is equal to \c {indicator ? indicator.implicitWidth : 0}.
+
+    This is typically used, together with \l {Control::}{implicitContentWidth} and
+    \l {Control::}{implicitBackgroundWidth}, to calculate the \l {Item::}{implicitWidth}.
+
+    \sa implicitIndicatorHeight
+*/
+qreal QQuickComboBox::implicitIndicatorWidth() const
+{
+    Q_D(const QQuickComboBox);
+    if (!d->indicator)
+        return 0;
+    return d->indicator->implicitWidth();
+}
+
+/*!
+    \since QtQuick.Controls 2.5 (Qt 5.12)
+    \qmlproperty real QtQuick.Controls::ComboBox::implicitIndicatorHeight
+    \readonly
+
+    This property holds the implicit indicator height.
+
+    The value is equal to \c {indicator ? indicator.implicitHeight : 0}.
+
+    This is typically used, together with \l {Control::}{implicitContentHeight} and
+    \l {Control::}{implicitBackgroundHeight}, to calculate the \l {Item::}{implicitHeight}.
+
+    \sa implicitIndicatorWidth
+*/
+qreal QQuickComboBox::implicitIndicatorHeight() const
+{
+    Q_D(const QQuickComboBox);
+    if (!d->indicator)
+        return 0;
+    return d->indicator->implicitHeight();
+}
+
+/*!
     \qmlmethod string QtQuick.Controls::ComboBox::textAt(int index)
 
     Returns the text for the specified \a index, or an empty string
@@ -1433,8 +1557,13 @@ bool QQuickComboBox::eventFilter(QObject *object, QEvent *event)
         break;
     }
     case QEvent::FocusOut:
-        d->hidePopup(false);
-        setPressed(false);
+        if (qGuiApp->focusObject() != this && (!d->popup || !d->popup->hasActiveFocus())) {
+            // Only close the popup if focus was transferred somewhere else
+            // than to the popup or the popup button (which normally means that
+            // the user clicked on the popup button to open it, not close it).
+            d->hidePopup(false);
+            setPressed(false);
+        }
         break;
 #if QT_CONFIG(im)
     case QEvent::InputMethod:
@@ -1460,8 +1589,14 @@ void QQuickComboBox::focusOutEvent(QFocusEvent *event)
 {
     Q_D(QQuickComboBox);
     QQuickControl::focusOutEvent(event);
-    d->hidePopup(false);
-    setPressed(false);
+
+    if (qGuiApp->focusObject() != d->contentItem && (!d->popup || !d->popup->hasActiveFocus())) {
+        // Only close the popup if focus was transferred
+        // somewhere else than to the popup or the inner line edit (which is
+        // normally done from QQuickComboBox::focusInEvent).
+        d->hidePopup(false);
+        setPressed(false);
+    }
 }
 
 #if QT_CONFIG(im)
@@ -1537,9 +1672,8 @@ void QQuickComboBox::keyReleaseEvent(QKeyEvent *event)
 {
     Q_D(QQuickComboBox);
     QQuickControl::keyReleaseEvent(event);
-
     d->keyNavigating = false;
-    if (!d->popup || event->isAutoRepeat())
+    if (event->isAutoRepeat())
         return;
 
     switch (event->key()) {
@@ -1558,9 +1692,11 @@ void QQuickComboBox::keyReleaseEvent(QKeyEvent *event)
         break;
     case Qt::Key_Escape:
     case Qt::Key_Back:
-        d->hidePopup(false);
-        setPressed(false);
-        event->accept();
+        if (d->isPopupVisible()) {
+            d->hidePopup(false);
+            setPressed(false);
+            event->accept();
+        }
         break;
     default:
         break;
@@ -1573,12 +1709,10 @@ void QQuickComboBox::wheelEvent(QWheelEvent *event)
     Q_D(QQuickComboBox);
     QQuickControl::wheelEvent(event);
     if (d->wheelEnabled && !d->isPopupVisible()) {
-        const int oldIndex = d->currentIndex;
         if (event->angleDelta().y() > 0)
             d->decrementCurrentIndex();
         else
             d->incrementCurrentIndex();
-        event->setAccepted(d->currentIndex != oldIndex);
     }
 }
 #endif
@@ -1586,7 +1720,10 @@ void QQuickComboBox::wheelEvent(QWheelEvent *event)
 void QQuickComboBox::componentComplete()
 {
     Q_D(QQuickComboBox);
+    d->executeIndicator(true);
     QQuickControl::componentComplete();
+    if (d->popup)
+        d->executePopup(true);
 
     if (d->delegateModel && d->ownModel)
         static_cast<QQmlDelegateModel *>(d->delegateModel)->componentComplete();
@@ -1596,6 +1733,16 @@ void QQuickComboBox::componentComplete()
             setCurrentIndex(0);
         else
             d->updateCurrentText();
+    }
+}
+
+void QQuickComboBox::itemChange(QQuickItem::ItemChange change, const QQuickItem::ItemChangeData &value)
+{
+    Q_D(QQuickComboBox);
+    QQuickControl::itemChange(change, value);
+    if (change == ItemVisibleHasChanged && !value.boolValue) {
+        d->hidePopup(false);
+        setPressed(false);
     }
 }
 
@@ -1636,12 +1783,12 @@ void QQuickComboBox::localeChange(const QLocale &newLocale, const QLocale &oldLo
 
 QFont QQuickComboBox::defaultFont() const
 {
-    return QQuickControlPrivate::themeFont(QPlatformTheme::ComboMenuItemFont);
+    return QQuickTheme::font(QQuickTheme::ComboBox);
 }
 
 QPalette QQuickComboBox::defaultPalette() const
 {
-    return QQuickControlPrivate::themePalette(QPlatformTheme::ComboBoxPalette);
+    return QQuickTheme::palette(QQuickTheme::ComboBox);
 }
 
 #if QT_CONFIG(accessibility)

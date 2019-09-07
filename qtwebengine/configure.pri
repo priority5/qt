@@ -1,3 +1,5 @@
+include(src/core/config/functions.pri)
+
 # this must be done outside any function
 QTWEBENGINE_SOURCE_TREE = $$PWD
 
@@ -84,26 +86,6 @@ defineTest(qtConfTest_detectFlex) {
     return(true)
 }
 
-defineTest(qtConfTest_detectGlibc) {
-    ldd = $$qtConfFindInPath("ldd")
-    !isEmpty(ldd) {
-        qtLog("Found ldd from path: $$ldd")
-        qtRunLoggedCommand("$$ldd --version", version)|return(true)
-        version ~= 's/^.*[^0-9]\([0-9]*\.[0-9]*\).*$/\1/'
-        version = $$first(version)
-        qtLog("Found libc version: $$version")
-        version = $$split(version,'.')
-        version = $$member(version, 1)
-        greaterThan(version, 16) {
-            return(true)
-        }
-        qtLog("Detected too old version of glibc. Required min 2.17.")
-        return(false)
-    }
-    qtLog("No ldd found. Assuming right version of glibc.")
-    return(true)
-}
-
 defineTest(qtConfTest_detectNinja) {
     ninja = $$qtConfFindInPath("ninja$$EXE_SUFFIX")
     !isEmpty(ninja) {
@@ -147,18 +129,23 @@ defineTest(qtConfTest_embedded) {
     return(false)
 }
 
-defineTest(qtConfTest_detectIcuuc) {
-   pkgConfig = $$qtConfPkgConfig()
-   !isEmpty(pkgConfig) {
-       qtRunLoggedCommand("$$pkgConfig --libs --static libxml-2.0", xmllibs)
-       contains(xmllibs,".*-licuuc.*"):return(true)
-       qtLog("System libxml2 is not configured with ICU")
+defineTest(qtConfTest_detectHostPkgConfig) {
+   PKG_CONFIG = $$qtConfPkgConfig(true)
+   isEmpty(PKG_CONFIG) {
+       qtLog("Could not find host pkg-config")
+       return(false)
    }
-   return(false)
+   qtLog("Found host pkg-config: $$PKG_CONFIG")
+   $${1}.path = $$PKG_CONFIG
+   export($${1}.path)
+   $${1}.cache += path
+   export($${1}.cache)
+   return(true)
 }
 
 defineTest(qtConfTest_isSanitizerSupported) {
   sanitizer_combo_supported = true
+
   sanitize_address {
     asan_supported = false
     linux-clang-libc++:isSanitizerSupportedOnLinux() {
@@ -168,7 +155,7 @@ defineTest(qtConfTest_isSanitizerSupported) {
     }
     !$$asan_supported {
       sanitizer_combo_supported = false
-       qtLog("An address sanitizer-enabled Qt WebEngine build can only be built on Linux or macOS using Clang and libc++.")
+      qtLog("An address sanitizer-enabled Qt WebEngine build can only be built on Linux or macOS using Clang and libc++.")
     }
   }
 
@@ -179,12 +166,16 @@ defineTest(qtConfTest_isSanitizerSupported) {
 
   sanitize_undefined {
     ubsan_supported = false
-    linux-clang-libc++:isSanitizerSupportedOnLinux():CONFIG(release, debug|release):!debug_and_release {
-      ubsan_supported = true
+    CONFIG(release, debug|release):!debug_and_release {
+      linux-clang-libc++:isSanitizerSupportedOnLinux() {
+        ubsan_supported = true
+      } else:macos:isSanitizerSupportedOnMacOS() {
+        ubsan_supported = true
+      }
     }
     !$$ubsan_supported {
       sanitizer_combo_supported = false
-      qtLog("An undefined behavior sanitizer-enabled Qt WebEngine build can only be built on Linux using Clang and libc++ in release mode.")
+      qtLog("An undefined behavior sanitizer-enabled Qt WebEngine build can only be built on Linux or macOS using Clang and libc++ in release mode.")
     }
   }
 
@@ -209,11 +200,12 @@ defineTest(isSanitizerSupportedOnLinux) {
 }
 
 defineTest(isSanitizerSupportedOnMacOS) {
-  isEmpty(QT_APPLE_CLANG_MAJOR_VERSION) {
+  isEmpty(QMAKE_APPLE_CLANG_MAJOR_VERSION) {
     QTWEBENGINE_CLANG_IS_APPLE = false
   } else {
     QTWEBENGINE_CLANG_IS_APPLE = true
   }
+
   $$QTWEBENGINE_CLANG_IS_APPLE:isSanitizerMacOSAppleClangVersionSupported(): return(true)
   else:isSanitizerMacOSClangVersionSupported(): return(true)
   return(false)
@@ -221,32 +213,89 @@ defineTest(isSanitizerSupportedOnMacOS) {
 
 defineTest(isSanitizerMacOSAppleClangVersionSupported) {
   # Clang sanitizer suppression attributes work from Apple Clang version 7.3.0+.
-  greaterThan(QT_APPLE_CLANG_MAJOR_VERSION, 7): return(true)
-  greaterThan(QT_APPLE_CLANG_MINOR_VERSION, 2): return(true)
+  greaterThan(QMAKE_APPLE_CLANG_MAJOR_VERSION, 7): return(true)
+  greaterThan(QMAKE_APPLE_CLANG_MINOR_VERSION, 2): return(true)
 
-  qtLog("Using Apple Clang version $${QT_APPLE_CLANG_MAJOR_VERSION}.$${QT_APPLE_CLANG_MINOR_VERSION}.$${QT_APPLE_CLANG_PATCH_VERSION}, but at least Apple Clang version 7.3.0 is required to build a sanitizer-enabled Qt WebEngine.")
+  qtLog("Using Apple Clang version $${QMAKE_APPLE_CLANG_MAJOR_VERSION}.$${QMAKE_APPLE_CLANG_MINOR_VERSION}.$${QMAKE_APPLE_CLANG_PATCH_VERSION}, but at least Apple Clang version 7.3.0 is required to build a sanitizer-enabled Qt WebEngine.")
   return(false)
 }
 
 defineTest(isSanitizerMacOSClangVersionSupported) {
   # Clang sanitizer suppression attributes work from non-apple Clang version 3.7+.
-  greaterThan(QT_CLANG_MAJOR_VERSION, 3): return(true)
-  greaterThan(QT_CLANG_MINOR_VERSION, 6): return(true)
+  greaterThan(QMAKE_CLANG_MAJOR_VERSION, 3): return(true)
+  greaterThan(QMAKE_CLANG_MINOR_VERSION, 6): return(true)
 
-  qtLog("Using Clang version $${QT_CLANG_MAJOR_VERSION}.$${QT_CLANG_MINOR_VERSION}, but at least Clang version 3.7 is required to build a sanitizer-enabled Qt WebEngine.")
+  qtLog("Using Clang version $${QMAKE_CLANG_MAJOR_VERSION}.$${QMAKE_CLANG_MINOR_VERSION}, but at least Clang version 3.7 is required to build a sanitizer-enabled Qt WebEngine.")
   return(false)
 }
 
 defineTest(isSanitizerLinuxClangVersionSupported) {
   # Clang sanitizer suppression attributes work from Clang version 3.7+.
-  greaterThan(QT_CLANG_MAJOR_VERSION, 3): return(true)
-  greaterThan(QT_CLANG_MINOR_VERSION, 6): return(true)
+  greaterThan(QMAKE_CLANG_MAJOR_VERSION, 3): return(true)
+  greaterThan(QMAKE_CLANG_MINOR_VERSION, 6): return(true)
 
-  qtLog("Using Clang version $${QT_CLANG_MAJOR_VERSION}.$${QT_CLANG_MINOR_VERSION}, but at least Clang version 3.7 is required to build a sanitizer-enabled Qt WebEngine.")
+  qtLog("Using Clang version $${QMAKE_CLANG_MAJOR_VERSION}.$${QMAKE_CLANG_MINOR_VERSION}, but at least Clang version 3.7 is required to build a sanitizer-enabled Qt WebEngine.")
   return(false)
 }
 
 defineReplace(qtConfFunc_isTestsInBuildParts) {
     contains(QT_BUILD_PARTS, tests): return(true)
+    return(false)
+}
+
+defineReplace(webEngineGetMacOSVersion) {
+    value = $$system("sw_vers -productVersion 2>/dev/null")
+    return($$value)
+}
+
+defineReplace(webEngineGetMacOSSDKVersion) {
+    value = $$system("/usr/bin/xcodebuild -sdk $$QMAKE_MAC_SDK -version ProductVersion 2>/dev/null")
+    return($$value)
+}
+
+defineReplace(webEngineGetMacOSClangVerboseVersion) {
+    output = $$system("$$QMAKE_CXX --version 2>/dev/null", lines)
+    value = $$first(output)
+    return($$value)
+}
+
+defineTest(qtConfReport_macosToolchainVersion) {
+    arg = $$2
+    contains(arg, "macosVersion"): report_message = $$webEngineGetMacOSVersion()
+    contains(arg, "xcodeVersion"): report_message = "$$QMAKE_XCODE_VERSION"
+    contains(arg, "clangVersion"): report_message = $$webEngineGetMacOSClangVerboseVersion()
+    contains(arg, "sdkVersion"): report_message = $$webEngineGetMacOSSDKVersion()
+    contains(arg, "deploymentTarget"): report_message = "$$QMAKE_MACOSX_DEPLOYMENT_TARGET"
+    !isEmpty(report_message): qtConfReportPadded($$1, $$report_message)
+}
+
+defineTest(qtConfTest_isWindowsHostCompiler64) {
+    win_host_arch = $$(VSCMD_ARG_HOST_ARCH)
+    isEmpty(win_host_arch): return(true)
+    contains(win_host_arch,"x64"): return(true)
+    qtLog("Required 64-bit cross-building or native toolchain was not detected.")
+    return(false)
+}
+
+# Fixme QTBUG-71772
+defineTest(qtConfTest_hasThumbFlag) {
+    FLAG = $$qtwebengine_extractCFlag("-mthumb")
+    !isEmpty(FLAG): return(true)
+    FLAG = $$qtwebengine_extractCFlag("-marm")
+    !isEmpty(FLAG): return(false)
+
+    MARCH = $$qtwebengine_extractCFlag("-march=.*")
+    MARMV = $$replace(MARCH, "armv",)
+    !isEmpty(MARMV) {
+        MARMV = $$split(MARMV,)
+        MARMV = $$member(MARMV, 0)
+    }
+    if (isEmpty(MARMV) | lessThan(MARMV, 7)): return(false)
+    # no flag assume mthumb
+    return(true)
+}
+
+defineTest(qtConfTest_hasGcc6OrNewer) {
+    greaterThan(QMAKE_GCC_MAJOR_VERSION, 5):return(true)
     return(false)
 }

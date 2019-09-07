@@ -65,10 +65,17 @@ void FindRunningClipAnimatorsJob::run()
     for (const auto &clipAnimatorHandle : qAsConst(m_clipAnimatorHandles)) {
         ClipAnimator *clipAnimator = clipAnimatorManager->data(clipAnimatorHandle);
         Q_ASSERT(clipAnimator);
-        const bool canRun = clipAnimator->canRun();
-        m_handler->setClipAnimatorRunning(clipAnimatorHandle, canRun);
+        if (!clipAnimator->isEnabled())
+            continue;
 
-        if (!canRun)
+        const bool canRun = clipAnimator->canRun();
+        const bool running = clipAnimator->isRunning();
+        const bool seeking = clipAnimator->isSeeking();
+        m_handler->setClipAnimatorRunning(clipAnimatorHandle, canRun && (seeking || running));
+
+        // TODO: Actually check if this is needed first, currently we re-build this every time
+        // canRun (or the normalized time) is true.
+        if (!canRun || !(seeking || running))
             continue;
 
         // The clip animator needs to know how to map fcurve values through to properties on QNodes.
@@ -81,19 +88,20 @@ void FindRunningClipAnimatorsJob::run()
 
         const QVector<ChannelNameAndType> channelNamesAndTypes
                 = buildRequiredChannelsAndTypes(m_handler, mapper);
-        QVector<ComponentIndices> channelComponentIndices
+        const QVector<ComponentIndices> channelComponentIndices
                 = assignChannelComponentIndices(channelNamesAndTypes);
 
         const AnimationClip *clip = m_handler->animationClipLoaderManager()->lookupResource(clipAnimator->clipId());
         Q_ASSERT(clip);
-        const ComponentIndices formatIndices = generateClipFormatIndices(channelNamesAndTypes,
-                                                                         channelComponentIndices,
-                                                                         clip);
-        clipAnimator->setFormatIndices(formatIndices);
+        const ClipFormat format = generateClipFormatIndices(channelNamesAndTypes,
+                                                            channelComponentIndices,
+                                                            clip);
+        clipAnimator->setClipFormat(format);
 
         const QVector<MappingData> mappingData = buildPropertyMappings(channelMappings,
                                                                        channelNamesAndTypes,
-                                                                       channelComponentIndices);
+                                                                       format.formattedComponentIndices,
+                                                                       format.sourceClipMask);
         clipAnimator->setMappingData(mappingData);
     }
 

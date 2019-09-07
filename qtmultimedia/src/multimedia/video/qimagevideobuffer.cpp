@@ -89,14 +89,14 @@ uchar *QImageVideoBuffer::map(MapMode mode, int *numBytes, int *bytesPerLine)
         d->mapMode = mode;
 
         if (numBytes)
-            *numBytes = d->image.byteCount();
+            *numBytes = int(d->image.sizeInBytes());
 
         if (bytesPerLine)
             *bytesPerLine = d->image.bytesPerLine();
 
         return d->image.bits();
     } else {
-        return 0;
+        return nullptr;
     }
 }
 

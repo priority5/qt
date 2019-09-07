@@ -75,7 +75,7 @@ class QAbstractAspectJobManager;
 class QSceneObserverInterface;
 class QServiceLocator;
 
-class QT3DCORE_PRIVATE_EXPORT QAspectManager : public QObject
+class Q_3DCORE_PRIVATE_EXPORT QAspectManager : public QObject
 {
     Q_OBJECT
 public:
@@ -98,6 +98,7 @@ public Q_SLOTS:
     void exec();
     void quit();
 
+public:
     const QVector<QAbstractAspect *> &aspects() const;
     QAbstractAspectJobManager *jobManager() const;
     QChangeArbiter *changeArbiter() const;

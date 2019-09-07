@@ -111,9 +111,7 @@ static QIcon messageIcon2qIcon(QSystemTrayIcon::MessageIcon icon)
     \li All X11 desktop environments that implement the D-Bus
        \l{http://www.freedesktop.org/wiki/Specifications/StatusNotifierItem/StatusNotifierItem}
        specification, including recent versions of KDE and Unity.
-    \li All supported versions of \macos. Note that the Growl
-       notification system must be installed for
-       QSystemTrayIcon::showMessage() to display messages on \macos prior to 10.8 (Mountain Lion).
+    \li All supported versions of \macos.
     \endlist
 
     To check whether a system tray is present on the user's desktop,
@@ -420,9 +418,6 @@ bool QSystemTrayIcon::supportsMessages()
     On Windows, the \a millisecondsTimeoutHint is usually ignored by the system
     when the application has focus.
 
-    On \macos, the Growl notification system must be installed for this function to
-    display messages.
-
     Has been turned into a slot in Qt 5.2.
 
     \sa show(), supportsMessages()
@@ -528,6 +523,8 @@ QBalloonTip::QBalloonTip(const QIcon &icon, const QString &title,
     closeButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     closeButton->setFixedSize(closeButtonSize, closeButtonSize);
     QObject::connect(closeButton, SIGNAL(clicked()), this, SLOT(close()));
+#else
+    Q_UNUSED(closeButtonSize);
 #endif
 
 #if QT_CONFIG(label)
@@ -577,7 +574,7 @@ QBalloonTip::QBalloonTip(const QIcon &icon, const QString &title,
     layout->addWidget(msgLabel, 1, 0, 1, 3);
 #endif
     layout->setSizeConstraint(QLayout::SetFixedSize);
-    layout->setMargin(3);
+    layout->setContentsMargins(3, 3, 3, 3);
     setLayout(layout);
 
     QPalette pal = palette();

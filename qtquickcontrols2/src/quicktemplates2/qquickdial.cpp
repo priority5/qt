@@ -35,6 +35,7 @@
 ****************************************************************************/
 
 #include "qquickdial_p.h"
+#include "qquickdeferredexecute_p_p.h"
 
 #include <QtCore/qmath.h>
 #include <QtQuick/private/qquickflickable_p.h>
@@ -74,6 +75,8 @@ QT_BEGIN_NAMESPACE
     \row \li Set \l value to \l to \li \c Qt.Key_End
     \endtable
 
+    \include qquickdial.qdocinc inputMode
+
     \sa {Customizing Dial}, {Input Controls}
 */
 
@@ -95,45 +98,38 @@ class QQuickDialPrivate : public QQuickControlPrivate
     Q_DECLARE_PUBLIC(QQuickDial)
 
 public:
-    QQuickDialPrivate()
-        : from(0),
-          to(1),
-          value(0),
-          position(0),
-          angle(startAngle),
-          stepSize(0),
-          pressed(false),
-          snapMode(QQuickDial::NoSnap),
-          wrap(false),
-          live(true),
-          handle(nullptr)
-    {
-    }
-
     qreal valueAt(qreal position) const;
     qreal snapPosition(qreal position) const;
     qreal positionAt(const QPointF &point) const;
+    qreal circularPositionAt(const QPointF &point) const;
+    qreal linearPositionAt(const QPointF &point) const;
     void setPosition(qreal position);
     void updatePosition();
     bool isLargeChange(const QPointF &eventPos, qreal proposedPosition) const;
+    bool isHorizontalOrVertical() const;
 
     void handlePress(const QPointF &point) override;
     void handleMove(const QPointF &point) override;
     void handleRelease(const QPointF &point) override;
     void handleUngrab() override;
 
-    qreal from;
-    qreal to;
-    qreal value;
-    qreal position;
-    qreal angle;
-    qreal stepSize;
-    bool pressed;
+    void cancelHandle();
+    void executeHandle(bool complete = false);
+
+    qreal from = 0;
+    qreal to = 1;
+    qreal value = 0;
+    qreal position = 0;
+    qreal angle = startAngle;
+    qreal stepSize = 0;
+    bool pressed = false;
     QPointF pressPoint;
-    QQuickDial::SnapMode snapMode;
-    bool wrap;
-    bool live;
-    QQuickItem *handle;
+    qreal positionBeforePress = 0;
+    QQuickDial::SnapMode snapMode = QQuickDial::NoSnap;
+    QQuickDial::InputMode inputMode = QQuickDial::Circular;
+    bool wrap = false;
+    bool live = true;
+    QQuickDeferredPointer<QQuickItem> handle;
 };
 
 qreal QQuickDialPrivate::valueAt(qreal position) const
@@ -156,6 +152,11 @@ qreal QQuickDialPrivate::snapPosition(qreal position) const
 
 qreal QQuickDialPrivate::positionAt(const QPointF &point) const
 {
+    return inputMode == QQuickDial::Circular ? circularPositionAt(point) : linearPositionAt(point);
+}
+
+qreal QQuickDialPrivate::circularPositionAt(const QPointF &point) const
+{
     qreal yy = height / 2.0 - point.y();
     qreal xx = point.x() - width / 2.0;
     qreal angle = (xx || yy) ? std::atan2(yy, xx) : 0;
@@ -167,10 +168,36 @@ qreal QQuickDialPrivate::positionAt(const QPointF &point) const
     return normalizedAngle;
 }
 
+qreal QQuickDialPrivate::linearPositionAt(const QPointF &point) const
+{
+    // This value determines the range (either horizontal or vertical)
+    // within which the dial can be dragged.
+    // The larger this value is, the further the drag distance
+    // must be to go from a position of e.g. 0.0 to 1.0.
+    qreal dragArea = 0;
+
+    // The linear input mode uses a "relative" input system,
+    // where the distance from the press point is used to calculate
+    // the change in position. Moving the mouse above the press
+    // point increases the position (when inputMode is Vertical),
+    // and vice versa. This prevents the dial from jumping when clicked.
+    qreal dragDistance = 0;
+
+    if (inputMode == QQuickDial::Horizontal) {
+        dragArea = width * 2;
+        dragDistance = pressPoint.x() - point.x();
+    } else {
+        dragArea = height * 2;
+        dragDistance = point.y() - pressPoint.y();
+    }
+    const qreal normalisedDifference = dragDistance / dragArea;
+    return qBound(qreal(0), positionBeforePress - normalisedDifference, qreal(1));
+}
+
 void QQuickDialPrivate::setPosition(qreal pos)
 {
     Q_Q(QQuickDial);
-    pos = qBound<qreal>(0.0, pos, 1.0);
+    pos = qBound<qreal>(qreal(0), pos, qreal(1));
     if (qFuzzyCompare(position, pos))
         return;
 
@@ -192,7 +219,12 @@ void QQuickDialPrivate::updatePosition()
 
 bool QQuickDialPrivate::isLargeChange(const QPointF &eventPos, qreal proposedPosition) const
 {
-    return qAbs(proposedPosition - position) >= 0.5 && eventPos.y() >= height / 2;
+    return qAbs(proposedPosition - position) >= qreal(0.5) && eventPos.y() >= height / 2;
+}
+
+bool QQuickDialPrivate::isHorizontalOrVertical() const
+{
+    return inputMode == QQuickDial::Horizontal || inputMode == QQuickDial::Vertical;
 }
 
 void QQuickDialPrivate::handlePress(const QPointF &point)
@@ -200,6 +232,7 @@ void QQuickDialPrivate::handlePress(const QPointF &point)
     Q_Q(QQuickDial);
     QQuickControlPrivate::handlePress(point);
     pressPoint = point;
+    positionBeforePress = position;
     q->setPressed(true);
 }
 
@@ -212,7 +245,7 @@ void QQuickDialPrivate::handleMove(const QPointF &point)
     if (snapMode == QQuickDial::SnapAlways)
         pos = snapPosition(pos);
 
-    if (wrap || (!wrap && !isLargeChange(point, pos))) {
+    if (wrap || (!wrap && (isHorizontalOrVertical() || !isLargeChange(point, pos)))) {
         if (live)
             q->setValue(valueAt(pos));
         else
@@ -232,7 +265,7 @@ void QQuickDialPrivate::handleRelease(const QPointF &point)
         if (snapMode != QQuickDial::NoSnap)
             pos = snapPosition(pos);
 
-        if (wrap || (!wrap && !isLargeChange(point, pos)))
+        if (wrap || (!wrap && (isHorizontalOrVertical() || !isLargeChange(point, pos))))
             q->setValue(valueAt(pos));
         if (!qFuzzyCompare(pos, oldPos))
             emit q->moved();
@@ -243,6 +276,7 @@ void QQuickDialPrivate::handleRelease(const QPointF &point)
 
     q->setPressed(false);
     pressPoint = QPointF();
+    positionBeforePress = 0;
 }
 
 void QQuickDialPrivate::handleUngrab()
@@ -250,7 +284,28 @@ void QQuickDialPrivate::handleUngrab()
     Q_Q(QQuickDial);
     QQuickControlPrivate::handleUngrab();
     pressPoint = QPointF();
+    positionBeforePress = 0;
     q->setPressed(false);
+}
+
+static inline QString handleName() { return QStringLiteral("handle"); }
+
+void QQuickDialPrivate::cancelHandle()
+{
+    Q_Q(QQuickDial);
+    quickCancelDeferred(q, handleName());
+}
+
+void QQuickDialPrivate::executeHandle(bool complete)
+{
+    Q_Q(QQuickDial);
+    if (handle.wasExecuted())
+        return;
+
+    if (!handle || complete)
+        quickBeginDeferred(q, handleName(), handle);
+    if (complete)
+        quickCompleteDeferred(q, handleName(), handle);
 }
 
 QQuickDial::QQuickDial(QQuickItem *parent)
@@ -445,6 +500,32 @@ void QQuickDial::setSnapMode(SnapMode mode)
 }
 
 /*!
+    \since QtQuick.Controls 2.5 (Qt 5.12)
+    \qmlproperty enumeration QtQuick.Controls::Dial::inputMode
+
+    This property holds the input mode.
+
+    \include qquickdial.qdocinc inputMode
+
+    The default value is \c Dial.Circular.
+*/
+QQuickDial::InputMode QQuickDial::inputMode() const
+{
+    Q_D(const QQuickDial);
+    return d->inputMode;
+}
+
+void QQuickDial::setInputMode(QQuickDial::InputMode mode)
+{
+    Q_D(QQuickDial);
+    if (d->inputMode == mode)
+        return;
+
+    d->inputMode = mode;
+    emit inputModeChanged();
+}
+
+/*!
     \qmlproperty bool QtQuick.Controls::Dial::wrap
 
     This property holds whether the dial wraps when dragged.
@@ -524,7 +605,9 @@ void QQuickDial::setPressed(bool pressed)
 */
 QQuickItem *QQuickDial::handle() const
 {
-    Q_D(const QQuickDial);
+    QQuickDialPrivate *d = const_cast<QQuickDialPrivate *>(d_func());
+    if (!d->handle)
+        d->executeHandle();
     return d->handle;
 }
 
@@ -534,11 +617,15 @@ void QQuickDial::setHandle(QQuickItem *handle)
     if (handle == d->handle)
         return;
 
-    QQuickControlPrivate::destroyDelegate(d->handle, this);
+    if (!d->handle.isExecuting())
+        d->cancelHandle();
+
+    delete d->handle;
     d->handle = handle;
     if (d->handle && !d->handle->parentItem())
         d->handle->setParentItem(this);
-    emit handleChanged();
+    if (!d->handle.isExecuting())
+        emit handleChanged();
 }
 
 /*!
@@ -649,21 +736,7 @@ void QQuickDial::mousePressEvent(QMouseEvent *event)
     Q_D(QQuickDial);
     QQuickControl::mousePressEvent(event);
     d->handleMove(event->localPos());
-}
-
-void QQuickDial::mouseMoveEvent(QMouseEvent *event)
-{
-    Q_D(QQuickDial);
-    if (!keepMouseGrab()) {
-        bool overXDragThreshold = QQuickWindowPrivate::dragOverThreshold(event->localPos().x() - d->pressPoint.x(), Qt::XAxis, event);
-        setKeepMouseGrab(overXDragThreshold);
-
-        if (!overXDragThreshold) {
-            bool overYDragThreshold = QQuickWindowPrivate::dragOverThreshold(event->localPos().y() - d->pressPoint.y(), Qt::YAxis, event);
-            setKeepMouseGrab(overYDragThreshold);
-        }
-    }
-    QQuickControl::mouseMoveEvent(event);
+    setKeepMouseGrab(true);
 }
 
 #if QT_CONFIG(quicktemplates2_multitouch)
@@ -730,6 +803,7 @@ void QQuickDial::mirrorChange()
 void QQuickDial::componentComplete()
 {
     Q_D(QQuickDial);
+    d->executeHandle(true);
     QQuickControl::componentComplete();
     setValue(d->value);
     d->updatePosition();

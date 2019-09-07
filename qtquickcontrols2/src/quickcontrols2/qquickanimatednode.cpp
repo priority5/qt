@@ -44,12 +44,7 @@
 QT_BEGIN_NAMESPACE
 
 QQuickAnimatedNode::QQuickAnimatedNode(QQuickItem *target)
-    : m_running(false),
-      m_duration(0),
-      m_loopCount(1),
-      m_currentTime(0),
-      m_currentLoop(0),
-      m_window(target->window())
+    : m_window(target->window())
 {
 }
 
@@ -112,8 +107,14 @@ void QQuickAnimatedNode::start(int duration)
     m_timer.restart();
     if (duration > 0)
         m_duration = duration;
-    connect(m_window, &QQuickWindow::beforeRendering, this, &QQuickAnimatedNode::advance);
-    connect(m_window, &QQuickWindow::frameSwapped, this, &QQuickAnimatedNode::update);
+
+    connect(m_window, &QQuickWindow::beforeRendering, this, &QQuickAnimatedNode::advance, Qt::DirectConnection);
+    connect(m_window, &QQuickWindow::frameSwapped, this, &QQuickAnimatedNode::update, Qt::DirectConnection);
+
+    // If we're inside a QQuickWidget, this call is necessary to ensure the widget
+    // gets updated for the first time.
+    m_window->update();
+
     emit started();
 }
 
@@ -152,6 +153,9 @@ void QQuickAnimatedNode::advance()
         }
     }
     updateCurrentTime(time);
+
+    // If we're inside a QQuickWidget, this call is necessary to ensure the widget gets updated.
+    m_window->update();
 }
 
 void QQuickAnimatedNode::update()

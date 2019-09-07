@@ -139,7 +139,48 @@ TestCase {
         }
     }
 
+    Component {
+        id: tabNavigationComponent
+        ApplicationWindow {
+            property alias scrollView: view
+            property alias control1: text1
+            property alias control2: text2
+            property alias control3: button
+
+            width: 400
+            height: 300
+            visible: true
+            modality: Qt.WindowModal
+
+            ScrollView {
+                id: view
+                anchors { top: parent.top; left: parent.left; right: parent.right; bottom: button.top }
+                Column {
+                    width: view.width
+                    TextField {
+                        id: text1
+                        anchors { left: parent.left; right: parent.right }
+                        height: 30
+                    }
+                    TextField {
+                        id: text2
+                        anchors { left: parent.left; right: parent.right }
+                        height: 30
+                    }
+                }
+            }
+
+            Button {
+                id: button
+                anchors.bottom: parent.bottom
+                text: "hi"
+            }
+        }
+    }
+
     function test_dragFetchAppend() {   // QTBUG-50795
+        skip("This is flaky: QTBUG-55727. Can't use BLACKLIST because of QTBUG-74117.")
+
         var scrollView = dragFetchAppendComponent.createObject(container)
         verify(scrollView !== null, "view created is null")
         waitForRendering(scrollView)
@@ -158,8 +199,12 @@ TestCase {
         mouseRelease(scrollView, scrollView.width - 2, 8 + 16)
         waitForRendering(scrollView)
 
-        verify(Math.round(scrollView.flickableItem.contentHeight) > 60 * 20)
-        verify(Math.round(scrollView.flickableItem.contentY) < -(60 * 20))
+        tryVerify(
+                function() { return Math.round(scrollView.flickableItem.contentHeight) > 60 * 20 },
+                50, "contentHeight did not adjust to new data.")
+        tryVerify(
+                function() { return Math.round(scrollView.flickableItem.contentY) < -(60 * 20) },
+                50, "contentY did not adjust to new data.")
 
         scrollView.destroy()
     }
@@ -173,21 +218,27 @@ TestCase {
         bigItem.height = 100
         bigItem.width = 100
 
-        verify(!scrollView.__horizontalScrollBar.visible, "Scrollbar showing when contents already fit")
-        verify(!scrollView.__verticalScrollBar.visible, "Scrollbar showing when contents already fit")
+        tryVerify(function() { return !scrollView.__horizontalScrollBar.visible }, 50,
+                  "Scrollbar showing when contents already fit")
+        tryVerify(function() { return !scrollView.__verticalScrollBar.visible }, 50,
+                  "Scrollbar showing when contents already fit")
 
         bigItem.height = 1000
         bigItem.width = 1000
 
-        verify(scrollView.__horizontalScrollBar.visible, "Scrollbar not showing when contents are too big")
-        verify(scrollView.__verticalScrollBar.visible, "Scrollbar not showing when contents are too big")
+        tryVerify(function() { return scrollView.__horizontalScrollBar.visible }, 50,
+                  "Scrollbar not showing when contents are too big")
+        tryVerify(function() { return scrollView.__verticalScrollBar.visible }, 50,
+                  "Scrollbar not showing when contents are too big")
 
         //always off
         bigItem.height = 1000
         scrollView.verticalScrollBarPolicy = Qt.ScrollBarAlwaysOff
-        verify(!scrollView.__verticalScrollBar.visible, "Scrollbar showing when disabled")
+        tryVerify(function() { return !scrollView.__verticalScrollBar.visible }, 50,
+                  "Scrollbar showing when disabled")
         bigItem.height = 100
-        verify(!scrollView.__verticalScrollBar.visible, "Scrollbar showing when disabled")
+        tryVerify(function() { return !scrollView.__verticalScrollBar.visible }, 50,
+                  "Scrollbar showing when disabled")
 
         //always on
         scrollView.verticalScrollBarPolicy = Qt.ScrollBarAlwaysOn
@@ -219,12 +270,14 @@ TestCase {
         verify(scrollView !== null, "view created is null")
         verify(scrollView.flickableItem.contentY === 0)
 
-        mouseClick(scrollView, scrollView.width -2, scrollView.height/2, Qt.LeftButton)
-        verify(Math.round(scrollView.flickableItem.contentY) === 100)
+        tryVerify(function() { return scrollView.__verticalScrollBar.visible });
 
-        verify(scrollView.flickableItem.contentX === 0)
+        mouseClick(scrollView, scrollView.width -2, scrollView.height/2, Qt.LeftButton)
+        tryVerify(function() { return Math.round(scrollView.flickableItem.contentY) === 100 });
+
+        tryVerify(function() { return scrollView.flickableItem.contentX === 0 })
         mouseClick(scrollView, scrollView.width/2, scrollView.height - 2, Qt.LeftButton)
-        verify(Math.round(scrollView.flickableItem.contentX) === 100)
+        tryVerify(function() { return Math.round(scrollView.flickableItem.contentX) === 100 })
     }
 
     function test_viewport() {
@@ -317,6 +370,51 @@ TestCase {
         verify(control.control1.activeFocus)
         verify(!control.control2.activeFocus)
         verify(!control.control3.activeFocus)
+        control.destroy()
+    }
+
+    function test_navigation_QTBUG_64596() {
+        if (Qt.styleHints.tabFocusBehavior != Qt.TabFocusAllControls)
+            skip("This function doesn't support NOT iterating all.")
+
+        var control = tabNavigationComponent.createObject(container)
+        verify(control)
+        waitForRendering(control.contentItem)
+
+        control.requestActivate()
+        control.control1.forceActiveFocus()
+        verify(control.control1.activeFocus)
+        verify(!control.control2.activeFocus)
+        verify(!control.control3.activeFocus)
+        keyPress(Qt.Key_Tab)
+        verify(!control.control1.activeFocus)
+        verify(control.control2.activeFocus)
+        verify(!control.control3.activeFocus)
+        keyPress(Qt.Key_Tab)
+        verify(!control.control1.activeFocus)
+        verify(!control.control2.activeFocus)
+        verify(control.control3.activeFocus)
+        keyPress(Qt.Key_Tab)
+        verify(control.control1.activeFocus)
+        verify(!control.control2.activeFocus)
+        verify(!control.control3.activeFocus)
+        // and backwards
+        keyPress(Qt.Key_Tab, Qt.ShiftModifier)
+        verify(!control.control1.activeFocus)
+        verify(!control.control2.activeFocus)
+        verify(control.control3.activeFocus)
+        keyPress(Qt.Key_Tab, Qt.ShiftModifier)
+        verify(!control.control1.activeFocus)
+        verify(control.control2.activeFocus)
+        verify(!control.control3.activeFocus)
+        keyPress(Qt.Key_Tab, Qt.ShiftModifier)
+        verify(control.control1.activeFocus)
+        verify(!control.control2.activeFocus)
+        verify(!control.control3.activeFocus)
+        keyPress(Qt.Key_Tab, Qt.ShiftModifier)
+        verify(!control.control1.activeFocus)
+        verify(!control.control2.activeFocus)
+        verify(control.control3.activeFocus)
         control.destroy()
     }
 }

@@ -43,7 +43,7 @@
 #include <Qt3DRender/qabstractfunctor.h>
 #include <Qt3DRender/qabstracttexture.h>
 #include <Qt3DRender/qtexturewrapmode.h>
-#include <QSharedPointer>
+#include <QtCore/QSharedPointer>
 
 QT_BEGIN_NAMESPACE
 
@@ -52,7 +52,7 @@ namespace Qt3DRender {
 class QTextureData;
 typedef QSharedPointer<QTextureData> QTextureDataPtr;
 
-class QT3DRENDERSHARED_EXPORT QTextureGenerator : public QAbstractFunctor
+class Q_3DRENDERSHARED_EXPORT QTextureGenerator : public QAbstractFunctor
 {
 public:
     virtual ~QTextureGenerator();

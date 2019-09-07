@@ -34,6 +34,12 @@
 #include <qmakeglobals.h>
 #include <qmakeevaluator.h>
 
+#ifdef Q_OS_WIN
+#  define EVAL_DRIVE "R:"
+#else
+#  define EVAL_DRIVE
+#endif
+
 void tst_qmakelib::addAssignments()
 {
     QTest::newRow("assignment")
@@ -813,7 +819,7 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$member(): bad number of arguments")
             << "VAR = $$member(1, 2, 3, 4)"
             << "VAR ="
-            << "##:1: member(var, start, end) requires one to three arguments."
+            << "##:1: member(var, [start, [end]]) requires one to three arguments."
             << true;
 
     QTest::newRow("$$member(): bad args (1)")
@@ -1024,8 +1030,8 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$fromfile(): bad number of arguments")
             << "VAR = $$fromfile(1) \\\n$$fromfile(1, 2, 3)"
             << "VAR ="
-            << "##:1: fromfile(file, variable) requires two arguments.\n"
-               "##:2: fromfile(file, variable) requires two arguments."
+            << "##:1: fromfile(file, var) requires two arguments.\n"
+               "##:2: fromfile(file, var) requires two arguments."
             << true;
 
     QTest::newRow("$$eval()")
@@ -1037,7 +1043,7 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$eval(): bad number of arguments")
             << "VAR = $$eval(1, 2)"
             << "VAR ="
-            << "##:1: eval(variable) requires one argument."
+            << "##:1: eval(var) requires one argument."
             << true;
 
     QTest::newRow("$$list()")
@@ -1122,7 +1128,7 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$format_number(): bad number of arguments")
             << "VAR = $$format_number(13, 1, 2)"
             << "VAR ="
-            << "##:1: format_number(number[, options...]) requires one or two arguments."
+            << "##:1: format_number(number, [options...]) requires one or two arguments."
             << true;
 
     QTest::newRow("$$format_number(): invalid option")
@@ -1194,7 +1200,7 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$join(): bad number of arguments")
             << "VAR = $$join(1, 2, 3, 4, 5)"
             << "VAR ="
-            << "##:1: join(var, glue, before, after) requires one to four arguments."
+            << "##:1: join(var, [glue, [before, [after]]]) requires one to four arguments."
             << true;
 
     QTest::newRow("$$split(): default sep")
@@ -1290,8 +1296,8 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$section(): bad number of arguments")
             << "VAR = $$section(1, 2) \\\n$$section(1, 2, 3, 4, 5)"
             << "VAR ="
-            << "##:1: section(var, sep, begin, end) requires three or four arguments.\n"
-               "##:2: section(var, sep, begin, end) requires three or four arguments."
+            << "##:1: section(var, sep, begin, [end]) requires three or four arguments.\n"
+               "##:2: section(var, sep, begin, [end]) requires three or four arguments."
             << true;
 
     QTest::newRow("$$find()")
@@ -1327,7 +1333,7 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$cat(): bad number of arguments")
             << "VAR = $$cat(1, 2, 3)"
             << "VAR ="
-            << "##:1: cat(file, singleline=true) requires one or two arguments."
+            << "##:1: cat(file, [mode=true|blob|lines]) requires one or two arguments."
             << true;
 
     QTest::newRow("$$system(): default mode")
@@ -1467,7 +1473,7 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$files(): bad number of arguments")
             << "VAR = $$files(1, 2, 3)"
             << "VAR ="
-            << "##:1: files(pattern, recursive=false) requires one or two arguments."
+            << "##:1: files(pattern, [recursive=false]) requires one or two arguments."
             << true;
 
 #if 0
@@ -1598,32 +1604,52 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
             << ""
             << true;
 
-    QTest::newRow("$$absolute_path(): file & path")
-            << "VAR = $$absolute_path(dir/file.ext, /root/sub)"
-            << "VAR = /root/sub/dir/file.ext"
+    QTest::newRow("$$absolute_path(): relative file & relative path")
+            << "VAR = $$absolute_path(dir/file.ext, some/where)"
+            << "VAR = " + qindir + "/some/where/dir/file.ext"
             << ""
             << true;
 
+    QTest::newRow("$$absolute_path(): file & path")
+            << "VAR = $$absolute_path(dir/file.ext, " EVAL_DRIVE "/root/sub)"
+            << "VAR = " EVAL_DRIVE "/root/sub/dir/file.ext"
+            << ""
+            << true;
+
+#ifdef Q_OS_WIN
+    QTest::newRow("$$absolute_path(): driveless file & absolute path")
+            << "VAR = $$absolute_path(/root/sub/dir/file.ext, " EVAL_DRIVE "/other)"
+            << "VAR = " EVAL_DRIVE "/root/sub/dir/file.ext"
+            << ""
+            << true;
+#endif
+
     QTest::newRow("$$absolute_path(): absolute file & path")
-            << "VAR = $$absolute_path(/root/sub/dir/file.ext, /other)"
-            << "VAR = /root/sub/dir/file.ext"
+            << "VAR = $$absolute_path(" EVAL_DRIVE "/root/sub/dir/file.ext, " EVAL_DRIVE "/other)"
+            << "VAR = " EVAL_DRIVE "/root/sub/dir/file.ext"
             << ""
             << true;
 
     QTest::newRow("$$absolute_path(): empty file & path")
-            << "VAR = $$absolute_path('', /root/sub)"
-            << "VAR = /root/sub"
+            << "VAR = $$absolute_path('', " EVAL_DRIVE "/root/sub)"
+            << "VAR = " EVAL_DRIVE "/root/sub"
             << ""
             << true;
 
     QTest::newRow("$$absolute_path(): bad number of arguments")
             << "VAR = $$absolute_path(1, 2, 3)"
             << "VAR ="
-            << "##:1: absolute_path(path[, base]) requires one or two arguments."
+            << "##:1: absolute_path(path, [base]) requires one or two arguments."
             << true;
 
     QTest::newRow("$$relative_path(): relative file")
             << "VAR = $$relative_path(dir/file.ext)"
+            << "VAR = dir/file.ext"
+            << ""
+            << true;
+
+    QTest::newRow("$$relative_path(): relative file & relative path")
+            << "VAR = $$relative_path(dir/file.ext, some/where)"
             << "VAR = dir/file.ext"
             << ""
             << true;
@@ -1634,14 +1660,22 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
             << ""
             << true;
 
+#ifdef Q_OS_WIN
+    QTest::newRow("$$relative_path(): driveless file & absolute path")
+            << "VAR = $$relative_path(/root/sub/dir/file.ext, " EVAL_DRIVE "/root/sub)"
+            << "VAR = dir/file.ext"
+            << ""
+            << true;
+#endif
+
     QTest::newRow("$$relative_path(): absolute file & path")
-            << "VAR = $$relative_path(/root/sub/dir/file.ext, /root/sub)"
+            << "VAR = $$relative_path(" EVAL_DRIVE "/root/sub/dir/file.ext, " EVAL_DRIVE "/root/sub)"
             << "VAR = dir/file.ext"
             << ""
             << true;
 
     QTest::newRow("$$relative_path(): empty file & path")
-            << "VAR = $$relative_path('', /root/sub)"
+            << "VAR = $$relative_path('', " EVAL_DRIVE "/root/sub)"
             << "VAR = ."
             << ""
             << true;
@@ -1649,7 +1683,7 @@ void tst_qmakelib::addReplaceFunctions(const QString &qindir)
     QTest::newRow("$$relative_path(): bad number of arguments")
             << "VAR = $$relative_path(1, 2, 3)"
             << "VAR ="
-            << "##:1: relative_path(path[, base]) requires one or two arguments."
+            << "##:1: relative_path(path, [base]) requires one or two arguments."
             << true;
 
     QTest::newRow("$$clean_path()")
@@ -1813,7 +1847,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("defined(): bad number of arguments")
             << "defined(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: defined(function, [\"test\"|\"replace\"|\"var\"]) requires one or two arguments."
+            << "##:1: defined(object, [\"test\"|\"replace\"|\"var\"]) requires one or two arguments."
             << true;
 
     QTest::newRow("export()")
@@ -1830,7 +1864,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("export(): bad number of arguments")
             << "export(1, 2): OK = 1"
             << "OK = UNDEF"
-            << "##:1: export(variable) requires one argument."
+            << "##:1: export(var) requires one argument."
             << true;
 
     QTest::newRow("infile(): found")
@@ -1972,7 +2006,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("CONFIG(): bad number of arguments")
             << "CONFIG(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: CONFIG(config) requires one or two arguments."
+            << "##:1: CONFIG(config, [mutuals]) requires one or two arguments."
             << true;
 
     QTest::newRow("contains(simple plain): true")
@@ -2038,8 +2072,8 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("contains(): bad number of arguments")
             << "contains(1): OK = 1\ncontains(1, 2, 3, 4): OK = 1"
             << "OK = UNDEF"
-            << "##:1: contains(var, val) requires two or three arguments.\n"
-               "##:2: contains(var, val) requires two or three arguments."
+            << "##:1: contains(var, val, [mutuals]) requires two or three arguments.\n"
+               "##:2: contains(var, val, [mutuals]) requires two or three arguments."
             << true;
 
     QTest::newRow("count(): true")
@@ -2099,8 +2133,8 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("count(): bad number of arguments")
             << "count(1): OK = 1\ncount(1, 2, 3, 4): OK = 1"
             << "OK = UNDEF"
-            << "##:1: count(var, count, op=\"equals\") requires two or three arguments.\n"
-               "##:2: count(var, count, op=\"equals\") requires two or three arguments."
+            << "##:1: count(var, count, [op=operator]) requires two or three arguments.\n"
+               "##:2: count(var, count, [op=operator]) requires two or three arguments."
             << true;
 
     QTest::newRow("greaterThan(int): true")
@@ -2130,8 +2164,8 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("greaterThan(): bad number of arguments")
             << "greaterThan(1): OK = 1\ngreaterThan(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: greaterThan(variable, value) requires two arguments.\n"
-               "##:2: greaterThan(variable, value) requires two arguments."
+            << "##:1: greaterThan(var, val) requires two arguments.\n"
+               "##:2: greaterThan(var, val) requires two arguments."
             << true;
 
     QTest::newRow("lessThan(int): true")
@@ -2161,8 +2195,8 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("lessThan(): bad number of arguments")
             << "lessThan(1): OK = 1\nlessThan(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: lessThan(variable, value) requires two arguments.\n"
-               "##:2: lessThan(variable, value) requires two arguments."
+            << "##:1: lessThan(var, val) requires two arguments.\n"
+               "##:2: lessThan(var, val) requires two arguments."
             << true;
 
     QTest::newRow("equals(): true")
@@ -2180,8 +2214,8 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("equals(): bad number of arguments")
             << "equals(1): OK = 1\nequals(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: equals(variable, value) requires two arguments.\n"
-               "##:2: equals(variable, value) requires two arguments."
+            << "##:1: equals(var, val) requires two arguments.\n"
+               "##:2: equals(var, val) requires two arguments."
             << true;
 
     // That's just an alias, so don't test much.
@@ -2206,8 +2240,8 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("versionAtLeast(): bad number of arguments")
             << "versionAtLeast(1): OK = 1\nversionAtLeast(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: versionAtLeast(variable, versionNumber) requires two arguments.\n"
-               "##:2: versionAtLeast(variable, versionNumber) requires two arguments."
+            << "##:1: versionAtLeast(var, version) requires two arguments.\n"
+               "##:2: versionAtLeast(var, version) requires two arguments."
             << true;
 
     QTest::newRow("versionAtMost(): true")
@@ -2225,8 +2259,8 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("versionAtMost(): bad number of arguments")
             << "versionAtMost(1): OK = 1\nversionAtMost(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: versionAtMost(variable, versionNumber) requires two arguments.\n"
-               "##:2: versionAtMost(variable, versionNumber) requires two arguments."
+            << "##:1: versionAtMost(var, version) requires two arguments.\n"
+               "##:2: versionAtMost(var, version) requires two arguments."
             << true;
 
     QTest::newRow("clear(): top-level")
@@ -2254,7 +2288,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("clear(): bad number of arguments")
             << "clear(1, 2): OK = 1"
             << "OK = UNDEF"
-            << "##:1: clear(variable) requires one argument."
+            << "##:1: clear(var) requires one argument."
             << true;
 
     QTest::newRow("unset(): top-level")
@@ -2282,7 +2316,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("unset(): bad number of arguments")
             << "unset(1, 2): OK = 1"
             << "OK = UNDEF"
-            << "##:1: unset(variable) requires one argument."
+            << "##:1: unset(var) requires one argument."
             << true;
 
     // This function does not follow the established naming pattern.
@@ -2328,8 +2362,8 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("parseJson(): bad number of arguments")
             << "parseJson(1): OK = 1\nparseJson(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: parseJson(variable, into) requires two arguments.\n"
-               "##:2: parseJson(variable, into) requires two arguments."
+            << "##:1: parseJson(var, into) requires two arguments.\n"
+               "##:2: parseJson(var, into) requires two arguments."
             << true;
 
     QTest::newRow("include()")
@@ -2341,11 +2375,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("include(): fail")
             << "include(include/nope.pri): OK = 1"
             << "OK = UNDEF"
-#ifdef Q_OS_WIN
-            << "Cannot read " + m_indir + "/include/nope.pri: The system cannot find the file specified."
-#else
             << "Cannot read " + m_indir + "/include/nope.pri: No such file or directory"
-#endif
             << true;
 
     QTest::newRow("include(): silent fail")
@@ -2365,7 +2395,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("include(): bad number of arguments")
             << "include(1, 2, 3, 4): OK = 1"
             << "OK = UNDEF"
-            << "##:1: include(file, [into, [silent]]) requires one, two or three arguments."
+            << "##:1: include(file, [into, [silent]]) requires one to three arguments."
             << true;
 
     QTest::newRow("load()")
@@ -2389,7 +2419,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("load(): bad number of arguments")
             << "load(1, 2, 3): OK = 1"
             << "OK = UNDEF"
-            << "##:1: load(feature) requires one or two arguments."
+            << "##:1: load(feature, [ignore_errors=false]) requires one or two arguments."
             << true;
 
     QTest::newRow("discard_from()")
@@ -2593,20 +2623,20 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
             << true;
 
     QTest::newRow("touch(): missing target")
-            << "touch(/does/not/exist, files/other.txt): OK = 1"
+            << "touch(" EVAL_DRIVE "/does/not/exist, files/other.txt): OK = 1"
             << "OK = UNDEF"
 #ifdef Q_OS_WIN
-            << "##:1: Cannot open /does/not/exist: The system cannot find the path specified."
+            << "##:1: Cannot open " EVAL_DRIVE "/does/not/exist: The system cannot find the path specified."
 #else
             << "##:1: Cannot touch /does/not/exist: No such file or directory."
 #endif
             << true;
 
     QTest::newRow("touch(): missing reference")
-            << "touch(" + wpath + ", /does/not/exist): OK = 1"
+            << "touch(" + wpath + ", " EVAL_DRIVE "/does/not/exist): OK = 1"
             << "OK = UNDEF"
 #ifdef Q_OS_WIN
-            << "##:1: Cannot open reference file /does/not/exist: The system cannot find the path specified."
+            << "##:1: Cannot open reference file " EVAL_DRIVE "/does/not/exist: The system cannot find the path specified."
 #else
             << "##:1: Cannot stat() reference file /does/not/exist: No such file or directory."
 #endif
@@ -2638,7 +2668,7 @@ void tst_qmakelib::addTestFunctions(const QString &qindir)
     QTest::newRow("mkpath(): bad number of arguments")
             << "mkpath(1, 2): OK = 1"
             << "OK = UNDEF"
-            << "##:1: mkpath(file) requires one argument."
+            << "##:1: mkpath(path) requires one argument."
             << true;
 
 #if 0
@@ -2730,9 +2760,9 @@ void tst_qmakelib::proEval_data()
 
     // Raw data leak with empty file name. Verify with Valgrind or asan.
     QTest::newRow("QTBUG-54550")
-            << "FULL = /there/is\n"
+            << "FULL = " EVAL_DRIVE "/there/is\n"
                "VAR = $$absolute_path(, $$FULL/nothing/here/really)"
-            << "VAR = /there/is/nothing/here/really"
+            << "VAR = " EVAL_DRIVE "/there/is/nothing/here/really"
             << ""
             << true;
 }
@@ -2839,12 +2869,12 @@ void tst_qmakelib::proEval()
     globals.environment = m_env;
     globals.setProperties(m_prop);
     globals.setDirectories(m_indir, m_outdir);
-    ProFile *outPro = parser.parsedProBlock(QStringRef(&out), "out", 1, QMakeParser::FullGrammar);
+    ProFile *outPro = parser.parsedProBlock(QStringRef(&out), 0, "out", 1, QMakeParser::FullGrammar);
     if (!outPro->isOk()) {
         qWarning("Expected output is malformed");
         verified = false;
     }
-    ProFile *pro = parser.parsedProBlock(QStringRef(&in), infile, 1, QMakeParser::FullGrammar);
+    ProFile *pro = parser.parsedProBlock(QStringRef(&in), 0, infile, 1, QMakeParser::FullGrammar);
     QMakeEvaluator visitor(&globals, &parser, &vfs, &handler);
     visitor.setOutputDir(m_outdir);
 #ifdef Q_OS_WIN

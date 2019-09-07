@@ -1,8 +1,10 @@
 TEMPLATE = subdirs
 
-QT_FOR_CONFIG += gui-private
+QT_FOR_CONFIG += core-private gui-private printsupport
+
 include($$OUT_PWD/corelib/qtcore-config.pri)
 include($$OUT_PWD/gui/qtgui-config.pri)
+include($$OUT_PWD/printsupport/qtprintsupport-config.pri)
 
 force_bootstrap|!qtConfig(commandlineparser): \
     CONFIG += force_dbus_bootstrap
@@ -30,6 +32,10 @@ src_tools_qlalr.target = sub-qlalr
 force_bootstrap: src_tools_qlalr.depends = src_tools_bootstrap
 else: src_tools_qlalr.depends = src_corelib
 
+src_tools_tracegen.subdir = tools/tracegen
+src_tools_tracegen.target = sub-tracegen
+src_tools_tracegen.depends = src_tools_bootstrap
+
 src_tools_uic.subdir = tools/uic
 src_tools_uic.target = sub-uic
 force_bootstrap: src_tools_uic.depends = src_tools_bootstrap
@@ -48,6 +54,10 @@ src_tools_qdbuscpp2xml.subdir = tools/qdbuscpp2xml
 src_tools_qdbuscpp2xml.target = sub-qdbuscpp2xml
 force_bootstrap: src_tools_qdbuscpp2xml.depends = src_tools_bootstrap_dbus
 else: src_tools_qdbuscpp2xml.depends = src_dbus
+
+src_tools_androiddeployqt.subdir = tools/androiddeployqt
+src_tools_androiddeployqt.target = sub-androiddeployqt
+src_tools_androiddeployqt.depends = src_corelib
 
 src_tools_qvkgen.subdir = tools/qvkgen
 src_tools_qvkgen.target = sub-qvkgen
@@ -152,8 +162,13 @@ qtConfig(regularexpression):pcre2 {
     SUBDIRS += src_3rdparty_pcre2
     src_corelib.depends += src_3rdparty_pcre2
 }
-SUBDIRS += src_corelib src_tools_qlalr
 TOOLS = src_tools_moc src_tools_rcc src_tools_qlalr src_tools_qfloat16_tables
+!force_bootstrap:if(qtConfig(lttng)|qtConfig(etw)) {
+    SUBDIRS += src_tools_tracegen
+    src_corelib.depends += src_tools_tracegen
+    TOOLS += src_tools_tracegen
+}
+SUBDIRS += src_corelib src_tools_qlalr
 win32:SUBDIRS += src_winmain
 qtConfig(network) {
     SUBDIRS += src_network
@@ -174,6 +189,12 @@ qtConfig(dbus) {
         src_platformsupport.depends += src_dbus src_tools_qdbusxml2cpp
     src_plugins.depends += src_dbus src_tools_qdbusxml2cpp src_tools_qdbuscpp2xml
 }
+
+android {
+    SUBDIRS += src_tools_androiddeployqt
+    TOOLS += src_tools_androiddeployqt
+}
+
 qtConfig(concurrent): SUBDIRS += src_concurrent
 qtConfig(gui) {
     qtConfig(harfbuzz):!qtConfig(system-harfbuzz) {
@@ -201,10 +222,14 @@ qtConfig(gui) {
     src_plugins.depends += src_gui src_platformsupport src_platformheaders
     src_testlib.depends += src_gui      # if QtGui is enabled, QtTest requires QtGui's headers
     qtConfig(widgets) {
-        SUBDIRS += src_tools_uic src_widgets src_printsupport
+        SUBDIRS += src_tools_uic src_widgets
         TOOLS += src_tools_uic
-        src_plugins.depends += src_widgets src_printsupport
+        src_plugins.depends += src_widgets
         src_testlib.depends += src_widgets        # if QtWidgets is enabled, QtTest requires QtWidgets's headers
+        qtConfig(printer) {
+            SUBDIRS += src_printsupport
+            src_plugins.depends += src_printsupport
+        }
         qtConfig(opengl) {
             SUBDIRS += src_opengl
             src_plugins.depends += src_opengl
@@ -215,12 +240,13 @@ SUBDIRS += src_plugins
 
 nacl: SUBDIRS -= src_network src_testlib
 
-android: SUBDIRS += src_android src_3rdparty_gradle
+android:!android-embedded: SUBDIRS += src_android src_3rdparty_gradle
 
 TR_EXCLUDE = \
     src_tools_bootstrap src_tools_moc src_tools_rcc src_tools_uic src_tools_qlalr \
     src_tools_bootstrap_dbus src_tools_qdbusxml2cpp src_tools_qdbuscpp2xml \
-    src_3rdparty_pcre2 src_3rdparty_harfbuzzng src_3rdparty_freetype
+    src_3rdparty_pcre2 src_3rdparty_harfbuzzng src_3rdparty_freetype \
+    src_tools_tracegen
 
 sub-tools.depends = $$TOOLS
 QMAKE_EXTRA_TARGETS = sub-tools

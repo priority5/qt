@@ -29,8 +29,11 @@
 #include <QtTest/QtTest>
 #include <qwineventnotifier.h>
 #include <qtimer.h>
+#include <qvarlengtharray.h>
+#include <qvector.h>
 #include <qt_windows.h>
 
+#include <algorithm>
 #include <memory>
 
 class tst_QWinEventNotifier : public QObject
@@ -43,7 +46,10 @@ protected slots:
 private slots:
     void simple_data();
     void simple();
+    void blockedWaiting();
     void manyNotifiers();
+    void disableNotifiersInActivatedSlot_data();
+    void disableNotifiersInActivatedSlot();
 
 private:
     HANDLE simpleHEvent;
@@ -99,6 +105,26 @@ void tst_QWinEventNotifier::simple()
     QVERIFY(simpleActivated);
 }
 
+void tst_QWinEventNotifier::blockedWaiting()
+{
+    simpleHEvent = CreateEvent(0, true, false, 0);
+    QWinEventNotifier n(simpleHEvent);
+    QObject::connect(&n, &QWinEventNotifier::activated,
+                     this, &tst_QWinEventNotifier::simple_activated);
+    simpleActivated = false;
+
+    SetEvent(simpleHEvent);
+    QCOMPARE(WaitForSingleObject(simpleHEvent, 1000), WAIT_OBJECT_0);
+
+    n.setEnabled(false);
+    ResetEvent(simpleHEvent);
+    n.setEnabled(true);
+
+    QTestEventLoop::instance().enterLoop(1);
+    QVERIFY(QTestEventLoop::instance().timeout());
+    QVERIFY(!simpleActivated);
+}
+
 class EventWithNotifier : public QObject
 {
     Q_OBJECT
@@ -109,9 +135,6 @@ public:
                 this, &EventWithNotifier::onNotifierActivated);
         notifier.setHandle(CreateEvent(0, TRUE, FALSE, 0));
         notifier.setEnabled(true);
-
-        static int nextIndex = 0;
-        idx = nextIndex++;
     }
 
     ~EventWithNotifier()
@@ -122,6 +145,8 @@ public:
 
     HANDLE eventHandle() const { return notifier.handle(); }
     int numberOfTimesActivated() const { return activatedCount; }
+    void setEnabled(bool b) { notifier.setEnabled(b); }
+    bool isEnabled() const { return notifier.isEnabled(); }
 
 signals:
     void activated();
@@ -137,7 +162,6 @@ public slots:
 private:
     QWinEventNotifier notifier;
     int activatedCount = 0;
-    int idx = 0;
 };
 
 void tst_QWinEventNotifier::manyNotifiers()
@@ -182,6 +206,63 @@ void tst_QWinEventNotifier::manyNotifiers()
     QVERIFY(std::all_of(events.cbegin(), events.cend(), [] (const EventWithNotifierPtr &ewn) {
         return ewn->numberOfTimesActivated() == 1;
     }));
+}
+
+using Indices = QVector<int>;
+
+void tst_QWinEventNotifier::disableNotifiersInActivatedSlot_data()
+{
+    QTest::addColumn<int>("count");
+    QTest::addColumn<Indices>("notifiersToSignal");
+    QTest::addColumn<Indices>("notifiersToDisable");
+    QTest::addColumn<bool>("deleteNotifiers");
+    QTest::newRow("disable_signaled") << 3 << Indices{1} << Indices{1} << false;
+    QTest::newRow("disable_signaled2") << 3 << Indices{1, 2} << Indices{1} << false;
+    QTest::newRow("disable_before_signaled") << 3 << Indices{1} << Indices{0, 1} << false;
+    QTest::newRow("disable_after_signaled") << 3 << Indices{1} << Indices{1, 2} << false;
+    QTest::newRow("delete_signaled") << 3 << Indices{1} << Indices{1} << true;
+    QTest::newRow("delete_before_signaled1") << 3 << Indices{1} << Indices{0} << true;
+    QTest::newRow("delete_before_signaled2") << 3 << Indices{1} << Indices{0, 1} << true;
+    QTest::newRow("delete_before_signaled3") << 4 << Indices{3, 1} << Indices{0, 1} << true;
+    QTest::newRow("delete_after_signaled1") << 3 << Indices{1} << Indices{1, 2} << true;
+    QTest::newRow("delete_after_signaled2") << 4 << Indices{1, 3} << Indices{1, 2} << true;
+    QTest::newRow("delete_after_signaled3") << 5 << Indices{1} << Indices{1, 4} << true;
+}
+
+void tst_QWinEventNotifier::disableNotifiersInActivatedSlot()
+{
+    QFETCH(int, count);
+    QFETCH(Indices, notifiersToSignal);
+    QFETCH(Indices, notifiersToDisable);
+    QFETCH(bool, deleteNotifiers);
+
+    QVarLengthArray<std::unique_ptr<EventWithNotifier>, 10> events(count);
+    for (int i = 0; i < count; ++i)
+        events[i].reset(new EventWithNotifier);
+
+    auto isActivatedOrDisabled = [&events](int i) {
+        return !events.at(i) || !events.at(i)->isEnabled()
+               || events.at(i)->numberOfTimesActivated() > 0;
+    };
+
+    for (auto &e : events) {
+        connect(e.get(), &EventWithNotifier::activated, [&]() {
+            for (int i : notifiersToDisable) {
+                if (deleteNotifiers)
+                    events[i].reset();
+                else
+                    events.at(i)->setEnabled(false);
+            }
+            if (std::all_of(notifiersToSignal.begin(), notifiersToSignal.end(),
+                            isActivatedOrDisabled)) {
+                QTimer::singleShot(0, &QTestEventLoop::instance(), SLOT(exitLoop()));
+            }
+        });
+    }
+    for (int i : notifiersToSignal)
+        SetEvent(events.at(i)->eventHandle());
+    QTestEventLoop::instance().enterLoop(30);
+    QVERIFY(!QTestEventLoop::instance().timeout());
 }
 
 QTEST_MAIN(tst_QWinEventNotifier)

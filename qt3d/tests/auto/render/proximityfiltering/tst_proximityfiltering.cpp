@@ -246,12 +246,19 @@ private Q_SLOTS:
 
         // WHEN
         Qt3DRender::Render::Entity *backendRoot = aspect->nodeManagers()->renderNodesManager()->getOrCreateResource(entitySubtree->id());
+
+        Qt3DRender::Render::UpdateEntityHierarchyJob updateEntitiesJob;
+        updateEntitiesJob.setManager(aspect->nodeManagers());
+        updateEntitiesJob.run();
+
         Qt3DRender::Render::UpdateTreeEnabledJob updateTreeEnabledJob;
         updateTreeEnabledJob.setRoot(backendRoot);
+        updateTreeEnabledJob.setManagers(aspect->nodeManagers());
         updateTreeEnabledJob.run();
 
         Qt3DRender::Render::UpdateWorldTransformJob updateWorldTransform;
         updateWorldTransform.setRoot(backendRoot);
+        updateWorldTransform.setManagers(aspect->nodeManagers());
         updateWorldTransform.run();
 
         Qt3DRender::Render::CalculateBoundingVolumeJob calcBVolume;
@@ -265,6 +272,7 @@ private Q_SLOTS:
 
         Qt3DRender::Render::ExpandBoundingVolumeJob expandBVolume;
         expandBVolume.setRoot(backendRoot);
+        expandBVolume.setManagers(aspect->nodeManagers());
         expandBVolume.run();
 
         // WHEN

@@ -298,7 +298,7 @@ public:
                Qt::TextFormat titleFormat, Qt::TextFormat subTitleFormat);
 
 protected:
-    void paintEvent(QPaintEvent *event) Q_DECL_OVERRIDE;
+    void paintEvent(QPaintEvent *event) override;
 #if QT_CONFIG(style_windowsvista)
 private:
     bool vistaDisabled() const;
@@ -331,7 +331,7 @@ QWizardHeader::QWizardHeader(QWidget *parent)
     titleLabel->setFont(font);
 
     layout = new QGridLayout(this);
-    layout->setMargin(0);
+    layout->setContentsMargins(QMargins());
     layout->setSpacing(0);
 
     layout->setRowMinimumHeight(3, 1);
@@ -454,9 +454,9 @@ public:
             m_layout->addWidget(m_sideWidget);
     }
 
-    QSize minimumSizeHint() const Q_DECL_OVERRIDE {
+    QSize minimumSizeHint() const override {
         if (pixmap() && !pixmap()->isNull())
-            return pixmap()->size();
+            return pixmap()->size() / pixmap()->devicePixelRatio();
         return QFrame::minimumSizeHint();
     }
 
@@ -579,7 +579,7 @@ public:
         , bottomRuler(0)
 #if QT_CONFIG(style_windowsvista)
         , vistaHelper(0)
-        , vistaInitPending(false)
+        , vistaInitPending(true)
         , vistaState(QVistaHelper::Dirty)
         , vistaStateChanged(false)
         , inHandleAeroStyleChange(false)
@@ -590,12 +590,6 @@ public:
         , maximumHeight(QWIDGETSIZE_MAX)
     {
         std::fill(btns, btns + QWizard::NButtons, static_cast<QAbstractButton *>(0));
-
-#if QT_CONFIG(style_windowsvista)
-        if (QSysInfo::WindowsVersion >= QSysInfo::WV_VISTA
-            && (QSysInfo::WindowsVersion & QSysInfo::WV_NT_based))
-            vistaInitPending = true;
-#endif
     }
 
     void init();
@@ -775,7 +769,7 @@ void QWizardPrivate::reset()
         for (int i = history.count() - 1; i >= 0; --i)
             q->cleanupPage(history.at(i));
         history.clear();
-        for (QWizardPage *page : pageMap)
+        for (QWizardPage *page : qAsConst(pageMap))
             page->d_func()->initialized = false;
 
         current = -1;
@@ -1038,13 +1032,13 @@ void QWizardPrivate::recreateLayout(const QWizardLayoutInfo &info)
     int pageColumn = qMin(1, numColumns - 1);
 
     if (mac) {
-        mainLayout->setMargin(0);
+        mainLayout->setContentsMargins(QMargins());
         mainLayout->setSpacing(0);
         buttonLayout->setContentsMargins(MacLayoutLeftMargin, MacButtonTopMargin, MacLayoutRightMargin, MacLayoutBottomMargin);
-        pageVBoxLayout->setMargin(7);
+        pageVBoxLayout->setContentsMargins(7, 7, 7, 7);
     } else {
         if (modern) {
-            mainLayout->setMargin(0);
+            mainLayout->setContentsMargins(QMargins());
             mainLayout->setSpacing(0);
             pageVBoxLayout->setContentsMargins(deltaMarginLeft, deltaMarginTop,
                                                deltaMarginRight, deltaMarginBottom);
@@ -2380,8 +2374,8 @@ void QWizard::removePage(int id)
 /*!
     \fn QWizardPage *QWizard::page(int id) const
 
-    Returns the page with the given \a id, or 0 if there is no such
-    page.
+    Returns the page with the given \a id, or \nullptr if there is no
+    such page.
 
     \sa addPage(), setPage()
 */
@@ -2468,8 +2462,8 @@ int QWizard::startId() const
 }
 
 /*!
-    Returns a pointer to the current page, or 0 if there is no current
-    page (e.g., before the wizard is shown).
+    Returns a pointer to the current page, or \nullptr if there is no
+    current page (e.g., before the wizard is shown).
 
     This is equivalent to calling page(currentId()).
 
@@ -2960,7 +2954,7 @@ void QWizard::setDefaultProperty(const char *className, const char *property,
 
     Passing 0 shows no side widget.
 
-    When the \a widget is not 0 the wizard reparents it.
+    When the \a widget is not \nullptr the wizard reparents it.
 
     Any previous side widget is hidden.
 
@@ -2969,7 +2963,7 @@ void QWizard::setDefaultProperty(const char *className, const char *property,
 
     All widgets set here will be deleted by the wizard when it is
     destroyed unless you separately reparent the widget after setting
-    some other side widget (or 0).
+    some other side widget (or \nullptr).
 
     By default, no side widget is present.
 */
@@ -2987,7 +2981,7 @@ void QWizard::setSideWidget(QWidget *widget)
 /*!
     \since 4.7
 
-    Returns the widget on the left side of the wizard or 0.
+    Returns the widget on the left side of the wizard or \nullptr.
 
     By default, no side widget is present.
 */
@@ -3975,7 +3969,7 @@ void QWizardPage::registerField(const QString &name, QWidget *widget, const char
 }
 
 /*!
-    Returns the wizard associated with this page, or 0 if this page
+    Returns the wizard associated with this page, or \nullptr if this page
     hasn't been inserted into a QWizard yet.
 
     \sa QWizard::addPage(), QWizard::setPage()

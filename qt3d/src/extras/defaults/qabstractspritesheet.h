@@ -42,8 +42,8 @@
 
 #include <Qt3DExtras/qt3dextras_global.h>
 #include <Qt3DCore/QNode>
-#include <QVector2D>
-#include <QMatrix3x3>
+#include <QtGui/QVector2D>
+#include <QtGui/QMatrix3x3>
 
 QT_BEGIN_NAMESPACE
 
@@ -57,7 +57,7 @@ namespace Qt3DExtras {
 
 class QAbstractSpriteSheetPrivate;
 
-class QT3DEXTRASSHARED_EXPORT QAbstractSpriteSheet : public Qt3DCore::QNode
+class Q_3DEXTRASSHARED_EXPORT QAbstractSpriteSheet : public Qt3DCore::QNode
 {
     Q_OBJECT
     Q_PROPERTY(Qt3DRender::QAbstractTexture *texture READ texture WRITE setTexture NOTIFY textureChanged)

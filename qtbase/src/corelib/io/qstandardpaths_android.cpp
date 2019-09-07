@@ -217,7 +217,16 @@ static QString getFilesDir()
     if (!path.isEmpty())
         return path;
 
-    return (path  = QDir::homePath());
+    QJNIObjectPrivate appCtx = applicationContext();
+    if (!appCtx.isValid())
+        return QString();
+
+    QJNIObjectPrivate file = appCtx.callObjectMethod("getFilesDir",
+                                                     "()Ljava/io/File;");
+    if (!file.isValid())
+        return QString();
+
+    return (path = getAbsolutePath(file));
 }
 
 QString QStandardPaths::writableLocation(StandardLocation type)
@@ -230,10 +239,7 @@ QString QStandardPaths::writableLocation(StandardLocation type)
     case QStandardPaths::PicturesLocation:
         return getExternalStoragePublicDirectory("DIRECTORY_PICTURES");
     case QStandardPaths::DocumentsLocation:
-        if (QtAndroidPrivate::androidSdkVersion() > 18)
-            return getExternalStoragePublicDirectory("DIRECTORY_DOCUMENTS");
-        else
-            return getExternalStorageDirectory() + QLatin1String("/Documents");
+        return getExternalStoragePublicDirectory("DIRECTORY_DOCUMENTS");
     case QStandardPaths::DownloadLocation:
         return getExternalStoragePublicDirectory("DIRECTORY_DOWNLOADS");
     case QStandardPaths::GenericConfigLocation:
@@ -286,13 +292,8 @@ QStringList QStandardPaths::standardLocations(StandardLocation type)
     }
 
     if (type == DocumentsLocation) {
-        if (QtAndroidPrivate::androidSdkVersion() > 18) {
-            return QStringList() << writableLocation(type)
-                                 << getExternalFilesDir("DIRECTORY_DOCUMENTS");
-        } else {
-            return QStringList() << writableLocation(type)
-                                 << getExternalFilesDir() + QLatin1String("/Documents");
-        }
+        return QStringList() << writableLocation(type)
+                             << getExternalFilesDir("DIRECTORY_DOCUMENTS");
     }
 
     if (type == DownloadLocation) {
@@ -319,7 +320,9 @@ QStringList QStandardPaths::standardLocations(StandardLocation type)
         if (!ba.isEmpty())
             return QStringList((fontLocation = QDir::cleanPath(QString::fromLocal8Bit(ba))));
 
-        return QStringList((fontLocation = QLatin1String("/system/fonts")));
+        // Don't cache the fallback, as we might just have been called before
+        // QT_ANDROID_FONT_LOCATION has been set.
+        return QStringList(QLatin1String("/system/fonts"));
     }
 
     return QStringList(writableLocation(type));

@@ -42,7 +42,7 @@
 
 #include <Qt3DRender/qframegraphnode.h>
 #include <Qt3DRender/qrendertargetoutput.h>
-#include <QRect>
+#include <QtCore/QRect>
 
 QT_BEGIN_NAMESPACE
 
@@ -51,7 +51,7 @@ namespace Qt3DRender {
 class QBlitFramebufferPrivate;
 class QRenderTarget;
 
-class QT3DRENDERSHARED_EXPORT QBlitFramebuffer : public QFrameGraphNode
+class Q_3DRENDERSHARED_EXPORT QBlitFramebuffer : public QFrameGraphNode
 {
     Q_OBJECT
     Q_PROPERTY(Qt3DRender::QRenderTarget *source READ source WRITE setSource NOTIFY sourceChanged)
@@ -101,7 +101,7 @@ protected:
 
 private:
     Q_DECLARE_PRIVATE(QBlitFramebuffer)
-    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const Q_DECL_OVERRIDE;
+    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const override;
 };
 
 } // namespace Qt3DRender

@@ -41,10 +41,11 @@
 
 #include <QtCharts/QValueAxis>
 #include <private/qabstractaxis_p.h>
+#include <QtCharts/private/qchartglobal_p.h>
 
 QT_CHARTS_BEGIN_NAMESPACE
 
-class QValueAxisPrivate : public QAbstractAxisPrivate
+class Q_CHARTS_PRIVATE_EXPORT QValueAxisPrivate : public QAbstractAxisPrivate
 {
     Q_OBJECT
 public:
@@ -59,6 +60,9 @@ public:
     qreal max() { return m_max; }
     void setRange(qreal min,qreal max);
 
+    qreal tickInterval() { return m_tickInterval; }
+    qreal tickAnchor() { return m_tickAnchor; }
+
 protected:
     void setMin(const QVariant &min);
     void setMax(const QVariant &max);
@@ -71,6 +75,9 @@ private:
     int m_minorTickCount;
     QString m_format;
     bool m_applying;
+    qreal m_tickInterval;
+    qreal m_tickAnchor;
+    QValueAxis::TickType m_tickType;
     Q_DECLARE_PUBLIC(QValueAxis)
 };
 

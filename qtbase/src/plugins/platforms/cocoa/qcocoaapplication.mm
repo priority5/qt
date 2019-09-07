@@ -82,25 +82,7 @@
 
 QT_USE_NAMESPACE
 
-@implementation NSApplication (QT_MANGLE_NAMESPACE(QApplicationIntegration))
-
-- (void)QT_MANGLE_NAMESPACE(qt_setDockMenu):(NSMenu *)newMenu
-{
-    [[QT_MANGLE_NAMESPACE(QCocoaApplicationDelegate) sharedDelegate] setDockMenu:newMenu];
-}
-
-- (int)QT_MANGLE_NAMESPACE(qt_validModesForFontPanel):(NSFontPanel *)fontPanel
-{
-    Q_UNUSED(fontPanel);
-    // only display those things that QFont can handle
-    return NSFontPanelFaceModeMask
-            | NSFontPanelSizeModeMask
-            | NSFontPanelCollectionModeMask
-            | NSFontPanelUnderlineEffectModeMask
-            | NSFontPanelStrikethroughEffectModeMask;
-}
-
-- (void)QT_MANGLE_NAMESPACE(qt_sendPostedMessage):(NSEvent *)event
+static void qt_sendPostedMessage(NSEvent *event)
 {
     // WARNING: data1 and data2 is truncated to from 64-bit to 32-bit on OS 10.5!
     // That is why we need to split the address in two parts:
@@ -128,16 +110,16 @@ QT_USE_NAMESPACE
 
 static const QByteArray q_macLocalEventType = QByteArrayLiteral("mac_generic_NSEvent");
 
-- (BOOL)QT_MANGLE_NAMESPACE(qt_filterEvent):(NSEvent *)event
+static bool qt_filterEvent(NSEvent *event)
 {
     if (qApp && qApp->eventDispatcher()->
-            filterNativeEvent(q_macLocalEventType, static_cast<void*>(event), 0))
+            filterNativeEvent(q_macLocalEventType, static_cast<void*>(event), nullptr))
         return true;
 
-    if ([event type] == NSApplicationDefined) {
-        switch (static_cast<short>([event subtype])) {
+    if (event.type == NSEventTypeApplicationDefined) {
+        switch (static_cast<short>(event.subtype)) {
             case QtCocoaEventSubTypePostMessage:
-                [NSApp QT_MANGLE_NAMESPACE(qt_sendPostedMessage):event];
+                qt_sendPostedMessage(event);
                 return true;
             default:
                 break;
@@ -147,8 +129,6 @@ static const QByteArray q_macLocalEventType = QByteArrayLiteral("mac_generic_NSE
     return false;
 }
 
-@end
-
 static void qt_maybeSendKeyEquivalentUpEvent(NSEvent *event)
 {
     // Cocoa is known for not sending key up events for key
@@ -157,7 +137,7 @@ static void qt_maybeSendKeyEquivalentUpEvent(NSEvent *event)
     // and forward the key event to the key (focus) window.
     // However, non-Qt windows will not (and should not) get
     // any special treatment, only QWindow-owned NSWindows.
-    if (event.type == NSKeyUp && (event.modifierFlags & NSCommandKeyMask)) {
+    if (event.type == NSEventTypeKeyUp && (event.modifierFlags & NSEventModifierFlagCommand)) {
         NSWindow *targetWindow = event.window;
         if ([targetWindow.class conformsToProtocol:@protocol(QNSWindowProtocol)])
             [targetWindow sendEvent:event];
@@ -180,7 +160,7 @@ static void qt_maybeSendKeyEquivalentUpEvent(NSEvent *event)
     // be called instead of sendEvent if redirection occurs.
     // 'self' will then be an instance of NSApplication
     // (and not QNSApplication)
-    if (![NSApp QT_MANGLE_NAMESPACE(qt_filterEvent):event]) {
+    if (!qt_filterEvent(event)) {
         [self QT_MANGLE_NAMESPACE(qt_sendEvent_original):event];
         qt_maybeSendKeyEquivalentUpEvent(event);
     }
@@ -190,7 +170,7 @@ static void qt_maybeSendKeyEquivalentUpEvent(NSEvent *event)
 {
     // This method will be called if
     // no redirection occurs
-    if (![NSApp QT_MANGLE_NAMESPACE(qt_filterEvent):event]) {
+    if (!qt_filterEvent(event)) {
         [super sendEvent:event];
         qt_maybeSendKeyEquivalentUpEvent(event);
     }

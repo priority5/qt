@@ -40,6 +40,7 @@
 #include "qenvironmentlight.h"
 #include "qenvironmentlight_p.h"
 #include "qabstracttexture.h"
+#include <QVector3D>
 
 QT_BEGIN_NAMESPACE
 
@@ -52,6 +53,9 @@ namespace Qt3DRender
  * \instantiates Qt3DRender::QEnvironmentLight
  * \brief Encapsulate an environment light object in a Qt 3D scene.
  * \since 5.9
+ *
+ * EnvironmentLight uses cubemaps to implement image-based lighting (IBL), a technique
+ * often used in conjunction with physically-based rendering (PBR).
  */
 
 QEnvironmentLightPrivate::QEnvironmentLightPrivate()
@@ -63,6 +67,23 @@ QEnvironmentLightPrivate::QEnvironmentLightPrivate()
 
 QEnvironmentLightPrivate::~QEnvironmentLightPrivate()
 {
+}
+
+void QEnvironmentLightPrivate::_q_updateEnvMapsSize()
+{
+    QVector3D irradianceSize;
+    if (m_irradiance != nullptr)
+        irradianceSize = QVector3D(m_irradiance->width(),
+                                   m_irradiance->height(),
+                                   m_irradiance->depth());
+    m_shaderData->setProperty("irradianceSize", QVariant::fromValue(irradianceSize));
+
+    QVector3D specularSize;
+    if (m_specular != nullptr)
+        specularSize = QVector3D(m_specular->width(),
+                                 m_specular->height(),
+                                 m_specular->depth());
+    m_shaderData->setProperty("specularSize", QVariant::fromValue(specularSize));
 }
 
 Qt3DCore::QNodeCreatedChangeBasePtr QEnvironmentLight::createNodeCreationChange() const
@@ -79,6 +100,9 @@ Qt3DCore::QNodeCreatedChangeBasePtr QEnvironmentLight::createNodeCreationChange(
     \inmodule Qt3DRender
     \brief Encapsulate an environment light object in a Qt 3D scene.
     \since 5.9
+
+    EnvironmentLight uses cubemaps to implement image-based lighting (IBL), a technique
+    often used in conjunction with physically-based rendering (PBR).
 */
 
 QEnvironmentLight::QEnvironmentLight(Qt3DCore::QNode *parent)
@@ -148,17 +172,26 @@ void QEnvironmentLight::setIrradiance(QAbstractTexture *i)
     if (irradiance() == i)
         return;
 
-    if (irradiance())
-        d->unregisterDestructionHelper(irradiance());
+    if (irradiance()) {
+        d->unregisterDestructionHelper(d->m_irradiance);
+        QObject::disconnect(d->m_irradiance, SIGNAL(widthChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+        QObject::disconnect(d->m_irradiance, SIGNAL(heightChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+        QObject::disconnect(d->m_irradiance, SIGNAL(depthChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+    }
 
     if (i && !i->parent())
         i->setParent(this);
 
     d->m_irradiance = i;
     d->m_shaderData->setProperty("irradiance", QVariant::fromValue(i));
+    d->_q_updateEnvMapsSize();
 
-    if (i)
+    if (i) {
         d->registerDestructionHelper(i, &QEnvironmentLight::setIrradiance, i);
+        QObject::connect(d->m_irradiance, SIGNAL(widthChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+        QObject::connect(d->m_irradiance, SIGNAL(heightChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+        QObject::connect(d->m_irradiance, SIGNAL(depthChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+    }
 
     emit irradianceChanged(i);
 }
@@ -169,17 +202,26 @@ void QEnvironmentLight::setSpecular(QAbstractTexture *s)
     if (specular() == s)
         return;
 
-    if (irradiance())
-        d->unregisterDestructionHelper(specular());
+    if (specular()) {
+        d->unregisterDestructionHelper(d->m_specular);
+        QObject::disconnect(d->m_specular, SIGNAL(widthChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+        QObject::disconnect(d->m_specular, SIGNAL(heightChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+        QObject::disconnect(d->m_specular, SIGNAL(depthChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+    }
 
     if (s && !s->parent())
         s->setParent(this);
 
     d->m_specular = s;
     d->m_shaderData->setProperty("specular", QVariant::fromValue(s));
+    d->_q_updateEnvMapsSize();
 
-    if (s)
+    if (s) {
         d->registerDestructionHelper(s, &QEnvironmentLight::setSpecular, s);
+        QObject::connect(d->m_specular, SIGNAL(widthChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+        QObject::connect(d->m_specular, SIGNAL(heightChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+        QObject::connect(d->m_specular, SIGNAL(depthChanged(int)), this, SLOT(_q_updateEnvMapsSize()));
+    }
 
     emit specularChanged(s);
 }
@@ -187,3 +229,5 @@ void QEnvironmentLight::setSpecular(QAbstractTexture *s)
 } // namespace Qt3DRender
 
 QT_END_NAMESPACE
+
+#include "moc_qenvironmentlight.cpp"

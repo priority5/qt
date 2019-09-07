@@ -17,7 +17,6 @@ namespace mbgl {
 class RendererBackend;
 class UpdateParameters;
 class RenderStaticData;
-class FrameHistory;
 class Programs;
 class TransformState;
 class ImageManager;
@@ -33,7 +32,6 @@ public:
                     const UpdateParameters&,
                     const EvaluatedLight&,
                     RenderStaticData&,
-                    FrameHistory&,
                     ImageManager&,
                     LineAtlas&);
 
@@ -44,7 +42,6 @@ public:
     const EvaluatedLight& evaluatedLight;
 
     RenderStaticData& staticData;
-    FrameHistory& frameHistory;
     ImageManager& imageManager;
     LineAtlas& lineAtlas;
 
@@ -65,15 +62,18 @@ public:
     gl::StencilMode stencilModeForClipping(const ClipID&) const;
     gl::ColorMode colorModeForRenderPass() const;
 
-    mat4 matrixForTile(const UnwrappedTileID&);
+    mat4 matrixForTile(const UnwrappedTileID&, bool aligned = false) const;
 
     mat4 projMatrix;
+    mat4 alignedProjMatrix;
     mat4 nearClippedProjMatrix;
 
     int numSublayers = 3;
     uint32_t currentLayer;
     float depthRangeSize;
     const float depthEpsilon = 1.0f / (1 << 16);
+    
+    float symbolFadeChange;
 };
 
 } // namespace mbgl

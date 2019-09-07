@@ -41,11 +41,13 @@
 #include <Qt3DRender/private/geometryrenderermanager_p.h>
 #include <Qt3DRender/private/qboundingvolume_p.h>
 #include <Qt3DRender/private/qgeometryrenderer_p.h>
+#include <Qt3DRender/private/qmesh_p.h>
 #include <Qt3DCore/qpropertyupdatedchange.h>
 #include <Qt3DCore/qpropertynodeaddedchange.h>
 #include <Qt3DCore/qpropertynoderemovedchange.h>
 #include <Qt3DCore/private/qnode_p.h>
 #include <Qt3DCore/private/qtypedpropertyupdatechange_p.h>
+#include <Qt3DCore/private/qservicelocator_p.h>
 #include <QtCore/qcoreapplication.h>
 
 #include <memory>
@@ -197,22 +199,51 @@ void GeometryRenderer::sceneChangeEvent(const Qt3DCore::QSceneChangePtr &e)
 void GeometryRenderer::executeFunctor()
 {
     Q_ASSERT(m_geometryFactory);
+
+    // What kind of functor are we dealing with?
+    const bool isQMeshFunctor = m_geometryFactory->id() == Qt3DRender::functorTypeId<MeshLoaderFunctor>();
+
+    if (isQMeshFunctor) {
+        QSharedPointer<MeshLoaderFunctor> meshLoader = qSharedPointerCast<MeshLoaderFunctor>(m_geometryFactory);
+
+        // Set the aspect engine to allow remote downloads
+        if (meshLoader->nodeManagers() == nullptr)
+            meshLoader->setNodeManagers(m_renderer->nodeManagers());
+
+        if (meshLoader->downloaderService() == nullptr) {
+            Qt3DCore::QServiceLocator *services = m_renderer->services();
+            meshLoader->setDownloaderService(services->service<Qt3DCore::QDownloadHelperService>(Qt3DCore::QServiceLocator::DownloadHelperService));
+        };
+    }
+
+    // Load geometry
     std::unique_ptr<QGeometry> geometry((*m_geometryFactory)());
-    if (!geometry)
-        return;
 
-    // Move the QGeometry object to the main thread and notify the
-    // corresponding QGeometryRenderer
-    const auto appThread = QCoreApplication::instance()->thread();
-    geometry->moveToThread(appThread);
+    // If the geometry is null, then we were either unable to load it (Error)
+    // or the mesh is located at a remote url and needs to be downloaded first (Loading)
+    if (geometry != nullptr) {
+        // Move the QGeometry object to the main thread and notify the
+        // corresponding QGeometryRenderer
+        const auto appThread = QCoreApplication::instance()->thread();
+        geometry->moveToThread(appThread);
 
-    auto e = QGeometryChangePtr::create(peerId());
-    e->setDeliveryFlags(Qt3DCore::QSceneChange::Nodes);
-    e->setPropertyName("geometry");
-    e->data = std::move(geometry);
-    notifyObservers(e);
+        auto e = QGeometryChangePtr::create(peerId());
+        e->setDeliveryFlags(Qt3DCore::QSceneChange::Nodes);
+        e->setPropertyName("geometry");
+        e->data = std::move(geometry);
+        notifyObservers(e);
+    }
 
-    // TODO: Maybe we could also send a status to help troubleshoot errors
+    // Send Status
+    if (isQMeshFunctor) {
+        QSharedPointer<MeshLoaderFunctor> meshLoader = qSharedPointerCast<MeshLoaderFunctor>(m_geometryFactory);
+
+        auto e = QPropertyUpdatedChangePtr::create(peerId());
+        e->setDeliveryFlags(Qt3DCore::QSceneChange::Nodes);
+        e->setPropertyName("status");
+        e->setValue(meshLoader->status());
+        notifyObservers(e);
+    }
 }
 
 void GeometryRenderer::unsetDirty()

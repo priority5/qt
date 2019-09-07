@@ -42,7 +42,9 @@ OTHER_FILES += \
     $$PWD/data/keyboardModifierMapping.html \
     $$PWD/data/keyboardEvents.html \
     $$PWD/data/titleupdate.js \
+    $$PWD/data/tst_action.qml \
     $$PWD/data/tst_activeFocusOnPress.qml \
+    $$PWD/data/tst_contextMenu.qml \
     $$PWD/data/tst_desktopBehaviorLoadHtml.qml \
     $$PWD/data/tst_download.qml \
     $$PWD/data/tst_favicon.qml \
@@ -50,7 +52,6 @@ OTHER_FILES += \
     $$PWD/data/tst_filePicker.qml \
     $$PWD/data/tst_findText.qml \
     $$PWD/data/tst_focusOnNavigation.qml \
-    $$PWD/data/tst_formValidation.qml \
     $$PWD/data/tst_geopermission.qml \
     $$PWD/data/tst_getUserMedia.qml \
     $$PWD/data/tst_inputMethod.qml \
@@ -66,6 +67,8 @@ OTHER_FILES += \
     $$PWD/data/tst_navigationHistory.qml \
     $$PWD/data/tst_navigationRequested.qml \
     $$PWD/data/tst_newViewRequest.qml \
+    $$PWD/data/tst_notification.qml \
+    $$PWD/data/tst_profile.qml \
     $$PWD/data/tst_properties.qml \
     $$PWD/data/tst_runJavaScript.qml \
     $$PWD/data/tst_scrollPosition.qml \
@@ -89,11 +92,13 @@ OTHER_FILES += \
     $$PWD/data/icons/qt144.png \
     $$PWD/data/icons/qt32.ico \
     $$PWD/data/icons/qtmulti.ico \
-    $$PWD/mock-delegates/QtWebEngine/UIDelegates/AlertDialog.qml \
-    $$PWD/mock-delegates/QtWebEngine/UIDelegates/ConfirmDialog.qml \
-    $$PWD/mock-delegates/QtWebEngine/UIDelegates/FilePicker.qml \
-    $$PWD/mock-delegates/QtWebEngine/UIDelegates/PromptDialog.qml \
-    $$PWD/mock-delegates/QtWebEngine/UIDelegates/qmldir \
+    $$PWD/mock-delegates/QtWebEngine/Controls1Delegates/AlertDialog.qml \
+    $$PWD/mock-delegates/QtWebEngine/Controls1Delegates/ConfirmDialog.qml \
+    $$PWD/mock-delegates/QtWebEngine/Controls1Delegates/FilePicker.qml \
+    $$PWD/mock-delegates/QtWebEngine/Controls1Delegates/Menu.qml \
+    $$PWD/mock-delegates/QtWebEngine/Controls1Delegates/MenuItem.qml \
+    $$PWD/mock-delegates/QtWebEngine/Controls1Delegates/PromptDialog.qml \
+    $$PWD/mock-delegates/QtWebEngine/Controls1Delegates/qmldir \
     $$PWD/mock-delegates/TestParams/FilePickerParams.qml \
     $$PWD/mock-delegates/TestParams/JSDialogParams.qml \
     $$PWD/mock-delegates/TestParams/qmldir \

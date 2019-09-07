@@ -45,6 +45,9 @@
 #endif
 
 #include <QtWaylandCompositor/QWaylandResource>
+#include <QDebug>
+
+#include <QtWaylandCompositor/private/qwaylandutils_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -93,10 +96,10 @@ QWaylandIviSurface::QWaylandIviSurface(QWaylandIviApplication *application, QWay
 }
 
 /*!
- * \qmlmethod void QtWaylandCompositor::IviSurface::initialize(object iviApplication, object surface, int iviId, object resource)
+ * \qmlmethod void QtWaylandCompositor::IviSurface::initialize(IviApplication iviApplication, WaylandSurface surface, int iviId, WaylandResource resource)
  *
  * Initializes the IviSurface, associating it with the given \a iviApplication, \a surface,
- * \a client, \a iviId, and \a resource.
+ * \a iviId, and \a resource.
  */
 
 /*!
@@ -181,10 +184,9 @@ QWaylandSurfaceRole *QWaylandIviSurface::role()
  */
 QWaylandIviSurface *QWaylandIviSurface::fromResource(wl_resource *resource)
 {
-    auto iviSurfaceResource = QWaylandIviSurfacePrivate::Resource::fromResource(resource);
-    if (!iviSurfaceResource)
-        return nullptr;
-    return static_cast<QWaylandIviSurfacePrivate *>(iviSurfaceResource->ivi_surface_object)->q_func();
+    if (auto p = QtWayland::fromResource<QWaylandIviSurfacePrivate *>(resource))
+        return p->q_func();
+    return nullptr;
 }
 
 /*!
@@ -198,6 +200,10 @@ QWaylandIviSurface *QWaylandIviSurface::fromResource(wl_resource *resource)
  */
 void QWaylandIviSurface::sendConfigure(const QSize &size)
 {
+    if (!size.isValid()) {
+        qWarning() << "Can't configure ivi_surface with an invalid size" << size;
+        return;
+    }
     Q_D(QWaylandIviSurface);
     d->send_configure(size.width(), size.height());
 }
@@ -218,11 +224,6 @@ void QWaylandIviSurface::initialize()
 }
 
 QWaylandIviSurfacePrivate::QWaylandIviSurfacePrivate()
-    : QWaylandCompositorExtensionPrivate()
-    , ivi_surface()
-    , m_iviApplication(nullptr)
-    , m_surface(nullptr)
-    , m_iviId(UINT_MAX)
 {
 }
 

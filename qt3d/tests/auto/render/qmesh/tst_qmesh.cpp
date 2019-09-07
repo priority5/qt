@@ -38,6 +38,20 @@
 #include <Qt3DCore/qnodecreatedchange.h>
 #include "testpostmanarbiter.h"
 
+class MyQMesh : public Qt3DRender::QMesh
+{
+    Q_OBJECT
+public:
+    explicit MyQMesh(Qt3DCore::QNode *parent = nullptr)
+        : Qt3DRender::QMesh(parent)
+    {}
+
+    void sceneChangeEvent(const Qt3DCore::QSceneChangePtr &change) final
+    {
+        Qt3DRender::QMesh::sceneChangeEvent(change);
+    }
+};
+
 class tst_QMesh : public QObject
 {
     Q_OBJECT
@@ -52,6 +66,7 @@ private Q_SLOTS:
         // THEN
         QCOMPARE(mesh.source(), QUrl());
         QCOMPARE(mesh.meshName(), QString());
+        QCOMPARE(mesh.status(), Qt3DRender::QMesh::None);
     }
 
     void checkPropertyChanges()
@@ -122,8 +137,8 @@ private Q_SLOTS:
             const auto creationChangeData = qSharedPointerCast<Qt3DCore::QNodeCreatedChange<Qt3DRender::QGeometryRendererData>>(creationChanges.first());
             const Qt3DRender::QGeometryRendererData cloneData = creationChangeData->data;
 
-            // Geometry factory is null until the engine becomes available
-            QVERIFY(cloneData.geometryFactory == nullptr);
+            // Geometry factory shouldn't be null
+            QVERIFY(cloneData.geometryFactory != nullptr);
             QCOMPARE(mesh.id(), creationChangeData->subjectId());
             QCOMPARE(mesh.isEnabled(), true);
             QCOMPARE(mesh.isEnabled(), creationChangeData->isNodeEnabled());
@@ -179,8 +194,8 @@ private Q_SLOTS:
             Qt3DRender::QGeometryFactoryPtr factory = change->value().value<Qt3DRender::QGeometryFactoryPtr>();
             QSharedPointer<Qt3DRender::MeshLoaderFunctor> meshFunctor = qSharedPointerCast<Qt3DRender::MeshLoaderFunctor>(factory);
             QVERIFY(meshFunctor != nullptr);
-            QCOMPARE(meshFunctor->m_mesh, mesh.id());
-            QCOMPARE(meshFunctor->m_sourcePath, mesh.source());
+            QCOMPARE(meshFunctor->mesh(), mesh.id());
+            QCOMPARE(meshFunctor->sourcePath(), mesh.source());
 
             arbiter.events.clear();
         }
@@ -224,8 +239,8 @@ private Q_SLOTS:
             Qt3DRender::QGeometryFactoryPtr factory = change->value().value<Qt3DRender::QGeometryFactoryPtr>();
             QSharedPointer<Qt3DRender::MeshLoaderFunctor> meshFunctor = qSharedPointerCast<Qt3DRender::MeshLoaderFunctor>(factory);
             QVERIFY(meshFunctor != nullptr);
-            QCOMPARE(meshFunctor->m_mesh, mesh.id());
-            QCOMPARE(meshFunctor->m_meshName, mesh.meshName());
+            QCOMPARE(meshFunctor->mesh(), mesh.id());
+            QCOMPARE(meshFunctor->meshName(), mesh.meshName());
 
             arbiter.events.clear();
         }
@@ -241,6 +256,39 @@ private Q_SLOTS:
 
     }
 
+    void checkStatusUpdate()
+    {
+        // GIVEN
+        qRegisterMetaType<Qt3DRender::QMesh::Status>("Status");
+        MyQMesh mesh;
+        QSignalSpy spy(&mesh, SIGNAL(statusChanged(Status)));
+
+        // THEN
+        QCOMPARE(mesh.status(), Qt3DRender::QMesh::None);
+
+        // WHEN
+        const Qt3DRender::QMesh::Status newStatus = Qt3DRender::QMesh::Error;
+        Qt3DCore::QPropertyUpdatedChangePtr e(new Qt3DCore::QPropertyUpdatedChange(mesh.id()));
+        e->setPropertyName("status");
+        e->setValue(QVariant::fromValue(newStatus));
+        mesh.sceneChangeEvent(e);
+
+        // THEN
+        QCOMPARE(mesh.status(), newStatus);
+        QCOMPARE(spy.count(), 1);
+    }
+
+    void checkGeometryFactoryIsAccessibleEvenWithNoScene() // QTBUG-65506
+    {
+        // GIVEN
+        Qt3DRender::QMesh mesh;
+
+        // WHEN
+        mesh.setSource(QUrl(QStringLiteral("some_path")));
+
+        // THEN
+        QVERIFY(!mesh.geometryFactory().isNull());
+    }
 };
 
 QTEST_MAIN(tst_QMesh)

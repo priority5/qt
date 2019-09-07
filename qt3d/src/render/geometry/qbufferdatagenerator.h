@@ -42,13 +42,13 @@
 
 #include <Qt3DRender/qt3drender_global.h>
 #include <Qt3DRender/qabstractfunctor.h>
-#include <QSharedPointer>
+#include <QtCore/QSharedPointer>
 
 QT_BEGIN_NAMESPACE
 
 namespace Qt3DRender {
 
-class QT3DRENDERSHARED_EXPORT QBufferDataGenerator : public QAbstractFunctor
+class Q_3DRENDERSHARED_EXPORT QBufferDataGenerator : public QAbstractFunctor
 {
 public:
     virtual ~QBufferDataGenerator() {}

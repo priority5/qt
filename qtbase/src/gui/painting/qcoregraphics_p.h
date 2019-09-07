@@ -51,18 +51,24 @@
 // We mean it.
 //
 
+#include <QtCore/private/qcore_mac_p.h>
+
 #include <QtGui/private/qtguiglobal_p.h>
 #include <QtGui/qregion.h>
 #include <QtGui/qpalette.h>
 
 #include <CoreGraphics/CoreGraphics.h>
-#ifdef Q_OS_MACOS
+
+#if defined(__OBJC__) && defined(Q_OS_MACOS)
 #include <AppKit/AppKit.h>
+#define HAVE_APPKIT
 #endif
 
 QT_BEGIN_NAMESPACE
 
-#ifdef Q_OS_MACOS
+Q_GUI_EXPORT CGBitmapInfo qt_mac_bitmapInfoForImage(const QImage &image);
+
+#ifdef HAVE_APPKIT
 Q_GUI_EXPORT NSImage *qt_mac_create_nsimage(const QPixmap &pm);
 Q_GUI_EXPORT NSImage *qt_mac_create_nsimage(const QIcon &icon, int defaultSize = 0);
 Q_GUI_EXPORT QPixmap qt_mac_toQPixmap(const NSImage *image, const QSizeF &size);
@@ -73,12 +79,9 @@ Q_GUI_EXPORT QImage qt_mac_toQImage(CGImageRef image);
 
 Q_GUI_EXPORT void qt_mac_drawCGImage(CGContextRef inContext, const CGRect *inBounds, CGImageRef inImage);
 
-Q_GUI_EXPORT CGColorSpaceRef qt_mac_genericColorSpace();
-Q_GUI_EXPORT CGColorSpaceRef qt_mac_colorSpaceForDeviceType(const QPaintDevice *paintDevice);
-
 Q_GUI_EXPORT void qt_mac_clip_cg(CGContextRef hd, const QRegion &rgn, CGAffineTransform *orig_xform);
 
-#ifdef Q_OS_MACOS
+#ifdef HAVE_APPKIT
 Q_GUI_EXPORT QColor qt_mac_toQColor(const NSColor *color);
 Q_GUI_EXPORT QBrush qt_mac_toQBrush(const NSColor *color, QPalette::ColorGroup colorGroup = QPalette::Normal);
 #endif
@@ -88,40 +91,20 @@ Q_GUI_EXPORT QBrush qt_mac_toQBrush(CGColorRef color);
 class Q_GUI_EXPORT QMacCGContext
 {
 public:
-    inline QMacCGContext() { context = 0; }
+    QMacCGContext() = default;
     QMacCGContext(QPaintDevice *pdev);
     QMacCGContext(QPainter *p);
-    inline QMacCGContext(CGContextRef cg, bool takeOwnership = false) {
-        context = cg;
-        if (!takeOwnership)
-            CGContextRetain(context);
-    }
-    inline QMacCGContext(const QMacCGContext &copy) : context(0) { *this = copy; }
-    inline ~QMacCGContext() {
-        if (context)
-            CGContextRelease(context);
-    }
-    inline bool isNull() const { return context; }
-    inline operator CGContextRef() { return context; }
-    inline QMacCGContext &operator=(const QMacCGContext &copy) {
-        if (context)
-            CGContextRelease(context);
-        context = copy.context;
-        CGContextRetain(context);
-        return *this;
-    }
-    inline QMacCGContext &operator=(CGContextRef cg) {
-        if (context)
-            CGContextRelease(context);
-        context = cg;
-        CGContextRetain(context); //we do not take ownership
-        return *this;
-    }
+
+    operator CGContextRef() { return context; }
 
 private:
-    CGContextRef context;
+    void initialize(QPaintDevice *paintDevice);
+    void initialize(const QImage *, QPainter *painter = nullptr);
+    QCFType<CGContextRef> context;
 };
 
 QT_END_NAMESPACE
+
+#undef HAVE_APPKIT
 
 #endif // QCOREGRAPHICS_P_H

@@ -40,7 +40,7 @@
 #ifndef QT3DRENDER_QSTENCILTESTARGUMENTS_H
 #define QT3DRENDER_QSTENCILTESTARGUMENTS_H
 
-#include <QObject>
+#include <QtCore/QObject>
 #include <Qt3DRender/qt3drender_global.h>
 
 QT_BEGIN_NAMESPACE
@@ -50,7 +50,7 @@ namespace Qt3DRender {
 class QStencilTestPrivate;
 class QStencilTestArgumentsPrivate;
 
-class QT3DRENDERSHARED_EXPORT QStencilTestArguments : public QObject
+class Q_3DRENDERSHARED_EXPORT QStencilTestArguments : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(StencilFaceMode faceMode READ faceMode NOTIFY faceModeChanged)

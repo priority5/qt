@@ -45,7 +45,7 @@
 #include <qversionnumber.h>
 #include <qdebug.h>
 
-#if defined(Q_OS_ANDROID)
+#if defined(Q_OS_ANDROID) && !defined(Q_OS_ANDROID_EMBEDDED)
 #include <private/qjni_p.h>
 #endif
 
@@ -106,20 +106,12 @@ QT_BEGIN_NAMESPACE
     major version number component of the object on the left hand side of the expression (10) is
     greater than that of the object on the right (9):
 
-    \code
-    QOperatingSystemVersion::current() >= QOperatingSystemVersion(QOperatingSystemVersion::IOS, 9)
-    \endcode
+    \snippet code/src_corelib_global_qoperatingsystemversion.cpp 0
 
     This allows expressions for multiple operating systems to be joined with a logical OR operator
     and still work as expected. For example:
 
-    \code
-    auto current = QOperatingSystemVersion::current();
-    if (current >= QOperatingSystemVersion::OSXYosemite ||
-        current >= QOperatingSystemVersion(QOperatingSystemVersion::IOS, 8)) {
-        // returns true on macOS >= 10.10 and iOS >= 8.0, but false on macOS < 10.10 and iOS < 8.0
-    }
-    \endcode
+    \snippet code/src_corelib_global_qoperatingsystemversion.cpp 1
 
     A more naive comparison algorithm might incorrectly return true on all versions of macOS,
     including Mac OS 9. This behavior is achieved by overloading the comparison operators to return
@@ -163,7 +155,7 @@ QOperatingSystemVersion QOperatingSystemVersion::current()
 {
     QOperatingSystemVersion version;
     version.m_os = currentType();
-#if defined(Q_OS_ANDROID)
+#if defined(Q_OS_ANDROID) && !defined(Q_OS_ANDROID_EMBEDDED)
 #ifndef QT_BOOTSTRAPPED
     const QVersionNumber v = QVersionNumber::fromString(QJNIObjectPrivate::getStaticObjectField(
         "android/os/Build$VERSION", "RELEASE", "Ljava/lang/String;").toString());
@@ -436,6 +428,22 @@ const QOperatingSystemVersion QOperatingSystemVersion::MacOSSierra =
  */
 const QOperatingSystemVersion QOperatingSystemVersion::MacOSHighSierra =
     QOperatingSystemVersion(QOperatingSystemVersion::MacOS, 10, 13);
+
+/*!
+    \variable QOperatingSystemVersion::MacOSMojave
+    \brief a version corresponding to macOS Mojave (version 10.14).
+    \since 5.11.2
+ */
+const QOperatingSystemVersion QOperatingSystemVersion::MacOSMojave =
+    QOperatingSystemVersion(QOperatingSystemVersion::MacOS, 10, 14);
+
+/*!
+    \variable QOperatingSystemVersion::MacOSCatalina
+    \brief a version corresponding to macOS Catalina (version 10.15).
+    \since 5.12.5
+ */
+const QOperatingSystemVersion QOperatingSystemVersion::MacOSCatalina =
+    QOperatingSystemVersion(QOperatingSystemVersion::MacOS, 10, 15);
 
 /*!
     \variable QOperatingSystemVersion::AndroidJellyBean

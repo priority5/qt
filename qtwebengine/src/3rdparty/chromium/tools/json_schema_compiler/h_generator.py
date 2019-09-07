@@ -214,7 +214,7 @@ class _Generator(object):
       # static. On the other hand, those declared inline (e.g. in an object) do.
       maybe_static = '' if is_toplevel else 'static '
       (c.Append()
-        .Append('%sstd::string ToString(%s as_enum);' %
+        .Append('%sconst char* ToString(%s as_enum);' %
                 (maybe_static, classname))
         .Append('%s%s Parse%s(const std::string& as_string);' %
                 (maybe_static, classname, classname))
@@ -281,7 +281,9 @@ class _Generator(object):
       (c.Eblock()
         .Append()
         .Sblock(' private:')
+          .Append('#if !defined(__GNUC__) || __GNUC__ > 5')
           .Append('DISALLOW_COPY_AND_ASSIGN(%(classname)s);')
+          .Append('#endif')
         .Eblock('};')
       )
     return c.Substitute({'classname': classname})

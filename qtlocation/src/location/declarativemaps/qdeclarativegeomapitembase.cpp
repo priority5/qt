@@ -85,10 +85,6 @@ QDeclarativeGeoMapItemBase::QDeclarativeGeoMapItemBase(QQuickItem *parent)
     // Changing opacity on a mapItemGroup should affect also the opacity on the children.
     // This must be notified to plugins, if they are to render the item.
     connect(this, &QQuickItem::opacityChanged, this, &QDeclarativeGeoMapItemBase::mapItemOpacityChanged);
-    parentGroup_ = qobject_cast<QDeclarativeGeoMapItemGroup *>(parent);
-    if (parentGroup_)
-        connect(qobject_cast<QDeclarativeGeoMapItemGroup *>(parent), &QQuickItem::opacityChanged,
-                this, &QDeclarativeGeoMapItemBase::mapItemOpacityChanged);
 }
 
 QDeclarativeGeoMapItemBase::~QDeclarativeGeoMapItemBase()
@@ -141,6 +137,8 @@ void QDeclarativeGeoMapItemBase::setMap(QDeclarativeGeoMap *quickMap, QGeoMap *m
     if (map_ && quickMap_) {
         connect(map_, SIGNAL(cameraDataChanged(QGeoCameraData)),
                 this, SLOT(baseCameraDataChanged(QGeoCameraData)));
+        connect(map_, SIGNAL(visibleAreaChanged()),
+                this, SLOT(visibleAreaChanged()));
         connect(quickMap, SIGNAL(heightChanged()), this, SLOT(polishAndUpdate()));
         connect(quickMap, SIGNAL(widthChanged()), this, SLOT(polishAndUpdate()));
         lastSize_ = QSizeF(quickMap_->width(), quickMap_->height());
@@ -177,6 +175,13 @@ void QDeclarativeGeoMapItemBase::baseCameraDataChanged(const QGeoCameraData &cam
     afterViewportChanged(evt);
 }
 
+void QDeclarativeGeoMapItemBase::visibleAreaChanged()
+{
+    QGeoMapViewportChangeEvent evt;
+    evt.mapSize = QSizeF(quickMap_->width(), quickMap_->height());
+    afterViewportChanged(evt);
+}
+
 /*!
     \internal
 */
@@ -185,11 +190,19 @@ void QDeclarativeGeoMapItemBase::setPositionOnMap(const QGeoCoordinate &coordina
     if (!map_ || !quickMap_)
         return;
 
-    QDoubleVector2D wrappedProjection = map_->geoProjection().geoToWrappedMapProjection(coordinate);
-    if (!map_->geoProjection().isProjectable(wrappedProjection))
-        return;
+    QDoubleVector2D pos;
+    if (map()->geoProjection().projectionType() == QGeoProjection::ProjectionWebMercator) {
+        const QGeoProjectionWebMercator &p = static_cast<const QGeoProjectionWebMercator&>(map()->geoProjection());
+        QDoubleVector2D wrappedProjection = p.geoToWrappedMapProjection(coordinate);
+        if (!p.isProjectable(wrappedProjection))
+            return;
+        pos = p.wrappedMapProjectionToItemPosition(wrappedProjection);
+    } else {
+        pos = map()->geoProjection().coordinateToItemPosition(coordinate, false);
+        if (qIsNaN(pos.x()))
+            return;
+    }
 
-    QDoubleVector2D pos = map_->geoProjection().wrappedMapProjectionToItemPosition(wrappedProjection);
     QPointF topLeft = pos.toPointF() - offset;
 
     setPosition(topLeft);
@@ -212,11 +225,16 @@ float QDeclarativeGeoMapItemBase::zoomLevelOpacity() const
 
 bool QDeclarativeGeoMapItemBase::childMouseEventFilter(QQuickItem *item, QEvent *event)
 {
-    Q_UNUSED(item)
+    Q_UNUSED(item);
     if (event->type() == QEvent::MouseButtonPress && !contains(static_cast<QMouseEvent*>(event)->pos())) {
-        // This is an evil hack: in case of items that are not rectangles, we never accept the event.
-        // Instead the events are now delivered to QDeclarativeGeoMapItemBase which doesn't to anything with them.
-        // The map below it still works since it filters events and steals the events at some point.
+        // In case of items that are not rectangles, this filter is used to test if the event has landed
+        // inside the actual item shape.
+        // If so, the method returns true, meaning that it prevents the event delivery to child "*item" (for example,
+        // a mouse area that is on top of this map item).
+        // However, this method sets "accepted" to false, so that the event can still be passed further up,
+        // specifically to the parent Map, that is a sort of flickable.
+        // Otherwise, if the event is not contained within the map item, the method returns false, meaning the event
+        // is delivered to the child *item (like the mouse area associated).
         event->setAccepted(false);
         return true;
     }
@@ -263,11 +281,31 @@ QSGNode *QDeclarativeGeoMapItemBase::updateMapItemPaintNode(QSGNode *oldNode, Up
     return 0;
 }
 
+QGeoMap::ItemType QDeclarativeGeoMapItemBase::itemType() const
+{
+    return m_itemType;
+}
+
+/*!
+    \internal
+
+    The actual combined opacity of the item. Needed by custom renderer to look like
+    the scene-graph one.
+*/
 qreal QDeclarativeGeoMapItemBase::mapItemOpacity() const
 {
     if (parentGroup_)
-        return parentGroup_->opacity() * opacity();
+        return parentGroup_->mapItemOpacity() * opacity();
     return opacity();
+}
+
+void QDeclarativeGeoMapItemBase::setParentGroup(QDeclarativeGeoMapItemGroup &parentGroup)
+{
+    parentGroup_ = &parentGroup;
+    if (parentGroup_) {
+        connect(parentGroup_, &QDeclarativeGeoMapItemGroup::mapItemOpacityChanged,
+                this, &QDeclarativeGeoMapItemBase::mapItemOpacityChanged);
+    }
 }
 
 bool QDeclarativeGeoMapItemBase::isPolishScheduled() const

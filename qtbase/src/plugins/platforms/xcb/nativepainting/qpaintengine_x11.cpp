@@ -1,31 +1,37 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
+** Copyright (C) 2018 The Qt Company Ltd.
+** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the plugins of the Qt Toolkit.
 **
-** $QT_BEGIN_LICENSE:LGPL21$
+** $QT_BEGIN_LICENSE:LGPL$
 ** Commercial License Usage
 ** Licensees holding valid commercial Qt licenses may use this file in
 ** accordance with the commercial license agreement provided with the
 ** Software or, alternatively, in accordance with the terms contained in
 ** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
 **
 ** GNU Lesser General Public License Usage
 ** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 2.1 or version 3 as published by the Free
-** Software Foundation and appearing in the file LICENSE.LGPLv21 and
-** LICENSE.LGPLv3 included in the packaging of this file. Please review the
-** following information to ensure the GNU Lesser General Public License
-** requirements will be met: https://www.gnu.org/licenses/lgpl.html and
-** http://www.gnu.org/licenses/old-licenses/lgpl-2.1.html.
+** General Public License version 3 as published by the Free Software
+** Foundation and appearing in the file LICENSE.LGPL3 included in the
+** packaging of this file. Please review the following information to
+** ensure the GNU Lesser General Public License version 3 requirements
+** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
 **
-** As a special exception, The Qt Company gives you certain additional
-** rights. These rights are described in The Qt Company LGPL Exception
-** version 1.1, included in the file LGPL_EXCEPTION.txt in this package.
+** GNU General Public License Usage
+** Alternatively, this file may be used under the terms of the GNU
+** General Public License version 2.0 or (at your option) the GNU General
+** Public license version 3 or any later version approved by the KDE Free
+** Qt Foundation. The licenses are as published by the Free Software
+** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
+** included in the packaging of this file. Please review the following
+** information to ensure the GNU General Public License requirements will
+** be met: https://www.gnu.org/licenses/gpl-2.0.html and
+** https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ** $QT_END_LICENSE$
 **
@@ -194,6 +200,7 @@ public:
     uint has_pattern : 1;
     uint has_alpha_pen : 1;
     uint has_alpha_brush : 1;
+    uint use_sysclip : 1;
     uint render_hints;
 
     const QXcbX11Info *xinfo;
@@ -220,7 +227,9 @@ public:
     QXRenderGlyphCache(QXcbX11Info x, QFontEngine::GlyphFormat format, const QTransform &matrix);
     ~QXRenderGlyphCache();
 
-    bool addGlyphs(const QTextItemInt &ti, QVarLengthArray<glyph_t> glyphs, QVarLengthArray<QFixedPoint> positions);
+    bool addGlyphs(const QTextItemInt &ti,
+                   const QVarLengthArray<glyph_t> &glyphs,
+                   const QVarLengthArray<QFixedPoint> &positions);
     bool draw(Drawable src, Drawable dst, const QTransform &matrix, const QTextItemInt &ti);
 
     inline GlyphSet glyphSet();
@@ -450,7 +459,7 @@ static QPixmap qt_patternForAlpha(uchar alpha, int screen)
                   % HexString<uchar>(alpha)
                   % HexString<int>(screen);
 
-    if (!QPixmapCache::find(key, pm)) {
+    if (!QPixmapCache::find(key, &pm)) {
         // #### why not use a mono image here????
         QImage pattern(DITHER_SIZE, DITHER_SIZE, QImage::Format_ARGB32);
         pattern.fill(0xffffffff);
@@ -692,6 +701,9 @@ bool QX11PaintEngine::begin(QPaintDevice *pdev)
 #endif
     d->xlibMaxLinePoints = 32762; // a safe number used to avoid, call to XMaxRequestSize(d->dpy) - 3;
     d->opacity = 1;
+
+    QX11PlatformPixmap *x11pm = paintDevice()->devType() == QInternal::Pixmap ? qt_x11Pixmap(*static_cast<QPixmap *>(paintDevice())) : nullptr;
+    d->use_sysclip = paintDevice()->devType() == QInternal::Widget || (x11pm ? x11pm->isBackingStore() : false);
 
     // Set up the polygon clipper. Note: This will only work in
     // polyline mode as long as we have a buffer zone, since a
@@ -1464,7 +1476,7 @@ void QX11PaintEngine::updatePen(const QPen &pen)
     }
 
     if (!d->has_clipping) { // if clipping is set the paintevent clip region is merged with the clip region
-        QRegion sysClip = systemClip();
+        QRegion sysClip = d->use_sysclip ? systemClip() : QRegion();
         if (!sysClip.isEmpty())
             x11SetClipRegion(d->dpy, d->gc, 0, d->picture, sysClip);
         else
@@ -1595,7 +1607,7 @@ void QX11PaintEngine::updateBrush(const QBrush &brush, const QPointF &origin)
     vals.fill_style = s;
     XChangeGC(d->dpy, d->gc_brush, mask, &vals);
     if (!d->has_clipping) {
-        QRegion sysClip = systemClip();
+        QRegion sysClip = d->use_sysclip ? systemClip() : QRegion();
         if (!sysClip.isEmpty())
             x11SetClipRegion(d->dpy, d->gc_brush, 0, d->picture, sysClip);
         else
@@ -2215,7 +2227,7 @@ void QX11PaintEngine::updateMatrix(const QTransform &mtx)
 void QX11PaintEngine::updateClipRegion_dev(const QRegion &clipRegion, Qt::ClipOperation op)
 {
     Q_D(QX11PaintEngine);
-    QRegion sysClip = systemClip();
+    QRegion sysClip = d->use_sysclip ? systemClip() : QRegion();
     if (op == Qt::NoClip) {
         d->has_clipping = false;
         d->crgn = sysClip;
@@ -2602,7 +2614,9 @@ QXRenderGlyphCache::~QXRenderGlyphCache()
         XRenderFreeGlyphSet(xinfo.display(), gset);
 }
 
-bool QXRenderGlyphCache::addGlyphs(const QTextItemInt &ti, QVarLengthArray<glyph_t> glyphs, QVarLengthArray<QFixedPoint> positions)
+bool QXRenderGlyphCache::addGlyphs(const QTextItemInt &ti,
+                                   const QVarLengthArray<glyph_t> &glyphs,
+                                   const QVarLengthArray<QFixedPoint> &positions)
 {
     Q_ASSERT(ti.fontEngine->type() == QFontEngine::Freetype);
 
@@ -2630,6 +2644,13 @@ bool QXRenderGlyphCache::addGlyphs(const QTextItemInt &ti, QVarLengthArray<glyph
 
         if (glyph == 0 || glyph->format != glyphFormat())
             return false;
+
+        if (glyph->format == QFontEngine::Format_Mono) {
+            // Must convert bitmap from msb to lsb bit order
+            QImage img(glyph->data, glyph->width, glyph->height, QImage::Format_Mono);
+            img = img.convertToFormat(QImage::Format_MonoLSB);
+            memcpy(glyph->data, img.constBits(), static_cast<size_t>(img.sizeInBytes()));
+        }
 
         set->setGlyph(glyphs[i], spp, glyph);
         Q_ASSERT(glyph->data || glyph->width == 0 || glyph->height == 0);

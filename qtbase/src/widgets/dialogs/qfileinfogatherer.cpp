@@ -80,7 +80,7 @@ static QString translateDriveName(const QFileInfo &drive)
 */
 QFileInfoGatherer::QFileInfoGatherer(QObject *parent)
     : QThread(parent), abort(false),
-#ifndef QT_NO_FILESYSTEMWATCHER
+#if QT_CONFIG(filesystemwatcher)
       watcher(0),
 #endif
 #ifdef Q_OS_WIN
@@ -88,7 +88,7 @@ QFileInfoGatherer::QFileInfoGatherer(QObject *parent)
 #endif
       m_iconProvider(&defaultProvider)
 {
-#ifndef QT_NO_FILESYSTEMWATCHER
+#if QT_CONFIG(filesystemwatcher)
     watcher = new QFileSystemWatcher(this);
     connect(watcher, SIGNAL(directoryChanged(QString)), this, SLOT(list(QString)));
     connect(watcher, SIGNAL(fileChanged(QString)), this, SLOT(updateFile(QString)));
@@ -179,7 +179,7 @@ void QFileInfoGatherer::fetchExtendedInformation(const QString &path, const QStr
     this->files.push(files);
     condition.wakeAll();
 
-#ifndef QT_NO_FILESYSTEMWATCHER
+#if QT_CONFIG(filesystemwatcher)
     if (files.isEmpty()
         && !path.isEmpty()
         && !path.startsWith(QLatin1String("//")) /*don't watch UNC path*/) {
@@ -196,7 +196,7 @@ void QFileInfoGatherer::fetchExtendedInformation(const QString &path, const QStr
 */
 void QFileInfoGatherer::updateFile(const QString &filePath)
 {
-    QString dir = filePath.mid(0, filePath.lastIndexOf(QDir::separator()));
+    QString dir = filePath.mid(0, filePath.lastIndexOf(QLatin1Char('/')));
     QString fileName = filePath.mid(dir.length() + 1);
     fetchExtendedInformation(dir, QStringList(fileName));
 }
@@ -208,7 +208,7 @@ void QFileInfoGatherer::updateFile(const QString &filePath)
 */
 void QFileInfoGatherer::clear()
 {
-#ifndef QT_NO_FILESYSTEMWATCHER
+#if QT_CONFIG(filesystemwatcher)
     QMutexLocker locker(&mutex);
     watcher->removePaths(watcher->files());
     watcher->removePaths(watcher->directories());
@@ -222,7 +222,7 @@ void QFileInfoGatherer::clear()
 */
 void QFileInfoGatherer::removePath(const QString &path)
 {
-#ifndef QT_NO_FILESYSTEMWATCHER
+#if QT_CONFIG(filesystemwatcher)
     QMutexLocker locker(&mutex);
     watcher->removePath(path);
 #else
@@ -266,21 +266,21 @@ QExtendedInformation QFileInfoGatherer::getInfo(const QFileInfo &fileInfo) const
     QExtendedInformation info(fileInfo);
     info.icon = m_iconProvider->icon(fileInfo);
     info.displayType = m_iconProvider->type(fileInfo);
-#ifndef QT_NO_FILESYSTEMWATCHER
-    // ### Not ready to listen all modifications
-    #if 0
-        // Enable the next two commented out lines to get updates when the file sizes change...
+#if QT_CONFIG(filesystemwatcher)
+    // ### Not ready to listen all modifications by default
+    static const bool watchFiles = qEnvironmentVariableIsSet("QT_FILESYSTEMMODEL_WATCH_FILES");
+    if (watchFiles) {
         if (!fileInfo.exists() && !fileInfo.isSymLink()) {
-            info.size = -1;
-            //watcher->removePath(fileInfo.absoluteFilePath());
+            watcher->removePath(fileInfo.absoluteFilePath());
         } else {
-            if (!fileInfo.absoluteFilePath().isEmpty() && fileInfo.exists() && fileInfo.isReadable()
-                && !watcher->files().contains(fileInfo.absoluteFilePath())) {
-                //watcher->addPath(fileInfo.absoluteFilePath());
+            const QString path = fileInfo.absoluteFilePath();
+            if (!path.isEmpty() && fileInfo.exists() && fileInfo.isFile() && fileInfo.isReadable()
+                && !watcher->files().contains(path)) {
+                watcher->addPath(path);
             }
         }
-    #endif
-#endif
+    }
+#endif // filesystemwatcher
 
 #ifdef Q_OS_WIN
     if (m_resolveSymlinks && info.isSymLink(/* ignoreNtfsSymLinks = */ true)) {
@@ -329,14 +329,15 @@ void QFileInfoGatherer::getFileInfos(const QString &path, const QStringList &fil
     QVector<QPair<QString, QFileInfo> > updatedFiles;
     QStringList filesToCheck = files;
 
-    QString itPath = QDir::fromNativeSeparators(files.isEmpty() ? path : QLatin1String(""));
-    QDirIterator dirIt(itPath, QDir::AllEntries | QDir::System | QDir::Hidden);
     QStringList allFiles;
-    while (!abort.load() && dirIt.hasNext()) {
-        dirIt.next();
-        fileInfo = dirIt.fileInfo();
-        allFiles.append(fileInfo.fileName());
-        fetch(fileInfo, base, firstTime, updatedFiles, path);
+    if (files.isEmpty()) {
+        QDirIterator dirIt(path, QDir::AllEntries | QDir::System | QDir::Hidden);
+        while (!abort.load() && dirIt.hasNext()) {
+            dirIt.next();
+            fileInfo = dirIt.fileInfo();
+            allFiles.append(fileInfo.fileName());
+            fetch(fileInfo, base, firstTime, updatedFiles, path);
+        }
     }
     if (!allFiles.isEmpty())
         emit newListOfFiles(path, allFiles);

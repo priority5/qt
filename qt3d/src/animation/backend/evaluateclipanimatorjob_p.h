@@ -77,14 +77,11 @@ public:
     }
 
 protected:
-    void run() Q_DECL_OVERRIDE;
+    void run() override;
 
 private:
     HClipAnimator m_clipAnimatorHandle;
     Handler *m_handler;
-
-    qint64 m_currentGlobalTime;
-    qint64 m_lastGlobalTime;
 };
 
 } // namespace Animation

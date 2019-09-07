@@ -379,7 +379,7 @@ QFrameInfo QMoviePrivate::infoForFrame(int frameNumber)
             }
             if (frameNumber > greatestFrameNumber)
                 greatestFrameNumber = frameNumber;
-            QPixmap aPixmap = QPixmap::fromImage(anImage);
+            QPixmap aPixmap = QPixmap::fromImage(std::move(anImage));
             int aDelay = reader->nextImageDelay();
             return QFrameInfo(aPixmap, aDelay);
         } else if (frameNumber != 0) {
@@ -405,7 +405,7 @@ QFrameInfo QMoviePrivate::infoForFrame(int frameNumber)
                     return QFrameInfo(); // Invalid
                 }
                 greatestFrameNumber = i;
-                QPixmap aPixmap = QPixmap::fromImage(anImage);
+                QPixmap aPixmap = QPixmap::fromImage(std::move(anImage));
                 int aDelay = reader->nextImageDelay();
                 QFrameInfo info(aPixmap, aDelay);
                 // Cache it!
@@ -470,6 +470,10 @@ bool QMoviePrivate::next()
         currentPixmap = QPixmap::fromImage( info.pixmap.toImage().scaled(scaledSize) );
     else
         currentPixmap = info.pixmap;
+
+    if (!speed)
+        return true;
+
     nextDelay = speedAdjustedDelay(info.delay);
     // Adjust delay according to the time it took to read the frame
     int processingTime = time.elapsed();
@@ -504,7 +508,7 @@ void QMoviePrivate::_q_loadNextFrame(bool starting)
         emit q->updated(frameRect);
         emit q->frameChanged(currentFrameNumber);
 
-        if (movieState == QMovie::Running)
+        if (speed && movieState == QMovie::Running)
             nextImageTimer.start(nextDelay);
     } else {
         // Could not read another frame
@@ -655,7 +659,7 @@ void QMovie::setDevice(QIODevice *device)
 
 /*!
     Returns the device QMovie reads image data from. If no device has
-    currently been assigned, 0 is returned.
+    currently been assigned, \nullptr is returned.
 
     \sa setDevice(), fileName()
 */
@@ -926,6 +930,8 @@ void QMovie::setPaused(bool paused)
 void QMovie::setSpeed(int percentSpeed)
 {
     Q_D(QMovie);
+    if (!d->speed && d->movieState == Running)
+        d->nextImageTimer.start(nextFrameDelay());
     d->speed = percentSpeed;
 }
 

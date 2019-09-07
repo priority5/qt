@@ -43,7 +43,7 @@
 #include <Qt3DCore/qcomponent.h>
 #include <Qt3DRender/qt3drender_global.h>
 
-#include <QVector3D>
+#include <QtGui/QVector3D>
 
 QT_BEGIN_NAMESPACE
 
@@ -51,7 +51,7 @@ namespace Qt3DRender {
 
 class QLevelOfDetailBoundingSpherePrivate;
 
-class QT3DRENDERSHARED_EXPORT QLevelOfDetailBoundingSphere
+class Q_3DRENDERSHARED_EXPORT QLevelOfDetailBoundingSphere
 {
     Q_GADGET
     Q_PROPERTY(QVector3D center READ center CONSTANT)

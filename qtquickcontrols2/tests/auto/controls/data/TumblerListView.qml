@@ -48,16 +48,22 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.6
+import QtQuick 2.12
+import QtQuick.Controls 2.12
 
 ListView {
     anchors.fill: parent
-    model: parent.model
-    delegate: parent.delegate
-
     snapMode: ListView.SnapToItem
     highlightRangeMode: ListView.StrictlyEnforceRange
     preferredHighlightBegin: height / 2 - (height / parent.visibleItemCount / 2)
     preferredHighlightEnd: height / 2 + (height / parent.visibleItemCount / 2)
     clip: true
+    model: parent.model
+    delegate: Text {
+        objectName: text
+        text: "Custom" + modelData
+        opacity: 1.0 - Math.abs(Tumbler.displacement) / (Tumbler.tumbler.visibleItemCount / 2)
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
+    }
 }

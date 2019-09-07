@@ -63,7 +63,6 @@ namespace Render {
 class Q_AUTOTEST_EXPORT BufferManager : public Qt3DCore::QResourceManager<
         Buffer,
         Qt3DCore::QNodeId,
-        16,
         Qt3DCore::ObjectLevelLockingPolicy>
 {
 public:
@@ -72,7 +71,7 @@ public:
 
     // Aspect Thread
     void addDirtyBuffer(Qt3DCore::QNodeId bufferId);
-    QVector<Qt3DCore::QNodeId> dirtyBuffers();
+    QVector<Qt3DCore::QNodeId> takeDirtyBuffers();
 
     // Aspect Thread
     void addBufferReference(Qt3DCore::QNodeId bufferId);

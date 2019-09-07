@@ -141,6 +141,27 @@ void QGeoTiledMap::clearData()
     Q_D(QGeoTiledMap);
     d->m_cache->clearAll();
     d->m_mapScene->clearTexturedTiles();
+    d->updateScene();
+    sgNodeChanged();
+}
+
+QGeoMap::Capabilities QGeoTiledMap::capabilities() const
+{
+    return Capabilities(SupportsVisibleRegion
+                        | SupportsSetBearing
+                        | SupportsAnchoringCoordinate
+                        | SupportsVisibleArea);
+}
+
+void QGeoTiledMap::setCopyrightVisible(bool visible)
+{
+    Q_D(QGeoTiledMap);
+    if (visible == d->m_copyrightVisible)
+        return;
+
+    QGeoMap::setCopyrightVisible(visible);
+    if (visible)
+        evaluateCopyrights(d->m_mapScene->visibleTiles());
 }
 
 void QGeoTiledMap::clearScene(int mapId)
@@ -319,7 +340,7 @@ void QGeoTiledMapPrivate::updateScene()
     bool newTilesIntroduced = !m_mapScene->visibleTiles().contains(tiles);
     m_mapScene->setVisibleTiles(tiles);
 
-    if (newTilesIntroduced)
+    if (newTilesIntroduced && m_copyrightVisible)
         q->evaluateCopyrights(tiles);
 
     // don't request tiles that are already built and textured
@@ -331,6 +352,31 @@ void QGeoTiledMapPrivate::updateScene()
 
     if (!cachedTiles.isEmpty())
         emit q->sgNodeChanged();
+}
+
+void QGeoTiledMapPrivate::setVisibleArea(const QRectF &visibleArea)
+{
+    Q_Q(QGeoTiledMap);
+    const QRectF va = clampVisibleArea(visibleArea);
+    if (va == m_visibleArea)
+        return;
+
+    m_visibleArea = va;
+    m_geoProjection->setVisibleArea(va);
+
+    m_visibleTiles->setVisibleArea(va);
+    m_prefetchTiles->setVisibleArea(va);
+    m_mapScene->setVisibleArea(va);
+
+     if (m_copyrightVisible)
+        q->evaluateCopyrights(m_mapScene->visibleTiles());
+    updateScene();
+    q->sgNodeChanged();
+}
+
+QRectF QGeoTiledMapPrivate::visibleArea() const
+{
+    return m_visibleArea;
 }
 
 void QGeoTiledMapPrivate::changeActiveMapType(const QGeoMapType mapType)
@@ -381,7 +427,8 @@ void QGeoTiledMapPrivate::changeViewportSize(const QSize& size)
         m_cache->setMinTextureUsage(newSize);
     }
 
-    q->evaluateCopyrights(m_visibleTiles->createTiles());
+    if (m_copyrightVisible)
+        q->evaluateCopyrights(m_mapScene->visibleTiles());
     updateScene();
 }
 

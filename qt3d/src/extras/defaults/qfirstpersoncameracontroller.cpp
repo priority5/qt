@@ -44,6 +44,7 @@ namespace Qt3DExtras {
 
 /*!
     \class Qt3DExtras::QFirstPersonCameraController
+    \ingroup qt3d-extras-cameracontrollers
     \brief The QFirstPersonCameraController class allows controlling the scene camera
     from the first person perspective.
     \inmodule Qt3DExtras
@@ -72,6 +73,9 @@ namespace Qt3DExtras {
     \row
         \li Page up and page down keys
         \li Move the camera vertically relative to camera viewport.
+    \row
+        \li Escape
+        \li Moves the camera so that entire scene is visible in the camera viewport.
     \endtable
 */
 

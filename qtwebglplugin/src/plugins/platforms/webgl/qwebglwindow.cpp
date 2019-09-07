@@ -36,6 +36,7 @@
 #include <QtCore/qtextstream.h>
 #include <QtGui/private/qguiapplication_p.h>
 #include <QtGui/private/qopenglcontext_p.h>
+#include <QtGui/private/qwindow_p.h>
 #include <QtGui/qpa/qwindowsysteminterface.h>
 #include <QtGui/qpa/qplatformintegration.h>
 #include <QtGui/qopenglcontext.h>
@@ -114,6 +115,8 @@ void QWebGLWindow::destroy()
         invalidateSurface();
     }
 
+    qt_window_private(window())->updateRequestPending = false;
+
     d->flags = 0;
 
     auto integrationPrivate = QWebGLIntegrationPrivate::instance();
@@ -147,6 +150,12 @@ QSurfaceFormat QWebGLWindow::format() const
 QWebGLScreen *QWebGLWindow::screen() const
 {
     return static_cast<QWebGLScreen *>(QPlatformWindow::screen());
+}
+
+void QWebGLWindow::setGeometry(const QRect &rect)
+{
+    QWindowSystemInterface::handleGeometryChange(window(), rect);
+    QPlatformWindow::setGeometry(rect);
 }
 
 void QWebGLWindow::setDefaults(const QMap<GLenum, QVariant> &values)

@@ -42,8 +42,8 @@
 
 #include <Qt3DExtras/qabstractspritesheet.h>
 #include <Qt3DCore/qcomponent.h>
-#include <QVector2D>
-#include <QMatrix3x3>
+#include <QtGui/QVector2D>
+#include <QtGui/QMatrix3x3>
 
 QT_BEGIN_NAMESPACE
 
@@ -51,7 +51,7 @@ namespace Qt3DExtras {
 
 class QSpriteGridPrivate;
 
-class QT3DEXTRASSHARED_EXPORT QSpriteGrid : public QAbstractSpriteSheet
+class Q_3DEXTRASSHARED_EXPORT QSpriteGrid : public QAbstractSpriteSheet
 {
     Q_OBJECT
     Q_PROPERTY(int rows READ rows WRITE setRows NOTIFY rowsChanged)

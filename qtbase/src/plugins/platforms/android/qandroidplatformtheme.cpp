@@ -44,6 +44,7 @@
 #include "qandroidplatformmenu.h"
 #include "qandroidplatformmenuitem.h"
 #include "qandroidplatformdialoghelpers.h"
+#include "qandroidplatformfiledialoghelper.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -488,6 +489,8 @@ QVariant QAndroidPlatformTheme::themeHint(ThemeHint hint) const
 
             Q_FALLTHROUGH();
     }
+    case DialogButtonBoxLayout:
+        return QVariant(QPlatformDialogHelper::AndroidLayout);
     default:
         return QPlatformTheme::themeHint(hint);
     }
@@ -512,6 +515,8 @@ bool QAndroidPlatformTheme::usePlatformNativeDialog(QPlatformTheme::DialogType t
 {
     if (type == MessageDialog)
         return qEnvironmentVariableIntValue("QT_USE_ANDROID_NATIVE_DIALOGS") == 1;
+    if (type == FileDialog)
+        return true;
     return false;
 }
 
@@ -520,6 +525,8 @@ QPlatformDialogHelper *QAndroidPlatformTheme::createPlatformDialogHelper(QPlatfo
     switch (type) {
     case MessageDialog:
         return new QtAndroidDialogHelpers::QAndroidPlatformMessageDialogHelper;
+    case FileDialog:
+        return new QtAndroidFileDialogHelper::QAndroidPlatformFileDialogHelper;
     default:
         return 0;
     }

@@ -72,11 +72,14 @@ public:
         DeviceTypeTablet
     };
 
-    QInputDeviceManager(QObject *parent = 0);
+    QInputDeviceManager(QObject *parent = nullptr);
 
     int deviceCount(DeviceType type) const;
 
     void setCursorPos(const QPoint &pos);
+
+    Qt::KeyboardModifiers keyboardModifiers() const;
+    void setKeyboardModifiers(Qt::KeyboardModifiers mods);
 
 signals:
     void deviceListChanged(QInputDeviceManager::DeviceType type);

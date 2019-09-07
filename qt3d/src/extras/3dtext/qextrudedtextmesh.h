@@ -53,14 +53,14 @@
 
 #include <Qt3DExtras/qt3dextras_global.h>
 #include <Qt3DRender/qgeometryrenderer.h>
-#include <QString>
-#include <QFont>
+#include <QtCore/QString>
+#include <QtGui/QFont>
 
 QT_BEGIN_NAMESPACE
 
 namespace Qt3DExtras {
 
-class QT3DEXTRASSHARED_EXPORT QExtrudedTextMesh : public Qt3DRender::QGeometryRenderer
+class Q_3DEXTRASSHARED_EXPORT QExtrudedTextMesh : public Qt3DRender::QGeometryRenderer
 {
     Q_OBJECT
     Q_PROPERTY(QString text READ text WRITE setText NOTIFY textChanged)

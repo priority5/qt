@@ -41,8 +41,8 @@
 #define QT3DRENDER_QVIEWPORT_H
 
 #include <Qt3DRender/qframegraphnode.h>
-#include <QRectF>
-#include <QColor>
+#include <QtCore/QRectF>
+#include <QtGui/QColor>
 
 QT_BEGIN_NAMESPACE
 
@@ -50,7 +50,7 @@ namespace Qt3DRender {
 
 class QViewportPrivate;
 
-class QT3DRENDERSHARED_EXPORT QViewport : public QFrameGraphNode
+class Q_3DRENDERSHARED_EXPORT QViewport : public QFrameGraphNode
 {
     Q_OBJECT
     Q_PROPERTY(QRectF normalizedRect READ normalizedRect WRITE setNormalizedRect NOTIFY normalizedRectChanged)
@@ -76,7 +76,7 @@ protected:
 
 private:
     Q_DECLARE_PRIVATE(QViewport)
-    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const Q_DECL_OVERRIDE;
+    Qt3DCore::QNodeCreatedChangeBasePtr createNodeCreationChange() const override;
 };
 
 } // namespace Qt3DRender
