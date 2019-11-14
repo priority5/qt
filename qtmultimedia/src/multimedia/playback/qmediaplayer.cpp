@@ -595,15 +595,15 @@ QMediaPlayer::QMediaPlayer(QObject *parent, QMediaPlayer::Flags flags):
                     SLOT(_q_mediaStatusChanged(QMediaPlayer::MediaStatus)));
             connect(d->control, SIGNAL(error(int,QString)), SLOT(_q_error(int,QString)));
 
-            connect(d->control, SIGNAL(durationChanged(qint64)), SIGNAL(durationChanged(qint64)));
-            connect(d->control, SIGNAL(positionChanged(qint64)), SIGNAL(positionChanged(qint64)));
-            connect(d->control, SIGNAL(audioAvailableChanged(bool)), SIGNAL(audioAvailableChanged(bool)));
-            connect(d->control, SIGNAL(videoAvailableChanged(bool)), SIGNAL(videoAvailableChanged(bool)));
-            connect(d->control, SIGNAL(volumeChanged(int)), SIGNAL(volumeChanged(int)));
-            connect(d->control, SIGNAL(mutedChanged(bool)), SIGNAL(mutedChanged(bool)));
-            connect(d->control, SIGNAL(seekableChanged(bool)), SIGNAL(seekableChanged(bool)));
-            connect(d->control, SIGNAL(playbackRateChanged(qreal)), SIGNAL(playbackRateChanged(qreal)));
-            connect(d->control, SIGNAL(bufferStatusChanged(int)), SIGNAL(bufferStatusChanged(int)));
+            connect(d->control, &QMediaPlayerControl::durationChanged, this, &QMediaPlayer::durationChanged);
+            connect(d->control, &QMediaPlayerControl::positionChanged, this, &QMediaPlayer::positionChanged);
+            connect(d->control, &QMediaPlayerControl::audioAvailableChanged, this, &QMediaPlayer::audioAvailableChanged);
+            connect(d->control, &QMediaPlayerControl::videoAvailableChanged, this, &QMediaPlayer::videoAvailableChanged);
+            connect(d->control, &QMediaPlayerControl::volumeChanged, this, &QMediaPlayer::volumeChanged);
+            connect(d->control, &QMediaPlayerControl::mutedChanged, this, &QMediaPlayer::mutedChanged);
+            connect(d->control, &QMediaPlayerControl::seekableChanged, this, &QMediaPlayer::seekableChanged);
+            connect(d->control, &QMediaPlayerControl::playbackRateChanged, this, &QMediaPlayer::playbackRateChanged);
+            connect(d->control, &QMediaPlayerControl::bufferStatusChanged, this, &QMediaPlayer::bufferStatusChanged);
 
             d->state = d->control->state();
             d->status = d->control->mediaStatus();
@@ -632,8 +632,8 @@ QMediaPlayer::QMediaPlayer(QObject *parent, QMediaPlayer::Flags flags):
             }
         }
         if (d->networkAccessControl != nullptr) {
-            connect(d->networkAccessControl, SIGNAL(configurationChanged(QNetworkConfiguration)),
-            this, SIGNAL(networkConfigurationChanged(QNetworkConfiguration)));
+            connect(d->networkAccessControl, &QMediaNetworkAccessControl::configurationChanged,
+                    this, &QMediaPlayer::networkConfigurationChanged);
         }
     }
 }
@@ -1005,6 +1005,18 @@ void QMediaPlayer::setPlaybackRate(qreal rate)
     It does not wait for the media to finish loading and does not check for errors. Listen for
     the mediaStatusChanged() and error() signals to be notified when the media is loaded and
     when an error occurs during loading.
+
+    Since Qt 5.12.2, the url scheme \c gst-pipeline provides custom pipelines
+    for the GStreamer backend.
+
+    \snippet multimedia-snippets/media.cpp Pipeline
+
+    If the pipeline contains a video sink element named \c qtvideosink,
+    current QVideoWidget can be used to render the video.
+
+    If the pipeline contains appsrc element, it will be used to push data from \a stream.
+
+    \snippet multimedia-snippets/media.cpp Pipeline appsrc
 */
 
 void QMediaPlayer::setMedia(const QMediaContent &media, QIODevice *stream)
@@ -1631,6 +1643,6 @@ QStringList QMediaPlayer::supportedCustomAudioRoles() const
             QAbstractVideoSurface \l {setVideoOutput()}{output}.
 */
 
-#include "moc_qmediaplayer.cpp"
 QT_END_NAMESPACE
 
+#include "moc_qmediaplayer.cpp"

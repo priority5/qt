@@ -2338,11 +2338,6 @@ class GLES2DecoderImpl : public GLES2Decoder, public ErrorStateClient {
            surface_->DeferDraws();
   }
 
-  bool IsRobustnessSupported() {
-    return has_robustness_extension_ &&
-           context_->WasAllocatedUsingRobustnessExtension();
-  }
-
   error::Error WillAccessBoundFramebufferForDraw() {
     if (ShouldDeferDraws())
       return error::kDeferCommandUntilLater;
@@ -2645,7 +2640,6 @@ class GLES2DecoderImpl : public GLES2Decoder, public ErrorStateClient {
   // Number of commands remaining to be processed in DoCommands().
   int commands_to_process_;
 
-  bool has_robustness_extension_;
   bool context_was_lost_;
   bool reset_by_robustness_extension_;
   bool supports_post_sub_buffer_;
@@ -3423,7 +3417,6 @@ GLES2DecoderImpl::GLES2DecoderImpl(
       validators_(group_->feature_info()->validators()),
       feature_info_(group_->feature_info()),
       frame_number_(0),
-      has_robustness_extension_(false),
       context_was_lost_(false),
       reset_by_robustness_extension_(false),
       supports_post_sub_buffer_(false),
@@ -3878,10 +3871,6 @@ gpu::ContextResult GLES2DecoderImpl::Initialize(
     api()->glEnableFn(GL_TEXTURE_CUBE_MAP_SEAMLESS);
   }
 
-  has_robustness_extension_ = features().arb_robustness ||
-                              features().khr_robustness ||
-                              features().ext_robustness;
-
   GLint range[2] = {0, 0};
   GLint precision = 0;
   QueryShaderPrecisionFormat(gl_version_info(), GL_FRAGMENT_SHADER,
@@ -4045,6 +4034,18 @@ gpu::ContextResult GLES2DecoderImpl::Initialize(
   if (feature_info_->feature_flags().chromium_texture_filtering_hint &&
       feature_info_->feature_flags().is_swiftshader) {
     api()->glHintFn(GL_TEXTURE_FILTERING_HINT_CHROMIUM, GL_NICEST);
+  }
+
+  if (CheckResetStatus()) {
+    // If the context was lost at any point before or during initialization, the
+    // values queried from the driver could be bogus, and potentially
+    // inconsistent between various ContextStates on the same underlying real GL
+    // context. Make sure to report the failure early, to not allow virtualized
+    // context switches in that case.
+    LOG(ERROR)
+        << "  GLES2DecoderImpl: Context reset detected after initialization.";
+    group_->LoseContexts(error::kUnknown);
+    return gpu::ContextResult::kTransientFailure;
   }
 
   return gpu::ContextResult::kSuccess;
@@ -16638,39 +16639,32 @@ bool GLES2DecoderImpl::CheckResetStatus() {
   DCHECK(!WasContextLost());
   DCHECK(context_->IsCurrent(nullptr));
 
-  if (IsRobustnessSupported()) {
-    // If the reason for the call was a GL error, we can try to determine the
-    // reset status more accurately.
-    GLenum driver_status = api()->glGetGraphicsResetStatusARBFn();
-    if (driver_status == GL_NO_ERROR)
+  // If the reason for the call was a GL error, we can try to determine the
+  // reset status more accurately.
+  GLenum driver_status = context_->CheckStickyGraphicsResetStatus();
+  if (driver_status == GL_NO_ERROR)
+    return false;
+
+  LOG(ERROR) << (surface_->IsOffscreen() ? "Offscreen" : "Onscreen")
+             << " context lost via ARB/EXT_robustness. Reset status = "
+             << GLES2Util::GetStringEnum(driver_status);
+
+  switch (driver_status) {
+    case GL_GUILTY_CONTEXT_RESET_ARB:
+      MarkContextLost(error::kGuilty);
+      break;
+    case GL_INNOCENT_CONTEXT_RESET_ARB:
+      MarkContextLost(error::kInnocent);
+      break;
+    case GL_UNKNOWN_CONTEXT_RESET_ARB:
+      MarkContextLost(error::kUnknown);
+      break;
+    default:
+      NOTREACHED();
       return false;
-
-    LOG(ERROR) << (surface_->IsOffscreen() ? "Offscreen" : "Onscreen")
-               << " context lost via ARB/EXT_robustness. Reset status = "
-               << GLES2Util::GetStringEnum(driver_status);
-
-    // Don't pretend we know which client was responsible.
-    if (workarounds().use_virtualized_gl_contexts)
-      driver_status = GL_UNKNOWN_CONTEXT_RESET_ARB;
-
-    switch (driver_status) {
-      case GL_GUILTY_CONTEXT_RESET_ARB:
-        MarkContextLost(error::kGuilty);
-        break;
-      case GL_INNOCENT_CONTEXT_RESET_ARB:
-        MarkContextLost(error::kInnocent);
-        break;
-      case GL_UNKNOWN_CONTEXT_RESET_ARB:
-        MarkContextLost(error::kUnknown);
-        break;
-      default:
-        NOTREACHED();
-        return false;
-    }
-    reset_by_robustness_extension_ = true;
-    return true;
   }
-  return false;
+  reset_by_robustness_extension_ = true;
+  return true;
 }
 
 error::Error GLES2DecoderImpl::HandleDescheduleUntilFinishedCHROMIUM(

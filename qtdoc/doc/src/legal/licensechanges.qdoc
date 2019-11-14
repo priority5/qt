@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2018 The Qt Company Ltd.
+** Copyright (C) 2019 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the documentation of the Qt Toolkit.
@@ -33,6 +33,19 @@
 
     Changes in Qt and \l{Licenses Used in Qt}{Third Party Modules}
     released with Qt that are relevant to licensing.
+
+    \section1 Qt 5.13.2
+
+    \section2 Qt GUI Module
+
+    \list
+        \li \l{X Server helper} was added under X11 License and Historical Permission Notice and Disclaimer license.
+        \li \l{Adobe Glyph List For New Fonts} version 1.7 was added under BSD 3-Clause \"New\" or \"Revised\" License.
+    \endlist
+
+    \section2 Qt SQL Module
+
+    \l{SQLite} got updated to upstream version 3.29.0.
 
     \section1 Qt 5.13.1
 
@@ -83,6 +96,23 @@
         \li The wp-viewporter protocol version 1 was added under the MIT
         License.
     \endlist
+
+    \section1 Qt 5.12.6
+
+    \section2 Qt SQL Module
+
+    \l{SQLite} got updated to upstream version 3.29.0.
+
+    \section1 Qt 5.12.5
+
+    \section2 Qt GUI Module
+
+    Use of \l{Adobe Glyph List For New Fonts} under the \e{BSD-3-Clause}
+    license is now documented.
+
+    \section2 Qt Image Formats
+
+    \l{WebP (libwebp)} got updated to upstream version 1.0.3.
 
     \section1 Qt 5.12.4
 

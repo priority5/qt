@@ -1114,7 +1114,7 @@ QStringList Aggregate::primaryKeys()
 void Aggregate::markUndocumentedChildrenInternal()
 {
     foreach (Node *child, children_) {
-        if (!child->isSharingComment() && !child->hasDoc() && !child->isDontDocument()) {
+        if (!child->isSharingComment() && !child->hasDoc()) {
             if (!child->docMustBeGenerated()) {
                 if (child->isFunction()) {
                     if (static_cast<FunctionNode*>(child)->hasAssociatedProperties())
@@ -3101,11 +3101,11 @@ QString Node::fullDocumentName() const
         if (n->isTextPageNode())
             break;
 
-        // Examine the parent node if one exists.
-        if (n->parent())
-            n = n->parent();
-        else
+        // Examine the parent if the node is a member
+        if (!n->parent() || n->isRelatedNonmember())
             break;
+
+        n = n->parent();
     } while (true);
 
     // Create a name based on the type of the ancestor node.
@@ -3386,7 +3386,7 @@ void Aggregate::findAllObsoleteThings()
 void Aggregate::findAllClasses()
 {
     foreach (Node *n, children_) {
-        if (!n->isPrivate() && !n->isInternal() &&
+        if (!n->isPrivate() && !n->isInternal() && !n->isDontDocument() &&
             n->tree()->camelCaseModuleName() != QString("QDoc")) {
             if (n->isClassNode()) {
                 QDocDatabase::cppClasses().insert(n->qualifyCppName().toLower(), n);

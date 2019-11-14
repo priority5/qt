@@ -199,7 +199,12 @@ void QWaylandWindow::initWindow()
 
 void QWaylandWindow::initializeWlSurface()
 {
-    init(mDisplay->createSurface(static_cast<QtWayland::wl_surface *>(this)));
+    Q_ASSERT(!isInitialized());
+    {
+        QWriteLocker lock(&mSurfaceLock);
+        init(mDisplay->createSurface(static_cast<QtWayland::wl_surface *>(this)));
+    }
+    emit wlSurfaceCreated();
 }
 
 bool QWaylandWindow::shouldCreateShellSurface() const
@@ -236,6 +241,7 @@ void QWaylandWindow::reset(bool sendDestroyEvent)
     mSubSurfaceWindow = nullptr;
     if (isInitialized()) {
         emit wlSurfaceDestroyed();
+        QWriteLocker lock(&mSurfaceLock);
         destroy();
     }
     mScreens.clear();
@@ -292,8 +298,10 @@ void QWaylandWindow::setWindowTitle(const QString &title)
         const QString formatted = formatWindowTitle(title, separator);
 
         const int libwaylandMaxBufferSize = 4096;
-        // Some parts of the buffer is used for metadata, so subtract 100 to be on the safe side
-        const int maxLength = libwaylandMaxBufferSize - 100;
+        // Some parts of the buffer is used for metadata, so subtract 100 to be on the safe side.
+        // Also, QString is in utf-16, which means that in the worst case each character will be
+        // three bytes when converted to utf-8 (which is what libwayland uses), so divide by three.
+        const int maxLength = libwaylandMaxBufferSize / 3 - 100;
 
         auto truncated = QStringRef(&formatted).left(maxLength);
         if (truncated.length() < formatted.length()) {
@@ -344,7 +352,7 @@ void QWaylandWindow::setGeometry(const QRect &rect)
         mSentInitialResize = true;
     }
     QRect exposeGeometry(QPoint(), geometry().size());
-    if (exposeGeometry != mLastExposeGeometry)
+    if (isExposed() && !mInResizeFromApplyConfigure && exposeGeometry != mLastExposeGeometry)
         sendExposeEvent(exposeGeometry);
 
     if (mShellSurface)
@@ -359,7 +367,9 @@ void QWaylandWindow::resizeFromApplyConfigure(const QSize &sizeWithMargins, cons
     QRect geometry(windowGeometry().topLeft(), QSize(widthWithoutMargins, heightWithoutMargins));
 
     mOffset += offset;
+    mInResizeFromApplyConfigure = true;
     setGeometry(geometry);
+    mInResizeFromApplyConfigure = false;
 }
 
 void QWaylandWindow::sendExposeEvent(const QRect &rect)
@@ -655,9 +665,10 @@ QMutex QWaylandWindow::mFrameSyncMutex;
 
 bool QWaylandWindow::waitForFrameSync(int timeout)
 {
-    QMutexLocker locker(&mFrameSyncMutex);
     if (!mWaitingForFrameCallback)
         return true;
+
+    QMutexLocker locker(&mFrameSyncMutex);
 
     wl_proxy_set_queue(reinterpret_cast<wl_proxy *>(mFrameCallback), mFrameQueue);
     mDisplay->dispatchQueueWhile(mFrameQueue, [&]() { return mWaitingForFrameCallback; }, timeout);
@@ -1155,6 +1166,9 @@ void QWaylandWindow::requestUpdate()
 void QWaylandWindow::handleUpdate()
 {
     // TODO: Should sync subsurfaces avoid requesting frame callbacks?
+    QReadLocker lock(&mSurfaceLock);
+    if (!isInitialized())
+        return;
 
     if (mFrameCallback) {
         wl_callback_destroy(mFrameCallback);

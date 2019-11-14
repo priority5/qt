@@ -327,6 +327,7 @@ void DirectShowPlayerService::load(const QMediaContent &media, QIODevice *stream
             0x36b73882, 0xc2c8, 0x11cf, {0x8b, 0x46, 0x00, 0x80, 0x5f, 0x6c, 0xef, 0x60} };
         m_graphStatus = Loading;
 
+        DirectShowUtils::CoInitializeIfNeeded();
         m_graph = com_new<IFilterGraph2>(CLSID_FilterGraph, iid_IFilterGraph2);
         m_graphBuilder = com_new<ICaptureGraphBuilder2>(CLSID_CaptureGraphBuilder2, IID_ICaptureGraphBuilder2);
 
@@ -645,6 +646,9 @@ void DirectShowPlayerService::doFinalizeLoad(QMutexLocker *locker)
 
 void DirectShowPlayerService::releaseGraph()
 {
+    if (m_videoProbeControl)
+        m_videoProbeControl->flushVideoFrame();
+
     if (m_graph) {
         if (m_executingTask != 0) {
             // {8E1C39A1-DE53-11cf-AA63-0080C744528D}
@@ -664,6 +668,7 @@ void DirectShowPlayerService::releaseGraph()
         ::SetEvent(m_taskHandle);
 
         m_loop->wait(&m_mutex);
+        DirectShowUtils::CoUninitializeIfNeeded();
     }
 }
 
@@ -1021,6 +1026,8 @@ void DirectShowPlayerService::stop()
 
     if ((m_executingTask | m_executedTasks) & (Play | Pause | Seek)) {
         m_pendingTasks |= Stop;
+        if (m_videoProbeControl)
+            m_videoProbeControl->flushVideoFrame();
 
         ::SetEvent(m_taskHandle);
 
@@ -1453,6 +1460,8 @@ void DirectShowPlayerService::customEvent(QEvent *event)
             m_playerControl->updateState(QMediaPlayer::StoppedState);
             m_playerControl->updateStatus(QMediaPlayer::EndOfMedia);
             m_playerControl->updatePosition(m_position);
+            if (m_videoProbeControl)
+                m_videoProbeControl->flushVideoFrame();
         }
     } else if (event->type() == QEvent::Type(PositionChange)) {
         QMutexLocker locker(&m_mutex);
@@ -1460,6 +1469,9 @@ void DirectShowPlayerService::customEvent(QEvent *event)
         if (m_playerControl->mediaStatus() == QMediaPlayer::EndOfMedia)
             m_playerControl->updateStatus(QMediaPlayer::LoadedMedia);
         m_playerControl->updatePosition(m_position);
+        // Emits only when seek has been performed.
+        if (m_videoRendererControl)
+            emit m_videoRendererControl->positionChanged(m_position);
     } else {
         QMediaService::customEvent(event);
     }
@@ -1558,7 +1570,7 @@ void DirectShowPlayerService::onVideoBufferAvailable(double time, const QByteArr
                       size,
                       format);
 
-    Q_EMIT m_videoProbeControl->videoFrameProbed(frame);
+    m_videoProbeControl->probeVideoFrame(frame);
 }
 
 QT_WARNING_POP

@@ -577,7 +577,7 @@ QSize SubmissionContext::renderTargetSize(const QSize &surfaceSize) const
     } else {
         renderTargetSize = m_surface->size();
         if (m_surface->surfaceClass() == QSurface::Window) {
-            int dpr = static_cast<QWindow *>(m_surface)->devicePixelRatio();
+            const float dpr = static_cast<QWindow *>(m_surface)->devicePixelRatio();
             renderTargetSize *= dpr;
         }
     }
@@ -1509,7 +1509,8 @@ void SubmissionContext::blitFramebuffer(Qt3DCore::QNodeId inputRenderTargetId,
     const GLenum mode = interpolationMethod ? GL_NEAREST : GL_LINEAR;
     m_glHelper->blitFramebuffer(srcX0, srcY0, srcX1, srcY1,
                                 dstX0, dstY0, dstX1, dstY1,
-                                GL_COLOR_BUFFER_BIT, mode);
+                                GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT,
+                                mode);
 
     // Reset draw buffer
     bindFramebuffer(lastDrawFboId, GraphicsHelperInterface::FBOReadAndDraw);

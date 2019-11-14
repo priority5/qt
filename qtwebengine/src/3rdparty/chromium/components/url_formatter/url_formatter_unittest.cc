@@ -135,6 +135,13 @@ const IDNTestCase idn_cases[] = {
     {"xn---123-kbjl2j0bl2k.in", L"\x0939\x093f\x0928\x094d\x0926\x0940-123.in",
      true},
 
+    // URL test with mostly numbers and one confusable character
+    // Georgian 'd' 4000.com
+    {"xn--4000-pfr.com",
+     L"\x10eb"
+     L"4000.com",
+     false},
+
     // What used to be 5 Aspirational scripts in the earlier versions of UAX 31.
     // UAX 31 does not define aspirational scripts any more.
     // See http://www.unicode.org/reports/tr31/#Aspirational_Use_Scripts .
@@ -170,6 +177,11 @@ const IDNTestCase idn_cases[] = {
     {"xn--hllo-bpa7979ih5m.cn", L"h\x00e9llo\x4e2d\x56fd.cn", false},
     // <Greek rho><Cyrillic a><Cyrillic u>.ru
     {"xn--2xa6t2b.ru", L"\x03c1\x0430\x0443.ru", false},
+    // Georgian + Latin
+    {"xn--abcef-vuu.test",
+     L"abc\x10eb"
+     L"ef.test",
+     false},
     // Hangul + Latin
     {"xn--han-eb9ll88m.kr", L"\xd55c\xae00han.kr", true},
     // Hangul + Latin + Han with IDN ccTLD
@@ -1030,6 +1042,31 @@ const IDNTestCase idn_cases[] = {
 
     // Modifier-letter-voicing should be blocked (wwwˬtest.com).
     {"xn--wwwtest-2be.com", L"www\x02ectest.com", false},
+
+    // U+4E00 and U+3127 should be blocked when next to non-CJK.
+    {"xn--ipaddress-w75n.com", L"ip一address.com", false},
+    {"xn--ipaddress-wx5h.com", L"ipㄧaddress.com", false},
+    // These are allowed because 一 is not immediately next to non-CJK.
+    {"xn--gamer-fg1hz05u.com", L"一生gamer.com", true},
+    {"xn--gamer-kg1hy05u.com", L"gamer生一.com", true},
+    {"xn--4gqz91g.com", L"一猫.com", true},
+    {"xn--4fkv10r.com", L"ㄧ猫.com", true},
+    // U+4E00 with another ideograph.
+    {"xn--4gqc.com", L"一丁.com", true},
+
+    // CJK ideographs looking like slashes should be blocked when next to
+    // non-CJK.
+    {"example.xn--comtest-k63k", L"example.com丶test", false},
+    {"example.xn--comtest-u83k", L"example.com乀test", false},
+    {"example.xn--comtest-283k", L"example.com乁test", false},
+    {"example.xn--comtest-m83k", L"example.com丿test", false},
+    // This is allowed because the ideographs are not immediately next to
+    // non-CJK.
+    {"xn--oiqsace.com", L"丶乀乁丿.com", true},
+
+    // Kana voiced sound marks are not allowed.
+    {"xn--google-1m4e.com", L"google\x3099.com", false},
+    {"xn--google-8m4e.com", L"google\x309A.com", false},
 };
 
 struct AdjustOffsetCase {
