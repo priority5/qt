@@ -40,6 +40,7 @@
 #include "qopenglprogrambinarycache_p.h"
 #include <QOpenGLContext>
 #include <QOpenGLExtraFunctions>
+#include <QSysInfo>
 #include <QStandardPaths>
 #include <QDir>
 #include <QSaveFile>
@@ -102,7 +103,7 @@ static inline bool qt_ensureWritableDir(const QString &name)
 QOpenGLProgramBinaryCache::QOpenGLProgramBinaryCache()
     : m_cacheWritable(false)
 {
-    const QString subPath = QLatin1String("/qtshadercache/");
+    const QString subPath = QLatin1String("/qtshadercache-") + QSysInfo::buildAbi() + QLatin1Char('/');
     const QString sharedCachePath = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation);
     if (!sharedCachePath.isEmpty()) {
         m_cacheDir = sharedCachePath + subPath;
@@ -262,10 +263,9 @@ public:
 
 bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
 {
-    if (m_memCache.contains(cacheKey)) {
-        const MemCacheEntry *e = m_memCache[cacheKey];
+    QMutexLocker lock(&m_mutex);
+    if (const MemCacheEntry *e = m_memCache.object(cacheKey))
         return setProgramBinary(programId, e->format, e->blob.constData(), e->blob.size());
-    }
 
     QByteArray buf;
     const QString fn = cacheFileName(cacheKey);
@@ -400,6 +400,7 @@ void QOpenGLProgramBinaryCache::save(const QByteArray &cacheKey, uint programId)
     GLint outSize = 0;
 #if defined(QT_OPENGL_ES_2)
     if (context->isOpenGLES() && context->format().majorVersion() < 3) {
+        QMutexLocker lock(&m_mutex);
         initializeProgramBinaryOES(context);
         getProgramBinaryOES(programId, blobSize, &outSize, &blobFormat, p);
     } else

@@ -274,7 +274,7 @@ QLibraryInfo::licensedProducts()
 QDate
 QLibraryInfo::buildDate()
 {
-    return QDate::fromString(QString::fromLatin1(qt_configure_installation + 12), Qt::ISODate);
+    return QDate::fromString(QString::fromLatin1("2012-12-20"), Qt::ISODate);
 }
 #endif
 #endif // datestring
@@ -322,8 +322,10 @@ QLibraryInfo::buildDate()
 #elif defined(Q_CC_MSVC)
 #  if _MSC_VER < 1910
 #    define COMPILER_STRING "MSVC 2015"
-#  elif _MSC_VER < 2000
+#  elif _MSC_VER < 1917
 #    define COMPILER_STRING "MSVC 2017"
+#  elif _MSC_VER < 2000
+#    define COMPILER_STRING "MSVC 2019"
 #  else
 #    define COMPILER_STRING "MSVC _MSC_VER " QT_STRINGIFY(_MSC_VER)
 #  endif
@@ -707,10 +709,14 @@ QT_END_NAMESPACE
 
 #include "private/qcoreapplication_p.h"
 
+QT_WARNING_DISABLE_GCC("-Wattributes")
+QT_WARNING_DISABLE_CLANG("-Wattributes")
+QT_WARNING_DISABLE_INTEL(2621)
+
 extern const char qt_core_interpreter[] __attribute__((section(".interp")))
     = ELF_INTERPRETER;
 
-extern "C" void qt_core_boilerplate();
+extern "C" void qt_core_boilerplate() __attribute__((force_align_arg_pointer));
 void qt_core_boilerplate()
 {
     printf("This is the QtCore library version " QT_BUILD_STR "\n"

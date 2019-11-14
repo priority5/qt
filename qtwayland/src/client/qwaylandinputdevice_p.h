@@ -167,7 +167,7 @@ private:
     uint32_t mSerial = 0;
 
     void seat_capabilities(uint32_t caps) override;
-    void handleTouchPoint(int id, double x, double y, Qt::TouchPointState state);
+    void handleTouchPoint(int id, Qt::TouchPointState state, const QPointF &surfacePosition = QPoint());
 
     QTouchDevice *mTouchDevice = nullptr;
 
@@ -333,8 +333,7 @@ public:
 
     QWaylandInputDevice *mParent = nullptr;
     QPointer<QWaylandWindow> mFocus;
-    QList<QWindowSystemInterface::TouchPoint> mTouchPoints;
-    QList<QWindowSystemInterface::TouchPoint> mPrevTouchPoints;
+    QList<QWindowSystemInterface::TouchPoint> mPendingTouchPoints;
 };
 
 class QWaylandPointerEvent

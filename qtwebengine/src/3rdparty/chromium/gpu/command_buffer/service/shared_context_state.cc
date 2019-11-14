@@ -169,6 +169,18 @@ bool SharedContextState::InitializeGL(
   context_state_->InitCapabilities(nullptr);
   context_state_->InitState(nullptr);
 
+  GLenum driver_status = real_context_->CheckStickyGraphicsResetStatus();
+  if (driver_status != GL_NO_ERROR) {
+    // If the context was lost at any point before or during initialization,
+    // the values queried from the driver could be bogus, and potentially
+    // inconsistent between various ContextStates on the same underlying real
+    // GL context. Make sure to report the failure early, to not allow
+    // virtualized context switches in that case.
+    feature_info_ = nullptr;
+    context_state_ = nullptr;
+    return false;
+  }
+
   if (use_virtualized_gl_contexts_) {
     auto virtual_context = base::MakeRefCounted<GLContextVirtual>(
         share_group_.get(), real_context_.get(),

@@ -196,7 +196,7 @@ public:
 
     void* GetHandle() override { return m_handle; }
     // Qt currently never creates contexts using robustness attributes.
-    bool WasAllocatedUsingRobustnessExtension() override { return false; }
+    unsigned int CheckStickyGraphicsResetStatus() override { return 0 /*GL_NO_ERROR*/; }
 
     // We don't care about the rest, this context shouldn't be used except for its handle.
     bool Initialize(gl::GLSurface *, const gl::GLContextAttribs &) override { Q_UNREACHABLE(); return false; }
@@ -235,7 +235,7 @@ void ShareGroupQtQuick::AboutToAddFirstContext()
     // This currently has to be setup by ::main in all applications using QQuickWebEngineView with delegated rendering.
     QOpenGLContext *shareContext = qt_gl_global_share_context();
     if (!shareContext) {
-        qFatal("QWebEngine: OpenGL resource sharing is not set up in QtQuick. Please make sure to call QtWebEngine::initialize() in your main() function.");
+        qFatal("QWebEngine: OpenGL resource sharing is not set up in QtQuick. Please make sure to call QtWebEngine::initialize() in your main() function before QCoreApplication is created.");
     }
     m_shareContextQtQuick = new QtShareGLContext(shareContext);
 #endif
@@ -387,7 +387,7 @@ void ContentBrowserClientQt::AllowCertificateError(content::WebContents *webCont
                             ssl_info,
                             request_url,
                             resource_type,
-                            !IsCertErrorFatal(cert_error),
+                            IsCertErrorFatal(cert_error),
                             strict_enforcement,
                             callback)));
     contentsDelegate->allowCertificateError(errorController);

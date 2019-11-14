@@ -286,37 +286,13 @@ defineTest(qtConfTest_architecture) {
     !qtConfTest_compile($${1}): \
         error("Could not determine $$eval($${1}.label). See config.log for details.")
 
-    host = $$eval($${1}.host)
-    isEmpty(host): host = false
-    file_prefix =
-    exts = -
-    $$host {
-        equals(QMAKE_HOST.os, Windows): \
-            exts = .exe
-    } else {
-        win32 {
-            exts = .exe
-        } else:android {
-            file_prefix = lib
-            exts = .so
-        } else:wasm {
-            exts = .wasm .o
-        }
-    }
-
     test = $$eval($${1}.test)
     output = $$eval($${1}.output)
     test_out_dir = $$OUT_PWD/$$basename(QMAKE_CONFIG_TESTS_DIR)/$$test
-    test_out_file =
-    for(ext, exts) {
-        equals(ext, -): ext =
-        f = $$test_out_dir/$$file_prefix$$output$$ext
-        exists($$f) {
-            test_out_file = $$f
-            break()
-        }
-    }
-    isEmpty(test_out_file): \
+    test_out_file = $$test_out_dir/$$cat($$test_out_dir/$${output}.target.txt)
+    exists($$test_out_file): \
+        content = $$cat($$test_out_file, blob)
+    else: \
         error("$$eval($${1}.label) detection binary not found.")
     content = $$cat($$test_out_file, blob)
 
@@ -874,9 +850,6 @@ defineTest(qtConfOutput_preparePaths) {
     addConfStr($$[QMAKE_SPEC])
 
     $${currentConfig}.output.qconfigSource = \
-        "/* Installation date */" \
-        "static const char qt_configure_installation     [12+11]  = \"qt_instdate=2012-12-20\";" \
-        "" \
         "/* Installation Info */" \
         "static const char qt_configure_prefix_path_str  [12+256] = \"qt_prfxpath=$$config.input.prefix\";" \
         "$${LITERAL_HASH}ifdef QT_BUILD_QMAKE" \

@@ -53,6 +53,8 @@
 
 #include <QtCore/QWaitCondition>
 #include <QtCore/QMutex>
+#include <QtCore/QReadWriteLock>
+
 #include <QtGui/QIcon>
 #include <QtCore/QVariant>
 #include <QtCore/QLoggingCategory>
@@ -203,6 +205,7 @@ public slots:
     void applyConfigure();
 
 signals:
+    void wlSurfaceCreated();
     void wlSurfaceDestroyed();
 
 protected:
@@ -269,6 +272,7 @@ private:
     void handleMouseEventWithDecoration(QWaylandInputDevice *inputDevice, const QWaylandPointerEvent &e);
     void handleScreenChanged();
 
+    bool mInResizeFromApplyConfigure = false;
     QRect mLastExposeGeometry;
 
     static const wl_callback_listener callbackListener;
@@ -276,6 +280,8 @@ private:
 
     static QMutex mFrameSyncMutex;
     static QWaylandWindow *mMouseGrab;
+
+    QReadWriteLock mSurfaceLock;
 
     friend class QWaylandSubSurface;
 };

@@ -175,7 +175,6 @@ QWebEnginePagePrivate::QWebEnginePagePrivate(QWebEngineProfile *_profile)
     wasShownTimer.setSingleShot(true);
     QObject::connect(&wasShownTimer, &QTimer::timeout, [this](){
         ensureInitialized();
-        wasShown();
     });
 
     profile->d_ptr->addWebContentsAdapterClient(this);
@@ -214,6 +213,9 @@ void QWebEnginePagePrivate::initializationFinished()
         adapter->setAudioMuted(defaultAudioMuted);
     if (!qFuzzyCompare(adapter->currentZoomFactor(), defaultZoomFactor))
         adapter->setZoomFactor(defaultZoomFactor);
+
+    if (view && view->isVisible())
+        adapter->wasShown();
 
     scriptCollection.d->initializationFinished(adapter);
 
@@ -1727,11 +1729,9 @@ void QWebEnginePagePrivate::allowCertificateError(const QSharedPointer<Certifica
     Q_Q(QWebEnginePage);
     bool accepted = false;
 
-    QWebEngineCertificateError error(controller->error(), controller->url(), controller->overridable() && !controller->strictEnforcement(), controller->errorString());
+    QWebEngineCertificateError error(controller->error(), controller->url(), controller->overridable(), controller->errorString());
     accepted = q->certificateError(error);
-
-    if (error.isOverridable())
-        controller->accept(accepted);
+    controller->accept(error.isOverridable() && accepted);
 }
 
 void QWebEnginePagePrivate::selectClientCert(const QSharedPointer<ClientCertSelectController> &controller)
@@ -2539,16 +2539,13 @@ void QContextMenuBuilder::addMenuItem(ContextMenuItem menuItem)
 
     switch (menuItem) {
     case ContextMenuItem::Back:
-        action = new QAction(QIcon::fromTheme(QStringLiteral("go-previous")), QWebEnginePage::tr("&Back"), m_menu);
-        QObject::connect(action, &QAction::triggered, thisRef->d_ptr->view, &QWebEngineView::back);
+        action = thisRef->action(QWebEnginePage::Back);
         break;
     case ContextMenuItem::Forward:
-        action = new QAction(QIcon::fromTheme(QStringLiteral("go-next")), QWebEnginePage::tr("&Forward"), m_menu);
-        QObject::connect(action, &QAction::triggered, thisRef->d_ptr->view, &QWebEngineView::forward);
+        action = thisRef->action(QWebEnginePage::Forward);
         break;
     case ContextMenuItem::Reload:
-        action = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")), QWebEnginePage::tr("&Reload"), m_menu);
-        QObject::connect(action, &QAction::triggered, thisRef->d_ptr->view, &QWebEngineView::reload);
+        action = thisRef->action(QWebEnginePage::Reload);
         break;
     case ContextMenuItem::Cut:
         action = thisRef->action(QWebEnginePage::Cut);
