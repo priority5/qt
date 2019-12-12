@@ -60,7 +60,8 @@
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
-    m_ui(new Ui::MainWindow)
+    m_ui(new Ui::MainWindow),
+    m_busStatusTimer(new QTimer(this))
 {
     m_ui->setupUi(this);
 
@@ -93,6 +94,9 @@ void MainWindow::initActionsConnections()
     connect(m_ui->actionConnect, &QAction::triggered, m_connectDialog, &ConnectDialog::show);
     connect(m_connectDialog, &QDialog::accepted, this, &MainWindow::connectDevice);
     connect(m_ui->actionDisconnect, &QAction::triggered, this, &MainWindow::disconnectDevice);
+    connect(m_ui->actionResetController, &QAction::triggered, this, [this]() {
+        m_canDevice->resetController();
+    });
     connect(m_ui->actionQuit, &QAction::triggered, this, &QWidget::close);
     connect(m_ui->actionAboutQt, &QAction::triggered, qApp, &QApplication::aboutQt);
     connect(m_ui->actionClearLog, &QAction::triggered, m_ui->receivedMessagesEdit, &QTextEdit::clear);
@@ -171,12 +175,39 @@ void MainWindow::connectDevice()
                     .arg(p.pluginName).arg(p.deviceInterfaceName));
         }
     }
+
+    connect(m_busStatusTimer, &QTimer::timeout, this, [this]() {
+        switch (m_canDevice->busStatus()) {
+        case QCanBusDevice::CanBusStatus::Good:
+            m_ui->busStatus->setText("CAN bus status: Good.");
+            break;
+        case QCanBusDevice::CanBusStatus::Warning:
+            m_ui->busStatus->setText("CAN bus status: Warning.");
+            break;
+        case QCanBusDevice::CanBusStatus::Error:
+            m_ui->busStatus->setText("CAN bus status: Error.");
+            break;
+        case QCanBusDevice::CanBusStatus::BusOff:
+            m_ui->busStatus->setText("CAN bus status: Bus Off.");
+            break;
+        default:
+            m_ui->busStatus->setText("CAN bus status: Unknown.");
+            break;
+        }
+    });
+
+    if (m_canDevice->hasBusStatus())
+        m_busStatusTimer->start(2000);
+    else
+        m_ui->busStatus->setText(tr("No CAN bus status available."));
 }
 
 void MainWindow::disconnectDevice()
 {
     if (!m_canDevice)
         return;
+
+    m_busStatusTimer->stop();
 
     m_canDevice->disconnectDevice();
     delete m_canDevice;

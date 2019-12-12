@@ -39,7 +39,9 @@ DownloadUrlParameters::DownloadUrlParameters(
       fetch_error_body_(false),
       transient_(false),
       traffic_annotation_(traffic_annotation),
-      download_source_(DownloadSource::UNKNOWN) {}
+      download_source_(DownloadSource::UNKNOWN),
+      require_safety_checks_(true),
+      ignore_content_length_mismatch_(false) {}
 
 DownloadUrlParameters::~DownloadUrlParameters() = default;
 

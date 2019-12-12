@@ -235,7 +235,7 @@ void QCameraPrivate::updateViewMatrixAndTransform(bool doEmit)
  * \qmlmethod void Qt3D.Render::Camera::viewEntity(Entity entity)
  *
  * Rotates and moves the camera so that it's viewCenter is the center of the entity's bounding volume
- * and the entire entity fits in the view port.
+ * and the entire \a entity fits in the view port.
  *
  * \note Only works if the lens is in perspective projection mode.
  * \sa Qt3D.Render::Camera::projectionType
@@ -278,6 +278,18 @@ void QCameraPrivate::updateViewMatrixAndTransform(bool doEmit)
  * \qmlproperty real Qt3D.Render::Camera::farPlane
  * Holds the current camera far plane of the camera. Objects that
  * are farther from the camera than the farPlane will not be rendered.
+ */
+
+/*!
+ * \qmlproperty Qt3DRender::QCameraLens QCamera::lens
+ * Holds the CameraLens component of the camera.
+ * \since 5.14
+ */
+
+/*!
+ * \qmlproperty Qt3DCore::QTransform QCamera::transform
+ * Holds the Transform component of the camera.
+ * \since 5.14
  */
 
 /*!
@@ -420,6 +432,18 @@ void QCameraPrivate::updateViewMatrixAndTransform(bool doEmit)
  * \property QCamera::farPlane
  * Holds the current camera far plane. Objects that are farther from the
  * camera than the farPlane will not be rendered.
+ */
+
+/*!
+ * \property QCamera::lens
+ * Holds the Qt3DRender::QCameraLens component of the camera.
+ * \since 5.14
+ */
+
+/*!
+ * \property QCamera::transform
+ * Holds the Qt3DCore::QTransform component of the camera.
+ * \since 5.14
  */
 
 /*!

@@ -56,7 +56,6 @@
 #include <private/qquickimage_p_p.h>
 
 #include <qqmlinfo.h>
-#include <private/qv8engine_p.h>
 
 #include <qqmlengine.h>
 #include <private/qv4domerrors_p.h>
@@ -474,7 +473,7 @@ static QFont qt_font_from_string(const QString& fontString, const QFont &current
     return newFont;
 }
 
-class QQuickContext2DEngineData : public QV8Engine::Deletable
+class QQuickContext2DEngineData : public QV4::ExecutionEngine::Deletable
 {
 public:
     QQuickContext2DEngineData(QV4::ExecutionEngine *engine);
@@ -4324,7 +4323,8 @@ void QQuickContext2D::init(QQuickCanvasItem *canvasItem, const QVariantMap &args
         m_renderTarget = QQuickCanvasItem::Image;
     }
 
-    // Disable Framebuffer Object based rendering when not running with OpenGL
+    // Disable Framebuffer Object based rendering when not running with OpenGL.
+    // Same goes for the RHI based code path (regardless of the backend in use).
     if (m_renderTarget == QQuickCanvasItem::FramebufferObject) {
         QSGRendererInterface *rif = canvasItem->window()->rendererInterface();
         if (rif && rif->graphicsApi() != QSGRendererInterface::OpenGL)
@@ -4585,6 +4585,11 @@ void QQuickContext2D::reset()
     m_stateStack.push(newState);
     popState();
     m_buffer->clearRect(QRectF(0, 0, m_canvas->width(), m_canvas->height()));
+}
+
+QV4::ExecutionEngine *QQuickContext2D::v4Engine() const
+{
+    return m_v4engine;
 }
 
 void QQuickContext2D::setV4Engine(QV4::ExecutionEngine *engine)

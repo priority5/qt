@@ -175,8 +175,8 @@ void QQnxNativeServerPrivate::thread_func()
                  * our client, and if so, clean up our saved state
                  */
                 const int scoid = recv_buf.pulse.scoid;
-                QSet<int> coids = connections.take(scoid);
-                Q_FOREACH (int coid, coids)
+                const QSet<int> coids = connections.take(scoid);
+                for (int coid : coids)
                 {
                     const uint64_t uid = static_cast<uint64_t>(scoid) << 32 | static_cast<uint32_t>(coid);
                     QSharedPointer<QIOQnxSource> io;
@@ -415,12 +415,12 @@ void QQnxNativeServerPrivate::cleanupIOSource(QIOQnxSource *conn)
 {
     QSharedPointer<QIOQnxSource> io;
     mutex.lock();
-    QHashIterator<uint64_t, QSharedPointer<QIOQnxSource>> i(sources);
-    while (i.hasNext()) {
-        i.next();
-        if (i.value().data() == conn)
-            io = sources.take(i.key());
-        break;
+    for (auto i = sources.begin(), end = sources.end(); i != end; ++i) {
+        if (i.value().data() == conn) {
+            io = std::move(i.value());
+            sources.erase(i);
+            break;
+        }
     }
     mutex.unlock();
     if (!io.isNull()) {

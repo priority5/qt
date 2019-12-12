@@ -34,7 +34,7 @@
 #include "third_party/blink/renderer/platform/audio/hrtf_panner.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
@@ -228,6 +228,13 @@ void PannerHandler::ProcessSampleAccurateValues(AudioBus* destination,
                                               listener_position);
   }
 
+  // Update cached values in case automations end.
+  if (frames_to_process > 0) {
+    cached_azimuth_ = azimuth[frames_to_process - 1];
+    cached_elevation_ = elevation[frames_to_process - 1];
+    cached_distance_cone_gain_ = total_gain[frames_to_process - 1];
+  }
+
   panner_->PanWithSampleAccurateValues(azimuth, elevation, source, destination,
                                        frames_to_process,
                                        InternalChannelInterpretation());
@@ -270,7 +277,11 @@ void PannerHandler::Uninitialize() {
     return;
 
   panner_.reset();
-  Listener()->RemovePanner(*this);
+  if (Listener()) {
+    // Listener may have gone in the same garbage collection cycle, which means
+    // that the panner does not need to be removed.
+    Listener()->RemovePanner(*this);
+  }
 
   AudioHandler::Uninitialize();
 }
@@ -495,8 +506,13 @@ void PannerHandler::CalculateAzimuthElevation(
   float up_projection = source_listener.Dot(up);
 
   FloatPoint3D projected_source = source_listener - up_projection * up;
+  projected_source.Normalize();
 
-  double azimuth = rad2deg(projected_source.AngleBetween(listener_right));
+  // Don't use AngleBetween here.  It produces the wrong value when one of the
+  // vectors has zero length.  We know here that |projected_source| and
+  // |listener_right| are "normalized", so the dot product is good enough.
+  double azimuth =
+      rad2deg(acos(clampTo(projected_source.Dot(listener_right), -1.0f, 1.0f)));
   FixNANs(azimuth);  // avoid illegal values
 
   // Source  in front or behind the listener
@@ -592,7 +608,7 @@ void PannerHandler::SetChannelCount(unsigned channel_count,
   } else {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
-        ExceptionMessages::IndexOutsideRange<unsigned long>(
+        ExceptionMessages::IndexOutsideRange<uint32_t>(
             "channelCount", channel_count, 1,
             ExceptionMessages::kInclusiveBound, 2,
             ExceptionMessages::kInclusiveBound));
@@ -665,40 +681,47 @@ PannerNode::PannerNode(BaseAudioContext& context)
     : AudioNode(context),
       position_x_(
           AudioParam::Create(context,
-                             kParamTypePannerPositionX,
+                             Uuid(),
+                             AudioParamHandler::kParamTypePannerPositionX,
                              0.0,
                              AudioParamHandler::AutomationRate::kAudio,
                              AudioParamHandler::AutomationRateMode::kVariable)),
       position_y_(
           AudioParam::Create(context,
-                             kParamTypePannerPositionY,
+                             Uuid(),
+                             AudioParamHandler::kParamTypePannerPositionY,
                              0.0,
                              AudioParamHandler::AutomationRate::kAudio,
                              AudioParamHandler::AutomationRateMode::kVariable)),
       position_z_(
           AudioParam::Create(context,
-                             kParamTypePannerPositionZ,
+                             Uuid(),
+                             AudioParamHandler::kParamTypePannerPositionZ,
                              0.0,
                              AudioParamHandler::AutomationRate::kAudio,
                              AudioParamHandler::AutomationRateMode::kVariable)),
       orientation_x_(
           AudioParam::Create(context,
-                             kParamTypePannerOrientationX,
+                             Uuid(),
+                             AudioParamHandler::kParamTypePannerOrientationX,
                              1.0,
                              AudioParamHandler::AutomationRate::kAudio,
                              AudioParamHandler::AutomationRateMode::kVariable)),
       orientation_y_(
           AudioParam::Create(context,
-                             kParamTypePannerOrientationY,
+                             Uuid(),
+                             AudioParamHandler::kParamTypePannerOrientationY,
                              0.0,
                              AudioParamHandler::AutomationRate::kAudio,
                              AudioParamHandler::AutomationRateMode::kVariable)),
-      orientation_z_(AudioParam::Create(
-          context,
-          kParamTypePannerOrientationZ,
-          0.0,
-          AudioParamHandler::AutomationRate::kAudio,
-          AudioParamHandler::AutomationRateMode::kVariable)) {
+      orientation_z_(
+          AudioParam::Create(context,
+                             Uuid(),
+                             AudioParamHandler::kParamTypePannerOrientationZ,
+                             0.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable)),
+      listener_(context.listener()) {
   SetHandler(PannerHandler::Create(
       *this, context.sampleRate(), position_x_->Handler(),
       position_y_->Handler(), position_z_->Handler(), orientation_x_->Handler(),
@@ -708,11 +731,6 @@ PannerNode::PannerNode(BaseAudioContext& context)
 PannerNode* PannerNode::Create(BaseAudioContext& context,
                                ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-
-  if (context.IsContextClosed()) {
-    context.ThrowExceptionForClosedState(exception_state);
-    return nullptr;
-  }
 
   return MakeGarbageCollected<PannerNode>(context);
 }
@@ -868,11 +886,10 @@ void PannerNode::Trace(blink::Visitor* visitor) {
   visitor->Trace(position_x_);
   visitor->Trace(position_y_);
   visitor->Trace(position_z_);
-
   visitor->Trace(orientation_x_);
   visitor->Trace(orientation_y_);
   visitor->Trace(orientation_z_);
-
+  visitor->Trace(listener_);
   AudioNode::Trace(visitor);
 }
 

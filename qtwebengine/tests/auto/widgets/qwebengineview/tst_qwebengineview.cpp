@@ -203,6 +203,7 @@ private Q_SLOTS:
     void setViewDeletesImplicitPage();
     void setPagePreservesExplicitPage();
     void setViewPreservesExplicitPage();
+    void closeDiscardsPage();
 };
 
 // This will be called before the first test function is executed.
@@ -238,30 +239,45 @@ void tst_QWebEngineView::renderHints()
     QVERIFY(!(webView.renderHints() & QPainter::Antialiasing));
     QVERIFY(webView.renderHints() & QPainter::TextAntialiasing);
     QVERIFY(webView.renderHints() & QPainter::SmoothPixmapTransform);
+#if QT_DEPRECATED_SINCE(5, 14)
     QVERIFY(!(webView.renderHints() & QPainter::HighQualityAntialiasing));
+#endif
+    QVERIFY(!(webView.renderHints() & QPainter::Antialiasing));
 
     webView.setRenderHint(QPainter::Antialiasing, true);
     QVERIFY(webView.renderHints() & QPainter::Antialiasing);
     QVERIFY(webView.renderHints() & QPainter::TextAntialiasing);
     QVERIFY(webView.renderHints() & QPainter::SmoothPixmapTransform);
+#if QT_DEPRECATED_SINCE(5, 14)
     QVERIFY(!(webView.renderHints() & QPainter::HighQualityAntialiasing));
+#endif
+    QVERIFY(!(webView.renderHints() & QPainter::Antialiasing));
 
     webView.setRenderHint(QPainter::Antialiasing, false);
     QVERIFY(!(webView.renderHints() & QPainter::Antialiasing));
     QVERIFY(webView.renderHints() & QPainter::TextAntialiasing);
     QVERIFY(webView.renderHints() & QPainter::SmoothPixmapTransform);
+#if QT_DEPRECATED_SINCE(5, 14)
     QVERIFY(!(webView.renderHints() & QPainter::HighQualityAntialiasing));
+#endif
+    QVERIFY(!(webView.renderHints() & QPainter::Antialiasing));
 
     webView.setRenderHint(QPainter::SmoothPixmapTransform, true);
     QVERIFY(!(webView.renderHints() & QPainter::Antialiasing));
     QVERIFY(webView.renderHints() & QPainter::TextAntialiasing);
     QVERIFY(webView.renderHints() & QPainter::SmoothPixmapTransform);
+#if QT_DEPRECATED_SINCE(5, 14)
     QVERIFY(!(webView.renderHints() & QPainter::HighQualityAntialiasing));
+#endif
+    QVERIFY(!(webView.renderHints() & QPainter::Antialiasing));
 
     webView.setRenderHint(QPainter::SmoothPixmapTransform, false);
     QVERIFY(webView.renderHints() & QPainter::TextAntialiasing);
     QVERIFY(!(webView.renderHints() & QPainter::SmoothPixmapTransform));
+#if QT_DEPRECATED_SINCE(5, 14)
     QVERIFY(!(webView.renderHints() & QPainter::HighQualityAntialiasing));
+#endif
+    QVERIFY(!(webView.renderHints() & QPainter::Antialiasing));
 #endif
 }
 
@@ -481,14 +497,14 @@ void tst_QWebEngineView::microFocusCoordinates()
     evaluateJavaScriptSync(webView.page(), "document.getElementById('input1').focus()");
     QTRY_COMPARE(evaluateJavaScriptSync(webView.page(), "document.activeElement.id").toString(), QStringLiteral("input1"));
 
-    QTRY_VERIFY(webView.focusProxy()->inputMethodQuery(Qt::ImMicroFocus).isValid());
-    QVariant initialMicroFocus = webView.focusProxy()->inputMethodQuery(Qt::ImMicroFocus);
+    QTRY_VERIFY(webView.focusProxy()->inputMethodQuery(Qt::ImCursorRectangle).isValid());
+    QVariant initialMicroFocus = webView.focusProxy()->inputMethodQuery(Qt::ImCursorRectangle);
 
     evaluateJavaScriptSync(webView.page(), "window.scrollBy(0, 50)");
     QTRY_VERIFY(scrollSpy.count() > 0);
 
-    QTRY_VERIFY(webView.focusProxy()->inputMethodQuery(Qt::ImMicroFocus).isValid());
-    QVariant currentMicroFocus = webView.focusProxy()->inputMethodQuery(Qt::ImMicroFocus);
+    QTRY_VERIFY(webView.focusProxy()->inputMethodQuery(Qt::ImCursorRectangle).isValid());
+    QVariant currentMicroFocus = webView.focusProxy()->inputMethodQuery(Qt::ImCursorRectangle);
 
     QCOMPARE(initialMicroFocus.toRect().translated(QPoint(0,-50)), currentMicroFocus.toRect());
 }
@@ -1515,7 +1531,7 @@ void tst_QWebEngineView::postData()
             eventloop.quit();
         });
 
-        connect(socket, &QIODevice::readyRead, this, [this, socket, &server, &postData](){
+        connect(socket, &QIODevice::readyRead, this, [socket, &server, &postData](){
             QByteArray rawData = socket->readAll();
             QStringList lines = QString::fromLocal8Bit(rawData).split("\r\n");
 
@@ -1830,10 +1846,13 @@ void tst_QWebEngineView::softwareInputPanel()
 
 void tst_QWebEngineView::inputContextQueryInput()
 {
-    TestInputContext testContext;
     QWebEngineView view;
     view.resize(640, 480);
     view.show();
+
+    // testContext will be destroyed before the view, so no events are sent accidentally
+    // when the view is destroyed.
+    TestInputContext testContext;
 
     QSignalSpy selectionChangedSpy(&view, SIGNAL(selectionChanged()));
     QSignalSpy loadFinishedSpy(&view, SIGNAL(loadFinished(bool)));
@@ -2193,6 +2212,22 @@ void tst_QWebEngineView::textSelectionOutOfInputField()
     QTest::mouseClick(view.focusProxy(), Qt::LeftButton, 0, view.geometry().center());
     QVERIFY(selectionChangedSpy.wait());
     QCOMPARE(selectionChangedSpy.count(), 2);
+    QVERIFY(!view.hasSelection());
+    QVERIFY(view.page()->selectedText().isEmpty());
+
+    // Select text by ctrl+a
+    QTest::keyClick(view.windowHandle(), Qt::Key_A, Qt::ControlModifier);
+    QVERIFY(selectionChangedSpy.wait());
+    QCOMPARE(selectionChangedSpy.count(), 3);
+    QVERIFY(view.hasSelection());
+    QCOMPARE(view.page()->selectedText(), QString("This is a text"));
+
+    // Deselect text via discard+undiscard
+    view.hide();
+    view.page()->setLifecycleState(QWebEnginePage::LifecycleState::Discarded);
+    view.show();
+    QVERIFY(loadFinishedSpy.wait());
+    QCOMPARE(selectionChangedSpy.count(), 4);
     QVERIFY(!view.hasSelection());
     QVERIFY(view.page()->selectedText().isEmpty());
 
@@ -2971,7 +3006,7 @@ void tst_QWebEngineView::mouseLeave()
     QVBoxLayout *layout = new QVBoxLayout;
     layout->setAlignment(Qt::AlignTop);
     layout->setSpacing(0);
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(label);
     layout->addWidget(view);
     containerWidget->setLayout(layout);
@@ -3070,7 +3105,6 @@ void tst_QWebEngineView::webUIURLs_data()
     QTest::newRow("supervised-user-internals") << QUrl("chrome://supervised-user-internals") << false;
     QTest::newRow("sync-internals") << QUrl("chrome://sync-internals") << false;
     QTest::newRow("system") << QUrl("chrome://system") << false;
-    QTest::newRow("taskscheduler-internals") << QUrl("chrome://taskscheduler-internals") << true;
     QTest::newRow("terms") << QUrl("chrome://terms") << false;
     QTest::newRow("thumbnails") << QUrl("chrome://thumbnails") << false;
     QTest::newRow("tracing") << QUrl("chrome://tracing") << false;
@@ -3091,7 +3125,7 @@ void tst_QWebEngineView::webUIURLs()
     view.settings()->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
     QSignalSpy loadFinishedSpy(&view, SIGNAL(loadFinished(bool)));
     view.load(url);
-    QVERIFY(loadFinishedSpy.wait());
+    QTRY_COMPARE_WITH_TIMEOUT(loadFinishedSpy.count(), 1, 30000);
     QCOMPARE(loadFinishedSpy.takeFirst().at(0).toBool(), supported);
 }
 
@@ -3290,6 +3324,22 @@ void tst_QWebEngineView::setViewPreservesExplicitPage()
     explicitPage2->setView(&view);
     QCOMPARE(view.page(), explicitPage2.data());
     QVERIFY(explicitPage1); // should not be deleted
+}
+
+void tst_QWebEngineView::closeDiscardsPage()
+{
+    QWebEngineProfile profile;
+    QWebEnginePage page(&profile);
+    QWebEngineView view;
+    view.setPage(&page);
+    view.resize(300, 300);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QCOMPARE(page.isVisible(), true);
+    QCOMPARE(page.lifecycleState(), QWebEnginePage::LifecycleState::Active);
+    view.close();
+    QCOMPARE(page.isVisible(), false);
+    QCOMPARE(page.lifecycleState(), QWebEnginePage::LifecycleState::Discarded);
 }
 
 QTEST_MAIN(tst_QWebEngineView)

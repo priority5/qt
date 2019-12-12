@@ -38,6 +38,7 @@
 
 #include <qtimer.h>
 #include <qthread.h>
+#include <qelapsedtimer.h>
 
 #if defined Q_OS_UNIX
 #include <unistd.h>
@@ -46,7 +47,11 @@
 class tst_QTimer : public QObject
 {
     Q_OBJECT
+public:
+    static void initMain();
+
 private slots:
+    void cleanupTestCase();
     void zeroTimer();
     void singleShotTimeout();
     void timeout();
@@ -73,7 +78,12 @@ private slots:
     void recurseOnTimeoutAndStopTimer();
     void singleShotToFunctors();
     void singleShot_chrono();
+    void singleShot_static();
     void crossThreadSingleShotToFunctor();
+    void timerOrder();
+    void timerOrder_data();
+    void timerOrderBackgroundThread();
+    void timerOrderBackgroundThread_data() { timerOrder_data(); }
 
     void dontBlockEvents();
     void postedEventsShouldNotStarveTimers();
@@ -521,7 +531,7 @@ public:
     QBasicTimer m_timer;
 
     int m_interval;
-    QTime m_startedTime;
+    QElapsedTimer m_elapsedTimer;
     QEventLoop eventLoop;
 
     inline RestartedTimerFiresTooSoonObject()
@@ -533,7 +543,7 @@ public:
         static int interval = 1000;
 
         m_interval = interval;
-        m_startedTime.start();
+        m_elapsedTimer.start();
         m_timer.start(interval, this);
 
         // alternate between single-shot and 1 sec
@@ -547,7 +557,7 @@ public:
 
         m_timer.stop();
 
-        int elapsed = m_startedTime.elapsed();
+        int elapsed = m_elapsedTimer.elapsed();
 
         if (elapsed < m_interval / 2) {
             // severely too early!
@@ -585,10 +595,10 @@ public:
 public slots:
     void longLastingSlot()
     {
-        // Don't use timers for this, because we are testing them.
-        QTime time;
-        time.start();
-        while (time.elapsed() < 200) {
+        // Don't use QTimer for this, because we are testing it.
+        QElapsedTimer control;
+        control.start();
+        while (control.elapsed() < 200) {
             for (int c = 0; c < 100000; c++) {} // Mindless looping.
         }
         if (++count >= 2) {
@@ -768,7 +778,7 @@ public:
         quitEventLoop_noexcept();
     }
 
-    static void quitEventLoop_noexcept() Q_DECL_NOTHROW
+    static void quitEventLoop_noexcept() noexcept
     {
         QVERIFY(!_e.isNull());
         _e->quit();
@@ -1033,5 +1043,126 @@ void tst_QTimer::callOnTimeout()
     QVERIFY(!connection);
 }
 
+class OrderHelper : public QObject
+{
+    Q_OBJECT
+public:
+    enum CallType
+    {
+        String,
+        PMF,
+        Functor,
+        FunctorNoCtx
+    };
+    Q_ENUM(CallType)
+    QVector<CallType> calls;
+
+    void triggerCall(CallType callType)
+    {
+        switch (callType)
+        {
+        case String:
+            QTimer::singleShot(0, this, SLOT(stringSlot()));
+            break;
+        case PMF:
+            QTimer::singleShot(0, this, &OrderHelper::pmfSlot);
+            break;
+        case Functor:
+            QTimer::singleShot(0, this, [this]() { functorSlot(); });
+            break;
+        case FunctorNoCtx:
+            QTimer::singleShot(0, [this]() { functorNoCtxSlot(); });
+            break;
+        }
+    }
+
+public slots:
+    void stringSlot() { calls << String; }
+    void pmfSlot() { calls << PMF; }
+    void functorSlot() { calls << Functor; }
+    void functorNoCtxSlot() { calls << FunctorNoCtx; }
+};
+
+Q_DECLARE_METATYPE(OrderHelper::CallType)
+
+void tst_QTimer::timerOrder()
+{
+    QFETCH(QVector<OrderHelper::CallType>, calls);
+
+    OrderHelper helper;
+
+    for (const auto call : calls)
+        helper.triggerCall(call);
+
+    QTRY_COMPARE(helper.calls, calls);
+}
+
+void tst_QTimer::timerOrder_data()
+{
+    QTest::addColumn<QVector<OrderHelper::CallType>>("calls");
+
+    QVector<OrderHelper::CallType> calls = {
+        OrderHelper::String, OrderHelper::PMF,
+        OrderHelper::Functor, OrderHelper::FunctorNoCtx
+    };
+    std::sort(calls.begin(), calls.end());
+
+    int permutation = 0;
+    do {
+        QTest::addRow("permutation=%d", permutation) << calls;
+        ++permutation;
+    } while (std::next_permutation(calls.begin(), calls.end()));
+}
+
+void tst_QTimer::timerOrderBackgroundThread()
+{
+#if !QT_CONFIG(cxx11_future)
+    QSKIP("This test requires QThread::create");
+#else
+    auto *thread = QThread::create([this]() { timerOrder(); });
+    thread->start();
+    QVERIFY(thread->wait());
+    delete thread;
+#endif
+}
+
+struct StaticSingleShotUser
+{
+    StaticSingleShotUser()
+    {
+        for (auto call : calls())
+            helper.triggerCall(call);
+    }
+    OrderHelper helper;
+
+    static QVector<OrderHelper::CallType> calls()
+    {
+        return {OrderHelper::String, OrderHelper::PMF,
+                OrderHelper::Functor, OrderHelper::FunctorNoCtx};
+    }
+};
+
+// NOTE: to prevent any static initialization order fiasco, we implement
+//       initMain() to instantiate staticSingleShotUser before qApp
+
+static StaticSingleShotUser *s_staticSingleShotUser = nullptr;
+
+void tst_QTimer::initMain()
+{
+    s_staticSingleShotUser = new StaticSingleShotUser;
+}
+
+void tst_QTimer::cleanupTestCase()
+{
+    delete s_staticSingleShotUser;
+}
+
+void tst_QTimer::singleShot_static()
+{
+    QCoreApplication::processEvents();
+    QCOMPARE(s_staticSingleShotUser->helper.calls, s_staticSingleShotUser->calls());
+}
+
 QTEST_MAIN(tst_QTimer)
+
 #include "tst_qtimer.moc"

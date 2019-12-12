@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2019 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtWidgets module of the Qt Toolkit.
@@ -37,6 +37,7 @@
 **
 ****************************************************************************/
 
+#include <private/qapplication_p.h>
 #include <private/qdatetimeedit_p.h>
 #include <qabstractspinbox.h>
 #include <qapplication.h>
@@ -153,7 +154,7 @@ QDateTimeEdit::QDateTimeEdit(QWidget *parent)
     : QAbstractSpinBox(*new QDateTimeEditPrivate, parent)
 {
     Q_D(QDateTimeEdit);
-    d->init(QDateTime(QDATETIMEEDIT_DATE_INITIAL, QDATETIMEEDIT_TIME_MIN));
+    d->init(QDATETIMEEDIT_DATE_INITIAL.startOfDay());
 }
 
 /*!
@@ -165,8 +166,7 @@ QDateTimeEdit::QDateTimeEdit(const QDateTime &datetime, QWidget *parent)
     : QAbstractSpinBox(*new QDateTimeEditPrivate, parent)
 {
     Q_D(QDateTimeEdit);
-    d->init(datetime.isValid() ? datetime : QDateTime(QDATETIMEEDIT_DATE_INITIAL,
-                                                      QDATETIMEEDIT_TIME_MIN));
+    d->init(datetime.isValid() ? datetime : QDATETIMEEDIT_DATE_INITIAL.startOfDay());
 }
 
 /*!
@@ -312,6 +312,22 @@ void QDateTimeEdit::setTime(const QTime &time)
 }
 
 
+QCalendar QDateTimeEdit::calendar() const
+{
+    Q_D(const QDateTimeEdit);
+    return d->calendar;
+}
+
+void QDateTimeEdit::setCalendar(QCalendar calendar)
+{
+    Q_D(QDateTimeEdit);
+    // Set invalid date time to prevent runtime crashes on calendar change
+    QDateTime previousValue = d->value.toDateTime();
+    setDateTime(QDateTime());
+    d->setCalendar(calendar);
+    setDateTime(previousValue);
+}
+
 /*!
   \property QDateTimeEdit::minimumDateTime
   \since 4.4
@@ -342,7 +358,7 @@ QDateTime QDateTimeEdit::minimumDateTime() const
 
 void QDateTimeEdit::clearMinimumDateTime()
 {
-    setMinimumDateTime(QDateTime(QDATETIMEEDIT_COMPAT_DATE_MIN, QDATETIMEEDIT_TIME_MIN));
+    setMinimumDateTime(QDATETIMEEDIT_COMPAT_DATE_MIN.startOfDay());
 }
 
 void QDateTimeEdit::setMinimumDateTime(const QDateTime &dt)
@@ -385,7 +401,7 @@ QDateTime QDateTimeEdit::maximumDateTime() const
 
 void QDateTimeEdit::clearMaximumDateTime()
 {
-    setMaximumDateTime(QDATETIMEEDIT_DATETIME_MAX);
+    setMaximumDateTime(QDATETIMEEDIT_DATE_MAX.endOfDay());
 }
 
 void QDateTimeEdit::setMaximumDateTime(const QDateTime &dt)
@@ -643,10 +659,10 @@ QDateTimeEdit::Section QDateTimeEdit::currentSection() const
 {
     Q_D(const QDateTimeEdit);
 #ifdef QT_KEYPAD_NAVIGATION
-    if (QApplication::keypadNavigationEnabled() && d->focusOnButton)
+    if (QApplicationPrivate::keypadNavigationEnabled() && d->focusOnButton)
         return NoSection;
 #endif
-    return d->convertToPublic(d->sectionType(d->currentSectionIndex));
+    return QDateTimeEditPrivate::convertToPublic(d->sectionType(d->currentSectionIndex));
 }
 
 void QDateTimeEdit::setCurrentSection(Section section)
@@ -660,7 +676,7 @@ void QDateTimeEdit::setCurrentSection(Section section)
     int index = d->currentSectionIndex + 1;
     for (int i=0; i<2; ++i) {
         while (index < size) {
-            if (d->convertToPublic(d->sectionType(index)) == section) {
+            if (QDateTimeEditPrivate::convertToPublic(d->sectionType(index)) == section) {
                 d->edit->setCursorPosition(d->sectionPos(index));
                 QDTEDEBUG << d->sectionPos(index);
                 return;
@@ -686,7 +702,7 @@ QDateTimeEdit::Section QDateTimeEdit::sectionAt(int index) const
     Q_D(const QDateTimeEdit);
     if (index < 0 || index >= d->sectionNodes.size())
         return NoSection;
-    return d->convertToPublic(d->sectionType(index));
+    return QDateTimeEditPrivate::convertToPublic(d->sectionType(index));
 }
 
 /*!
@@ -880,7 +896,7 @@ void QDateTimeEdit::setDisplayFormat(const QString &format)
         }
 
         d->formatExplicitlySet = true;
-        d->sections = d->convertSections(d->display);
+        d->sections = QDateTimeEditPrivate::convertSections(d->display);
         d->clearCache();
 
         d->currentSectionIndex = qMin(d->currentSectionIndex, d->sectionNodes.size() - 1);
@@ -1056,7 +1072,7 @@ void QDateTimeEdit::keyPressEvent(QKeyEvent *event)
     switch (event->key()) {
 #ifdef QT_KEYPAD_NAVIGATION
     case Qt::Key_NumberSign:    //shortcut to popup calendar
-        if (QApplication::keypadNavigationEnabled() && d->calendarPopupEnabled()) {
+        if (QApplicationPrivate::keypadNavigationEnabled() && d->calendarPopupEnabled()) {
             d->initCalendarPopup();
             d->positionCalendarPopup();
             d->monthCalendar->show();
@@ -1064,7 +1080,7 @@ void QDateTimeEdit::keyPressEvent(QKeyEvent *event)
         }
         break;
     case Qt::Key_Select:
-        if (QApplication::keypadNavigationEnabled()) {
+        if (QApplicationPrivate::keypadNavigationEnabled()) {
             if (hasEditFocus()) {
                 if (d->focusOnButton) {
                     d->initCalendarPopup();
@@ -1096,7 +1112,7 @@ void QDateTimeEdit::keyPressEvent(QKeyEvent *event)
         return;
     default:
 #ifdef QT_KEYPAD_NAVIGATION
-        if (QApplication::keypadNavigationEnabled() && !hasEditFocus()
+        if (QApplicationPrivate::keypadNavigationEnabled() && !hasEditFocus()
             && !event->text().isEmpty() && event->text().at(0).isLetterOrNumber()) {
             setEditFocus(true);
 
@@ -1118,23 +1134,13 @@ void QDateTimeEdit::keyPressEvent(QKeyEvent *event)
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
             if (
 #ifdef QT_KEYPAD_NAVIGATION
-                QApplication::keypadNavigationEnabled() && !hasEditFocus()
-                || !QApplication::keypadNavigationEnabled() &&
+                QApplicationPrivate::keypadNavigationEnabled() && !hasEditFocus()
+                || !QApplicationPrivate::keypadNavigationEnabled() &&
 #endif
                 !(event->modifiers() & Qt::ControlModifier)) {
                 select = false;
                 break;
             }
-#if 0 // Used to be included in Qt4 for Q_WS_MAC
-            else
-#ifdef QT_KEYPAD_NAVIGATION
-                if (!QApplication::keypadNavigationEnabled())
-#endif
-            {
-                select = (event->modifiers() & Qt::ShiftModifier);
-                break;
-            }
-#endif
         }
         Q_FALLTHROUGH();
     case Qt::Key_Backtab:
@@ -1148,7 +1154,7 @@ void QDateTimeEdit::keyPressEvent(QKeyEvent *event)
                              && (event->key() != Qt::Key_Tab || !(event->modifiers() & Qt::ShiftModifier));
 #ifdef QT_KEYPAD_NAVIGATION
         int newSection = d->nextPrevSection(d->currentSectionIndex, forward);
-        if (QApplication::keypadNavigationEnabled()) {
+        if (QApplicationPrivate::keypadNavigationEnabled()) {
             if (d->focusOnButton) {
                 newSection = forward ? 0 : d->sectionNodes.size() - 1;
                 d->focusOnButton = false;
@@ -1291,7 +1297,7 @@ void QDateTimeEdit::stepBy(int steps)
     Q_D(QDateTimeEdit);
 #ifdef QT_KEYPAD_NAVIGATION
     // with keypad navigation and not editFocus, left right change the date/time by a fixed amount.
-    if (QApplication::keypadNavigationEnabled() && !hasEditFocus()) {
+    if (QApplicationPrivate::keypadNavigationEnabled() && !hasEditFocus()) {
         // if date based, shift by day.  else shift by 15min
         if (d->sections & DateSections_Mask) {
             setDateTime(dateTime().addDays(steps));
@@ -1354,7 +1360,7 @@ void QDateTimeEdit::stepBy(int steps)
 QString QDateTimeEdit::textFromDateTime(const QDateTime &dateTime) const
 {
     Q_D(const QDateTimeEdit);
-    return locale().toString(dateTime, d->displayFormat);
+    return locale().toString(dateTime, d->displayFormat, d->calendar);
 }
 
 
@@ -1418,7 +1424,7 @@ QDateTimeEdit::StepEnabled QDateTimeEdit::stepEnabled() const
     QAbstractSpinBox::StepEnabled ret = 0;
 
 #ifdef QT_KEYPAD_NAVIGATION
-    if (QApplication::keypadNavigationEnabled() && !hasEditFocus()) {
+    if (QApplicationPrivate::keypadNavigationEnabled() && !hasEditFocus()) {
         if (d->wrapping)
             return StepEnabled(StepUpEnabled | StepDownEnabled);
         // 3 cases.  date, time, datetime.  each case look
@@ -1646,7 +1652,7 @@ QDateEdit::~QDateEdit()
 
 
 QDateTimeEditPrivate::QDateTimeEditPrivate()
-    : QDateTimeParser(QVariant::DateTime, QDateTimeParser::DateTimeEdit)
+    : QDateTimeParser(QVariant::DateTime, QDateTimeParser::DateTimeEdit, QCalendar())
 {
     hasHadFocus = false;
     formatExplicitlySet = false;
@@ -1660,8 +1666,8 @@ QDateTimeEditPrivate::QDateTimeEditPrivate()
     first.pos = 0;
     sections = 0;
     calendarPopup = false;
-    minimum = QDATETIMEEDIT_COMPAT_DATETIME_MIN;
-    maximum = QDATETIMEEDIT_DATETIME_MAX;
+    minimum = QDATETIMEEDIT_COMPAT_DATE_MIN.startOfDay();
+    maximum = QDATETIMEEDIT_DATE_MAX.endOfDay();
     arrowState = QStyle::State_None;
     monthCalendar = 0;
     readLocaleSettings();
@@ -1669,10 +1675,6 @@ QDateTimeEditPrivate::QDateTimeEditPrivate()
 #ifdef QT_KEYPAD_NAVIGATION
     focusOnButton = false;
 #endif
-}
-
-QDateTimeEditPrivate::~QDateTimeEditPrivate()
-{
 }
 
 void QDateTimeEditPrivate::updateTimeSpec()
@@ -1685,8 +1687,8 @@ void QDateTimeEditPrivate::updateTimeSpec()
     const bool dateShown = (sections & QDateTimeEdit::DateSections_Mask);
     if (!dateShown) {
         if (minimum.toTime() >= maximum.toTime()){
-            minimum = QDateTime(value.toDate(), QDATETIMEEDIT_TIME_MIN, spec);
-            maximum = QDateTime(value.toDate(), QDATETIMEEDIT_TIME_MAX, spec);
+            minimum = value.toDate().startOfDay(spec);
+            maximum = value.toDate().endOfDay(spec);
         }
     }
 }
@@ -1703,7 +1705,7 @@ void QDateTimeEditPrivate::updateEdit()
 
     if (!specialValue()
 #ifdef QT_KEYPAD_NAVIGATION
-        && !(QApplication::keypadNavigationEnabled() && !edit->hasEditFocus())
+        && !(QApplicationPrivate::keypadNavigationEnabled() && !edit->hasEditFocus())
 #endif
             ) {
         int cursor = sectionPos(currentSectionIndex);
@@ -1732,7 +1734,7 @@ void QDateTimeEditPrivate::setSelected(int sectionIndex, bool forward)
 {
     if (specialValue()
 #ifdef QT_KEYPAD_NAVIGATION
-        || (QApplication::keypadNavigationEnabled() && !edit->hasEditFocus())
+        || (QApplicationPrivate::keypadNavigationEnabled() && !edit->hasEditFocus())
 #endif
         ) {
         edit->selectAll();
@@ -2018,8 +2020,7 @@ QDateTime QDateTimeEditPrivate::stepBy(int sectionIndex, int steps, bool test) c
         val = (wrapping ? min + val - max - 1 : max);
     }
 
-
-    const int oldDay = v.date().day();
+    const int oldDay = v.date().day(calendar);
 
     setDigit(v, sectionIndex, val);
     // if this sets year or month it will make
@@ -2038,10 +2039,10 @@ QDateTime QDateTimeEditPrivate::stepBy(int sectionIndex, int steps, bool test) c
             if (steps > 0) {
                 setDigit(v, sectionIndex, min);
                 if (!(sn.type & DaySectionMask) && sections & DateSectionMask) {
-                    const int daysInMonth = v.date().daysInMonth();
-                    if (v.date().day() < oldDay && v.date().day() < daysInMonth) {
+                    const int daysInMonth = v.date().daysInMonth(calendar);
+                    if (v.date().day(calendar) < oldDay && v.date().day(calendar) < daysInMonth) {
                         const int adds = qMin(oldDay, daysInMonth);
-                        v = v.addDays(adds - v.date().day());
+                        v = v.addDays(adds - v.date().day(calendar));
                     }
                 }
 
@@ -2053,10 +2054,10 @@ QDateTime QDateTimeEditPrivate::stepBy(int sectionIndex, int steps, bool test) c
             } else {
                 setDigit(v, sectionIndex, max);
                 if (!(sn.type & DaySectionMask) && sections & DateSectionMask) {
-                    const int daysInMonth = v.date().daysInMonth();
-                    if (v.date().day() < oldDay && v.date().day() < daysInMonth) {
+                    const int daysInMonth = v.date().daysInMonth(calendar);
+                    if (v.date().day(calendar) < oldDay && v.date().day(calendar) < daysInMonth) {
                         const int adds = qMin(oldDay, daysInMonth);
-                        v = v.addDays(adds - v.date().day());
+                        v = v.addDays(adds - v.date().day(calendar));
                     }
                 }
 
@@ -2070,7 +2071,7 @@ QDateTime QDateTimeEditPrivate::stepBy(int sectionIndex, int steps, bool test) c
             setDigit(v, sectionIndex, (steps > 0 ? localmax : localmin));
         }
     }
-    if (!test && oldDay != v.date().day() && !(sn.type & DaySectionMask)) {
+    if (!test && oldDay != v.date().day(calendar) && !(sn.type & DaySectionMask)) {
         // this should not happen when called from stepEnabled
         cachedDay = qMax<int>(oldDay, cachedDay);
     }
@@ -2402,7 +2403,7 @@ void QDateTimeEditPrivate::init(const QVariant &var)
     Q_Q(QDateTimeEdit);
     switch (var.type()) {
     case QVariant::Date:
-        value = QDateTime(var.toDate(), QDATETIMEEDIT_TIME_MIN);
+        value = var.toDate().startOfDay();
         updateTimeSpec();
         q->setDisplayFormat(defaultDateFormat);
         if (sectionNodes.isEmpty()) // ### safeguard for broken locale
@@ -2427,7 +2428,7 @@ void QDateTimeEditPrivate::init(const QVariant &var)
         break;
     }
 #ifdef QT_KEYPAD_NAVIGATION
-    if (QApplication::keypadNavigationEnabled())
+    if (QApplicationPrivate::keypadNavigationEnabled())
         q->setCalendarPopup(true);
 #endif
     q->setInputMethodHints(Qt::ImhPreferNumbers);
@@ -2523,7 +2524,7 @@ void QDateTimeEditPrivate::initCalendarPopup(QCalendarWidget *cw)
 {
     Q_Q(QDateTimeEdit);
     if (!monthCalendar) {
-        monthCalendar = new QCalendarPopup(q, cw);
+        monthCalendar = new QCalendarPopup(q, cw, calendar);
         monthCalendar->setObjectName(QLatin1String("qt_datetimedit_calendar"));
         QObject::connect(monthCalendar, SIGNAL(newDateSelected(QDate)), q, SLOT(setDate(QDate)));
         QObject::connect(monthCalendar, SIGNAL(hidingCalendar(QDate)), q, SLOT(setDate(QDate)));
@@ -2584,8 +2585,8 @@ void QDateTimeEditPrivate::syncCalendarWidget()
     }
 }
 
-QCalendarPopup::QCalendarPopup(QWidget * parent, QCalendarWidget *cw)
-    : QWidget(parent, Qt::Popup)
+QCalendarPopup::QCalendarPopup(QWidget *parent, QCalendarWidget *cw, QCalendar ca)
+    : QWidget(parent, Qt::Popup), calendarSystem(ca)
 {
     setAttribute(Qt::WA_WindowPropagation);
 
@@ -2601,9 +2602,10 @@ QCalendarWidget *QCalendarPopup::verifyCalendarInstance()
 {
     if (calendar.isNull()) {
         QCalendarWidget *cw = new QCalendarWidget(this);
+        cw->setCalendar(calendarSystem);
         cw->setVerticalHeaderFormat(QCalendarWidget::NoVerticalHeader);
 #ifdef QT_KEYPAD_NAVIGATION
-        if (QApplication::keypadNavigationEnabled())
+        if (QApplicationPrivate::keypadNavigationEnabled())
             cw->setHorizontalHeaderFormat(QCalendarWidget::SingleLetterDayNames);
 #endif
         setCalendarWidget(cw);
@@ -2634,13 +2636,13 @@ void QCalendarPopup::setCalendarWidget(QCalendarWidget *cw)
 }
 
 
-void QCalendarPopup::setDate(const QDate &date)
+void QCalendarPopup::setDate(QDate date)
 {
     oldDate = date;
     verifyCalendarInstance()->setSelectedDate(date);
 }
 
-void QCalendarPopup::setDateRange(const QDate &min, const QDate &max)
+void QCalendarPopup::setDateRange(QDate min, QDate max)
 {
     QCalendarWidget *cw = verifyCalendarInstance();
     cw->setMinimumDate(min);
@@ -2684,7 +2686,7 @@ void QCalendarPopup::dateSelectionChanged()
     dateChanged = true;
     emit newDateSelected(verifyCalendarInstance()->selectedDate());
 }
-void QCalendarPopup::dateSelected(const QDate &date)
+void QCalendarPopup::dateSelected(QDate date)
 {
     dateChanged = true;
     emit activated(date);

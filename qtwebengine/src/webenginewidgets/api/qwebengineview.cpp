@@ -61,7 +61,7 @@ void QWebEngineViewPrivate::pageChanged(QWebEnginePage *oldPage, QWebEnginePage 
     Q_Q(QWebEngineView);
 
     if (oldPage) {
-        oldPage->d_ptr->wasHidden();
+        oldPage->setVisible(false);
         oldPage->disconnect(q);
     }
 
@@ -75,8 +75,7 @@ void QWebEngineViewPrivate::pageChanged(QWebEnginePage *oldPage, QWebEnginePage 
         QObject::connect(newPage, &QWebEnginePage::loadFinished, q, &QWebEngineView::loadFinished);
         QObject::connect(newPage, &QWebEnginePage::selectionChanged, q, &QWebEngineView::selectionChanged);
         QObject::connect(newPage, &QWebEnginePage::renderProcessTerminated, q, &QWebEngineView::renderProcessTerminated);
-        if (q->isVisible())
-            newPage->d_ptr->wasShown();
+        newPage->setVisible(q->isVisible());
     }
 
     auto oldUrl = oldPage ? oldPage->url() : QUrl();
@@ -381,7 +380,7 @@ void QWebEngineView::contextMenuEvent(QContextMenuEvent *event)
 void QWebEngineView::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
-    page()->d_ptr->wasShown();
+    page()->setVisible(true);
 }
 
 /*!
@@ -390,7 +389,17 @@ void QWebEngineView::showEvent(QShowEvent *event)
 void QWebEngineView::hideEvent(QHideEvent *event)
 {
     QWidget::hideEvent(event);
-    page()->d_ptr->wasHidden();
+    page()->setVisible(false);
+}
+
+/*!
+ * \reimp
+ */
+void QWebEngineView::closeEvent(QCloseEvent *event)
+{
+    QWidget::closeEvent(event);
+    page()->setVisible(false);
+    page()->setLifecycleState(QWebEnginePage::LifecycleState::Discarded);
 }
 
 #if QT_CONFIG(draganddrop)

@@ -94,6 +94,13 @@ inline Q_DECL_CONSTEXPR int qMetaTypeId();
 #define QT_FOR_EACH_STATIC_PRIMITIVE_POINTER(F)\
     F(VoidStar, 31, void*) \
 
+#if QT_CONFIG(easingcurve)
+#define QT_FOR_EACH_STATIC_EASINGCURVE(F)\
+    F(QEasingCurve, 29, QEasingCurve)
+#else
+#define QT_FOR_EACH_STATIC_EASINGCURVE(F)
+#endif
+
 #if QT_CONFIG(itemmodel)
 #define QT_FOR_EACH_STATIC_ITEMMODEL_CLASS(F)\
     F(QModelIndex, 42, QModelIndex) \
@@ -122,7 +129,7 @@ inline Q_DECL_CONSTEXPR int qMetaTypeId();
     F(QPoint, 25, QPoint) \
     F(QPointF, 26, QPointF) \
     F(QRegExp, 27, QRegExp) \
-    F(QEasingCurve, 29, QEasingCurve) \
+    QT_FOR_EACH_STATIC_EASINGCURVE(F) \
     F(QUuid, 30, QUuid) \
     F(QVariant, 41, QVariant) \
     F(QRegularExpression, 44, QRegularExpression) \
@@ -216,7 +223,7 @@ inline Q_DECL_CONSTEXPR int qMetaTypeId();
     F(QQueue) \
     F(QStack) \
     F(QSet) \
-    F(QLinkedList)
+    /*end*/
 
 #define QT_FOR_EACH_AUTOMATIC_TEMPLATE_2ARG(F) \
     F(QHash, class) \
@@ -849,7 +856,7 @@ struct VariantData
     const uint flags;
 private:
     // copy constructor allowed to be implicit to silence level 4 warning from MSVC
-    VariantData &operator=(const VariantData &) Q_DECL_EQ_DELETE;
+    VariantData &operator=(const VariantData &) = delete;
 };
 
 template<typename const_iterator>
@@ -1715,12 +1722,17 @@ namespace QtPrivate {
         }
     };
 
+    // hack to delay name lookup to instantiation time by making
+    // EnableInternalData a dependent name:
+    template <typename T>
+    struct EnableInternalDataWrap;
+
     template<typename T>
     struct QSmartPointerConvertFunctor<QWeakPointer<T> >
     {
         QObject* operator()(const QWeakPointer<T> &p) const
         {
-            return p.data();
+            return QtPrivate::EnableInternalDataWrap<T>::internalData(p);
         }
     };
 }
@@ -1994,7 +2006,7 @@ struct QMetaTypeId< SINGLE_ARG_TEMPLATE<T> > \
     static int qt_metatype_id() \
     { \
         static QBasicAtomicInt metatype_id = Q_BASIC_ATOMIC_INITIALIZER(0); \
-        if (const int id = metatype_id.load()) \
+        if (const int id = metatype_id.loadRelaxed()) \
             return id; \
         const char *tName = QMetaType::typeName(qMetaTypeId<T>()); \
         Q_ASSERT(tName); \

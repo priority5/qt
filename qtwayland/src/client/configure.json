@@ -93,6 +93,11 @@
             "condition": "features.draganddrop || features.clipboard",
             "output": [ "privateFeature" ]
         },
+        "wayland-client-primary-selection": {
+            "label": "primary-selection clipboard",
+            "condition": "features.clipboard",
+            "output": [ "privateFeature" ]
+        },
         "wayland-client-fullscreen-shell-v1": {
             "label": "fullscreen-shell-v1",
             "condition": "features.wayland-client",
@@ -158,14 +163,9 @@
             "condition": "features.wayland-client && features.opengl && features.egl && tests.dmabuf-server-buffer",
             "output": [ "privateFeature" ]
         },
-        "wayland-client-texture-sharing-experimental" : {
-            "label": "Texture sharing (experimental)",
-            "autoDetect": "false",
-            "output": [ "privateFeature" ]
-        },
         "wayland-vulkan-server-buffer": {
             "label": "Vulkan-based server buffer integration",
-            "condition": "features.wayland-client && features.opengl && features.egl && tests.vulkan-server-buffer && features.wayland-client-texture-sharing-experimental",
+            "condition": "features.wayland-client && features.opengl && features.egl && tests.vulkan-server-buffer",
             "output": [ "privateFeature" ]
         },
         "wayland-shm-emulation-server-buffer": {

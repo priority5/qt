@@ -766,8 +766,8 @@ static void writeDoubleToCbor(QCborStreamWriter &writer, double d, QCborValue::E
     if (qt_is_nan(d)) {
         if (opt & QCborValue::UseFloat16) {
             if ((opt & QCborValue::UseFloat16) == QCborValue::UseFloat16)
-                return writer.append(qfloat16(qt_qnan()));
-            return writer.append(float(qt_qnan()));
+                return writer.append(std::numeric_limits<qfloat16>::quiet_NaN());
+            return writer.append(std::numeric_limits<float>::quiet_NaN());
         }
         return writer.append(qt_qnan());
     }
@@ -849,7 +849,7 @@ QCborContainerPrivate *QCborContainerPrivate::clone(QCborContainerPrivate *d, qs
 
 QCborContainerPrivate *QCborContainerPrivate::detach(QCborContainerPrivate *d, qsizetype reserved)
 {
-    if (!d || d->ref.load() != 1)
+    if (!d || d->ref.loadRelaxed() != 1)
         return clone(d, reserved);
     return d;
 }
@@ -884,12 +884,12 @@ void QCborContainerPrivate::replaceAt_complex(Element &e, const QCborValue &valu
 
         // detect self-assignment
         if (Q_UNLIKELY(this == value.container)) {
-            Q_ASSERT(ref.load() >= 2);
+            Q_ASSERT(ref.loadRelaxed() >= 2);
             if (disp == MoveContainer)
                 ref.deref();    // not deref() because it can't drop to 0
             QCborContainerPrivate *d = QCborContainerPrivate::clone(this);
             d->elements.detach();
-            d->ref.store(1);
+            d->ref.storeRelaxed(1);
             e.container = d;
         } else {
             e.container = value.container;
@@ -915,7 +915,7 @@ void QCborContainerPrivate::replaceAt_complex(Element &e, const QCborValue &valu
 // in qstring.cpp
 void qt_to_latin1_unchecked(uchar *dst, const ushort *uc, qsizetype len);
 
-Q_NEVER_INLINE void QCborContainerPrivate::appendAsciiString(const QString &s)
+Q_NEVER_INLINE void QCborContainerPrivate::appendAsciiString(QStringView s)
 {
     qsizetype len = s.size();
     QtCbor::Element e;
@@ -926,7 +926,7 @@ Q_NEVER_INLINE void QCborContainerPrivate::appendAsciiString(const QString &s)
 
     char *ptr = data.data() + e.value + sizeof(ByteData);
     uchar *l = reinterpret_cast<uchar *>(ptr);
-    const ushort *uc = (const ushort *)s.unicode();
+    const ushort *uc = (const ushort *)s.utf16();
     qt_to_latin1_unchecked(l, uc, len);
 }
 
@@ -1368,7 +1368,7 @@ static Element decodeBasicValueFromCbor(QCborStreamReader &reader)
 static inline QCborContainerPrivate *createContainerFromCbor(QCborStreamReader &reader)
 {
     auto d = new QCborContainerPrivate;
-    d->ref.store(1);
+    d->ref.storeRelaxed(1);
     d->decodeFromCbor(reader);
     return d;
 }
@@ -1643,20 +1643,30 @@ QCborValue::QCborValue(const QByteArray &ba)
     : n(0), container(new QCborContainerPrivate), t(ByteArray)
 {
     container->appendByteData(ba.constData(), ba.size(), t);
-    container->ref.store(1);
+    container->ref.storeRelaxed(1);
 }
 
+#if QT_STRINGVIEW_LEVEL < 2
 /*!
     Creates a QCborValue with string value \a s. The value can later be
     retrieved using toString().
 
     \sa toString(), isString(), isByteArray()
  */
-QCborValue::QCborValue(const QString &s)
+QCborValue::QCborValue(const QString &s) : QCborValue(qToStringViewIgnoringNull(s)) {}
+#endif
+
+/*!
+    Creates a QCborValue with string value \a s. The value can later be
+    retrieved using toString().
+
+    \sa toString(), isString(), isByteArray()
+*/
+QCborValue::QCborValue(QStringView s)
     : n(0), container(new QCborContainerPrivate), t(String)
 {
     container->append(s);
-    container->ref.store(1);
+    container->ref.storeRelaxed(1);
 }
 
 /*!
@@ -1671,7 +1681,7 @@ QCborValue::QCborValue(QLatin1String s)
     : n(0), container(new QCborContainerPrivate), t(String)
 {
     container->append(s);
-    container->ref.store(1);
+    container->ref.storeRelaxed(1);
 }
 
 /*!
@@ -1719,7 +1729,7 @@ QCborValue::QCborValue(const QCborMap &m)
 QCborValue::QCborValue(QCborTag t, const QCborValue &tv)
     : n(-1), container(new QCborContainerPrivate), t(Tag)
 {
-    container->ref.store(1);
+    container->ref.storeRelaxed(1);
     container->append(t);
     container->append(tv);
 }
@@ -2941,7 +2951,7 @@ static QDebug debugContents(QDebug &dbg, const QCborValue &v)
     }
     if (v.isSimpleType())
         return dbg << v.toSimpleType();
-    return dbg << "<unknown type " << hex << int(v.type()) << dec << '>';
+    return dbg << "<unknown type " << Qt::hex << int(v.type()) << Qt::dec << '>';
 }
 QDebug operator<<(QDebug dbg, const QCborValue &v)
 {

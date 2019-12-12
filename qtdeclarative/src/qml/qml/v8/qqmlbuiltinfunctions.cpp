@@ -40,6 +40,7 @@
 #include "qqmlbuiltinfunctions_p.h"
 
 #include <QtQml/qqmlcomponent.h>
+#include <QtQml/qqmlfile.h>
 #include <private/qqmlengine_p.h>
 #include <private/qqmlcomponent_p.h>
 #include <private/qqmlloggingcategory_p.h>
@@ -47,7 +48,6 @@
 #if QT_CONFIG(qml_locale)
 #include <private/qqmllocale_p.h>
 #endif
-#include <private/qv8engine_p.h>
 #include <private/qqmldelayedcallqueue_p.h>
 #include <QFileInfo>
 
@@ -439,7 +439,7 @@ ReturnedValue QtObject::method_font(const FunctionObject *b, const Value *, cons
 
     QV4::ExecutionEngine *v4 = scope.engine;
     bool ok = false;
-    QVariant v = QQml_valueTypeProvider()->createVariantFromJsObject(QMetaType::QFont, QQmlV4Handle(argv[0]), v4, &ok);
+    QVariant v = QQml_valueTypeProvider()->createVariantFromJsObject(QMetaType::QFont, argv[0], v4, &ok);
     if (!ok)
         THROW_GENERIC_ERROR("Qt.font(): Invalid argument: no valid font subproperties specified");
     return scope.engine->fromVariant(v);
@@ -559,7 +559,7 @@ ReturnedValue QtObject::method_matrix4x4(const FunctionObject *b, const Value *,
 
     if (argc == 1 && argv[0].isObject()) {
         bool ok = false;
-        QVariant v = QQml_valueTypeProvider()->createVariantFromJsObject(QMetaType::QMatrix4x4, QQmlV4Handle(argv[0]), scope.engine, &ok);
+        QVariant v = QQml_valueTypeProvider()->createVariantFromJsObject(QMetaType::QMatrix4x4, argv[0], scope.engine, &ok);
         if (!ok)
             THROW_GENERIC_ERROR("Qt.matrix4x4(): Invalid argument: not a valid matrix4x4 values array");
         return scope.engine->fromVariant(v);
@@ -1710,10 +1710,8 @@ ReturnedValue ConsoleObject::method_time(const FunctionObject *b, const Value *,
     if (argc != 1)
         THROW_GENERIC_ERROR("console.time(): Invalid arguments");
 
-    QV8Engine *v8engine = scope.engine->v8Engine;
-
     QString name = argv[0].toQStringNoThrow();
-    v8engine->startTimer(name);
+    scope.engine->startTimer(name);
     return QV4::Encode::undefined();
 }
 
@@ -1723,11 +1721,9 @@ ReturnedValue ConsoleObject::method_timeEnd(const FunctionObject *b, const Value
     if (argc != 1)
         THROW_GENERIC_ERROR("console.timeEnd(): Invalid arguments");
 
-    QV8Engine *v8engine = scope.engine->v8Engine;
-
     QString name = argv[0].toQStringNoThrow();
     bool wasRunning;
-    qint64 elapsed = v8engine->stopTimer(name, &wasRunning);
+    qint64 elapsed = scope.engine->stopTimer(name, &wasRunning);
     if (wasRunning) {
         qDebug("%s: %llims", qPrintable(name), elapsed);
     }
@@ -1743,13 +1739,12 @@ ReturnedValue ConsoleObject::method_count(const FunctionObject *b, const Value *
 
     Scope scope(b);
     QV4::ExecutionEngine *v4 = scope.engine;
-    QV8Engine *v8engine = scope.engine->v8Engine;
 
     QV4::CppStackFrame *frame = v4->currentStackFrame;
 
     QString scriptName = frame->source();
 
-    int value = v8engine->consoleCountHelper(scriptName, frame->lineNumber(), 0);
+    int value = v4->consoleCountHelper(scriptName, frame->lineNumber(), 0);
     QString message = name + QLatin1String(": ") + QString::number(value);
 
     QMessageLogger(qPrintable(scriptName), frame->lineNumber(),
@@ -1972,29 +1967,32 @@ ReturnedValue GlobalExtensions::method_qsTr(const FunctionObject *b, const Value
         THROW_GENERIC_ERROR("qsTr(): third argument (n) must be a number");
 
     QString context;
-    if (QQmlContextData *ctxt = scope.engine->callingQmlContext()) {
-        QString path = ctxt->urlString();
-        int lastSlash = path.lastIndexOf(QLatin1Char('/'));
-        int lastDot = path.lastIndexOf(QLatin1Char('.'));
-        int length = lastDot - (lastSlash + 1);
-        context = (lastSlash > -1) ? path.mid(lastSlash + 1, (length > -1) ? length : -1) : QString();
-    } else {
-        CppStackFrame *frame = scope.engine->currentStackFrame;
-        // The first non-empty source URL in the call stack determines the translation context.
-        while (frame && context.isEmpty()) {
-            if (CompiledData::CompilationUnit *unit = frame->v4Function->compilationUnit) {
-                QString fileName = unit->fileName();
-                QUrl url(unit->fileName());
-                if (url.isValid() && url.isRelative()) {
-                    context = url.fileName();
-                } else {
-                    context = QQmlFile::urlToLocalFileOrQrc(fileName);
-                    if (context.isEmpty() && fileName.startsWith(QLatin1String(":/")))
-                        context = fileName;
-                }
-                context = QFileInfo(context).baseName();
+    CppStackFrame *frame = scope.engine->currentStackFrame;
+    // The first non-empty source URL in the call stack determines the translation context.
+    while (frame && context.isEmpty()) {
+        if (CompiledData::CompilationUnitBase *baseUnit = frame->v4Function->compilationUnit) {
+            const auto *unit = static_cast<const CompiledData::CompilationUnit *>(baseUnit);
+            QString fileName = unit->fileName();
+            QUrl url(unit->fileName());
+            if (url.isValid() && url.isRelative()) {
+                context = url.fileName();
+            } else {
+                context = QQmlFile::urlToLocalFileOrQrc(fileName);
+                if (context.isEmpty() && fileName.startsWith(QLatin1String(":/")))
+                    context = fileName;
             }
-            frame = frame->parent;
+            context = QFileInfo(context).baseName();
+        }
+        frame = frame->parent;
+    }
+
+    if (context.isEmpty()) {
+        if (QQmlContextData *ctxt = scope.engine->callingQmlContext()) {
+            QString path = ctxt->urlString();
+            int lastSlash = path.lastIndexOf(QLatin1Char('/'));
+            int lastDot = path.lastIndexOf(QLatin1Char('.'));
+            int length = lastDot - (lastSlash + 1);
+            context = (lastSlash > -1) ? path.mid(lastSlash + 1, (length > -1) ? length : -1) : QString();
         }
     }
 
@@ -2173,8 +2171,7 @@ function.
 */
 ReturnedValue QtObject::method_callLater(const FunctionObject *b, const Value *thisObject, const Value *argv, int argc)
 {
-    QV8Engine *v8engine = b->engine()->v8Engine;
-    return v8engine->delayedCallQueue()->addUniquelyAndExecuteLater(b, thisObject, argv, argc);
+    return b->engine()->delayedCallQueue()->addUniquelyAndExecuteLater(b, thisObject, argv, argc);
 }
 
 QT_END_NAMESPACE

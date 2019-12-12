@@ -195,7 +195,7 @@ void QNSWindowBackingStore::flush(QWindow *window, const QRegion &region, const 
     // context is set up correctly (coordinate system, clipping, etc). Outside
     // of the normal display cycle there is no focused view, as explained above,
     // so we have to handle it manually. There's also a corner case inside the
-    // normal display cycle due to way QWidgetBackingStore composits native child
+    // normal display cycle due to way QWidgetRepaintManager composits native child
     // widgets, where we'll get a flush of a native child during the drawRect of
     // its parent/ancestor, and the parent/ancestor being the one locked by AppKit.
     // In this case we also need to lock and unlock focus manually.
@@ -560,17 +560,26 @@ void QCALayerBackingStore::flush(QWindow *flushedWindow, const QRegion &region, 
         flushedView.layer.contents = nil;
     }
 
-    qCInfo(lcQpaBackingStore) << "Flushing" << backBufferSurface
-         << "to" << flushedView.layer << "of" << flushedView;
+    if (flushedView == backingStoreView) {
+        qCInfo(lcQpaBackingStore) << "Flushing" << backBufferSurface
+            << "to" << flushedView.layer << "of" << flushedView;
+        flushedView.layer.contents = backBufferSurface;
+    } else {
+        auto subviewRect = [flushedView convertRect:flushedView.bounds toView:backingStoreView];
+        auto scale = flushedView.layer.contentsScale;
+        subviewRect = CGRectApplyAffineTransform(subviewRect, CGAffineTransformMakeScale(scale, scale));
 
-    flushedView.layer.contents = backBufferSurface;
+        // We make a copy of the image data up front, which means we don't
+        // need to mark the IOSurface as being in use. FIXME: Investigate
+        // if there's a cheaper way to get sub-image data to a layer.
+        m_buffers.back()->lock(QPlatformGraphicsBuffer::SWReadAccess);
+        QImage subImage = m_buffers.back()->asImage()->copy(QRectF::fromCGRect(subviewRect).toRect());
+        m_buffers.back()->unlock();
 
-    if (flushedView != backingStoreView) {
-        const CGSize backingStoreSize = backingStoreView.bounds.size;
-        flushedView.layer.contentsRect = CGRectApplyAffineTransform(
-            [flushedView convertRect:flushedView.bounds toView:backingStoreView],
-            // The contentsRect is in unit coordinate system
-            CGAffineTransformMakeScale(1.0 / backingStoreSize.width, 1.0 / backingStoreSize.height));
+        qCInfo(lcQpaBackingStore) << "Flushing" << subImage
+            << "to" << flushedView.layer << "of subview" << flushedView;
+        QCFType<CGImageRef> cgImage = subImage.toCGImage();
+        flushedView.layer.contents = (__bridge id)static_cast<CGImageRef>(cgImage);
     }
 
     // Since we may receive multiple flushes before a new frame is started, we do not

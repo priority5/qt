@@ -84,7 +84,7 @@
 #include "qkeysequence.h"
 #define ACCEL_KEY(k) ((!QCoreApplication::testAttribute(Qt::AA_DontShowIconsInMenus) \
                         && QGuiApplication::styleHints()->showShortcutsInContextMenus()) \
-                      && !qApp->d_func()->shortcutMap.hasShortcutForKeySequence(k) ? \
+                      && !QGuiApplicationPrivate::instance()->shortcutMap.hasShortcutForKeySequence(k) ? \
                       QLatin1Char('\t') + QKeySequence(k).toString(QKeySequence::NativeText) : QString())
 #else
 #define ACCEL_KEY(k) QString()
@@ -315,7 +315,7 @@ QString QLineEdit::text() const
 void QLineEdit::setText(const QString& text)
 {
     Q_D(QLineEdit);
-    d->control->setText(text);
+    d->setText(text);
 }
 
 /*!
@@ -684,11 +684,12 @@ QSize QLineEdit::sizeHint() const
     ensurePolished();
     QFontMetrics fm(font());
     const int iconSize = style()->pixelMetric(QStyle::PM_SmallIconSize, 0, this);
-    int h = qMax(fm.height(), qMax(14, iconSize - 2)) + 2*d->verticalMargin
-            + d->topTextMargin + d->bottomTextMargin
+    const QMargins tm = d->effectiveTextMargins();
+    int h = qMax(fm.height(), qMax(14, iconSize - 2)) + 2 * QLineEditPrivate::verticalMargin
+            + tm.top() + tm.bottom()
             + d->topmargin + d->bottommargin;
-    int w = fm.horizontalAdvance(QLatin1Char('x')) * 17 + 2*d->horizontalMargin
-            + d->effectiveLeftTextMargin() + d->effectiveRightTextMargin()
+    int w = fm.horizontalAdvance(QLatin1Char('x')) * 17 + 2 * QLineEditPrivate::horizontalMargin
+            + tm.left() + tm.right()
             + d->leftmargin + d->rightmargin; // "some"
     QStyleOptionFrame opt;
     initStyleOption(&opt);
@@ -708,11 +709,12 @@ QSize QLineEdit::minimumSizeHint() const
     Q_D(const QLineEdit);
     ensurePolished();
     QFontMetrics fm = fontMetrics();
-    int h = fm.height() + qMax(2*d->verticalMargin, fm.leading())
-            + d->topTextMargin + d->bottomTextMargin
+    const QMargins tm = d->effectiveTextMargins();
+    int h = fm.height() + qMax(2 * QLineEditPrivate::verticalMargin, fm.leading())
+            + tm.top() + tm.bottom()
             + d->topmargin + d->bottommargin;
     int w = fm.maxWidth()
-            + d->effectiveLeftTextMargin() + d->effectiveRightTextMargin()
+            + tm.left() + tm.right()
             + d->leftmargin + d->rightmargin;
     QStyleOptionFrame opt;
     initStyleOption(&opt);
@@ -1127,17 +1129,11 @@ bool QLineEdit::hasAcceptableInput() const
     sizes \a left, \a top, \a right, and \a bottom.
     \since 4.5
 
-    See also getTextMargins().
+    See also textMargins().
 */
 void QLineEdit::setTextMargins(int left, int top, int right, int bottom)
 {
-    Q_D(QLineEdit);
-    d->leftTextMargin = left;
-    d->topTextMargin = top;
-    d->rightTextMargin = right;
-    d->bottomTextMargin = bottom;
-    updateGeometry();
-    update();
+    setTextMargins({left, top, right, bottom});
 }
 
 /*!
@@ -1148,10 +1144,17 @@ void QLineEdit::setTextMargins(int left, int top, int right, int bottom)
 */
 void QLineEdit::setTextMargins(const QMargins &margins)
 {
-    setTextMargins(margins.left(), margins.top(), margins.right(), margins.bottom());
+    Q_D(QLineEdit);
+    d->textMargins = margins;
+    updateGeometry();
+    update();
 }
 
+#if QT_DEPRECATED_SINCE(5, 14)
 /*!
+    \obsolete
+    Use textMargins()
+
     Returns the widget's text margins for \a left, \a top, \a right, and \a bottom.
     \since 4.5
 
@@ -1159,16 +1162,17 @@ void QLineEdit::setTextMargins(const QMargins &margins)
 */
 void QLineEdit::getTextMargins(int *left, int *top, int *right, int *bottom) const
 {
-    Q_D(const QLineEdit);
+    QMargins m = textMargins();
     if (left)
-        *left = d->leftTextMargin;
+        *left = m.left();
     if (top)
-        *top = d->topTextMargin;
+        *top = m.top();
     if (right)
-        *right = d->rightTextMargin;
+        *right = m.right();
     if (bottom)
-        *bottom = d->bottomTextMargin;
+        *bottom = m.bottom();
 }
+#endif
 
 /*!
     \since 4.6
@@ -1179,7 +1183,7 @@ void QLineEdit::getTextMargins(int *left, int *top, int *right, int *bottom) con
 QMargins QLineEdit::textMargins() const
 {
     Q_D(const QLineEdit);
-    return QMargins(d->leftTextMargin, d->topTextMargin, d->rightTextMargin, d->bottomTextMargin);
+    return d->textMargins;
 }
 
 /*!
@@ -1481,7 +1485,7 @@ bool QLineEdit::event(QEvent * e)
         d->initMouseYThreshold();
     }
 #ifdef QT_KEYPAD_NAVIGATION
-    if (QApplication::keypadNavigationEnabled()) {
+    if (QApplicationPrivate::keypadNavigationEnabled()) {
         if (e->type() == QEvent::EnterEditFocus) {
             end(false);
             d->setCursorVisible(true);
@@ -1489,8 +1493,11 @@ bool QLineEdit::event(QEvent * e)
         } else if (e->type() == QEvent::LeaveEditFocus) {
             d->setCursorVisible(false);
             d->control->setCursorBlinkEnabled(false);
-            if (d->control->hasAcceptableInput() || d->control->fixup())
+            if (d->edited && (d->control->hasAcceptableInput()
+                              || d->control->fixup())) {
                 emit editingFinished();
+                d->edited = false;
+            }
         }
     }
 #endif
@@ -1510,7 +1517,7 @@ void QLineEdit::mousePressEvent(QMouseEvent* e)
     if (e->button() == Qt::RightButton)
         return;
 #ifdef QT_KEYPAD_NAVIGATION
-    if (QApplication::keypadNavigationEnabled() && !hasEditFocus()) {
+    if (QApplication::QApplicationPrivate() && !hasEditFocus()) {
         setEditFocus(true);
         // Get the completion list to pop up.
         if (d->control->completer())
@@ -1603,7 +1610,7 @@ void QLineEdit::mouseReleaseEvent(QMouseEvent* e)
     }
 #endif
 #ifndef QT_NO_CLIPBOARD
-    if (QApplication::clipboard()->supportsSelection()) {
+    if (QGuiApplication::clipboard()->supportsSelection()) {
         if (e->button() == Qt::LeftButton) {
             d->control->copy(QClipboard::Selection);
         } else if (!d->control->isReadOnly() && e->button() == Qt::MidButton) {
@@ -1719,7 +1726,7 @@ void QLineEdit::keyPressEvent(QKeyEvent *event)
     bool select = false;
     switch (event->key()) {
         case Qt::Key_Select:
-            if (QApplication::keypadNavigationEnabled()) {
+            if (QApplicationPrivate::keypadNavigationEnabled()) {
                 if (hasEditFocus()) {
                     setEditFocus(false);
                     if (d->control->completer() && d->control->completer()->popup()->isVisible())
@@ -1730,13 +1737,13 @@ void QLineEdit::keyPressEvent(QKeyEvent *event)
             break;
         case Qt::Key_Back:
         case Qt::Key_No:
-            if (!QApplication::keypadNavigationEnabled() || !hasEditFocus()) {
+            if (!QApplicationPrivate::keypadNavigationEnabled() || !hasEditFocus()) {
                 event->ignore();
                 return;
             }
             break;
         default:
-            if (QApplication::keypadNavigationEnabled()) {
+            if (QApplicationPrivate::keypadNavigationEnabled()) {
                 if (!hasEditFocus() && !(event->modifiers() & Qt::ControlModifier)) {
                     if (!event->text().isEmpty() && event->text().at(0).isPrint()
                         && !isReadOnly())
@@ -1751,7 +1758,7 @@ void QLineEdit::keyPressEvent(QKeyEvent *event)
 
 
 
-    if (QApplication::keypadNavigationEnabled() && !select && !hasEditFocus()) {
+    if (QApplicationPrivate::keypadNavigationEnabled() && !select && !hasEditFocus()) {
         setEditFocus(true);
         if (event->key() == Qt::Key_Select)
             return; // Just start. No action.
@@ -1798,7 +1805,7 @@ void QLineEdit::inputMethodEvent(QInputMethodEvent *e)
     // Focus in if currently in navigation focus on the widget
     // Only focus in on preedits, to allow input methods to
     // commit text as they focus out without interfering with focus
-    if (QApplication::keypadNavigationEnabled()
+    if (QApplicationPrivate::keypadNavigationEnabled()
         && hasFocus() && !hasEditFocus()
         && !e->preeditString().isEmpty())
         setEditFocus(true);
@@ -1871,7 +1878,7 @@ void QLineEdit::focusInEvent(QFocusEvent *e)
         d->clickCausedFocus = 1;
     }
 #ifdef QT_KEYPAD_NAVIGATION
-    if (!QApplication::keypadNavigationEnabled() || (hasEditFocus() && ( e->reason() == Qt::PopupFocusReason))) {
+    if (!QApplicationPrivate::keypadNavigationEnabled() || (hasEditFocus() && ( e->reason() == Qt::PopupFocusReason))) {
 #endif
     d->control->setBlinkingCursorEnabled(true);
     QStyleOptionFrame opt;
@@ -1897,7 +1904,6 @@ void QLineEdit::focusInEvent(QFocusEvent *e)
 
 /*!\reimp
 */
-
 void QLineEdit::focusOutEvent(QFocusEvent *e)
 {
     Q_D(QLineEdit);
@@ -1916,12 +1922,14 @@ void QLineEdit::focusOutEvent(QFocusEvent *e)
     d->control->setBlinkingCursorEnabled(false);
 #ifdef QT_KEYPAD_NAVIGATION
     // editingFinished() is already emitted on LeaveEditFocus
-    if (!QApplication::keypadNavigationEnabled())
+    if (!QApplicationPrivate::keypadNavigationEnabled())
 #endif
     if (reason != Qt::PopupFocusReason
         || !(QApplication::activePopupWidget() && QApplication::activePopupWidget()->parentWidget() == this)) {
-            if (hasAcceptableInput() || d->control->fixup())
+            if (d->edited && (hasAcceptableInput() || d->control->fixup())) {
                 emit editingFinished();
+                d->edited = false;
+            }
     }
 #ifdef QT_KEYPAD_NAVIGATION
     d->control->setCancelText(QString());
@@ -1946,27 +1954,25 @@ void QLineEdit::paintEvent(QPaintEvent *)
     initStyleOption(&panel);
     style()->drawPrimitive(QStyle::PE_PanelLineEdit, &panel, &p, this);
     QRect r = style()->subElementRect(QStyle::SE_LineEditContents, &panel, this);
-    r.setX(r.x() + d->effectiveLeftTextMargin());
-    r.setY(r.y() + d->topTextMargin);
-    r.setRight(r.right() - d->effectiveRightTextMargin());
-    r.setBottom(r.bottom() - d->bottomTextMargin);
+    r = r.marginsRemoved(d->effectiveTextMargins());
     p.setClipRect(r);
 
     QFontMetrics fm = fontMetrics();
     Qt::Alignment va = QStyle::visualAlignment(d->control->layoutDirection(), QFlag(d->alignment));
     switch (va & Qt::AlignVertical_Mask) {
      case Qt::AlignBottom:
-         d->vscroll = r.y() + r.height() - fm.height() - d->verticalMargin;
+         d->vscroll = r.y() + r.height() - fm.height() - QLineEditPrivate::verticalMargin;
          break;
      case Qt::AlignTop:
-         d->vscroll = r.y() + d->verticalMargin;
+         d->vscroll = r.y() + QLineEditPrivate::verticalMargin;
          break;
      default:
          //center
          d->vscroll = r.y() + (r.height() - fm.height() + 1) / 2;
          break;
     }
-    QRect lineRect(r.x() + d->horizontalMargin, d->vscroll, r.width() - 2*d->horizontalMargin, fm.height());
+    QRect lineRect(r.x() + QLineEditPrivate::horizontalMargin, d->vscroll,
+                   r.width() - 2 * QLineEditPrivate::horizontalMargin, fm.height());
 
     if (d->shouldShowPlaceholderText()) {
         if (!d->placeholderText.isEmpty()) {
@@ -2036,7 +2042,7 @@ void QLineEdit::paintEvent(QPaintEvent *)
     int flags = QWidgetLineControl::DrawText;
 
 #ifdef QT_KEYPAD_NAVIGATION
-    if (!QApplication::keypadNavigationEnabled() || hasEditFocus())
+    if (!QApplicationPrivate::keypadNavigationEnabled() || hasEditFocus())
 #endif
     if (d->control->hasSelectedText() || (d->cursorVisible && !d->control->inputMask().isEmpty() && !d->control->isReadOnly())){
         flags |= QWidgetLineControl::DrawSelections;
@@ -2202,7 +2208,7 @@ QMenu *QLineEdit::createStandardContextMenu()
 
     if (!isReadOnly()) {
         action = popup->addAction(QLineEdit::tr("&Paste") + ACCEL_KEY(QKeySequence::Paste));
-        action->setEnabled(!d->control->isReadOnly() && !QApplication::clipboard()->text().isEmpty());
+        action->setEnabled(!d->control->isReadOnly() && !QGuiApplication::clipboard()->text().isEmpty());
         setActionIcon(action, QStringLiteral("edit-paste"));
         connect(action, SIGNAL(triggered()), SLOT(paste()));
     }
@@ -2220,6 +2226,7 @@ QMenu *QLineEdit::createStandardContextMenu()
 
     action = popup->addAction(QLineEdit::tr("Select All") + ACCEL_KEY(QKeySequence::SelectAll));
     action->setEnabled(!d->control->text().isEmpty() && !d->control->allSelected());
+    setActionIcon(action, QStringLiteral("edit-select-all"));
     d->selectAllAction = action;
     connect(action, SIGNAL(triggered()), SLOT(selectAll()));
 

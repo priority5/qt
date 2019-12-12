@@ -28,7 +28,7 @@
 
 import QtQuick 2.0
 import QtTest 1.0
-import QtWebEngine 1.9
+import QtWebEngine 1.10
 import Qt.labs.platform 1.0
 
 TestWebEngineView {
@@ -42,10 +42,22 @@ TestWebEngineView {
     property bool cancelDownload: false
     property var downloadState: []
     property var downloadInterruptReason: null
+    property url downloadUrl: ""
+    property string suggestedFileName: ""
+    property string downloadDirectory: ""
+    property string downloadFileName: ""
+    property string downloadedPath: ""
+    property string downloadedSetPath: ""
+    property int downloadDirectoryChanged: 0
+    property int downloadFileNameChanged: 0
+    property int downloadPathChanged: 0
 
     function urlToPath(url) {
         var path = url.toString()
-        path = path.replace(/^(file:\/{2})/,"")
+        if (Qt.platform.os !== "windows")
+            path = path.replace(/^(file:\/{2})/, "")
+        else
+            path = path.replace(/^(file:\/{3})/, "")
         return path
     }
 
@@ -66,21 +78,36 @@ TestWebEngineView {
         ignoreUnknownSignals: true
         onStateChanged: downloadState.push(target.state)
         onInterruptReasonChanged: downloadInterruptReason = target.interruptReason
+        onDownloadDirectoryChanged: downloadDirectoryChanged++
+        onDownloadFileNameChanged: downloadFileNameChanged++
+        onPathChanged: downloadPathChanged++
     }
 
     WebEngineProfile {
         id: testDownloadProfile
 
         onDownloadRequested: {
+            testDownloadProfile.downloadPath = urlToPath(StandardPaths.writableLocation(StandardPaths.TempLocation))
             downloadState.push(download.state)
             downloadItemConnections.target = download
             if (cancelDownload) {
                 download.cancel()
             } else {
                 totalBytes = download.totalBytes
-                download.path = "testfile.zip"
+
+                if (downloadedSetPath.length != 0) {
+                    download.path = testDownloadProfile.downloadPath + downloadedSetPath
+                    downloadedPath = download.path
+                } else {
+                    download.downloadDirectory = downloadDirectory.length != 0 ? testDownloadProfile.downloadPath + downloadDirectory : testDownloadProfile.downloadPath
+                    download.downloadFileName = downloadFileName.length != 0 ? downloadFileName : "testfile.zip"
+                    downloadedPath = download.downloadDirectory + download.downloadFileName
+                }
+
                 download.accept()
             }
+            downloadUrl = download.url
+            suggestedFileName = download.suggestedFileName
         }
         onDownloadFinished: {
             receivedBytes = download.receivedBytes;
@@ -99,6 +126,13 @@ TestWebEngineView {
             downloadItemConnections.target = null
             downloadState = []
             downloadInterruptReason = null
+            downloadDirectoryChanged = 0
+            downloadFileNameChanged = 0
+            downloadPathChanged = 0
+            downloadDirectory = ""
+            downloadFileName = ""
+            downloadedPath = ""
+            downloadedSetPath = ""
         }
 
         function test_downloadRequest() {
@@ -106,6 +140,8 @@ TestWebEngineView {
             webEngineView.url = Qt.resolvedUrl("download.zip")
             downLoadRequestedSpy.wait()
             compare(downLoadRequestedSpy.count, 1)
+            compare(downloadUrl, webEngineView.url)
+            compare(suggestedFileName, "download.zip")
             compare(downloadState[0], WebEngineDownloadItem.DownloadRequested)
             verify(!downloadInterruptReason)
         }
@@ -115,6 +151,8 @@ TestWebEngineView {
             webEngineView.url = Qt.resolvedUrl("download.zip")
             downLoadRequestedSpy.wait()
             compare(downLoadRequestedSpy.count, 1)
+            compare(downloadUrl, webEngineView.url)
+            compare(suggestedFileName, "download.zip")
             compare(totalBytes, 325)
             verify(!downloadInterruptReason)
         }
@@ -124,6 +162,8 @@ TestWebEngineView {
             webEngineView.url = Qt.resolvedUrl("download.zip")
             downLoadRequestedSpy.wait()
             compare(downLoadRequestedSpy.count, 1)
+            compare(downloadUrl, webEngineView.url)
+            compare(suggestedFileName, "download.zip")
             compare(downloadState[0], WebEngineDownloadItem.DownloadRequested)
             tryCompare(downloadState, "1", WebEngineDownloadItem.DownloadInProgress)
             downloadFinishedSpy.wait()
@@ -138,6 +178,8 @@ TestWebEngineView {
             webEngineView.url = Qt.resolvedUrl("download.zip")
             downLoadRequestedSpy.wait()
             compare(downLoadRequestedSpy.count, 1)
+            compare(downloadUrl, webEngineView.url)
+            compare(suggestedFileName, "download.zip")
             compare(downloadFinishedSpy.count, 1)
             tryCompare(downloadState, "1", WebEngineDownloadItem.DownloadCancelled)
             tryCompare(webEngineView, "downloadInterruptReason", WebEngineDownloadItem.UserCanceled)
@@ -152,6 +194,51 @@ TestWebEngineView {
 
             testDownloadProfile.downloadPath = downloadPath;
             compare(testDownloadProfile.downloadPath, downloadPath);
+        }
+
+        function test_downloadToDirectoryWithFileName() {
+            compare(downLoadRequestedSpy.count, 0);
+            compare(downloadDirectoryChanged, 0);
+            compare(downloadFileNameChanged, 0);
+            downloadDirectory = "/test/";
+            downloadFileName = "test.zip";
+            webEngineView.url = Qt.resolvedUrl("download.zip");
+            downLoadRequestedSpy.wait();
+            compare(downLoadRequestedSpy.count, 1);
+            compare(downloadUrl, webEngineView.url);
+            compare(suggestedFileName, "download.zip");
+            compare(downloadState[0], WebEngineDownloadItem.DownloadRequested);
+            tryCompare(downloadState, "1", WebEngineDownloadItem.DownloadInProgress);
+            compare(downloadedPath, testDownloadProfile.downloadPath + downloadDirectory + downloadFileName);
+            compare(downloadDirectoryChanged, 1);
+            compare(downloadFileNameChanged, 1);
+            compare(downloadPathChanged, 2);
+            downloadFinishedSpy.wait();
+            compare(totalBytes, receivedBytes);
+            tryCompare(downloadState, "2", WebEngineDownloadItem.DownloadCompleted);
+            verify(!downloadInterruptReason);
+        }
+
+        function test_downloadWithSetPath() {
+            compare(downLoadRequestedSpy.count, 0);
+            compare(downloadDirectoryChanged, 0);
+            compare(downloadFileNameChanged, 0);
+            downloadedSetPath = "/test/test.zip";
+            webEngineView.url = Qt.resolvedUrl("download.zip");
+            downLoadRequestedSpy.wait();
+            compare(downLoadRequestedSpy.count, 1);
+            compare(downloadUrl, webEngineView.url);
+            compare(suggestedFileName, "download.zip");
+            compare(downloadState[0], WebEngineDownloadItem.DownloadRequested);
+            tryCompare(downloadState, "1", WebEngineDownloadItem.DownloadInProgress);
+            compare(downloadedPath, testDownloadProfile.downloadPath + downloadedSetPath);
+            compare(downloadDirectoryChanged, 1);
+            compare(downloadFileNameChanged, 1);
+            compare(downloadPathChanged, 2);
+            downloadFinishedSpy.wait();
+            compare(totalBytes, receivedBytes);
+            tryCompare(downloadState, "2", WebEngineDownloadItem.DownloadCompleted);
+            verify(!downloadInterruptReason);
         }
     }
 }

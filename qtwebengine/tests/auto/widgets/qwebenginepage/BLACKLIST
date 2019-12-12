@@ -4,8 +4,5 @@ osx
 [mouseMovementProperties]
 windows
 
-[getUserMediaRequestDesktopVideoManyPages]
-windows
-
-[getUserMediaRequestDesktopVideoManyRequests]
+[fullScreenRequested]
 windows

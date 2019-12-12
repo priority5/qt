@@ -159,7 +159,7 @@ DownloadResourceHandler::DownloadResourceHandler(
   // before StartOnUIThread gets called.  This is safe because deletion
   // will occur via PostTask() as well, which will serialized behind this
   // PostTask()
-  const ResourceRequestInfoImpl* request_info = GetRequestInfo();
+  ResourceRequestInfoImpl* request_info = GetRequestInfo();
   base::PostTaskWithTraits(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
@@ -205,17 +205,21 @@ void DownloadResourceHandler::OnRequestRedirected(
   url::Origin new_origin(url::Origin::Create(redirect_info.new_url));
   if (!follow_cross_origin_redirects_ &&
       !first_origin_.IsSameOriginWith(new_origin)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(
-            &NavigateOnUIThread, redirect_info.new_url, request()->url_chain(),
-            Referrer(GURL(redirect_info.new_referrer),
-                     Referrer::NetReferrerPolicyToBlinkReferrerPolicy(
-                         redirect_info.new_referrer_policy)),
-            GetRequestInfo()->HasUserGesture(),
-            true /* from_download_cross_origin_redirect */,
-            GetRequestInfo()->GetWebContentsGetterForRequest(),
-            GetRequestInfo()->frame_tree_node_id()));
+    if (redirect_info.new_url.SchemeIsHTTPOrHTTPS() ||
+        GetContentClient()->browser()->IsHandledURL(redirect_info.new_url)) {
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
+          base::BindOnce(
+              &NavigateOnUIThread, redirect_info.new_url,
+              request()->url_chain(),
+              Referrer(GURL(redirect_info.new_referrer),
+                       Referrer::NetReferrerPolicyToBlinkReferrerPolicy(
+                           redirect_info.new_referrer_policy)),
+              GetRequestInfo()->HasUserGesture(),
+              true /* from_download_cross_origin_redirect */,
+              GetRequestInfo()->GetWebContentsGetterForRequest(),
+              GetRequestInfo()->frame_tree_node_id()));
+    }
     controller->Cancel();
     return;
   }
@@ -309,7 +313,7 @@ void DownloadResourceHandler::OnStart(
     return;
   }
 
-  const ResourceRequestInfoImpl* request_info = GetRequestInfo();
+  ResourceRequestInfoImpl* request_info = GetRequestInfo();
   create_info->has_user_gesture = request_info->HasUserGesture();
   create_info->transition_type = request_info->GetPageTransition();
 
@@ -336,7 +340,7 @@ void DownloadResourceHandler::OnReadyToRead() {
 void DownloadResourceHandler::CancelRequest() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  const ResourceRequestInfoImpl* info = GetRequestInfo();
+  ResourceRequestInfoImpl* info = GetRequestInfo();
   ResourceDispatcherHostImpl::Get()->CancelRequest(
       info->GetChildID(),
       info->GetRequestID());
@@ -344,7 +348,7 @@ void DownloadResourceHandler::CancelRequest() {
 }
 
 std::string DownloadResourceHandler::DebugString() const {
-  const ResourceRequestInfoImpl* info = GetRequestInfo();
+  ResourceRequestInfoImpl* info = GetRequestInfo();
   return base::StringPrintf("{"
                             " url_ = " "\"%s\""
                             " info = {"
