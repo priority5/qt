@@ -62,8 +62,10 @@ Shader::Shader()
     : BackendNode(ReadWrite)
     , m_isLoaded(false)
     , m_dna(0)
+    , m_oldDna(0)
     , m_graphicsContext(nullptr)
     , m_status(QShaderProgram::NotReady)
+    , m_requiresFrontendSync(false)
 {
     m_shaderCode.resize(static_cast<int>(QShaderProgram::Compute) + 1);
 }
@@ -101,23 +103,24 @@ void Shader::cleanup()
     m_status = QShaderProgram::NotReady;
 }
 
-void Shader::initializeFromPeer(const Qt3DCore::QNodeCreatedChangeBasePtr &change)
+void Shader::syncFromFrontEnd(const QNode *frontEnd, bool firstTime)
 {
-    const auto typedChange = qSharedPointerCast<Qt3DCore::QNodeCreatedChange<QShaderProgramData>>(change);
-    const auto &data = typedChange->data;
+    const QShaderProgram *node = qobject_cast<const QShaderProgram *>(frontEnd);
+    if (!node)
+        return;
 
-    for (int i = QShaderProgram::Vertex; i <= QShaderProgram::Compute; ++i)
-        m_shaderCode[i].clear();
+    BackendNode::syncFromFrontEnd(frontEnd, firstTime);
 
-    m_shaderCode[QShaderProgram::Vertex] = data.vertexShaderCode;
-    m_shaderCode[QShaderProgram::TessellationControl] = data.tessellationControlShaderCode;
-    m_shaderCode[QShaderProgram::TessellationEvaluation] = data.tessellationEvaluationShaderCode;
-    m_shaderCode[QShaderProgram::Geometry] = data.geometryShaderCode;
-    m_shaderCode[QShaderProgram::Fragment] = data.fragmentShaderCode;
-    m_shaderCode[QShaderProgram::Compute] = data.computeShaderCode;
-    m_isLoaded = false;
-    updateDNA();
-    markDirty(AbstractRenderer::ShadersDirty);
+    if (firstTime)
+        for (int i = QShaderProgram::Vertex; i <= QShaderProgram::Compute; ++i)
+            m_shaderCode[i].clear();
+
+    for (int i = QShaderProgram::Vertex; i <= QShaderProgram::Compute; ++i) {
+        const QShaderProgram::ShaderType shaderType = static_cast<QShaderProgram::ShaderType>(i);
+        const QByteArray code = node->shaderCode(shaderType);
+        if (code != m_shaderCode.value(shaderType))
+            setShaderCode(shaderType, code);
+    }
 }
 
 void Shader::setGraphicsContext(GraphicsContext *context)
@@ -169,32 +172,10 @@ void Shader::setShaderCode(QShaderProgram::ShaderType type, const QByteArray &co
 
     m_shaderCode[type] = code;
     m_isLoaded = false;
-    setStatus(QShaderProgram::NotReady);
+    m_status = QShaderProgram::NotReady;
     updateDNA();
+    m_requiresFrontendSync = true;
     markDirty(AbstractRenderer::ShadersDirty);
-}
-
-void Shader::sceneChangeEvent(const Qt3DCore::QSceneChangePtr &e)
-{
-    if (e->type() == PropertyUpdated) {
-        QPropertyUpdatedChangePtr propertyChange = e.staticCast<QPropertyUpdatedChange>();
-        QVariant propertyValue = propertyChange->value();
-
-        if (propertyChange->propertyName() == QByteArrayLiteral("vertexShaderCode"))
-            setShaderCode(QShaderProgram::Vertex, propertyValue.toByteArray());
-        else if (propertyChange->propertyName() == QByteArrayLiteral("fragmentShaderCode"))
-            setShaderCode(QShaderProgram::Fragment, propertyValue.toByteArray());
-        else if (propertyChange->propertyName() == QByteArrayLiteral("tessellationControlShaderCode"))
-            setShaderCode(QShaderProgram::TessellationControl, propertyValue.toByteArray());
-        else if (propertyChange->propertyName() == QByteArrayLiteral("tessellationEvaluationShaderCode"))
-            setShaderCode(QShaderProgram::TessellationEvaluation, propertyValue.toByteArray());
-        else if (propertyChange->propertyName() == QByteArrayLiteral("geometryShaderCode"))
-            setShaderCode(QShaderProgram::Geometry, propertyValue.toByteArray());
-        else if (propertyChange->propertyName() == QByteArrayLiteral("computeShaderCode"))
-            setShaderCode(QShaderProgram::Compute, propertyValue.toByteArray());
-    }
-
-    BackendNode::sceneChangeEvent(e);
 }
 
 QHash<QString, ShaderUniform> Shader::activeUniformsForUniformBlock(int blockIndex) const
@@ -259,24 +240,17 @@ ShaderStorageBlock Shader::storageBlockForBlockName(const QString &blockName)
     return ShaderStorageBlock();
 }
 
-// To be called from a worker thread
-void Shader::submitPendingNotifications()
-{
-    const  QVector<Qt3DCore::QPropertyUpdatedChangePtr> notifications = std::move(m_pendingNotifications);
-    for (const Qt3DCore::QPropertyUpdatedChangePtr &notification : notifications)
-        notifyObservers(notification);
-}
-
 void Shader::prepareUniforms(ShaderParameterPack &pack)
 {
     const PackUniformHash &values = pack.uniforms();
 
-    auto it = values.cbegin();
-    const auto end = values.cend();
+    auto it = values.keys.cbegin();
+    const auto end = values.keys.cend();
+
     while (it != end) {
         // Find if there's a uniform with the same name id
         for (const ShaderUniform &uniform : qAsConst(m_uniforms)) {
-            if (uniform.m_nameId == it.key()) {
+            if (uniform.m_nameId == *it) {
                 pack.setSubmissionUniform(uniform);
                 break;
             }
@@ -434,32 +408,21 @@ void Shader::initializeFromReference(const Shader &other)
     m_shaderStorageBlockNames = other.m_shaderStorageBlockNames;
     m_shaderStorageBlocks = other.m_shaderStorageBlocks;
     m_isLoaded = other.m_isLoaded;
-    setStatus(other.status());
-    setLog(other.log());
+    m_status = other.m_status;
+    m_log = other.m_log;
+    m_requiresFrontendSync = true;
 }
 
 void Shader::setLog(const QString &log)
 {
-    if (log != m_log) {
-        m_log = log;
-        Qt3DCore::QPropertyUpdatedChangePtr e = Qt3DCore::QPropertyUpdatedChangePtr::create(peerId());
-        e->setDeliveryFlags(Qt3DCore::QSceneChange::DeliverToAll);
-        e->setPropertyName("log");
-        e->setValue(QVariant::fromValue(m_log));
-        m_pendingNotifications.push_back(e);
-    }
+    m_log = log;
+    m_requiresFrontendSync = true;
 }
 
 void Shader::setStatus(QShaderProgram::Status status)
 {
-    if (status != m_status) {
-        m_status = status;
-        Qt3DCore::QPropertyUpdatedChangePtr e = Qt3DCore::QPropertyUpdatedChangePtr::create(peerId());
-        e->setDeliveryFlags(Qt3DCore::QSceneChange::DeliverToAll);
-        e->setPropertyName("status");
-        e->setValue(QVariant::fromValue(m_status));
-        m_pendingNotifications.push_back(e);
-    }
+    m_status = status;
+    m_requiresFrontendSync = true;
 }
 
 } // namespace Render

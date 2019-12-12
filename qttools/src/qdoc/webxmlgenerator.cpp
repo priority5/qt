@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2017 The Qt Company Ltd.
+** Copyright (C) 2019 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the tools applications of the Qt Toolkit.
@@ -27,12 +27,13 @@
 ****************************************************************************/
 
 #include "webxmlgenerator.h"
+
+#include "helpprojectwriter.h"
 #include "node.h"
+#include "qdocdatabase.h"
 #include "separator.h"
 #include "quoter.h"
 #include "tree.h"
-#include "qdocdatabase.h"
-#include "helpprojectwriter.h"
 
 #include <QtCore/qxmlstream.h>
 
@@ -259,7 +260,7 @@ void WebXMLGenerator::generateDocumentation(Node *node)
 
     if (node->parent()) {
         if (node->isNamespace() || node->isClassNode() || node->isHeader())
-            generateCppReferencePage(static_cast<Aggregate*>(node), nullptr);
+            generateCppReferencePage(static_cast<Aggregate *>(node), nullptr);
         else if (node->isCollectionNode()) {
             if (node->wasSeen()) {
                 // see remarks in base class impl.
@@ -273,7 +274,7 @@ void WebXMLGenerator::generateDocumentation(Node *node)
     }
 
     if (node->isAggregate()) {
-        Aggregate* aggregate = static_cast<Aggregate*>(node);
+        Aggregate *aggregate = static_cast<Aggregate *>(node);
         for (auto c : aggregate->childNodes()) {
             if ((c->isAggregate() ||
                 c->isTextPageNode() ||
@@ -764,7 +765,10 @@ void WebXMLGenerator::startLink(QXmlStreamWriter &writer, const Atom *atom,
         fullName = node->fullName();
     if (!fullName.isEmpty() && !link.isEmpty()) {
         writer.writeStartElement("link");
-        writer.writeAttribute("raw", atom->string());
+        if (!atom->string().isEmpty())
+            writer.writeAttribute("raw", atom->string());
+        else
+            writer.writeAttribute("raw", fullName);
         writer.writeAttribute("href", link);
         writer.writeAttribute("type", targetType(node));
         if (node) {
@@ -781,7 +785,7 @@ void WebXMLGenerator::startLink(QXmlStreamWriter &writer, const Atom *atom,
                     break;
                 }
             }
-            // fall through
+            Q_FALLTHROUGH();
             case Node::Page:
                 writer.writeAttribute("page", fullName);
                 break;
@@ -791,11 +795,19 @@ void WebXMLGenerator::startLink(QXmlStreamWriter &writer, const Atom *atom,
                 if (propertyNode->getters().size() > 0)
                     writer.writeAttribute("getter", propertyNode->getters().at(0)->fullName());
             }
+                break;
             default:
-                ;
+                break;
             }
         }
         inLink = true;
+    }
+}
+
+void WebXMLGenerator::endLink(QXmlStreamWriter &writer) {
+    if (inLink) {
+        writer.writeEndElement(); // link
+        inLink = false;
     }
 }
 
@@ -891,30 +903,22 @@ void WebXMLGenerator::generateAnnotatedList(QXmlStreamWriter &writer,
 
     for (const auto *node : nodeList) {
         writer.writeStartElement("row");
-        writer.writeStartElement("heading");
-        generateFullName(writer, node, relative);
-        writer.writeEndElement(); // heading
+        writer.writeStartElement("item");
+        writer.writeStartElement("para");
+        const QString link = linkForNode(node, relative);
+        startLink(writer, node->doc().body().firstAtom(), node, link);
+        endLink(writer);
+        writer.writeEndElement(); // para
+        writer.writeEndElement(); // item
 
         writer.writeStartElement("item");
+        writer.writeStartElement("para");
         writer.writeCharacters(node->doc().briefText().toString());
+        writer.writeEndElement(); // para
         writer.writeEndElement(); // item
         writer.writeEndElement(); // row
     }
     writer.writeEndElement(); // table
-}
-
-void WebXMLGenerator::generateFullName(QXmlStreamWriter &writer,
-    const Node *node, const Node *relative)
-{
-    QString type = targetType(node);
-    QString name = node->fullName(relative);
-    writer.writeStartElement("link");
-    writer.writeAttribute("href", fullDocumentLocation(node));
-    writer.writeAttribute("type", type);
-    if (type == QLatin1String("page"))
-        writer.writeAttribute("page", name);
-    writer.writeCharacters(name);
-    writer.writeEndElement(); // link
 }
 
 const QPair<QString,QString> WebXMLGenerator::anchorForNode(const Node *node)

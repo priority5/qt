@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2019 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the tools applications of the Qt Toolkit.
@@ -27,9 +27,10 @@
 ****************************************************************************/
 
 #include "parameters.h"
-#include "tokenizer.h"
+
 #include "codechunk.h"
 #include "generator.h"
+#include "tokenizer.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -83,13 +84,13 @@ QString Parameter::signature(bool includeValue) const
  */
 
 Parameters::Parameters()
-  : valid_(true), privateSignal_(false), tok_(0), tokenizer_(0)
+  : valid_(true), privateSignal_(false), tok_(0), tokenizer_(nullptr)
 {
     // nothing.
 }
 
 Parameters::Parameters(const QString &signature)
-    : valid_(true), privateSignal_(false), tok_(0), tokenizer_(0)
+    : valid_(true), privateSignal_(false), tok_(0), tokenizer_(nullptr)
 {
     if (!signature.isEmpty()) {
         if (!parse(signature)) {
@@ -455,7 +456,8 @@ QString Parameters::signature(bool includeValues) const
 QString Parameters::rawSignature(bool names, bool values) const
 {
     QString raw;
-    foreach (const Parameter &parameter, parameters_) {
+    const auto params = parameters_;
+    for (const auto &parameter : params) {
         raw += parameter.type();
         if (names)
             raw += parameter.name();
@@ -507,7 +509,8 @@ void Parameters::set(const QString &signature)
  */
 void Parameters::getNames(QSet<QString> &names) const
 {
-    foreach (const Parameter &parameter, parameters_) {
+    const auto params = parameters_;
+    for (const auto &parameter : params) {
         if (!parameter.name().isEmpty())
             names.insert(parameter.name());
     }

@@ -197,10 +197,16 @@ function QObject(name, data, webChannel)
             }
             return ret;
         }
-        if (!response
-            || !response["__QObject*__"]
-            || response.id === undefined) {
+        if (!(response instanceof Object))
             return response;
+
+        if (!response["__QObject*__"]
+            || response.id === undefined) {
+            var jObj = {};
+            for (var propName in response) {
+                jObj[propName] = object.unwrapQObject(response[propName]);
+            }
+            return jObj;
         }
 
         var objectId = response.id;
@@ -255,9 +261,16 @@ function QObject(name, data, webChannel)
                 object.__objectSignals__[signalIndex] = object.__objectSignals__[signalIndex] || [];
                 object.__objectSignals__[signalIndex].push(callback);
 
-                if (!isPropertyNotifySignal && signalName !== "destroyed") {
-                    // only required for "pure" signals, handled separately for properties in propertyUpdate
-                    // also note that we always get notified about the destroyed signal
+                // only required for "pure" signals, handled separately for properties in propertyUpdate
+                if (isPropertyNotifySignal)
+                    return;
+
+                // also note that we always get notified about the destroyed signal
+                if (signalName === "destroyed" || signalName === "destroyed()" || signalName === "destroyed(QObject*)")
+                    return;
+
+                // and otherwise we only need to be connected only once
+                if (object.__objectSignals__[signalIndex].length == 1) {
                     webChannel.exec({
                         type: QWebChannelMessageTypes.connectToSignal,
                         object: object.__id__,
@@ -307,7 +320,7 @@ function QObject(name, data, webChannel)
         // update property cache
         for (var propertyIndex in propertyMap) {
             var propertyValue = propertyMap[propertyIndex];
-            object.__propertyCache__[propertyIndex] = propertyValue;
+            object.__propertyCache__[propertyIndex] = this.unwrapQObject(propertyValue);
         }
 
         for (var signalName in signals) {
@@ -326,9 +339,14 @@ function QObject(name, data, webChannel)
     {
         var methodName = methodData[0];
         var methodIdx = methodData[1];
+
+        // Fully specified methods are invoked by id, others by name for host-side overload resolution
+        var invokedMethod = methodName[methodName.length - 1] === ')' ? methodIdx : methodName
+
         object[methodName] = function() {
             var args = [];
             var callback;
+            var errCallback;
             for (var i = 0; i < arguments.length; ++i) {
                 var argument = arguments[i];
                 if (typeof argument === "function")
@@ -341,10 +359,21 @@ function QObject(name, data, webChannel)
                     args.push(argument);
             }
 
+            var result;
+            // during test, webChannel.exec synchronously calls the callback
+            // therefore, the promise must be constucted before calling
+            // webChannel.exec to ensure the callback is set up
+            if (!callback && (typeof(Promise) === 'function')) {
+              result = new Promise(function(resolve, reject) {
+                callback = resolve;
+                errCallback = reject;
+              });
+            }
+
             webChannel.exec({
                 "type": QWebChannelMessageTypes.invokeMethod,
                 "object": object.__id__,
-                "method": methodIdx,
+                "method": invokedMethod,
                 "args": args
             }, function(response) {
                 if (response !== undefined) {
@@ -352,8 +381,12 @@ function QObject(name, data, webChannel)
                     if (callback) {
                         (callback)(result);
                     }
+                } else if (errCallback) {
+                  (errCallback)();
                 }
             });
+
+            return result;
         };
     }
 

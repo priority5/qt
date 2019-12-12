@@ -1262,17 +1262,6 @@ void QCocoaWindow::windowDidChangeScreen()
         currentScreen->requestUpdate();
     }
 }
-/*
-    The window's backing scale factor or color space has changed.
-*/
-void QCocoaWindow::windowDidChangeBackingProperties()
-{
-    // Ideally we would plumb this thought QPA in a way that lets clients
-    // invalidate their own caches, and recreate QBackingStore. For now we
-    // trigger an expose, and let QCocoaBackingStore deal with its own
-    // buffer invalidation.
-    [m_view setNeedsDisplay:YES];
-}
 
 void QCocoaWindow::windowWillClose()
 {
@@ -1286,14 +1275,11 @@ void QCocoaWindow::windowWillClose()
 bool QCocoaWindow::windowShouldClose()
 {
     qCDebug(lcQpaWindow) << "QCocoaWindow::windowShouldClose" << window();
-   // This callback should technically only determine if the window
-   // should (be allowed to) close, but since our QPA API to determine
-   // that also involves actually closing the window we do both at the
-   // same time, instead of doing the latter in windowWillClose.
-    bool accepted = false;
-    QWindowSystemInterface::handleCloseEvent(window(), &accepted);
-    QWindowSystemInterface::flushWindowSystemEvents();
-    return accepted;
+    // This callback should technically only determine if the window
+    // should (be allowed to) close, but since our QPA API to determine
+    // that also involves actually closing the window we do both at the
+    // same time, instead of doing the latter in windowWillClose.
+    return QWindowSystemInterface::handleCloseEvent<QWindowSystemInterface::SynchronousDelivery>(window());
 }
 
 // ----------------------------- QPA forwarding -----------------------------
@@ -1526,17 +1512,6 @@ bool QCocoaWindow::updatesWithDisplayLink() const
 
 void QCocoaWindow::deliverUpdateRequest()
 {
-    // Don't send update requests for views that need display, as the update
-    // request doesn't carry any information about dirty rects, so the app
-    // may end up painting a smaller region than required. (For some reason
-    // the layer and view's needsDisplay status isn't always in sync, even if
-    // the view is layer-backed, not layer-hosted, so we check both).
-    if (m_view.layer.needsDisplay || m_view.needsDisplay) {
-        qCDebug(lcQpaDrawing) << "View needs display, deferring update request for" << window();
-        requestUpdate();
-        return;
-    }
-
     qCDebug(lcQpaDrawing) << "Delivering update request to" << window();
     QPlatformWindow::deliverUpdateRequest();
 }

@@ -136,7 +136,8 @@ void QWebGLIntegration::initialize()
 void QWebGLIntegration::destroy()
 {
     Q_D(QWebGLIntegration);
-    foreach (QWindow *w, qGuiApp->topLevelWindows())
+    const auto tlws = qGuiApp->topLevelWindows();
+    for (QWindow *w : tlws)
         w->destroy();
 
     QWindowSystemInterface::handleScreenRemoved(d->screen);
@@ -250,6 +251,12 @@ QPlatformWindow *QWebGLIntegration::createPlatformWindow(QWindow *window) const
     });
     qCDebug(lcWebGL, "Created platform window %p for: %p", platformWindow, window);
     return platformWindow;
+}
+
+QPlatformOffscreenSurface *QWebGLIntegration::createPlatformOffscreenSurface(QOffscreenSurface *surface) const
+{
+    qCDebug(lcWebGL, "New offscreen surface %p", surface);
+    return new QWebGLOffscreenSurface(surface);
 }
 
 QPlatformOpenGLContext *QWebGLIntegration::createPlatformOpenGLContext(QOpenGLContext *context)

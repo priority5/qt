@@ -29,6 +29,7 @@
 #include "uic.h"
 #include "option.h"
 #include "driver.h"
+#include <language.h>
 
 #include <qfile.h>
 #include <qdir.h>
@@ -67,6 +68,10 @@ int runUic(int argc, char *argv[])
     outputOption.setValueName(QStringLiteral("file"));
     parser.addOption(outputOption);
 
+    QCommandLineOption noAutoConnectionOption(QStringList() << QStringLiteral("a") << QStringLiteral("no-autoconnection"));
+    noAutoConnectionOption.setDescription(QStringLiteral("Do not generate a call to QObject::connectSlotsByName()."));
+    parser.addOption(noAutoConnectionOption);
+
     QCommandLineOption noProtOption(QStringList() << QStringLiteral("p") << QStringLiteral("no-protection"));
     noProtOption.setDescription(QStringLiteral("Disable header protection."));
     parser.addOption(noProtOption);
@@ -96,7 +101,7 @@ int runUic(int argc, char *argv[])
 
     QCommandLineOption generatorOption(QStringList() << QStringLiteral("g") << QStringLiteral("generator"));
     generatorOption.setDescription(QStringLiteral("Select generator."));
-    generatorOption.setValueName(QStringLiteral("java|cpp"));
+    generatorOption.setValueName(QStringLiteral("python|cpp"));
     parser.addOption(generatorOption);
 
     QCommandLineOption idBasedOption(QStringLiteral("idbased"));
@@ -109,12 +114,20 @@ int runUic(int argc, char *argv[])
 
     driver.option().dependencies = parser.isSet(dependenciesOption);
     driver.option().outputFile = parser.value(outputOption);
+    driver.option().autoConnection = !parser.isSet(noAutoConnectionOption);
     driver.option().headerProtection = !parser.isSet(noProtOption);
     driver.option().implicitIncludes = !parser.isSet(noImplicitIncludesOption);
     driver.option().idBased = parser.isSet(idBasedOption);
     driver.option().postfix = parser.value(postfixOption);
     driver.option().translateFunction = parser.value(translateOption);
     driver.option().includeFile = parser.value(includeOption);
+
+    Language language = Language::Cpp;
+    if (parser.isSet(generatorOption)) {
+        if (parser.value(generatorOption).compare(QLatin1String("python")) == 0)
+            language = Language::Python;
+    }
+    language::setLanguage(language);
 
     if (parser.isSet(noStringLiteralOption))
         fprintf(stderr, "The -s, --no-stringliteral option is deprecated and it won't take any effect.\n");
@@ -129,7 +142,7 @@ int runUic(int argc, char *argv[])
         return !driver.printDependencies(inputFile);
     }
 
-    QTextStream *out = 0;
+    QTextStream *out = nullptr;
     QFile f;
     if (!driver.option().outputFile.isEmpty()) {
         f.setFileName(driver.option().outputFile);

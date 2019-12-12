@@ -215,6 +215,10 @@
 <context>
     <name>QAndroidCameraSession</name>
     <message>
+        <source>Camera cannot be started without a viewfinder.</source>
+        <translation>相機必須要有取景器才能開啟。</translation>
+    </message>
+    <message>
         <source>Camera not ready</source>
         <translation>相機未就緒</translation>
     </message>
@@ -234,10 +238,6 @@
     <message>
         <source>Could not open destination file: %1</source>
         <translation>無法打開目標檔案：%1</translation>
-    </message>
-    <message>
-        <source>Camera cannot be started without a viewfinder.</source>
-        <translation>相機必須要有取景器才能開啟。</translation>
     </message>
 </context>
 <context>

@@ -4,6 +4,7 @@
 
 #include "content/browser/download/url_downloader.h"
 
+#include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
@@ -77,8 +78,7 @@ UrlDownloader::UrlDownloader(
             request_origin,
             download_source),
       follow_cross_origin_redirects_(follow_cross_origin_redirects),
-      upload_callback_(upload_callback),
-      weak_ptr_factory_(this) {}
+      upload_callback_(upload_callback) {}
 
 UrlDownloader::~UrlDownloader() = default;
 

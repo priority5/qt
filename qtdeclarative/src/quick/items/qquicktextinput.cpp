@@ -1009,9 +1009,10 @@ void QQuickTextInput::setAutoScroll(bool b)
     an acceptable or intermediate state. The accepted signal will only be sent
     if the text is in an acceptable state when enter is pressed.
 
-    Currently supported validators are IntValidator, DoubleValidator and
-    RegExpValidator. An example of using validators is shown below, which allows
-    input of integers between 11 and 31 into the text input:
+    Currently supported validators are IntValidator, DoubleValidator,
+    RegExpValidator and RegularExpressionValidator. An example of using
+    validators is shown below, which allows input of integers between 11 and 31
+    into the text input:
 
     \code
     import QtQuick 2.0
@@ -1957,7 +1958,7 @@ QVariant QQuickTextInput::inputMethodQuery(Qt::InputMethodQuery property) const
     return inputMethodQuery(property, QVariant());
 }
 
-QVariant QQuickTextInput::inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const
+QVariant QQuickTextInput::inputMethodQuery(Qt::InputMethodQuery property, const QVariant &argument) const
 {
     Q_D(const QQuickTextInput);
     switch (property) {
@@ -2258,8 +2259,8 @@ void QQuickTextInput::remove(int start, int end)
             d->m_cursor -= qMin(d->m_cursor, end) - start;
         if (d->m_selstart > start)
             d->m_selstart -= qMin(d->m_selstart, end) - start;
-        if (d->m_selend > end)
-            d->m_selend -= qMin(d->m_selend, end) - start;
+        if (d->m_selend >= end)
+            d->m_selend -= end - start;
     }
     d->addCommand(QQuickTextInputPrivate::Command(
             QQuickTextInputPrivate::SetSelection, d->m_cursor, 0, d->m_selstart, d->m_selend));

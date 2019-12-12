@@ -30,6 +30,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/modules/webaudio/inspector_helper_mixin.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
@@ -134,12 +135,12 @@ class MODULES_EXPORT AudioHandler : public ThreadSafeRefCounted<AudioHandler> {
   // existing connections from others.
   // This function must be called after acquiring a connection reference.
   void MakeConnection();
-  // This object will be disconnected from another object. This might have
-  // remaining connections from others.
-  // This function must be called before releasing a connection reference.
-  void BreakConnection();
 
-  // Can be called from main thread or context's audio thread.  It must be
+  // This object will be disconnected from another object. This might have
+  // remaining connections from others.  This function must be called before
+  // releasing a connection reference.
+  //
+  // This can be called from main thread or context's audio thread.  It must be
   // called while the context's graph lock is held.
   void BreakConnectionWithLock();
 
@@ -152,7 +153,7 @@ class MODULES_EXPORT AudioHandler : public ThreadSafeRefCounted<AudioHandler> {
   // Like process(), but only causes the automations to process; the
   // normal processing of the node is bypassed.  By default, we assume
   // no AudioParams need to be updated.
-  virtual void ProcessOnlyAudioParams(uint32_t frames_to_process){};
+  virtual void ProcessOnlyAudioParams(uint32_t frames_to_process) {}
 
   // No significant resources should be allocated until initialize() is called.
   // Processing may not occur until a node is initialized.
@@ -171,6 +172,7 @@ class MODULES_EXPORT AudioHandler : public ThreadSafeRefCounted<AudioHandler> {
   AudioNodeInput& Input(unsigned);
   // The argument must be less than numberOfOutputs().
   AudioNodeOutput& Output(unsigned);
+  const AudioNodeOutput& Output(unsigned) const;
 
   // processIfNecessary() is called by our output(s) when the rendering graph
   // needs this AudioNode to process.  This method ensures that the AudioNode
@@ -317,7 +319,8 @@ class MODULES_EXPORT AudioHandler : public ThreadSafeRefCounted<AudioHandler> {
   AudioBus::ChannelInterpretation new_channel_interpretation_;
 };
 
-class MODULES_EXPORT AudioNode : public EventTargetWithInlineData {
+class MODULES_EXPORT AudioNode : public EventTargetWithInlineData,
+                                 public InspectorHelperMixin {
   DEFINE_WRAPPERTYPEINFO();
   USING_PRE_FINALIZER(AudioNode, Dispose);
 
@@ -366,7 +369,13 @@ class MODULES_EXPORT AudioNode : public EventTargetWithInlineData {
   // This should be called in a constructor.
   void SetHandler(scoped_refptr<AudioHandler>);
 
+  // During construction time the handler may not be set properly. Since the
+  // garbage collector can call into HasPendingActivity() such calls need to be
+  // able to see whether a handle has been set.
+  bool ContainsHandler() const;
+
  private:
+  void WarnIfContextClosed() const;
   void Dispose();
   void DisconnectAllFromOutput(unsigned output_index);
   // Returns true if the specified AudioNodeInput was connected.

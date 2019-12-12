@@ -51,7 +51,24 @@
 #include "widgetgallery.h"
 #include "norwegianwoodstyle.h"
 
-#include <QtWidgets>
+#include <QApplication>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDateTimeEdit>
+#include <QDial>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QLabel>
+#include <QLineEdit>
+#include <QProgressBar>
+#include <QPushButton>
+#include <QRadioButton>
+#include <QScrollBar>
+#include <QSpinBox>
+#include <QStyleFactory>
+#include <QTableWidget>
+#include <QTextEdit>
+#include <QTimer>
 
 //! [0]
 WidgetGallery::WidgetGallery(QWidget *parent)
@@ -79,7 +96,7 @@ WidgetGallery::WidgetGallery(QWidget *parent)
 //! [0]
 
 //! [1]
-    connect(styleComboBox, QOverload<const QString &>::of(&QComboBox::activated),
+    connect(styleComboBox, &QComboBox::textActivated,
 //! [1] //! [2]
             this, &WidgetGallery::changeStyle);
     connect(useStylePaletteCheckBox, &QCheckBox::toggled,
