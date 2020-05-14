@@ -2566,8 +2566,8 @@ QPoint QWindow::mapToGlobal(const QPoint &pos) const
         return QHighDpi::fromNativeLocalPosition(d->platformWindow->mapToGlobal(QHighDpi::toNativeLocalPosition(pos, this)), this);
     }
 
-    if (QHighDpiScaling::isActive())
-        return QHighDpiScaling::mapPositionToGlobal(pos, d->globalPosition(), this);
+    //if (QHighDpiScaling::isActive())
+    //    return QHighDpiScaling::mapPositionToGlobal(pos, d->globalPosition(), this);
 
     return pos + d->globalPosition();
 }
@@ -2590,8 +2590,8 @@ QPoint QWindow::mapFromGlobal(const QPoint &pos) const
         return QHighDpi::fromNativeLocalPosition(d->platformWindow->mapFromGlobal(QHighDpi::toNativeLocalPosition(pos, this)), this);
     }
 
-    if (QHighDpiScaling::isActive())
-        return QHighDpiScaling::mapPositionFromGlobal(pos, d->globalPosition(), this);
+    //if (QHighDpiScaling::isActive())
+    //    return QHighDpiScaling::mapPositionFromGlobal(pos, d->globalPosition(), this);
 
     return pos - d->globalPosition();
 }
