@@ -101,7 +101,13 @@ Q_WIDGETS_EXPORT qreal dpi(const QStyleOption *option)
     if (option)
         return option->fontMetrics.fontDpi();
 
+    // Fall back to historical Qt behavior: hardocded 72 DPI on mac,
+    // primary screen DPI on other platforms.
+#ifdef Q_OS_DARWIN
     return qstyleBaseDpi;
+#else
+    return qt_defaultDpiX();
+#endif
 }
 
 Q_WIDGETS_EXPORT qreal dpiScaled(qreal value, qreal dpi)
@@ -132,7 +138,7 @@ bool isInstanceOf(QObject *obj, QAccessible::Role role)
 bool hasAncestor(QObject *obj, QAccessible::Role role)
 {
     bool found = false;
-    QObject *parent = obj ? obj->parent() : 0;
+    QObject *parent = obj ? obj->parent() : nullptr;
     while (parent && !found) {
         if (isInstanceOf(parent, role))
             found = true;
@@ -274,6 +280,12 @@ void drawDial(const QStyleOptionSlider *option, QPainter *painter)
         painter->drawLines(QStyleHelper::calcLines(option));
     }
 
+    // setting color before BEGIN_STYLE_PIXMAPCACHE since
+    // otherwise it is not set when the image is in the cache
+    buttonColor.setHsv(buttonColor .hue(),
+                       qMin(140, buttonColor .saturation()),
+                       qMax(180, buttonColor.value()));
+
     // Cache dial background
     BEGIN_STYLE_PIXMAPCACHE(QString::fromLatin1("qdial"));
     p->setRenderHint(QPainter::Antialiasing);
@@ -285,9 +297,6 @@ void drawDial(const QStyleOptionSlider *option, QPainter *painter)
     QRectF br = QRectF(dx + 0.5, dy + 0.5,
                        int(r * 2 - 2 * d_ - 2),
                        int(r * 2 - 2 * d_ - 2));
-    buttonColor.setHsv(buttonColor .hue(),
-                       qMin(140, buttonColor .saturation()),
-                       qMax(180, buttonColor.value()));
 
     if (enabled) {
         // Drop shadow

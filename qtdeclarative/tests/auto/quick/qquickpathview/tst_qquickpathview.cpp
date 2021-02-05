@@ -140,6 +140,7 @@ private slots:
     void cacheItemCount();
     void changePathDuringRefill();
     void nestedinFlickable();
+    void ungrabNestedinFlickable();
     void flickableDelegate();
     void jsArrayChange();
     void qtbug37815();
@@ -150,6 +151,8 @@ private slots:
     void movementDirection();
     void removePath();
     void objectModelMove();
+    void requiredPropertiesInDelegate();
+    void requiredPropertiesInDelegatePreventUnrelated();
 };
 
 class TestObject : public QObject
@@ -2411,6 +2414,40 @@ void tst_QQuickPathView::nestedinFlickable()
 
 }
 
+void tst_QQuickPathView::ungrabNestedinFlickable()
+{
+    QScopedPointer<QQuickView> window(createView());
+    QQuickViewTestUtil::moveMouseAway(window.data());
+    window->setSource(testFileUrl("ungrabNestedinFlickable.qml"));
+    window->show();
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowActive(window.data()));
+    QCOMPARE(window.data(), qGuiApp->focusWindow());
+
+    QQuickPathView *pathview = findItem<QQuickPathView>(window->rootObject(), "pathView");
+    QVERIFY(pathview != nullptr);
+
+    double pathviewOffsetBefore = pathview->offset();
+
+    // Drag slowly upwards so that it does not flick, release, and let it start snapping back
+    QTest::mousePress(window.data(), Qt::LeftButton, 0, QPoint(200, 350));
+    for (int i = 0; i < 4; ++i)
+        QTest::mouseMove(window.data(), QPoint(200, 325 - i * 25), 500);
+    QTest::mouseRelease(window.data(), Qt::LeftButton, 0,  QPoint(200, 250));
+    QCOMPARE(pathview->isMoving(), true);
+
+    // Press again to stop moving
+    QTest::mousePress(window.data(), Qt::LeftButton, 0, QPoint(200, 350));
+    QTRY_COMPARE(pathview->isMoving(), false);
+
+    // Cancel the grab, wait for movement to stop, and expect it to snap to
+    // the nearest delegate, which should be at the same offset as where we started
+    pathview->ungrabMouse();
+    QTRY_COMPARE(pathview->offset(), pathviewOffsetBefore);
+    QCOMPARE(pathview->isMoving(), false);
+    QTest::mouseRelease(window.data(), Qt::LeftButton, 0, QPoint(200, 350));
+}
+
 void tst_QQuickPathView::flickableDelegate()
 {
     QScopedPointer<QQuickView> window(createView());
@@ -2722,6 +2759,41 @@ void tst_QQuickPathView::objectModelMove()
         const QQuickItemPrivate *childItemPrivate = QQuickItemPrivate::get(childItem);
         QCOMPARE(childItemPrivate->changeListeners.size(), 0);
     }
+}
+
+void tst_QQuickPathView::requiredPropertiesInDelegate()
+{
+    {
+        QTest::ignoreMessage(QtMsgType::QtInfoMsg, "Bill JonesBerlin0");
+        QTest::ignoreMessage(QtMsgType::QtInfoMsg, "Jane DoeOslo1");
+        QTest::ignoreMessage(QtMsgType::QtInfoMsg, "John SmithOulo2");
+        QScopedPointer<QQuickView> window(createView());
+        window->setSource(testFileUrl("delegateWithRequiredProperties.qml"));
+        window->show();
+    }
+    {
+        QScopedPointer<QQuickView> window(createView());
+        window->setSource(testFileUrl("delegateWithRequiredProperties.2.qml"));
+        window->show();
+        QTRY_VERIFY(window->rootObject()->property("working").toBool());
+    }
+    {
+        QScopedPointer<QQuickView> window(createView());
+        QTest::ignoreMessage(QtMsgType::QtWarningMsg, QRegularExpression("Writing to \"name\" broke the binding to the underlying model"));
+        window->setSource(testFileUrl("delegateWithRequiredProperties.3.qml"));
+        window->show();
+        QTRY_VERIFY(window->rootObject()->property("working").toBool());
+    }
+}
+
+void tst_QQuickPathView::requiredPropertiesInDelegatePreventUnrelated()
+{
+    QTest::ignoreMessage(QtMsgType::QtInfoMsg, "ReferenceError");
+    QTest::ignoreMessage(QtMsgType::QtInfoMsg, "ReferenceError");
+    QTest::ignoreMessage(QtMsgType::QtInfoMsg, "ReferenceError");
+    QScopedPointer<QQuickView> window(createView());
+    window->setSource(testFileUrl("delegatewithUnrelatedRequiredPreventsAccessToModel.qml"));
+    window->show();
 }
 
 QTEST_MAIN(tst_QQuickPathView)

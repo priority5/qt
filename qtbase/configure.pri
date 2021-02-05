@@ -53,6 +53,8 @@ defineTest(qtConfCommandline_sanitize) {
             qtConfCommandlineSetInput("sanitize_thread", "yes")
         } else: equals(val, "memory") {
             qtConfCommandlineSetInput("sanitize_memory", "yes")
+        } else: equals(val, "fuzzer-no-link") {
+            qtConfCommandlineSetInput("sanitize_fuzzer_no_link", "yes")
         } else: equals(val, "undefined") {
             qtConfCommandlineSetInput("sanitize_undefined", "yes")
         } else {
@@ -70,7 +72,9 @@ defineTest(qtConfCommandline_coverage) {
     !contains(val, "^-.*"):!isEmpty(val) {
         equals(val, "trace-pc-guard") {
             qtConfCommandlineSetInput("coverage_trace_pc_guard", "yes")
-        } else {
+        } else: equals(val, "source-based") {
+            qtConfCommandlineSetInput("coverage_source_based", "yes")
+        } else: {
             qtConfAddError("Invalid argument $$val to command line parameter $$arg")
         }
     } else {
@@ -81,6 +85,8 @@ defineTest(qtConfCommandline_coverage) {
 # callbacks
 
 defineReplace(qtConfFunc_crossCompile) {
+    !isEmpty(config.input.xplatform): return(true)
+    !isEmpty(config.input.device-option): return(true)
     !isEmpty(config.input.sysroot): return(true)
     spec = $$[QMAKE_SPEC]
     !equals(spec, $$[QMAKE_XSPEC]): return(true)
@@ -623,12 +629,17 @@ defineTest(qtConfOutput_prepareOptions) {
         isEmpty(platform): \
             platform = android-21
 
+        android_javac_target = $$eval(config.input.android-javac-target)
+        android_javac_source = $$eval(config.input.android-javac-source)
+
         $${currentConfig}.output.devicePro += \
             "DEFAULT_ANDROID_SDK_ROOT = $$val_escape(sdk_root)" \
             "DEFAULT_ANDROID_NDK_ROOT = $$val_escape(ndk_root)" \
             "DEFAULT_ANDROID_PLATFORM = $$platform" \
             "DEFAULT_ANDROID_NDK_HOST = $$ndk_host" \
-            "DEFAULT_ANDROID_ABIS = $$split(android_abis, ',')"
+            "DEFAULT_ANDROID_ABIS = $$split(android_abis, ',')" \
+            "ANDROID_JAVAC_TARGET_VERSION = $$android_javac_target" \
+            "ANDROID_JAVAC_SOURCE_VERSION = $$android_javac_source"
     }
 
     export($${currentConfig}.output.devicePro)
@@ -823,6 +834,8 @@ defineTest(qtConfOutput_preparePaths) {
         libloc_absolute_path = $$absolute_path($$config.rel_input.libdir, $$config.input.prefix)
     }
     config.input.liblocation_to_prefix = $$relative_path($$config.input.prefix, $$libloc_absolute_path)
+    config.qtbase.features.shared.available =
+    export(config.qtbase.features.shared.available)
 
     hostbindir_absolute_path = $$absolute_path($$config.rel_input.hostbindir, $$config.input.hostprefix)
     config.input.hostbindir_to_hostprefix = $$relative_path($$config.input.hostprefix, $$hostbindir_absolute_path)
@@ -1224,6 +1237,12 @@ defineReplace(qtConfOutputPostProcess_publicPro) {
             "QT_RELEASE_DATE = $$config.input.qt_release_date"
     }
 
+    wasm: {
+        qt_emcc_version = $$qtSystemEmccVersion()
+        output += \
+           "QT_EMCC_VERSION = $$qt_emcc_version"
+    }
+
     return($$output)
 }
 
@@ -1255,6 +1274,12 @@ defineReplace(qtConfOutputPostProcess_publicHeader) {
 
     !isEmpty(config.input.qt_libinfix): \
         output += "$${LITERAL_HASH}define QT_LIBINFIX \"$$eval(config.input.qt_libinfix)\""
+
+    wasm: {
+        qt_emcc_version = $$qtSystemEmccVersion()
+output += \
+           "$${LITERAL_HASH}define QT_EMCC_VERSION \"$$qt_emcc_version\""
+    }
 
     return($$output)
 }
@@ -1336,6 +1361,14 @@ defineTest(qtConfReport_buildMode) {
         build_mode = "$$build_mode; optimized tools"
 
     qtConfReportPadded($$1, $$build_mode)
+}
+
+defineTest(qtConfReport_emccVersion) {
+    EMCC_VERSION = $$qtSystemEmccVersion()
+    REQ_VERSION = $$qtEmccRecommendedVersion()
+    !equals(EMCC_VERSION, $$REQ_VERSION) {
+        qtConfAddReport("You should use the recommended Emscripten version $$REQ_VERSION with this Qt. You have $$EMCC_VERSION $$QT_EMCC_VERSION")
+    }
 }
 
 # ensure pristine environment for configuration

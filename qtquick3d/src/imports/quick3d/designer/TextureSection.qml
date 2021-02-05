@@ -27,7 +27,7 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.12
+import QtQuick 2.15
 import HelperWidgets 2.0
 import QtQuick.Layouts 1.12
 
@@ -37,7 +37,7 @@ Section {
     SectionLayout {
         Label {
             text: qsTr("Source")
-            tooltip: qsTr("Source of image data")
+            tooltip: qsTr("Holds the location of an image file containing the data used by the texture.")
         }
         SecondColumnLayout {
             UrlChooser {
@@ -46,14 +46,26 @@ Section {
         }
 
         Label {
-            text: qsTr("U Repeat")
-            tooltip: qsTr("Number of times the image is tiled on the U direction of the material")
+            text: qsTr("Source Item")
+            tooltip: qsTr("Defines an item to be used as the source of the texture.")
+        }
+        SecondColumnLayout {
+            IdComboBox {
+                typeFilter: "QtQuick.Item"
+                Layout.fillWidth: true
+                backendValue: backendValues.sourceItem
+            }
+        }
+
+        Label {
+            text: qsTr("U Scale")
+            tooltip: qsTr("Defines how to scale the U texture coordinate when mapping to UV coordinates of a mesh.")
         }
         SecondColumnLayout {
             SpinBox {
                 maximumValue: 999999
-                minimumValue: -999999
-                realDragRange: 5000
+                minimumValue: 0
+                realDragRange: 10
                 decimals: 0
                 backendValue: backendValues.scaleU
                 Layout.fillWidth: true
@@ -61,14 +73,14 @@ Section {
         }
 
         Label {
-            text: qsTr("V Repeat")
-            tooltip: qsTr("Number of times the image is tiled on the V direction of the material")
+            text: qsTr("V Scale")
+            tooltip: qsTr("Defines how to scale the V texture coordinate when mapping to UV coordinates of a mesh.")
         }
         SecondColumnLayout {
             SpinBox {
                 maximumValue: 999999
-                minimumValue: -999999
-                realDragRange: 5000
+                minimumValue: 0
+                realDragRange: 10
                 decimals: 0
                 backendValue: backendValues.scaleV
                 Layout.fillWidth: true
@@ -77,12 +89,12 @@ Section {
 
         Label {
             text: qsTr("Texture Mapping")
-            tooltip: qsTr("How the image is applied to thematerial")
+            tooltip: qsTr("Defines which method of mapping to use when sampling this texture.")
         }
         SecondColumnLayout {
             ComboBox {
                 scope: "Texture"
-                model: ["Normal", "Environment", "LightProbe"]
+                model: ["UV", "Environment", "LightProbe"]
                 backendValue: backendValues.mappingMode
                 Layout.fillWidth: true
             }
@@ -90,7 +102,7 @@ Section {
 
         Label {
             text: qsTr("U Tiling")
-            tooltip: qsTr("How the image is tiled in the U direction")
+            tooltip: qsTr("Controls how the texture is mapped when the U scaling value is greater than 1.")
         }
         SecondColumnLayout {
             ComboBox {
@@ -103,7 +115,7 @@ Section {
 
         Label {
             text: qsTr("V Tiling")
-            tooltip: qsTr("How the image is tiled in the V direction")
+            tooltip: qsTr("Controls how the texture is mapped when the V scaling value is greater than 1.")
         }
         SecondColumnLayout {
             ComboBox {
@@ -116,13 +128,13 @@ Section {
 
         Label {
             text: qsTr("UV Rotation")
-            tooltip: qsTr("Rotate the image's coordinates")
+            tooltip: qsTr("Rotates the texture around the pivot point.")
         }
         SecondColumnLayout {
             SpinBox {
                 maximumValue: 999999
                 minimumValue: -999999
-                realDragRange: 5000
+                realDragRange: 360
                 decimals: 0
                 backendValue: backendValues.rotationUV
                 Layout.fillWidth: true
@@ -131,14 +143,15 @@ Section {
 
         Label {
             text: qsTr("U Position")
-            tooltip: qsTr("Offset of the image along the U direction of the material")
+            tooltip: qsTr("Offsets the U coordinate mapping from left to right.")
         }
         SecondColumnLayout {
             SpinBox {
                 maximumValue: 999999
                 minimumValue: -999999
-                realDragRange: 5000
-                decimals: 0
+                realDragRange: 2
+                decimals: 2
+                stepSize: 0.1
                 backendValue: backendValues.positionU
                 Layout.fillWidth: true
             }
@@ -146,14 +159,15 @@ Section {
 
         Label {
             text: qsTr("V Position")
-            tooltip: qsTr("Offset of the image along the V direction of the material")
+            tooltip: qsTr("Offsets the V coordinate mapping from bottom to top.")
         }
         SecondColumnLayout {
             SpinBox {
                 maximumValue: 999999
                 minimumValue: -999999
-                realDragRange: 5000
-                decimals: 0
+                realDragRange: 2
+                decimals: 2
+                stepSize: 0.1
                 backendValue: backendValues.positionV
                 Layout.fillWidth: true
             }
@@ -161,14 +175,15 @@ Section {
 
         Label {
             text: qsTr("U Pivot")
-            tooltip: qsTr("Offset the image in the U direction without affecting rotation center")
+            tooltip: qsTr("Sets the pivot U position.")
         }
         SecondColumnLayout {
             SpinBox {
                 maximumValue: 999999
                 minimumValue: -999999
-                realDragRange: 5000
-                decimals: 0
+                realDragRange: 2
+                decimals: 2
+                stepSize: 0.1
                 backendValue: backendValues.pivotU
                 Layout.fillWidth: true
             }
@@ -176,14 +191,15 @@ Section {
 
         Label {
             text: qsTr("V Pivot")
-            tooltip: qsTr("Offset the image in the V direction without affecting rotation center")
+            tooltip: qsTr("Sets the pivot V position.")
         }
         SecondColumnLayout {
             SpinBox {
                 maximumValue: 999999
                 minimumValue: -999999
-                realDragRange: 5000
-                decimals: 0
+                realDragRange: 2
+                decimals: 2
+                stepSize: 0.1
                 backendValue: backendValues.pivotV
                 Layout.fillWidth: true
             }

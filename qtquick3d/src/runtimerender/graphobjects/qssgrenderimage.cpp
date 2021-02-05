@@ -50,27 +50,21 @@ bool QSSGRenderImage::clearDirty(const QSSGRef<QSSGBufferManager> &inBufferManag
 {
     bool wasDirty = m_flags.testFlag(Flag::Dirty);
     m_flags.setFlag(Flag::Dirty, false);
-    QSSGRenderImageTextureData newImage;
-    bool replaceTexture(false);
 
-    if (wasDirty && newImage.m_texture == nullptr && m_qsgTexture) {
-        newImage = inBufferManager->loadRenderImage(m_qsgTexture);
-        replaceTexture = newImage.m_texture != m_textureData.m_texture;
-    }
+    if (wasDirty) {
+        QSSGRenderImageTextureData newImage;
+        if (m_qsgTexture)
+            newImage = inBufferManager->loadRenderImage(m_qsgTexture);
+        else
+            newImage = inBufferManager->loadRenderImage(m_imagePath, m_format, false, forIbl);
 
-    if (wasDirty && newImage.m_texture == nullptr) {
-        newImage = inBufferManager->loadRenderImage(m_imagePath, m_format, false, forIbl);
-        replaceTexture = newImage.m_texture != m_textureData.m_texture;
-    }
-
-    if (replaceTexture) {
-        wasDirty = true;
-        m_textureData = newImage;
+        if (newImage.m_texture != m_textureData.m_texture)
+            m_textureData = newImage;
     }
 
     if (m_flags.testFlag(Flag::TransformDirty)) {
-        wasDirty = true;
         calculateTextureTransform();
+        return true;
     }
     return wasDirty;
 }
@@ -105,6 +99,13 @@ void QSSGRenderImage::calculateTextureTransform()
     m_textureTransform *= rotation;
     m_textureTransform *= scale;
     m_textureTransform *= pivot_r;
+}
+
+bool QSSGRenderImage::isImageTransformIdentity() const
+{
+    if (m_mappingMode != MappingModes::Normal)
+        return false;
+    return m_textureTransform.isIdentity();
 }
 
 QSSGRenderImageTextureData::QSSGRenderImageTextureData() = default;

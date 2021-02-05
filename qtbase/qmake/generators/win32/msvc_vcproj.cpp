@@ -1247,10 +1247,10 @@ void VcprojGenerator::initDeploymentTool()
                         + "|" + targetPath
                         + "|0;";
                 if (!qpaPluginDeployed) {
-                    QChar debugInfixChar;
+                    QString debugInfix;
                     bool foundGuid = dllName.contains(QLatin1String("Guid"));
                     if (foundGuid)
-                        debugInfixChar = QLatin1Char('d');
+                        debugInfix = QLatin1Char('d');
 
                     if (foundGuid || dllName.contains(QLatin1String("Gui"))) {
                         QFileInfo info2;
@@ -1258,13 +1258,14 @@ void VcprojGenerator::initDeploymentTool()
                             QString absoluteDllFilePath = dllPath.toQString();
                             if (!absoluteDllFilePath.endsWith(QLatin1Char('/')))
                                 absoluteDllFilePath += QLatin1Char('/');
-                            absoluteDllFilePath += QLatin1String("../plugins/platforms/qwindows") + debugInfixChar + QLatin1String(".dll");
+                            absoluteDllFilePath += QLatin1String("../plugins/platforms/qwindows")
+                                    + debugInfix + QLatin1String(".dll");
                             info2 = QFileInfo(absoluteDllFilePath);
                             if (info2.exists())
                                 break;
                         }
                         if (info2.exists()) {
-                            conf.deployment.AdditionalFiles += QLatin1String("qwindows") + debugInfixChar + QLatin1String(".dll")
+                            conf.deployment.AdditionalFiles += QLatin1String("qwindows") + debugInfix + QLatin1String(".dll")
                                                         + QLatin1Char('|') + QDir::toNativeSeparators(info2.absolutePath())
                                                         + QLatin1Char('|') + targetPath + QLatin1String("\\platforms")
                                                         + QLatin1String("|0;");
@@ -1480,36 +1481,20 @@ void VcprojGenerator::initResourceFiles()
     // Bad hack, please look away -------------------------------------
     QString rcc_dep_cmd = project->values("rcc.depend_command").join(' ');
     if(!rcc_dep_cmd.isEmpty()) {
-        ProStringList qrc_files = project->values("RESOURCES");
+        const QStringList qrc_files = project->values("RESOURCES").toQStringList();
         QStringList deps;
-        if(!qrc_files.isEmpty()) {
-            for (int i = 0; i < qrc_files.count(); ++i) {
-                char buff[256];
-                QString dep_cmd = replaceExtraCompilerVariables(
-                        rcc_dep_cmd, qrc_files.at(i).toQString(), QString(), LocalShell);
-
-                dep_cmd = Option::fixPathToLocalOS(dep_cmd, true, false);
-                if(canExecute(dep_cmd)) {
-                    dep_cmd.prepend(QLatin1String("cd ")
-                                    + IoUtils::shellQuote(Option::fixPathToLocalOS(Option::output_dir, false))
-                                    + QLatin1String(" && "));
-                    if (FILE *proc = QT_POPEN(dep_cmd.toLatin1().constData(), QT_POPEN_READ)) {
-                        QString indeps;
-                        while(!feof(proc)) {
-                            int read_in = (int)fread(buff, 1, 255, proc);
-                            if(!read_in)
-                                break;
-                            indeps += QByteArray(buff, read_in);
-                        }
-                        QT_PCLOSE(proc);
-                        if(!indeps.isEmpty())
-                            deps += fileFixify(indeps.replace('\n', ' ').simplified().split(' '),
-                                               FileFixifyFromOutdir);
-                    }
-                }
-            }
-            vcProject.ResourceFiles.addFiles(deps);
+        for (const QString &qrc_file : qrc_files) {
+            callExtraCompilerDependCommand("rcc",
+                                           rcc_dep_cmd,
+                                           qrc_file,
+                                           QString(),
+                                           true,  // dep_lines
+                                           &deps,
+                                           false, // existingDepsOnly
+                                           true   // checkCommandavailability
+                                          );
         }
+        vcProject.ResourceFiles.addFiles(deps);
     }
     // You may look again --------------------------------------------
 

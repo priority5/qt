@@ -194,23 +194,41 @@ void RealtimeAudioDestinationHandler::Render(
 
   context->HandlePreRenderTasks(&output_position, &metric);
 
-  // Renders the graph by pulling all the input(s) to this node. This will in
-  // turn pull on their input(s), all the way backwards through the graph.
-  AudioBus* rendered_bus = Input(0).Pull(destination_bus, number_of_frames);
+  // Only pull on the audio graph if we have not stopped the destination.  It
+  // takes time for the destination to stop, but we want to stop pulling before
+  // the destination has actually stopped.
+  {
+    // The entire block that relies on |IsPullingAudioGraphAllowed| needs
+    // locking to prevent pulling audio graph being disallowed (i.e. a
+    // destruction started) in the middle of processing.
+    MutexTryLocker try_locker(allow_pulling_audio_graph_mutex_);
 
-  DCHECK(rendered_bus);
-  if (!rendered_bus) {
-    // AudioNodeInput might be in the middle of destruction. Then the internal
-    // summing bus will return as nullptr. Then zero out the output.
-    destination_bus->Zero();
-  } else if (rendered_bus != destination_bus) {
-    // In-place processing was not possible. Copy the rendererd result to the
-    // given |destination_bus| buffer.
-    destination_bus->CopyFrom(*rendered_bus);
+    if (IsPullingAudioGraphAllowed() && try_locker.Locked()) {
+      // Renders the graph by pulling all the inputs to this node. This will in
+      // turn pull on their inputs, all the way backwards through the graph.
+      scoped_refptr<AudioBus> rendered_bus =
+          Input(0).Pull(destination_bus, number_of_frames);
+
+      DCHECK(rendered_bus);
+      if (!rendered_bus) {
+        // AudioNodeInput might be in the middle of destruction. Then the
+        // internal summing bus will return as nullptr. Then zero out the
+        // output.
+        destination_bus->Zero();
+      } else if (rendered_bus != destination_bus) {
+        // In-place processing was not possible. Copy the rendered result to the
+        // given |destination_bus| buffer.
+        destination_bus->CopyFrom(*rendered_bus);
+      }
+    } else {
+      // Not allowed to pull on the graph or couldn't get the lock.
+      destination_bus->Zero();
+    }
   }
 
-  // Processes "automatic" nodes that are not connected to anything. This can
-  // be done after copying because it does not affect the rendered result.
+  // Processes "automatic" nodes that are not connected to anything. This
+  // can be done after copying because it does not affect the rendered
+  // result.
   context->GetDeferredTaskHandler().ProcessAutomaticPullNodes(number_of_frames);
 
   context->HandlePostRenderTasks();
@@ -243,6 +261,8 @@ void RealtimeAudioDestinationHandler::CreatePlatformDestination() {
 }
 
 void RealtimeAudioDestinationHandler::StartPlatformDestination() {
+  DCHECK(IsMainThread());
+
   if (platform_destination_->IsPlaying()) {
     return;
   }
@@ -258,9 +278,19 @@ void RealtimeAudioDestinationHandler::StartPlatformDestination() {
   } else {
     platform_destination_->Start();
   }
+
+  // Allow the graph to be pulled once the destination actually starts
+  // requesting data.
+  EnablePullingAudioGraph();
 }
 
 void RealtimeAudioDestinationHandler::StopPlatformDestination() {
+  DCHECK(IsMainThread());
+
+  // Stop pulling on the graph, even if the destination is still requesting data
+  // for a while. (It may take a bit of time for the destination to stop.)
+  DisablePullingAudioGraph();
+
   if (platform_destination_->IsPlaying()) {
     platform_destination_->Stop();
   }

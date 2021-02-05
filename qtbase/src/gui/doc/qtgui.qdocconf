@@ -35,12 +35,14 @@ depends += \
     qtnetwork \
     qtopengl \
     qtplatformheaders \
+    qtprintsupport \
     qtsvg \
     qtqml \
     qtquick \
     qtwidgets \
     qtdoc \
     qmake \
+    qtcmake \
     qttestlib
 
 headerdirs  += ..

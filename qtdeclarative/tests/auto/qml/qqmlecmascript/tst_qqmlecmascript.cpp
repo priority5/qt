@@ -74,6 +74,7 @@ public:
 
 private slots:
     void initTestCase();
+    void arrayIncludesValueType();
     void assignBasicTypes();
     void assignDate_data();
     void assignDate();
@@ -379,6 +380,10 @@ private slots:
     void singletonTypeWrapperLookup();
     void getThisObject();
     void semicolonAfterProperty();
+    void hugeStack();
+    void variantConversionMethod();
+
+    void gcCrashRegressionTest();
 
 private:
 //    static void propertyVarWeakRefCallback(v8::Persistent<v8::Value> object, void* parameter);
@@ -409,6 +414,36 @@ void tst_qqmlecmascript::initTestCase()
 {
     QQmlDataTest::initTestCase();
     registerTypes();
+}
+
+void tst_qqmlecmascript::arrayIncludesValueType()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    // It is vital that QtQuick is imported below else we get a warning about
+    // QQml_colorProvider and tst_qqmlecmascript::signalParameterTypes fails due
+    // to some static variable being initialized with the wrong value
+    component.setData(R"(
+    import QtQuick 2.15
+    import QtQml 2.15
+    QtObject {
+        id: root
+        property color r: Qt.rgba(1, 0, 0)
+        property color g: Qt.rgba(0, 1, 0)
+        property color b: Qt.rgba(0, 0, 1)
+        property var colors: [r, g, b]
+        property bool success: false
+
+        Component.onCompleted: {
+            root.success = root.colors.includes(root.g)
+        }
+    }
+    )", QUrl("testData"));
+    QScopedPointer<QObject> o(component.create());
+    QVERIFY(o);
+    auto success = o->property("success");
+    QVERIFY(success.isValid());
+    QVERIFY(success.toBool());
 }
 
 void tst_qqmlecmascript::assignBasicTypes()
@@ -5789,13 +5824,12 @@ void tst_qqmlecmascript::sequenceConversionWrite()
         MySequenceConversionObject *seq = object->findChild<MySequenceConversionObject*>("msco");
         QVERIFY(seq != nullptr);
 
-        // we haven't registered QList<QPoint> as a sequence type, so writing shouldn't work.
-        QString warningOne = qmlFile.toString() + QLatin1String(":16: Error: Cannot assign QJSValue to QList<QPoint>");
-        QTest::ignoreMessage(QtWarningMsg, warningOne.toLatin1().constData());
-
+        // Behavior change in 5.14: due to added auto-magical conversions, it is possible to assign to
+        // QList<QPoint>, even though it is not a registered sequence type
+        QTest::ignoreMessage(QtMsgType::QtWarningMsg, QRegularExpression("Could not convert array value at position 1 from QString to QPoint"));
         QMetaObject::invokeMethod(object, "performTest");
 
-        QList<QPoint> pointList; pointList << QPoint(1, 2) << QPoint(3, 4) << QPoint(5, 6); // original values, shouldn't have changed
+        QList<QPoint> pointList; pointList << QPoint(7, 7) << QPoint(0,0) << QPoint(8, 8) << QPoint(9, 9); // original values, shouldn't have changed
         QCOMPARE(seq->pointListProperty(), pointList);
 
         delete object;
@@ -6437,6 +6471,8 @@ void tst_qqmlecmascript::topLevelGeneratorFunction()
     QQmlComponent component(&engine, testFileUrl("generatorFunction.qml"));
 
     QScopedPointer<QObject> o {component.create()};
+    if (!o)
+        qDebug() << component.errorString();
     QVERIFY(o != nullptr);
 
     // check that generator works correctly in QML
@@ -7269,7 +7305,7 @@ void tst_qqmlecmascript::forInLoop()
 
     QMetaObject::invokeMethod(object, "listProperty");
 
-    QStringList r = object->property("listResult").toString().split("|", QString::SkipEmptyParts);
+    QStringList r = object->property("listResult").toString().split("|", Qt::SkipEmptyParts);
     QCOMPARE(r.size(), 3);
     QCOMPARE(r[0],QLatin1String("0=obj1"));
     QCOMPARE(r[1],QLatin1String("1=obj2"));
@@ -9196,6 +9232,78 @@ void tst_qqmlecmascript::semicolonAfterProperty()
     QVERIFY(component.isReady());
     QScopedPointer<QObject> test(component.create());
     QVERIFY(!test.isNull());
+}
+
+void tst_qqmlecmascript::hugeStack()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("hugeStack.qml"));
+    QVERIFY(component.isReady());
+    QScopedPointer<QObject> test(component.create());
+    QVERIFY(!test.isNull());
+
+    QVariant huge = test->property("longList");
+    QCOMPARE(qvariant_cast<QJSValue>(huge).property(QLatin1String("length")).toInt(), 33059);
+}
+
+void tst_qqmlecmascript::gcCrashRegressionTest()
+{
+    const QString qmljs = QLibraryInfo::location(QLibraryInfo::BinariesPath) + "/qmljs";
+    if (!QFile::exists(qmljs)) {
+        QSKIP("Tets requires qmljs");
+    }
+    QProcess process;
+
+    QTemporaryFile infile;
+    QVERIFY(infile.open());
+    infile.write(R"js(
+        function i_want_to_break_free() {
+            var n = 400;
+            var m = 10;
+            var regex = new RegExp("(ab)".repeat(n), "g"); // g flag to trigger the vulnerable path
+            var part = "ab".repeat(n); // matches have to be at least size 2 to prevent interning
+            var s = (part + "|").repeat(m);
+            var cnt = 0;
+            var ary = [];
+            s.replace(regex, function() {
+                for (var i = 1; i < arguments.length-2; ++i) {
+                    if (typeof arguments[i] !== 'string') {
+                        i_am_free = arguments[i];
+                        throw "success";
+                    }
+                    ary[cnt++] = arguments[i];  // root everything to force GC
+                }
+                return "x";
+            });
+        }
+        try { i_want_to_break_free(); } catch (e) {console.log("hi") }
+        console.log(typeof(i_am_free));  // will print "object"
+    )js");
+    infile.close();
+
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("QV4_GC_MAX_STACK_SIZE", "32768");
+
+    process.setProcessEnvironment(environment);
+    process.start(qmljs, QStringList({infile.fileName()}));
+    QVERIFY(process.waitForStarted());
+    const qint64 pid = process.processId();
+    QVERIFY(pid != 0);
+    QVERIFY(process.waitForFinished());
+    QCOMPARE(process.exitCode(), 0);
+}
+
+void tst_qqmlecmascript::variantConversionMethod()
+{
+    QQmlEngine qmlengine;
+
+    VariantConvertObject obj;
+    qmlengine.rootContext()->setContextProperty("variantObject", &obj);
+
+    QQmlComponent component(&qmlengine, testFileUrl("variantConvert.qml"));
+    QScopedPointer<QObject> o(component.create());
+    QVERIFY(o != nullptr);
+    QCOMPARE(obj.funcCalled, QLatin1String("QModelIndex"));
 }
 
 QTEST_MAIN(tst_qqmlecmascript)

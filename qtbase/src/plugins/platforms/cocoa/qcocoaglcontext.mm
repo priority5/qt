@@ -158,6 +158,8 @@ void QCocoaGLContext::initialize()
     [m_context setValues:&order forParameter:NSOpenGLCPSurfaceOrder];
 
     updateSurfaceFormat();
+
+    qCDebug(lcQpaOpenGLContext).verbosity(3) << "Created" << this << "based on requested" << context()->format();
 }
 
 NSOpenGLPixelFormat *QCocoaGLContext::pixelFormatForSurfaceFormat(const QSurfaceFormat &format)
@@ -355,7 +357,9 @@ QCocoaGLContext::~QCocoaGLContext()
 
 bool QCocoaGLContext::makeCurrent(QPlatformSurface *surface)
 {
-    qCDebug(lcQpaOpenGLContext) << "Making" << m_context << "current"
+    QMacAutoReleasePool pool;
+
+    qCDebug(lcQpaOpenGLContext) << "Making" << this << "current"
         << "in" << QThread::currentThread() << "for" << surface;
 
     Q_ASSERT(surface->surface()->supportsOpenGL());
@@ -487,6 +491,8 @@ void QCocoaGLContext::update()
 
 void QCocoaGLContext::swapBuffers(QPlatformSurface *surface)
 {
+    QMacAutoReleasePool pool;
+
     qCDebug(lcQpaOpenGLContext) << "Swapping" << m_context
         << "in" << QThread::currentThread() << "to" << surface;
 
@@ -520,6 +526,8 @@ void QCocoaGLContext::swapBuffers(QPlatformSurface *surface)
 
 void QCocoaGLContext::doneCurrent()
 {
+    QMacAutoReleasePool pool;
+
     qCDebug(lcQpaOpenGLContext) << "Clearing current context"
         << [NSOpenGLContext currentContext] << "in" << QThread::currentThread();
 
@@ -552,7 +560,23 @@ NSOpenGLContext *QCocoaGLContext::nativeContext() const
 
 QFunctionPointer QCocoaGLContext::getProcAddress(const char *procName)
 {
-    return (QFunctionPointer)dlsym(RTLD_DEFAULT, procName);
+    return (QFunctionPointer)dlsym(RTLD_NEXT, procName);
 }
+
+#ifndef QT_NO_DEBUG_STREAM
+QDebug operator<<(QDebug debug, const QCocoaGLContext *context)
+{
+    QDebugStateSaver saver(debug);
+    debug.nospace();
+    debug << "QCocoaGLContext(" << (const void *)context;
+    if (context) {
+        if (debug.verbosity() > QDebug::DefaultVerbosity)
+            debug << ", " << context->format();
+        debug << ", " << context->nativeContext();
+    }
+    debug << ')';
+    return debug;
+}
+#endif // !QT_NO_DEBUG_STREAM
 
 QT_END_NAMESPACE

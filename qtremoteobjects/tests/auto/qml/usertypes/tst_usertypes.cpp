@@ -56,12 +56,15 @@ public:
 
 private Q_SLOTS:
     void extraPropertyInQml();
+    void extraPropertyInQml2();
     void extraPropertyInQmlComplex();
     void modelInQml();
     void subObjectInQml();
     void complexInQml_data();
     void complexInQml();
     void watcherInQml();
+    void hostInQml();
+    void twoReplicas();
 };
 
 tst_usertypes::tst_usertypes()
@@ -83,6 +86,24 @@ void tst_usertypes::extraPropertyInQml()
     QVERIFY(obj);
 
     QTRY_COMPARE_WITH_TIMEOUT(obj->property("result").value<int>(), 10, 300);
+}
+
+void tst_usertypes::extraPropertyInQml2()
+{
+    qmlRegisterType<SimpleClockReplica>("usertypes", 1, 0, "SimpleClockReplica");
+
+    QRemoteObjectRegistryHost host(QUrl("local:test2"));
+    SimpleClockSimpleSource clock;
+    clock.setHour(10);
+    host.enableRemoting(&clock);
+
+    QQmlEngine e;
+    QQmlComponent c(&e, SRCDIR "data/extraprop2.qml");
+    QObject *obj = c.create();
+    QVERIFY(obj);
+
+    QTRY_COMPARE_WITH_TIMEOUT(obj->property("hour").value<int>(), 10, 300);
+    QCOMPARE(obj->property("result").value<int>(), 10);
 }
 
 void tst_usertypes::extraPropertyInQmlComplex()
@@ -233,6 +254,43 @@ void tst_usertypes::watcherInQml()
     auto map = obj->property("result").value<QMap<QString,QString>>();
     QCOMPARE(map.value("one"), QString::fromLatin1("1"));
     QCOMPARE(obj->property("hasError").value<bool>(), false);
+}
+
+void tst_usertypes::hostInQml()
+{
+    qmlRegisterType<SimpleClockSimpleSource>("usertypes", 1, 0, "SimpleClockSimpleSource");
+
+    QQmlEngine e;
+    QQmlComponent c(&e, SRCDIR "data/hosted.qml");
+    QObject *obj = c.create();
+    QVERIFY(obj);
+
+    QRemoteObjectNode node;
+    node.connectToNode(QUrl("local:testHost"));
+    SimpleClockReplica *replica = node.acquire<SimpleClockReplica>();
+    QTRY_COMPARE_WITH_TIMEOUT(replica->state(), QRemoteObjectReplica::Valid, 300);
+
+    QSignalSpy spy(replica, &SimpleClockReplica::timeUpdated);
+    spy.wait();
+    QCOMPARE(spy.count(), 1);
+}
+
+void tst_usertypes::twoReplicas()
+{
+    qmlRegisterType<SimpleClockReplica>("usertypes", 1, 0, "SimpleClockReplica");
+
+    QRemoteObjectRegistryHost host(QUrl("local:testTwoReplicas"));
+    SimpleClockSimpleSource clock;
+    clock.setHour(7);
+    host.enableRemoting(&clock);
+
+    QQmlEngine e;
+    QQmlComponent c(&e, SRCDIR "data/twoReplicas.qml");
+    QObject *obj = c.create();
+    QVERIFY(obj);
+
+    QTRY_COMPARE_WITH_TIMEOUT(obj->property("result").value<int>(), 7, 300);
+    QTRY_COMPARE_WITH_TIMEOUT(obj->property("result2").value<int>(), 7, 500);
 }
 
 QTEST_MAIN(tst_usertypes)

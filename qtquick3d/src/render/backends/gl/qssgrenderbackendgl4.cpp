@@ -32,6 +32,8 @@
 #include <QtQuick3DRender/private/qssgrenderbackendinputassemblergl_p.h>
 #include <QtQuick3DRender/private/qssgrenderbackendshaderprogramgl_p.h>
 
+#include <QtQuick3DRender/private/qssgopenglextensions_p.h>
+
 QT_BEGIN_NAMESPACE
 
 #ifdef RENDER_BACKEND_LOG_GL_ERRORS
@@ -108,9 +110,6 @@ QByteArray khrBlendAdvancedCoherent()
 QSSGRenderBackendGL4Impl::QSSGRenderBackendGL4Impl(const QSurfaceFormat &format)
     : QSSGRenderBackendGL3Impl(format)
 {
-    const QByteArray apiVersion(getVersionString());
-    qCInfo(TRACE_INFO, "GL version: %s", apiVersion.constData());
-
     // get extension count
     GLint numExtensions = 0;
     GL_CALL_EXTRA_FUNCTION(glGetIntegerv(GL_NUM_EXTENSIONS, &numExtensions));
@@ -186,6 +185,32 @@ QSSGRenderBackendGL4Impl::~QSSGRenderBackendGL4Impl()
 #endif
 }
 
+QByteArray QSSGRenderBackendGL4Impl::getShadingLanguageVersion()
+{
+    // Re-use the implementation from the GL3 backend if the surface is GL ES 3
+    // (should only be the case for 3.1 and greater).
+    if (m_format.renderableType() == QSurfaceFormat::OpenGLES && m_format.majorVersion() == 3)
+        return QSSGRenderBackendGL3Impl::getShadingLanguageVersion();
+
+    Q_ASSERT(m_format.majorVersion() >= 4);
+    QByteArray ver("#version 400\n");
+    if (m_format.majorVersion() == 4)
+        ver[10] = '0' + char(m_format.minorVersion());
+
+    return ver;
+}
+
+QSSGRenderContextType QSSGRenderBackendGL4Impl::getRenderContextType() const
+{
+    // Re-use the implementation from the GL3 backend if the surface is GL ES 3
+    // (should only be the case for 3.1 and greater).
+    if (m_format.renderableType() == QSurfaceFormat::OpenGLES && m_format.majorVersion() == 3)
+        return QSSGRenderBackendGL3Impl::getRenderContextType();
+
+    Q_ASSERT(m_format.majorVersion() >= 4);
+    return QSSGRenderContextType::GL4;
+}
+
 void QSSGRenderBackendGL4Impl::createTextureStorage2D(QSSGRenderBackendTextureObject to,
                                                         QSSGRenderTextureTargetType target,
                                                         qint32 levels,
@@ -195,7 +220,7 @@ void QSSGRenderBackendGL4Impl::createTextureStorage2D(QSSGRenderBackendTextureOb
 {
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
-    GL_CALL_EXTRA_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_EXTRA_FUNCTION(glBindTexture(glTarget, texID));
 
     // up to now compressed is not supported
@@ -219,7 +244,7 @@ void QSSGRenderBackendGL4Impl::setMultisampledTextureData2D(QSSGRenderBackendTex
 {
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
-    GL_CALL_EXTRA_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_EXTRA_FUNCTION(glBindTexture(glTarget, texID));
 
     QSSGRenderTextureSwizzleMode swizzleMode = QSSGRenderTextureSwizzleMode::NoSwizzle;
@@ -432,10 +457,8 @@ void QSSGRenderBackendGL4Impl::setConstantValue(QSSGRenderBackendShaderProgramOb
         GL_CALL_EXTRA_FUNCTION(glProgramUniform1iv(programID, GLint(id), count, static_cast<const GLint *>(value)));
         break;
     case GL_BOOL: {
-        // Cast int value to be 0 or 1, matching to bool
-        GLint *boolValue = (GLint *)value;
-        *boolValue = *(GLboolean *)value;
-        GL_CALL_EXTRA_FUNCTION(glProgramUniform1iv(programID, GLint(id), count, boolValue));
+        const GLint boolValue = value ? *reinterpret_cast<const bool *>(value) : false;
+        GL_CALL_EXTRA_FUNCTION(glProgramUniform1iv(programID, GLint(id), count, &boolValue));
     } break;
     case GL_INT_VEC2:
     case GL_BOOL_VEC2:
@@ -468,7 +491,7 @@ void QSSGRenderBackendGL4Impl::setConstantValue(QSSGRenderBackendShaderProgramOb
         }
     } break;
     default:
-        qCCritical(INTERNAL_ERROR, "Unknown shader type format %d", int(type));
+        qCCritical(RENDER_INTERNAL_ERROR, "Unknown shader type format %d", int(type));
         Q_ASSERT(false);
         break;
     }

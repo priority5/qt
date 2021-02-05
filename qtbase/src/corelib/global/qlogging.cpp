@@ -70,7 +70,7 @@
 #if QT_CONFIG(slog2)
 #include <sys/slog2.h>
 #endif
-#if QT_HAS_INCLUDE(<paths.h>)
+#if __has_include(<paths.h>)
 #include <paths.h>
 #endif
 
@@ -106,7 +106,7 @@
 #    if __UCLIBC_HAS_BACKTRACE__
 #      define QLOGGING_HAVE_BACKTRACE
 #    endif
-#  elif (defined(__GLIBC__) && defined(__GLIBCXX__)) || (QT_HAS_INCLUDE(<cxxabi.h>) && QT_HAS_INCLUDE(<execinfo.h>))
+#  elif (defined(__GLIBC__) && defined(__GLIBCXX__)) || (__has_include(<cxxabi.h>) && __has_include(<execinfo.h>))
 #    define QLOGGING_HAVE_BACKTRACE
 #  endif
 #endif
@@ -116,7 +116,7 @@ extern char *__progname;
 #endif
 
 #ifndef QT_BOOTSTRAPPED
-#if defined(Q_OS_LINUX) && (defined(__GLIBC__) || QT_HAS_INCLUDE(<sys/syscall.h>))
+#if defined(Q_OS_LINUX) && (defined(__GLIBC__) || __has_include(<sys/syscall.h>))
 #  include <sys/syscall.h>
 
 # if defined(Q_OS_ANDROID) && !defined(SYS_gettid)
@@ -1276,7 +1276,7 @@ void QMessagePattern::setPattern(const QString &pattern)
 #if defined(QLOGGING_HAVE_BACKTRACE) && !defined(QT_BOOTSTRAPPED)
 // make sure the function has "Message" in the name so the function is removed
 
-#if ((defined(Q_CC_GNU) && defined(QT_COMPILER_SUPPORTS_SIMD_ALWAYS)) || QT_HAS_ATTRIBUTE(optimize)) \
+#if ((defined(Q_CC_GNU) && defined(QT_COMPILER_SUPPORTS_SIMD_ALWAYS)) || __has_attribute(optimize)) \
     && !defined(Q_CC_INTEL) && !defined(Q_CC_CLANG)
 // force skipping the frame pointer, to save the backtrace() function some work
 __attribute__((optimize("omit-frame-pointer")))
@@ -1315,7 +1315,7 @@ static QStringList backtraceFramesForLogMessage(int frameCount)
 
                 if (function.startsWith(QLatin1String("_Z"))) {
                     QScopedPointer<char, QScopedPointerPodDeleter> demangled(
-                                abi::__cxa_demangle(function.toUtf8(), 0, 0, 0));
+                                abi::__cxa_demangle(function.toUtf8(), nullptr, nullptr, nullptr));
                     if (demangled)
                         function = QString::fromUtf8(qCleanupFuncinfo(demangled.data()));
                 }
@@ -1669,14 +1669,34 @@ static bool android_default_message_handler(QtMsgType type,
 #endif //Q_OS_ANDROID
 
 #ifdef Q_OS_WIN
+static void win_outputDebugString_helper(QStringView message)
+{
+    const int maxOutputStringLength = 32766;
+    static QBasicMutex m;
+    auto locker = qt_unique_lock(m);
+    // fast path: Avoid string copies if one output is enough
+    if (message.length() <= maxOutputStringLength) {
+        OutputDebugString(reinterpret_cast<const wchar_t *>(message.utf16()));
+    } else {
+        wchar_t *messagePart = new wchar_t[maxOutputStringLength + 1];
+        for (int i = 0; i < message.length(); i += maxOutputStringLength ) {
+            const int length = std::min(message.length() - i, maxOutputStringLength );
+            const int len = message.mid(i, length).toWCharArray(messagePart);
+            Q_ASSERT(len == length);
+            messagePart[len] = 0;
+            OutputDebugString(messagePart);
+        }
+        delete[] messagePart;
+    }
+}
+
 static bool win_message_handler(QtMsgType type, const QMessageLogContext &context, const QString &message)
 {
     if (shouldLogToStderr())
         return false; // Leave logging up to stderr handler
 
-    QString formattedMessage = qFormatLogMessage(type, context, message);
-    formattedMessage.append(QLatin1Char('\n'));
-    OutputDebugString(reinterpret_cast<const wchar_t *>(formattedMessage.utf16()));
+    const QString formattedMessage = qFormatLogMessage(type, context, message).append('\n');
+    win_outputDebugString_helper(formattedMessage);
 
     return true; // Prevent further output to stderr
 }
@@ -1832,11 +1852,11 @@ static void qt_message_print(QtMsgType msgType, const QMessageLogContext &contex
 static void qt_message_print(const QString &message)
 {
 #if defined(Q_OS_WINRT)
-    OutputDebugString(reinterpret_cast<const wchar_t*>(message.utf16()));
+    win_outputDebugString_helper(message);
     return;
 #elif defined(Q_OS_WIN) && !defined(QT_BOOTSTRAPPED)
     if (!shouldLogToStderr()) {
-        OutputDebugString(reinterpret_cast<const wchar_t*>(message.utf16()));
+        win_outputDebugString_helper(message);
         return;
     }
 #endif

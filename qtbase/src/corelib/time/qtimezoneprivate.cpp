@@ -1,5 +1,6 @@
 /****************************************************************************
 **
+** Copyright (C) 2019 The Qt Company Ltd.
 ** Copyright (C) 2013 John Layt <jlayt@kde.org>
 ** Contact: https://www.qt.io/licensing/
 **
@@ -380,18 +381,15 @@ QTimeZonePrivate::Data QTimeZonePrivate::dataForLocalTime(qint64 forLocalMSecs, 
                   On the first pass, the case we consider is what hint told us to expect
                   (except when hint was -1 and didn't actually tell us what to expect),
                   so it's likely right.  We only get a second pass if the first failed,
-                  by which time the second case, that we're trying, is likely right.  If
-                  an overwhelming majority of calls have hint == -1, the Q_LIKELY here
-                  shall be wrong half the time; otherwise, its errors shall be rarer
-                  than that.
+                  by which time the second case, that we're trying, is likely right.
                 */
                 if (nextFirst ? i == 0 : i) {
                     Q_ASSERT(nextStart != invalidMSecs());
-                    if (Q_LIKELY(nextStart <= nextTran.atMSecsSinceEpoch))
+                    if (nextStart <= nextTran.atMSecsSinceEpoch)
                         return nextTran;
                 } else {
                     // If next is invalid, nextFirst is false, to route us here first:
-                    if (nextStart == invalidMSecs() || Q_LIKELY(nextStart > tran.atMSecsSinceEpoch))
+                    if (nextStart == invalidMSecs() || nextStart > tran.atMSecsSinceEpoch)
                         return tran;
                 }
             }
@@ -420,7 +418,7 @@ QTimeZonePrivate::Data QTimeZonePrivate::dataForLocalTime(qint64 forLocalMSecs, 
 
     int early = offsetFromUtc(recent);
     int late = offsetFromUtc(imminent);
-    if (Q_LIKELY(early == late)) { // > 99% of the time
+    if (early == late) { // > 99% of the time
         utcEpochMSecs = forLocalMSecs - early * 1000;
     } else {
         // Close to a DST transition: early > late is near a fall-back,
@@ -432,7 +430,7 @@ QTimeZonePrivate::Data QTimeZonePrivate::dataForLocalTime(qint64 forLocalMSecs, 
         const qint64 forStd = forLocalMSecs - offsetInStd * 1000;
         // Best guess at the answer:
         const qint64 hinted = hint > 0 ? forDst : forStd;
-        if (Q_LIKELY(offsetFromUtc(hinted) == (hint > 0 ? offsetInDst : offsetInStd))) {
+        if (offsetFromUtc(hinted) == (hint > 0 ? offsetInDst : offsetInStd)) {
             utcEpochMSecs = hinted;
         } else if (hint <= 0 && offsetFromUtc(forDst) == offsetInDst) {
             utcEpochMSecs = forDst;
@@ -767,6 +765,39 @@ QUtcTimeZonePrivate::QUtcTimeZonePrivate(const QByteArray &id)
     }
 }
 
+qint64 QUtcTimeZonePrivate::offsetFromUtcString(const QByteArray &id)
+{
+    // Convert reasonable UTC[+-]\d+(:\d+){,2} to offset in seconds.
+    // Assumption: id has already been tried as a CLDR UTC offset ID (notably
+    // including plain "UTC" itself) and a system offset ID; it's neither.
+    if (!id.startsWith("UTC") || id.size() < 5)
+        return invalidSeconds(); // Doesn't match
+    const char signChar = id.at(3);
+    if (signChar != '-' && signChar != '+')
+        return invalidSeconds(); // No sign
+    const int sign = signChar == '-' ? -1 : 1;
+
+    const auto offsets = id.mid(4).split(':');
+    if (offsets.isEmpty() || offsets.size() > 3)
+        return invalidSeconds(); // No numbers, or too many.
+
+    qint32 seconds = 0;
+    int prior = 0; // Number of fields parsed thus far
+    for (const auto &offset : offsets) {
+        bool ok = false;
+        unsigned short field = offset.toUShort(&ok);
+        // Bound hour above at 24, minutes and seconds at 60:
+        if (!ok || field >= (prior ? 60 : 24))
+            return invalidSeconds();
+        seconds = seconds * 60 + field;
+        ++prior;
+    }
+    while (prior++ < 3)
+        seconds *= 60;
+
+    return seconds * sign;
+}
+
 // Create offset from UTC
 QUtcTimeZonePrivate::QUtcTimeZonePrivate(qint32 offsetSeconds)
 {
@@ -880,22 +911,25 @@ QByteArray QUtcTimeZonePrivate::systemTimeZoneId() const
 
 bool QUtcTimeZonePrivate::isTimeZoneIdAvailable(const QByteArray &ianaId) const
 {
+    // Only the zone IDs supplied by CLDR and recognized by constructor.
     for (int i = 0; i < utcDataTableSize; ++i) {
         const QUtcData *data = utcData(i);
-        if (utcId(data) == ianaId) {
+        if (utcId(data) == ianaId)
             return true;
-        }
     }
+    // But see offsetFromUtcString(), which lets us accept some "unavailable" IDs.
     return false;
 }
 
 QList<QByteArray> QUtcTimeZonePrivate::availableTimeZoneIds() const
 {
+    // Only the zone IDs supplied by CLDR and recognized by constructor.
     QList<QByteArray> result;
     result.reserve(utcDataTableSize);
     for (int i = 0; i < utcDataTableSize; ++i)
         result << utcId(utcData(i));
-    std::sort(result.begin(), result.end()); // ### or already sorted??
+    // Not guaranteed to be sorted, so sort:
+    std::sort(result.begin(), result.end());
     // ### assuming no duplicates
     return result;
 }
@@ -910,13 +944,16 @@ QList<QByteArray> QUtcTimeZonePrivate::availableTimeZoneIds(QLocale::Country cou
 
 QList<QByteArray> QUtcTimeZonePrivate::availableTimeZoneIds(qint32 offsetSeconds) const
 {
+    // Only if it's present in CLDR. (May get more than one ID: UTC, UTC+00:00
+    // and UTC-00:00 all have the same offset.)
     QList<QByteArray> result;
     for (int i = 0; i < utcDataTableSize; ++i) {
         const QUtcData *data = utcData(i);
         if (data->offsetFromUtc == offsetSeconds)
             result << utcId(data);
     }
-    std::sort(result.begin(), result.end()); // ### or already sorted??
+    // Not guaranteed to be sorted, so sort:
+    std::sort(result.begin(), result.end());
     // ### assuming no duplicates
     return result;
 }

@@ -28,7 +28,7 @@
 ****************************************************************************/
 
 #include "qquick3dpointlight_p.h"
-#include "qquick3dobject_p_p.h"
+#include "qquick3dobject_p.h"
 
 #include <QtQuick3DRuntimeRender/private/qssgrenderlight_p.h>
 
@@ -50,7 +50,7 @@ QT_BEGIN_NAMESPACE
     (and range) can be controlled with the \l {constantFade}, \l {linearFade}, and
     \l quadraticFade properties.
 
-    \sa AreaLight, DirectionalLight
+    \sa AreaLight, DirectionalLight, SpotLight
 */
 
 /*!
@@ -128,6 +128,7 @@ void QQuick3DPointLight::setQuadraticFade(float quadraticFade)
 QSSGRenderGraphObject *QQuick3DPointLight::updateSpatialNode(QSSGRenderGraphObject *node)
 {
     if (!node) {
+        markAllDirty();
         node = new QSSGRenderLight();
         QSSGRenderLight *light = static_cast<QSSGRenderLight *>(node);
         light->m_lightType = QSSGRenderLight::Type::Point;

@@ -149,26 +149,17 @@ class QPSQLDriverPrivate final : public QSqlDriverPrivate
 {
     Q_DECLARE_PUBLIC(QPSQLDriver)
 public:
-    QPSQLDriverPrivate() : QSqlDriverPrivate(),
-        connection(nullptr),
-        isUtf8(false),
-        pro(QPSQLDriver::Version6),
-        sn(nullptr),
-        pendingNotifyCheck(false),
-        hasBackslashEscape(false),
-        stmtCount(0),
-        currentStmtId(InvalidStatementId)
-    { dbmsType = QSqlDriver::PostgreSQL; }
+    QPSQLDriverPrivate() : QSqlDriverPrivate(QSqlDriver::PostgreSQL) {}
 
-    PGconn *connection;
-    bool isUtf8;
-    QPSQLDriver::Protocol pro;
-    QSocketNotifier *sn;
     QStringList seid;
-    mutable bool pendingNotifyCheck;
-    bool hasBackslashEscape;
-    int stmtCount;
-    StatementId currentStmtId;
+    PGconn *connection = nullptr;
+    QSocketNotifier *sn = nullptr;
+    QPSQLDriver::Protocol pro = QPSQLDriver::Version6;
+    StatementId currentStmtId = InvalidStatementId;
+    int stmtCount = 0;
+    mutable bool pendingNotifyCheck = false;
+    bool hasBackslashEscape = false;
+    bool isUtf8 = false;
 
     void appendTables(QStringList &tl, QSqlQuery &t, QChar type);
     PGresult *exec(const char *stmt);
@@ -288,7 +279,7 @@ void QPSQLDriverPrivate::checkPendingNotifications() const
     Q_Q(const QPSQLDriver);
     if (seid.size() && !pendingNotifyCheck) {
         pendingNotifyCheck = true;
-        QMetaObject::invokeMethod(const_cast<QPSQLDriver*>(q), "_q_handleNotification", Qt::QueuedConnection, Q_ARG(int,0));
+        QMetaObject::invokeMethod(const_cast<QPSQLDriver*>(q), "_q_handleNotification", Qt::QueuedConnection);
     }
 }
 
@@ -297,25 +288,18 @@ class QPSQLResultPrivate : public QSqlResultPrivate
     Q_DECLARE_PUBLIC(QPSQLResult)
 public:
     Q_DECLARE_SQLDRIVER_PRIVATE(QPSQLDriver)
-    QPSQLResultPrivate(QPSQLResult *q, const QPSQLDriver *drv)
-      : QSqlResultPrivate(q, drv),
-        result(nullptr),
-        stmtId(InvalidStatementId),
-        currentSize(-1),
-        canFetchMoreRows(false),
-        preparedQueriesEnabled(false)
-    { }
+    using QSqlResultPrivate::QSqlResultPrivate;
 
     QString fieldSerial(int i) const override { return QLatin1Char('$') + QString::number(i + 1); }
     void deallocatePreparedStmt();
 
-    PGresult *result;
     std::queue<PGresult*> nextResultSets;
     QString preparedStmtId;
-    StatementId stmtId;
-    int currentSize;
-    bool canFetchMoreRows;
-    bool preparedQueriesEnabled;
+    PGresult *result = nullptr;
+    StatementId stmtId = InvalidStatementId;
+    int currentSize = -1;
+    bool canFetchMoreRows = false;
+    bool preparedQueriesEnabled = false;
 
     bool processResults();
 };
@@ -692,40 +676,24 @@ QVariant QPSQLResult::data(int i)
         return dbl;
     }
     case QVariant::Date:
-        if (val[0] == '\0') {
-            return QVariant(QDate());
-        } else {
 #if QT_CONFIG(datestring)
-            return QVariant(QDate::fromString(QString::fromLatin1(val), Qt::ISODate));
+        return QVariant(QDate::fromString(QString::fromLatin1(val), Qt::ISODate));
 #else
-            return QVariant(QString::fromLatin1(val));
+        return QVariant(QString::fromLatin1(val));
 #endif
-        }
-    case QVariant::Time: {
-        const QString str = QString::fromLatin1(val);
+    case QVariant::Time:
 #if QT_CONFIG(datestring)
-        if (str.isEmpty())
-            return QVariant(QTime());
-        else
-            return QVariant(QTime::fromString(str, Qt::ISODate));
+        return QVariant(QTime::fromString(QString::fromLatin1(val), Qt::ISODate));
 #else
-        return QVariant(str);
+        return QVariant(QString::fromLatin1(val));
 #endif
-    }
-    case QVariant::DateTime: {
-        QString dtval = QString::fromLatin1(val);
+    case QVariant::DateTime:
 #if QT_CONFIG(datestring)
-        if (dtval.length() < 10) {
-            return QVariant(QDateTime());
-        } else {
-            QChar sign = dtval[dtval.size() - 3];
-            if (sign == QLatin1Char('-') || sign == QLatin1Char('+')) dtval += QLatin1String(":00");
-            return QVariant(QDateTime::fromString(dtval, Qt::ISODate).toLocalTime());
-        }
+        return QVariant(QDateTime::fromString(QString::fromLatin1(val),
+                                              Qt::ISODate).toLocalTime());
 #else
-        return QVariant(dtval);
+        return QVariant(QString::fromLatin1(val));
 #endif
-    }
     case QVariant::ByteArray: {
         size_t len;
         unsigned char *data = PQunescapeBytea((const unsigned char*)val, &len);
@@ -838,6 +806,7 @@ QSqlRecord QPSQLResult::record() const
         }
         int ptype = PQftype(d->result, i);
         f.setType(qDecodePSQLType(ptype));
+        f.setValue(QVariant(f.type())); // only set in setType() when it's invalid before
         int len = PQfsize(d->result, i);
         int precision = PQfmod(d->result, i);
 
@@ -1277,7 +1246,7 @@ void QPSQLDriver::close()
 
         d->seid.clear();
         if (d->sn) {
-            disconnect(d->sn, SIGNAL(activated(int)), this, SLOT(_q_handleNotification(int)));
+            disconnect(d->sn, SIGNAL(activated(QSocketDescriptor)), this, SLOT(_q_handleNotification()));
             delete d->sn;
             d->sn = nullptr;
         }
@@ -1611,21 +1580,20 @@ bool QPSQLDriver::subscribeToNotification(const QString &name)
         return false;
     }
 
-    if (d->seid.contains(name)) {
-        qWarning("QPSQLDriver::subscribeToNotificationImplementation: already subscribing to '%s'.",
-            qPrintable(name));
-        return false;
-    }
-
+    const bool alreadyContained = d->seid.contains(name);
     int socket = PQsocket(d->connection);
     if (socket) {
         // Add the name to the list of subscriptions here so that QSQLDriverPrivate::exec knows
-        // to check for notifications immediately after executing the LISTEN
-        d->seid << name;
+        // to check for notifications immediately after executing the LISTEN. If it has already
+        // been subscribed then LISTEN Will do nothing. But we do the call anyway in case the
+        // connection was lost and this is a re-subscription.
+        if (!alreadyContained)
+            d->seid << name;
         QString query = QStringLiteral("LISTEN ") + escapeIdentifier(name, QSqlDriver::TableName);
         PGresult *result = d->exec(query);
         if (PQresultStatus(result) != PGRES_COMMAND_OK) {
-            d->seid.removeLast();
+            if (!alreadyContained)
+                d->seid.removeLast();
             setLastError(qMakeError(tr("Unable to subscribe"), QSqlError::StatementError, d, result));
             PQclear(result);
             return false;
@@ -1634,7 +1602,7 @@ bool QPSQLDriver::subscribeToNotification(const QString &name)
 
         if (!d->sn) {
             d->sn = new QSocketNotifier(socket, QSocketNotifier::Read);
-            connect(d->sn, SIGNAL(activated(int)), this, SLOT(_q_handleNotification(int)));
+            connect(d->sn, SIGNAL(activated(QSocketDescriptor)), this, SLOT(_q_handleNotification()));
         }
     } else {
         qWarning("QPSQLDriver::subscribeToNotificationImplementation: PQsocket didn't return a valid socket to listen on");
@@ -1670,7 +1638,7 @@ bool QPSQLDriver::unsubscribeFromNotification(const QString &name)
     d->seid.removeAll(name);
 
     if (d->seid.isEmpty()) {
-        disconnect(d->sn, SIGNAL(activated(int)), this, SLOT(_q_handleNotification(int)));
+        disconnect(d->sn, SIGNAL(activated(QSocketDescriptor)), this, SLOT(_q_handleNotification()));
         delete d->sn;
         d->sn = nullptr;
     }
@@ -1684,7 +1652,7 @@ QStringList QPSQLDriver::subscribedToNotifications() const
     return d->seid;
 }
 
-void QPSQLDriver::_q_handleNotification(int)
+void QPSQLDriver::_q_handleNotification()
 {
     Q_D(QPSQLDriver);
     d->pendingNotifyCheck = false;
@@ -1699,7 +1667,12 @@ void QPSQLDriver::_q_handleNotification(int)
             if (notify->extra)
                 payload = d->isUtf8 ? QString::fromUtf8(notify->extra) : QString::fromLatin1(notify->extra);
 #endif
+#if QT_DEPRECATED_SINCE(5, 15)
+QT_WARNING_PUSH
+QT_WARNING_DISABLE_DEPRECATED
             emit notification(name);
+QT_WARNING_POP
+#endif
             QSqlDriver::NotificationSource source = (notify->be_pid == PQbackendPID(d->connection)) ? QSqlDriver::SelfSource : QSqlDriver::OtherSource;
             emit notification(name, source, payload);
         }

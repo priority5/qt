@@ -1,14 +1,15 @@
 TEMPLATE = subdirs
 SUBDIRS += \
+    antialiasing \
     customshaders \
+    effects \
     hellocube \
     simple \
     view3d \
-    wasdcamera \
     picking \
-    blendmodes \
-    studio \
     lights \
     custommaterial \
     principledmaterial \
-    dynamiccreation
+    dynamictexture \
+    dynamiccreation \
+    quickitems

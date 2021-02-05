@@ -294,7 +294,9 @@ qreal QHighDpiScaling::rawScaleFactor(const QPlatformScreen *screen)
     qreal factor;
     QDpi platformBaseDpi = screen->logicalBaseDpi();
     if (usePhysicalDpi) {
-        qreal platformPhysicalDpi = screen->screen()->physicalDotsPerInch();
+        QSize sz = screen->geometry().size();
+        QSizeF psz = screen->physicalSize();
+        qreal platformPhysicalDpi = ((sz.height() / psz.height()) + (sz.width() / psz.width())) * qreal(25.4 * 0.5);
         factor = qreal(platformPhysicalDpi) / qreal(platformBaseDpi.first);
     } else {
         const QDpi platformLogicalDpi = QPlatformScreen::overrideDpi(screen->logicalDpi());
@@ -493,6 +495,8 @@ void QHighDpiScaling::updateHighDpiScaling()
     if (QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling))
         return;
 
+    m_usePixelDensity = usePixelDensity();
+
     if (m_usePixelDensity && !m_pixelDensityScalingActive) {
         const auto screens = QGuiApplication::screens();
         for (QScreen *screen : screens) {
@@ -535,7 +539,7 @@ void QHighDpiScaling::updateHighDpiScaling()
             ++i;
         }
     }
-    m_active = m_globalScalingActive || m_screenFactorSet || m_usePixelDensity;
+    m_active = m_globalScalingActive || m_screenFactorSet || m_pixelDensityScalingActive;
 }
 
 /*

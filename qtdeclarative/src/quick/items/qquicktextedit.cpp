@@ -118,8 +118,6 @@ TextEdit {
     This signal is emitted when the user clicks on a link embedded in the text.
     The link must be in rich text or HTML format and the
     \a link string provides access to the particular link.
-
-    The corresponding handler is \c onLinkActivated.
 */
 
 // This is a pretty arbitrary figure. The idea is that we don't want to break down the document
@@ -395,6 +393,7 @@ QString QQuickTextEdit::text() const
     The text to display.  If the text format is AutoText the text edit will
     automatically determine whether the text should be treated as
     rich text.  This determination is made using Qt::mightBeRichText().
+    However, detection of Markdown is not automatic.
 
     The text-property is mostly suitable for setting the initial content and
     handling modifications to relatively small text content. The append(),
@@ -402,7 +401,7 @@ QString QQuickTextEdit::text() const
     remarkably better performance for modifying especially large rich text
     content.
 
-    \sa clear()
+    \sa clear(), textFormat
 */
 void QQuickTextEdit::setText(const QString &text)
 {
@@ -444,41 +443,43 @@ QString QQuickTextEdit::preeditText() const
 /*!
     \qmlproperty enumeration QtQuick::TextEdit::textFormat
 
-    The way the text property should be displayed.
+    The way the \l text property should be displayed.
 
-    \list
-    \li TextEdit.AutoText
-    \li TextEdit.PlainText
-    \li TextEdit.RichText
-    \endlist
+    Supported text formats are:
 
-    The default is TextEdit.PlainText.  If the text format is TextEdit.AutoText the text edit
-    will automatically determine whether the text should be treated as
-    rich text.  This determination is made using Qt::mightBeRichText().
+    \value TextEdit.PlainText       (default) all styling tags are treated as plain text
+    \value TextEdit.AutoText        detected via the Qt::mightBeRichText() heuristic
+    \value TextEdit.RichText        \l {Supported HTML Subset} {a subset of HTML 4}
+    \value TextEdit.MarkdownText    \l {https://commonmark.org/help/}{CommonMark} plus the
+                                    \l {https://guides.github.com/features/mastering-markdown/}{GitHub}
+                                    extensions for tables and task lists (since 5.14)
+
+    The default is \c TextEdit.PlainText. If the text format is set to
+    \c TextEdit.AutoText, the text edit will automatically determine whether
+    the text should be treated as rich text. This determination is made using
+    Qt::mightBeRichText(), which can detect the presence of an HTML tag on the
+    first line of text, but cannot distinguish Markdown from plain text.
 
     \table
     \row
     \li
-    \qml
-Column {
-    TextEdit {
-        font.pointSize: 24
-        text: "<b>Hello</b> <i>World!</i>"
-    }
-    TextEdit {
-        font.pointSize: 24
-        textFormat: TextEdit.RichText
-        text: "<b>Hello</b> <i>World!</i>"
-    }
-    TextEdit {
-        font.pointSize: 24
-        textFormat: TextEdit.PlainText
-        text: "<b>Hello</b> <i>World!</i>"
-    }
-}
-    \endqml
+    \snippet qml/text/textEditFormats.qml 0
     \li \image declarative-textformat.png
     \endtable
+
+    With \c TextEdit.MarkdownText, checkboxes that result from using the
+    \l {https://guides.github.com/features/mastering-markdown/#GitHub-flavored-markdown}{GitHub checkbox extension}
+    are interactively checkable.
+
+    \note Interactively typing markup or markdown formatting is not supported.
+
+    \note With \c Text.MarkdownText, and with the supported subset of HTML,
+    some decorative elements are not rendered as they would be in a web browser:
+    \list
+    \li code blocks use the \l {QFontDatabase::FixedFont}{default monospace font} but without a surrounding highlight box
+    \li block quotes are indented, but there is no vertical line alongside the quote
+    \li horizontal rules are not rendered
+    \endlist
 */
 QQuickTextEdit::TextFormat QQuickTextEdit::textFormat() const
 {
@@ -2529,8 +2530,9 @@ void QQuickTextEdit::updateSize()
             if (d->inLayout)    // probably the result of a binding loop, but by letting it
                 return;         // get this far we'll get a warning to that effect.
         }
-        if (d->document->textWidth() != width()) {
-            d->document->setTextWidth(width() - leftPadding() - rightPadding());
+        const qreal newTextWidth = width() - leftPadding() - rightPadding();
+        if (d->document->textWidth() != newTextWidth) {
+            d->document->setTextWidth(newTextWidth);
             newWidth = d->document->idealWidth();
         }
         //### need to confirm cost of always setting these
@@ -2900,8 +2902,6 @@ bool QQuickTextEditPrivate::isLinkHoveredConnected()
     The link must be in rich text or HTML format and the
     \a link string provides access to the particular link.
 
-    The corresponding handler is \c onLinkHovered.
-
     \sa hoveredLink, linkAt()
 */
 
@@ -2910,8 +2910,6 @@ bool QQuickTextEditPrivate::isLinkHoveredConnected()
     \since 5.6
 
     This signal is emitted when the text edit loses focus.
-
-    The corresponding handler is \c onEditingFinished.
 */
 
 /*!

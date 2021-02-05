@@ -481,6 +481,8 @@ ReturnedValue RegExpPrototype::exec(ExecutionEngine *engine, const Object *o, co
     ScopedFunctionObject exec(scope, o->get(key));
     if (exec) {
         ScopedValue result(scope, exec->call(o, s, 1));
+        if (scope.hasException())
+            RETURN_UNDEFINED();
         if (!result->isNull() && !result->isObject())
             return scope.engine->throwTypeError();
         return result->asReturnedValue();
@@ -737,6 +739,8 @@ ReturnedValue RegExpPrototype::method_replace(const FunctionObject *f, const Val
             cData->args[nCaptures + 1] = Encode(position);
             cData->args[nCaptures + 2] = s;
             ScopedValue replValue(scope, replaceFunction->call(cData));
+            if (scope.hasException())
+                return Encode::undefined();
             replacement = replValue->toQString();
         } else {
             replacement = RegExp::getSubstitution(matchString->toQString(), s->toQString(), position, cData.args, nCaptures, replaceValue->toQString());
@@ -961,8 +965,8 @@ ReturnedValue RegExpPrototype::method_compile(const FunctionObject *b, const Val
         return scope.engine->throwTypeError();
 
     Scoped<RegExpObject> re(scope, scope.engine->regExpCtor()->callAsConstructor(argv, argc));
-
-    r->d()->value.set(scope.engine, re->value());
+    if (re) // Otherwise the regexp constructor should have thrown an exception
+        r->d()->value.set(scope.engine, re->value());
     return Encode::undefined();
 }
 

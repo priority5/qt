@@ -48,9 +48,8 @@
 **
 ****************************************************************************/
 
-import QtQuick3D 1.14
-import QtQuick 2.14
-import QtQuick.Timeline 1.0
+import QtQuick3D 1.15
+import QtQuick 2.15
 
 Rectangle {
     id: opacitymap
@@ -72,28 +71,25 @@ Rectangle {
             depthPrePassEnabled: true
         }
 
-        Camera {
+        PerspectiveCamera {
             id: camera
-            position: Qt.vector3d(0, 0, -600)
-            rotationOrder: Node.YZX
+            position: Qt.vector3d(0, 0, 600)
             clipFar: 5000
         }
 
         DirectionalLight {
             id: light
-            rotationOrder: Node.YZX
             shadowFactor: 10
         }
 
         Model {
             id: rectangle
-            position: Qt.vector3d(15.6206, 1.91976, -21.2664)
-            rotation: Qt.vector3d(62.5, 0, 0)
+            position: Qt.vector3d(15.6206, 1.91976, 21.2664)
+            rotation: Quaternion.fromEulerAngles(-62.5, 0, 0)
             scale: Qt.vector3d(6.24243, 4.98461, 1)
-            rotationOrder: Node.YZX
             source: "#Rectangle"
-            edgeTess: 4
-            innerTess: 4
+            
+            
 
             DefaultMaterial {
                 id: material
@@ -111,11 +107,10 @@ Rectangle {
 
         Model {
             id: sphere
-            position: Qt.vector3d(3.93619, 42.917, -251.294)
-            rotationOrder: Node.YZX
+            position: Qt.vector3d(3.93619, 42.917, 251.294)
             source: "#Sphere"
-            edgeTess: 4
-            innerTess: 4
+            
+            
 
             DefaultMaterial {
                 id: material_001
@@ -139,12 +134,11 @@ Rectangle {
 
         Model {
             id: cube
-            position: Qt.vector3d(-259.951, 176.081, -5.02271)
-            rotation: Qt.vector3d(-30.5, -34, 0)
-            rotationOrder: Node.YZX
+            position: Qt.vector3d(-259.951, 176.081, 5.02271)
+            rotation: Quaternion.fromEulerAngles(30.5, 34, 0)
             source: "#Cube"
-            edgeTess: 4
-            innerTess: 4
+            
+            
 
             DefaultMaterial {
                 id: material_002
@@ -166,39 +160,4 @@ Rectangle {
             materials: [material_002]
         }
     }
-
-    Timeline {
-        id: slide1Timeline
-        startFrame: 0
-        endFrame: 10
-        currentFrame: 0
-        enabled: false
-        animations: [
-            TimelineAnimation {
-                id: slide1TimelineAnimation
-                duration: 10000
-                from: 0
-                to: 10
-                running: true
-                loops: 1
-                pingPong: false
-            }
-        ]
-    }
-
-    states: [
-        State {
-            name: "Slide1"
-            PropertyChanges {
-                target: slide1Timeline
-                enabled: true
-                currentFrame: 0
-            }
-            PropertyChanges {
-                target: slide1TimelineAnimation
-                running: true
-            }
-        }
-    ]
-    state: "Slide1"
 }

@@ -44,6 +44,7 @@
 
 #include <QtQuick3DRuntimeRender/private/qssgrenderdefaultmaterialshadergenerator_p.h>
 #include <QtQuick3DRuntimeRender/private/qssgrendertessmodevalues_p.h>
+#include <QtQuick3DRuntimeRender/private/qssgrendershaderkeys_p.h>
 
 #include <QtCore/QSharedPointer>
 
@@ -78,9 +79,9 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
     QSSGRenderableImage *m_displacementImage;
     QList<QByteArray> m_addedFunctions;
 
-    QSSGVertexPipelineImpl(QSSGRef<QSSGMaterialShaderGeneratorInterface> inMaterial,
-                             QSSGRef<QSSGShaderProgramGeneratorInterface> inProgram,
-                             bool inWireframe /* only works if tessellation is true */)
+    QSSGVertexPipelineImpl(const QSSGRef<QSSGMaterialShaderGeneratorInterface> &inMaterial,
+                           const QSSGRef<QSSGShaderProgramGeneratorInterface> &inProgram,
+                           bool inWireframe /* only works if tessellation is true */)
 
         : m_materialGenerator(inMaterial)
         , m_programGenerator(inProgram)
@@ -150,21 +151,21 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
                 // http://developer.download.nvidia.com/SDK/10.5/direct3d/Source/SolidWireframe/Doc/SolidWireframe.pdf
 
                 geometryShader.append("// project points to screen space\n"
-                                      "\tvec3 p0 = vec3(viewportMatrix * (gl_in[0].gl_Position / "
+                                      "    vec3 p0 = vec3(viewportMatrix * (gl_in[0].gl_Position / "
                                       "gl_in[0].gl_Position.w));\n"
-                                      "\tvec3 p1 = vec3(viewportMatrix * (gl_in[1].gl_Position / "
+                                      "    vec3 p1 = vec3(viewportMatrix * (gl_in[1].gl_Position / "
                                       "gl_in[1].gl_Position.w));\n"
-                                      "\tvec3 p2 = vec3(viewportMatrix * (gl_in[2].gl_Position / "
+                                      "    vec3 p2 = vec3(viewportMatrix * (gl_in[2].gl_Position / "
                                       "gl_in[2].gl_Position.w));\n"
                                       "// compute triangle heights\n"
-                                      "\tfloat e1 = length(p1 - p2);\n"
-                                      "\tfloat e2 = length(p2 - p0);\n"
-                                      "\tfloat e3 = length(p1 - p0);\n"
-                                      "\tfloat alpha = acos( (e2*e2 + e3*e3 - e1*e1) / (2.0*e2*e3) );\n"
-                                      "\tfloat beta = acos( (e1*e1 + e3*e3 - e2*e2) / (2.0*e1*e3) );\n"
-                                      "\tfloat ha = abs( e3 * sin( beta ) );\n"
-                                      "\tfloat hb = abs( e3 * sin( alpha ) );\n"
-                                      "\tfloat hc = abs( e2 * sin( alpha ) );\n");
+                                      "    float e1 = length(p1 - p2);\n"
+                                      "    float e2 = length(p2 - p0);\n"
+                                      "    float e3 = length(p1 - p0);\n"
+                                      "    float alpha = acos( (e2*e2 + e3*e3 - e1*e1) / (2.0*e2*e3) );\n"
+                                      "    float beta = acos( (e1*e1 + e3*e3 - e2*e2) / (2.0*e1*e3) );\n"
+                                      "    float ha = abs( e3 * sin( beta ) );\n"
+                                      "    float hb = abs( e3 * sin( alpha ) );\n"
+                                      "    float hc = abs( e2 * sin( alpha ) );\n");
             }
         }
     }
@@ -183,27 +184,27 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
                 for (TStrTableStrMap::iterator iter = m_interpolationParameters.begin(), end = m_interpolationParameters.end();
                      iter != end;
                      ++iter) {
-                    geometryShader << "\t" << iter.key() << " = " << iter.key() << theExtension << buf << "];\n";
+                    geometryShader << "    " << iter.key() << " = " << iter.key() << theExtension << buf << "];\n";
                 }
 
-                geometryShader << "\tgl_Position = gl_in[" << buf << "].gl_Position;\n";
+                geometryShader << "    gl_Position = gl_in[" << buf << "].gl_Position;\n";
                 // the triangle distance is interpolated through the shader stage
                 if (i == 0) {
-                    geometryShader << "\n\tvarEdgeDistance = vec3(ha*"
+                    geometryShader << "\n    varEdgeDistance = vec3(ha*"
                                    << "gl_in[" << buf << "].gl_Position.w, 0.0, 0.0);\n";
                 } else if (i == 1) {
-                    geometryShader << "\n\tvarEdgeDistance = vec3(0.0, hb*"
+                    geometryShader << "\n    varEdgeDistance = vec3(0.0, hb*"
                                    << "gl_in[" << buf << "].gl_Position.w, 0.0);\n";
                 } else if (i == 2) {
-                    geometryShader << "\n\tvarEdgeDistance = vec3(0.0, 0.0, hc*"
+                    geometryShader << "\n    varEdgeDistance = vec3(0.0, 0.0, hc*"
                                    << "gl_in[" << buf << "].gl_Position.w);\n";
                 }
 
                 // submit vertex
-                geometryShader << "\tEmitVertex();\n";
+                geometryShader << "    EmitVertex();\n";
             }
             // end primitive
-            geometryShader << "\tEndPrimitive();\n";
+            geometryShader << "    EndPrimitive();\n";
         }
     }
 
@@ -227,7 +228,7 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
         }
     }
 
-    void generateUVCoords(quint32 inUVSet = 0) override
+    void generateUVCoords(const QSSGShaderDefaultMaterialKey &inKey, quint32 inUVSet = 0) override
     {
         if (inUVSet == 0 && setCode(GenerationFlag::UVCoords))
             return;
@@ -236,30 +237,41 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
 
         Q_ASSERT(inUVSet == 0 || inUVSet == 1);
 
-        if (inUVSet == 0)
-            addInterpolationParameter("varTexCoord0", "vec2");
-        else if (inUVSet == 1)
-            addInterpolationParameter("varTexCoord1", "vec2");
-
-        doGenerateUVCoords(inUVSet);
+        if (inUVSet == 0) {
+            if (hasAttributeInKey(QSSGShaderKeyVertexAttribute::TexCoord0, inKey)) {
+                addInterpolationParameter("varTexCoord0", "vec2");
+                doGenerateUVCoords(inUVSet);
+            } else {
+                fragment() << "    vec2 varTexCoord0 = vec2(0.0);\n";
+            }
+        } else if (inUVSet == 1) {
+            if (hasAttributeInKey(QSSGShaderKeyVertexAttribute::TexCoord1, inKey)) {
+                addInterpolationParameter("varTexCoord1", "vec2");
+                doGenerateUVCoords(inUVSet);
+            } else {
+                fragment() << "    vec2 varTexCoord1 = vec2(0.0);\n";
+            }
+        }
     }
-    void generateEnvMapReflection() override
+    void generateEnvMapReflection(const QSSGShaderDefaultMaterialKey &inKey) override
     {
         if (setCode(GenerationFlag::EnvMapReflection))
             return;
 
         generateWorldPosition();
-        generateWorldNormal();
+        generateWorldNormal(inKey);
         QSSGShaderStageGeneratorInterface &activeGenerator(activeStage());
         activeGenerator.addInclude("viewProperties.glsllib");
         addInterpolationParameter("var_object_to_camera", "vec3");
-        activeGenerator.append("\tvar_object_to_camera = normalize( local_model_world_position "
+
+        activeGenerator.append("    var_object_to_camera = normalize( local_model_world_position "
                                "- cameraPosition );");
+
         // World normal cannot be relied upon in the vertex shader because of bump maps.
-        fragment().append("\tvec3 environment_map_reflection = reflect( "
+        fragment().append("    vec3 environment_map_reflection = reflect( "
                           "normalize(var_object_to_camera), world_normal.xyz );");
-        fragment().append("\tenvironment_map_reflection *= vec3( 0.5, 0.5, 0 );");
-        fragment().append("\tenvironment_map_reflection += vec3( 0.5, 0.5, 1.0 );");
+        fragment().append("    environment_map_reflection *= vec3( 0.5, 0.5, 0 );");
+        fragment().append("    environment_map_reflection += vec3( 0.5, 0.5, 1.0 );");
     }
     void generateViewVector() override
     {
@@ -269,28 +281,35 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
         QSSGShaderStageGeneratorInterface &activeGenerator(activeStage());
         activeGenerator.addInclude("viewProperties.glsllib");
         addInterpolationParameter("varViewVector", "vec3");
-        activeGenerator.append("\tvec3 local_view_vector = normalize(cameraPosition - "
+
+        activeGenerator.append("    vec3 local_view_vector = normalize(cameraPosition - "
                                "local_model_world_position);");
         assignOutput("varViewVector", "local_view_vector");
-        fragment() << "\tvec3 view_vector = normalize(varViewVector);\n";
+        fragment() << "    vec3 view_vector = normalize(varViewVector);\n";
     }
 
     // fragment shader expects varying vertex normal
     // lighting in vertex pipeline expects world_normal
-    void generateWorldNormal() override
+    void generateWorldNormal(const QSSGShaderDefaultMaterialKey &inKey) override
     {
         if (setCode(GenerationFlag::WorldNormal))
             return;
-        addInterpolationParameter("varNormal", "vec3");
-        doGenerateWorldNormal();
-        fragment().append("\tvec3 world_normal = normalize( varNormal );");
+
+        if (hasAttributeInKey(QSSGShaderKeyVertexAttribute::Normal, inKey)) {
+            addInterpolationParameter("varNormal", "vec3");
+            doGenerateWorldNormal();
+        } else {
+            generateWorldPosition();
+            fragment().append("    vec3 varNormal = cross(dFdx(varWorldPos), dFdy(varWorldPos));");
+        }
+        fragment().append("    vec3 world_normal = normalize( varNormal );");
     }
     void generateObjectNormal() override
     {
         if (setCode(GenerationFlag::ObjectNormal))
             return;
         doGenerateObjectNormal();
-        fragment().append("\tvec3 object_normal = normalize(varObjectNormal);");
+        fragment().append("    vec3 object_normal = normalize(varObjectNormal);");
     }
     void generateWorldPosition() override
     {
@@ -300,26 +319,39 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
         activeStage().addUniform("modelMatrix", "mat4");
         addInterpolationParameter("varWorldPos", "vec3");
         doGenerateWorldPosition();
-
-        assignOutput("varWorldPos", "local_model_world_position");
     }
-    void generateVarTangentAndBinormal() override
+    void generateVarTangentAndBinormal(const QSSGShaderDefaultMaterialKey &inKey) override
     {
         if (setCode(GenerationFlag::TangentBinormal))
             return;
-        addInterpolationParameter("varTangent", "vec3");
-        addInterpolationParameter("varBinormal", "vec3");
-        doGenerateVarTangentAndBinormal();
-        fragment() << "\tvec3 tangent = normalize(varTangent);\n"
-                   << "\tvec3 binormal = normalize(varBinormal);\n";
+
+        // I assume that there is no mesh having only binormal without tangent
+        // since it is an abnormal case
+        if (hasAttributeInKey(QSSGShaderKeyVertexAttribute::Tangent, inKey)) {
+            const bool hasBinormal = hasAttributeInKey(QSSGShaderKeyVertexAttribute::Binormal, inKey);
+            addInterpolationParameter("varTangent", "vec3");
+            doGenerateVarTangent();
+            fragment() << "    vec3 tangent = normalize(varTangent);\n";
+
+            if (hasBinormal) {
+                addInterpolationParameter("varBinormal", "vec3");
+                doGenerateVarBinormal();
+                fragment() << "    vec3 binormal = normalize(varBinormal);\n";
+            } else {
+                fragment() << "    vec3 binormal = vec3(0.0);\n";
+            }
+        } else {
+            fragment() << "    vec3 tangent = vec3(0.0);\n"
+                       << "    vec3 binormal = vec3(0.0);\n";
+        }
     }
-    void generateVertexColor() override
+    void generateVertexColor(const QSSGShaderDefaultMaterialKey &inKey) override
     {
         if (setCode(GenerationFlag::VertexColor))
             return;
-        addInterpolationParameter("varColor", "vec3");
-        doGenerateVertexColor();
-        fragment().append("\tvec3 vertColor = varColor;");
+        addInterpolationParameter("varColor", "vec4");
+        doGenerateVertexColor(inKey);
+        fragment().append("    vec4 vertColor = varColor;");
     }
 
     bool hasActiveWireframe() override { return m_wireframe; }
@@ -363,7 +395,7 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
         return const_cast<QSSGVertexPipelineImpl *>(this)->activeStage().stage();
     }
 
-    void beginVertexGeneration(quint32 displacementImageIdx, QSSGRenderableImage *displacementImage) override = 0;
+    void beginVertexGeneration(const QSSGShaderDefaultMaterialKey &inKey, quint32 displacementImageIdx, QSSGRenderableImage *displacementImage) override = 0;
     void assignOutput(const QByteArray &inVarName, const QByteArray &inVarValueExpr) override = 0;
     void endVertexGeneration(bool customShader) override = 0;
 
@@ -377,8 +409,15 @@ struct QSSGVertexPipelineImpl : public QSSGDefaultMaterialVertexPipelineInterfac
     virtual void doGenerateWorldNormal() = 0;
     virtual void doGenerateObjectNormal() = 0;
     virtual void doGenerateWorldPosition() = 0;
-    virtual void doGenerateVarTangentAndBinormal() = 0;
-    virtual void doGenerateVertexColor() = 0;
+    virtual void doGenerateVarTangent() = 0;
+    virtual void doGenerateVarBinormal() = 0;
+    virtual void doGenerateVertexColor(const QSSGShaderDefaultMaterialKey &inKey) = 0;
+    virtual bool hasAttributeInKey(QSSGShaderKeyVertexAttribute::VertexAttributeBits inAttr, const QSSGShaderDefaultMaterialKey &inKey) {
+        // it returns true by default
+        Q_UNUSED(inAttr)
+        Q_UNUSED(inKey)
+        return true;
+    }
 };
 QT_END_NAMESPACE
 

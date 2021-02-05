@@ -205,6 +205,7 @@ private slots:
     void overshoot_reentrant();
     void synchronousDrag_data();
     void synchronousDrag();
+    void visibleAreaBinding();
 
 private:
     void flickWithTouch(QQuickWindow *window, const QPoint &from, const QPoint &to);
@@ -226,7 +227,7 @@ void tst_qquickflickable::create()
 {
     QQmlEngine engine;
     QQmlComponent c(&engine, testFileUrl("flickable01.qml"));
-    QQuickFlickable *obj = qobject_cast<QQuickFlickable*>(c.create());
+    QQuickFlickable *obj = qobject_cast<QQuickFlickable*>(c.createWithInitialProperties({{"setRebound", false}}));
 
     QVERIFY(obj != nullptr);
     QCOMPARE(obj->isAtXBeginning(), true);
@@ -782,9 +783,8 @@ void tst_qquickflickable::flickableDirection()
 void tst_qquickflickable::resizeContent()
 {
     QQmlEngine engine;
-    engine.rootContext()->setContextProperty("setRebound", QVariant::fromValue(false));
     QQmlComponent c(&engine, testFileUrl("resize.qml"));
-    QQuickItem *root = qobject_cast<QQuickItem*>(c.create());
+    QQuickItem *root = qobject_cast<QQuickItem*>(c.createWithInitialProperties({{"setRebound", false}}));
     QQuickFlickable *obj = findItem<QQuickFlickable>(root, "flick");
 
     QVERIFY(obj != nullptr);
@@ -816,7 +816,7 @@ void tst_qquickflickable::returnToBounds()
 
     QScopedPointer<QQuickView> window(new QQuickView);
 
-    window->rootContext()->setContextProperty("setRebound", setRebound);
+    window->setInitialProperties({{"setRebound", setRebound}});
     window->setSource(testFileUrl("resize.qml"));
     window->show();
     QVERIFY(QTest::qWaitForWindowActive(window.data()));
@@ -2539,6 +2539,16 @@ void tst_qquickflickable::synchronousDrag()
     if (!synchronousDrag)
         QVERIFY(flickable->contentY() < 50.0f);
     QTest::touchEvent(window, touchDevice).release(0, p5, window);
+}
+
+// QTBUG-81098: tests that a binding to visibleArea doesn't result
+// in a division-by-zero exception (when exceptions are enabled).
+void tst_qquickflickable::visibleAreaBinding()
+{
+    QScopedPointer<QQuickView> window(new QQuickView);
+    window->setSource(testFileUrl("visibleAreaBinding.qml"));
+    QTRY_COMPARE(window->status(), QQuickView::Ready);
+    // Shouldn't crash.
 }
 
 QTEST_MAIN(tst_qquickflickable)

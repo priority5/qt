@@ -49,15 +49,21 @@
 
 QT_BEGIN_NAMESPACE
 
+#if !defined(QT_OPENGL_ES)
+    class QOpenGLExtension_EXT_direct_state_access;
+#endif
+
 class QSSGRenderBackendGL4Impl : public QSSGRenderBackendGL3Impl
 {
 public:
     /// constructor
     QSSGRenderBackendGL4Impl(const QSurfaceFormat &format);
     /// destructor
-    virtual ~QSSGRenderBackendGL4Impl();
+    virtual ~QSSGRenderBackendGL4Impl() override;
 
-public:
+    QByteArray getShadingLanguageVersion() final;
+    QSSGRenderContextType getRenderContextType() const final;
+
     void createTextureStorage2D(QSSGRenderBackendTextureObject to,
                                 QSSGRenderTextureTargetType target,
                                 qint32 levels,

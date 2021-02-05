@@ -63,6 +63,7 @@ private slots:
     void simpleAxis();
     void fingerScroll();
     void fingerScrollSlow();
+    void continuousScroll();
     void wheelDiscreteScroll();
 
     // Touch tests
@@ -71,6 +72,7 @@ private slots:
     void singleTapFloat();
     void multiTouch();
     void multiTouchUpAndMotionFrame();
+    void tapAndMoveInSameFrame();
 };
 
 void tst_seatv5::bindsToSeat()
@@ -251,7 +253,7 @@ void tst_seatv5::fingerScroll()
         QCOMPARE(e.phase, Qt::ScrollUpdate);
         QVERIFY(qAbs(e.angleDelta.x()) <= qAbs(e.angleDelta.y())); // Vertical scroll
 //        QCOMPARE(e.angleDelta, angleDelta); // TODO: what should this be?
-        QCOMPARE(e.pixelDelta, QPoint(0, 10));
+        QCOMPARE(e.pixelDelta, QPoint(0, -10));
         QCOMPARE(e.source, Qt::MouseEventSynthesizedBySystem); // A finger is not a wheel
     }
 
@@ -268,7 +270,7 @@ void tst_seatv5::fingerScroll()
         auto e = window.m_events.takeFirst();
         QCOMPARE(e.phase, Qt::ScrollUpdate);
         QVERIFY(qAbs(e.angleDelta.x()) > qAbs(e.angleDelta.y())); // Horizontal scroll
-        QCOMPARE(e.pixelDelta, QPoint(10, 0));
+        QCOMPARE(e.pixelDelta, QPoint(-10, 0));
         QCOMPARE(e.source, Qt::MouseEventSynthesizedBySystem); // A finger is not a wheel
     }
 
@@ -283,7 +285,7 @@ void tst_seatv5::fingerScroll()
     {
         auto e = window.m_events.takeFirst();
         QCOMPARE(e.phase, Qt::ScrollUpdate);
-        QCOMPARE(e.pixelDelta, QPoint(10, 10));
+        QCOMPARE(e.pixelDelta, QPoint(-10, -10));
         QCOMPARE(e.source, Qt::MouseEventSynthesizedBySystem); // A finger is not a wheel
     }
 
@@ -337,7 +339,7 @@ void tst_seatv5::fingerScrollSlow()
         accumulated += e.pixelDelta;
         QTRY_VERIFY(!window.m_events.empty());
     }
-    QCOMPARE(accumulated.y(), 1);
+    QCOMPARE(accumulated.y(), -1);
 }
 void tst_seatv5::wheelDiscreteScroll()
 {
@@ -367,6 +369,32 @@ void tst_seatv5::wheelDiscreteScroll()
         // Click scrolls are not continuous and should not have a pixel delta
         QCOMPARE(e.pixelDelta, QPoint(0, 0));
     }
+}
+
+void tst_seatv5::continuousScroll()
+{
+    WheelWindow window;
+    QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
+
+    exec([=] {
+        auto *p = pointer();
+        auto *c = client();
+        p->sendEnter(xdgToplevel()->surface(), {32, 32});
+        p->sendFrame(c);
+        p->sendAxisSource(c, Pointer::axis_source_continuous);
+        p->sendAxis(c, Pointer::axis_vertical_scroll, 10);
+        p->sendAxis(c, Pointer::axis_horizontal_scroll, -5);
+        p->sendFrame(c);
+    });
+
+    QTRY_VERIFY(!window.m_events.empty());
+    {
+        auto e = window.m_events.takeFirst();
+        QCOMPARE(e.phase, Qt::NoScrollPhase);
+        QCOMPARE(e.pixelDelta, QPoint(5, -10));
+        QCOMPARE(e.source, Qt::MouseEventSynthesizedBySystem); // touchpads are not wheels
+    }
+    // Sending axis_stop is not mandatory when axis source != finger
 }
 
 void tst_seatv5::createsTouch()
@@ -584,6 +612,38 @@ void tst_seatv5::multiTouchUpAndMotionFrame()
         QCOMPARE(e.touchPoints[0].state(), Qt::TouchPointState::TouchPointReleased);
     }
     QVERIFY(window.m_events.empty());
+}
+
+void tst_seatv5::tapAndMoveInSameFrame()
+{
+    TouchWindow window;
+    QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
+
+    exec([=] {
+        auto *t = touch();
+        auto *c = client();
+
+        t->sendDown(xdgToplevel()->surface(), {32, 32}, 0);
+        t->sendMotion(c, {33, 33}, 0);
+        t->sendFrame(c);
+
+        // Don't leave touch in a weird state
+        t->sendUp(c, 0);
+        t->sendFrame(c);
+    });
+
+    QTRY_VERIFY(!window.m_events.empty());
+    {
+        auto e = window.m_events.takeFirst();
+        QCOMPARE(e.type, QEvent::TouchBegin);
+        QCOMPARE(e.touchPoints.size(), 1);
+        QCOMPARE(e.touchPoints[0].state(), Qt::TouchPointState::TouchPointPressed);
+        // Position isn't that important, we just want to make sure we actually get the pressed event
+    }
+
+    // Make sure we eventually release
+    QTRY_VERIFY(!window.m_events.empty());
+    QTRY_COMPARE(window.m_events.last().touchPoints.first().state(), Qt::TouchPointState::TouchPointReleased);
 }
 
 QCOMPOSITOR_TEST_MAIN(tst_seatv5)

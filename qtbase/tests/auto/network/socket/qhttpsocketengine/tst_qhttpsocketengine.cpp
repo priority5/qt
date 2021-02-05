@@ -129,7 +129,8 @@ void tst_QHttpSocketEngine::initTestCase()
     QVERIFY(QtNetworkSettings::verifyConnection(QtNetworkSettings::httpServerName(), 80));
     QVERIFY(QtNetworkSettings::verifyConnection(QtNetworkSettings::imapServerName(), 143));
 #else
-    QVERIFY(QtNetworkSettings::verifyTestNetworkSettings());
+    if (!QtNetworkSettings::verifyTestNetworkSettings())
+        QSKIP("No network test server available");
 #endif
 }
 
@@ -269,7 +270,7 @@ void tst_QHttpSocketEngine::errorTest()
     socket.setProxy(QNetworkProxy(QNetworkProxy::HttpProxy, hostname, port, username, username));
     socket.connectToHost("0.1.2.3", 12345);
 
-    connect(&socket, SIGNAL(error(QAbstractSocket::SocketError)),
+    connect(&socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)),
             &QTestEventLoop::instance(), SLOT(exitLoop()));
     QTestEventLoop::instance().enterLoop(30);
     QVERIFY(!QTestEventLoop::instance().timeout());

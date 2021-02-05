@@ -71,6 +71,7 @@ class PannerHandler final : public AudioHandler {
   ~PannerHandler() override;
 
   // AudioHandler
+  void ProcessIfNecessary(uint32_t frames_to_process) override;
   void Process(uint32_t frames_to_process) override;
   void ProcessSampleAccurateValues(AudioBus* destination,
                                    const AudioBus* source,
@@ -134,7 +135,7 @@ class PannerHandler final : public AudioHandler {
   // BaseAudioContext's listener
   AudioListener* Listener();
 
-  bool SetPanningModel(unsigned);   // Returns true on success.
+  bool SetPanningModel(Panner::PanningModel);  // Returns true on success.
   bool SetDistanceModel(unsigned);  // Returns true on success.
 
   void CalculateAzimuthElevation(double* out_azimuth,
@@ -159,7 +160,7 @@ class PannerHandler final : public AudioHandler {
   // AudioListener is held alive by PannerNode.
   CrossThreadWeakPersistent<AudioListener> listener_;
   std::unique_ptr<Panner> panner_;
-  unsigned panning_model_;
+  Panner::PanningModel panning_model_;
   unsigned distance_model_;
 
   bool is_azimuth_elevation_dirty_;
@@ -215,7 +216,7 @@ class PannerNode final : public AudioNode {
 
   PannerNode(BaseAudioContext&);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   // Uses a 3D cartesian coordinate system
   AudioParam* positionX() const { return position_x_; }
@@ -244,6 +245,10 @@ class PannerNode final : public AudioNode {
   void setConeOuterAngle(double);
   double coneOuterGain() const;
   void setConeOuterGain(double, ExceptionState&);
+
+  // InspectorHelperMixin
+  void ReportDidCreate() final;
+  void ReportWillBeDestroyed() final;
 
  private:
   Member<AudioParam> position_x_;

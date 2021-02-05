@@ -115,7 +115,8 @@ struct ByteData
     QStringView asStringView() const{ return QStringView(utf16(), len / 2); }
     QString asQStringRaw() const    { return QString::fromRawData(utf16(), len / 2); }
 };
-Q_STATIC_ASSERT(std::is_pod<ByteData>::value);
+Q_STATIC_ASSERT(std::is_trivial<ByteData>::value);
+Q_STATIC_ASSERT(std::is_standard_layout<ByteData>::value);
 } // namespace QtCbor
 
 Q_DECLARE_TYPEINFO(QtCbor::Element, Q_PRIMITIVE_TYPE);
@@ -196,8 +197,7 @@ public:
         if (value.container)
             return replaceAt_complex(e, value, disp);
 
-        e.value = value.value_helper();
-        e.type = value.type();
+        e = { value.value_helper(), value.type() };
         if (value.isContainer())
             e.container = nullptr;
     }
@@ -405,9 +405,9 @@ public:
         elements.remove(idx);
     }
 
-    void decodeValueFromCbor(QCborStreamReader &reader);
-    void decodeFromCbor(QCborStreamReader &reader);
+    void decodeValueFromCbor(QCborStreamReader &reader, int remainiingStackDepth);
     void decodeStringFromCbor(QCborStreamReader &reader);
+    static inline void setErrorInReader(QCborStreamReader &reader, QCborError error);
 };
 
 QT_END_NAMESPACE

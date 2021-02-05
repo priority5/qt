@@ -53,6 +53,7 @@
 #include "qwindowsuiagridprovider.h"
 #include "qwindowsuiagriditemprovider.h"
 #include "qwindowsuiawindowprovider.h"
+#include "qwindowsuiaexpandcollapseprovider.h"
 #include "qwindowscombase.h"
 #include "qwindowscontext.h"
 #include "qwindowsuiautils.h"
@@ -165,11 +166,27 @@ void QWindowsUiaMainProvider::notifyValueChange(QAccessibleValueChangeEvent *eve
         }
         if (event->value().type() == QVariant::String) {
             if (QWindowsUiaMainProvider *provider = providerForAccessible(accessible)) {
-                // Notifies changes in string values.
-                VARIANT oldVal, newVal;
-                clearVariant(&oldVal);
-                setVariantString(event->value().toString(), &newVal);
-                QWindowsUiaWrapper::instance()->raiseAutomationPropertyChangedEvent(provider, UIA_ValueValuePropertyId, oldVal, newVal);
+
+                // Tries to notify the change using UiaRaiseNotificationEvent(), which is only available on
+                // Windows 10 version 1709 or newer. Otherwise uses UiaRaiseAutomationPropertyChangedEvent().
+
+                BSTR displayString = bStrFromQString(event->value().toString());
+                BSTR activityId = bStrFromQString(QString());
+
+                HRESULT hr = QWindowsUiaWrapper::instance()->raiseNotificationEvent(provider, NotificationKind_Other,
+                                                                                    NotificationProcessing_ImportantMostRecent,
+                                                                                    displayString, activityId);
+
+                ::SysFreeString(displayString);
+                ::SysFreeString(activityId);
+
+                if (hr == static_cast<HRESULT>(UIA_E_NOTSUPPORTED)) {
+                    VARIANT oldVal, newVal;
+                    clearVariant(&oldVal);
+                    setVariantString(event->value().toString(), &newVal);
+                    QWindowsUiaWrapper::instance()->raiseAutomationPropertyChangedEvent(provider, UIA_ValueValuePropertyId, oldVal, newVal);
+                    ::SysFreeString(newVal.bstrVal);
+                }
             }
         } else if (QAccessibleValueInterface *valueInterface = accessible->valueInterface()) {
             if (QWindowsUiaMainProvider *provider = providerForAccessible(accessible)) {
@@ -179,6 +196,19 @@ void QWindowsUiaMainProvider::notifyValueChange(QAccessibleValueChangeEvent *eve
                 setVariantDouble(valueInterface->currentValue().toDouble(), &newVal);
                 QWindowsUiaWrapper::instance()->raiseAutomationPropertyChangedEvent(provider, UIA_RangeValueValuePropertyId, oldVal, newVal);
             }
+        }
+    }
+}
+
+void QWindowsUiaMainProvider::notifyNameChange(QAccessibleEvent *event)
+{
+    if (QAccessibleInterface *accessible = event->accessibleInterface()) {
+        if (QWindowsUiaMainProvider *provider = providerForAccessible(accessible)) {
+            VARIANT oldVal, newVal;
+            clearVariant(&oldVal);
+            setVariantString(accessible->text(QAccessible::Name), &newVal);
+            QWindowsUiaWrapper::instance()->raiseAutomationPropertyChangedEvent(provider, UIA_NamePropertyId, oldVal, newVal);
+            ::SysFreeString(newVal.bstrVal);
         }
     }
 }
@@ -288,10 +318,9 @@ HRESULT QWindowsUiaMainProvider::GetPatternProvider(PATTERNID idPattern, IUnknow
         }
         break;
     case UIA_TogglePatternId:
-        // Checkbox controls.
-        if (accessible->role() == QAccessible::CheckBox) {
+        // Checkboxes and other checkable controls.
+        if (accessible->state().checkable)
             *pRetVal = new QWindowsUiaToggleProvider(id());
-        }
         break;
     case UIA_SelectionPatternId:
         // Lists of items.
@@ -338,6 +367,14 @@ HRESULT QWindowsUiaMainProvider::GetPatternProvider(PATTERNID idPattern, IUnknow
         // Things that have an invokable action (e.g., simple buttons).
         if (accessible->actionInterface()) {
             *pRetVal = new QWindowsUiaInvokeProvider(id());
+        }
+        break;
+    case UIA_ExpandCollapsePatternId:
+        // Menu items with submenus.
+        if (accessible->role() == QAccessible::MenuItem
+                && accessible->childCount() > 0
+                && accessible->child(0)->role() == QAccessible::PopupMenu) {
+            *pRetVal = new QWindowsUiaExpandCollapseProvider(id());
         }
         break;
     default:
@@ -390,7 +427,19 @@ HRESULT QWindowsUiaMainProvider::GetPropertyValue(PROPERTYID idProp, VARIANT *pR
             setVariantI4(UIA_WindowControlTypeId, pRetVal);
         } else {
             // Control type converted from role.
-            setVariantI4(roleToControlTypeId(accessible->role()), pRetVal);
+            auto controlType = roleToControlTypeId(accessible->role());
+
+            // The native OSK should be disbled if the Qt OSK is in use,
+            // or if disabled via application attribute.
+            static bool imModuleEmpty = qEnvironmentVariableIsEmpty("QT_IM_MODULE");
+            bool nativeVKDisabled = QCoreApplication::testAttribute(Qt::AA_DisableNativeVirtualKeyboard);
+
+            // If we want to disable the native OSK auto-showing
+            // we have to report text fields as non-editable.
+            if (controlType == UIA_EditControlTypeId && (!imModuleEmpty || nativeVKDisabled))
+                controlType = UIA_TextControlTypeId;
+
+            setVariantI4(controlType, pRetVal);
         }
         break;
     case UIA_HelpTextPropertyId:
@@ -435,6 +484,10 @@ HRESULT QWindowsUiaMainProvider::GetPropertyValue(PROPERTYID idProp, VARIANT *pR
             setVariantBool(wt == Qt::Popup || wt == Qt::ToolTip || wt == Qt::SplashScreen, pRetVal);
         }
         break;
+    case UIA_IsDialogPropertyId:
+        setVariantBool(accessible->role() == QAccessible::Dialog
+                       || accessible->role() == QAccessible::AlertMessage, pRetVal);
+        break;
     case UIA_FullDescriptionPropertyId:
         setVariantString(accessible->text(QAccessible::Description), pRetVal);
         break;
@@ -462,7 +515,7 @@ QString QWindowsUiaMainProvider::automationIdForAccessible(const QAccessibleInte
             if (name.isEmpty())
                 return QString();
             if (!result.isEmpty())
-                result.prepend(QLatin1Char('.'));
+                result.prepend(u'.');
             result.prepend(name);
             obj = obj->parent();
         }

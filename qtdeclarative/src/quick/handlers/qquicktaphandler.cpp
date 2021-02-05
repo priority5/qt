@@ -97,13 +97,6 @@ QQuickTapHandler::QQuickTapHandler(QQuickItem *parent)
     }
 }
 
-static bool dragOverThreshold(const QQuickEventPoint *point)
-{
-    QPointF delta = point->scenePosition() - point->scenePressPosition();
-    return (QQuickWindowPrivate::dragOverThreshold(delta.x(), Qt::XAxis, point) ||
-            QQuickWindowPrivate::dragOverThreshold(delta.y(), Qt::YAxis, point));
-}
-
 bool QQuickTapHandler::wantsEventPoint(QQuickEventPoint *point)
 {
     if (!point->pointerEvent()->asPointerMouseEvent() &&
@@ -115,7 +108,7 @@ bool QQuickTapHandler::wantsEventPoint(QQuickEventPoint *point)
     // (e.g. DragHandler) gets a chance to take over.
     // Don't forget to emit released in case of a cancel.
     bool ret = false;
-    bool overThreshold = dragOverThreshold(point);
+    bool overThreshold = d_func()->dragOverThreshold(point);
     if (overThreshold) {
         m_longPressTimer.stop();
         m_holdTimer.invalidate();
@@ -139,17 +132,16 @@ bool QQuickTapHandler::wantsEventPoint(QQuickEventPoint *point)
         }
         break;
     case QQuickEventPoint::Stationary:
-        // Never react in any way when the point hasn't moved.
-        // In autotests, the point's position may not even be correct, because
-        // QTest::touchEvent(window, touchDevice).stationary(1)
-        // provides no opportunity to give a position, so it ends up being random.
+        // If the point hasn't moved since last time, the return value should be the same as last time.
+        // If we return false here, QQuickPointerHandler::handlePointerEvent() will call setActive(false).
+        ret = point->pointId() == this->point().id();
         break;
     }
     // If this is the grabber, returning false from this function will cancel the grab,
     // so onGrabChanged(this, CancelGrabExclusive, point) and setPressed(false) will be called.
     // But when m_gesturePolicy is DragThreshold, we don't get an exclusive grab, but
     // we still don't want to be pressed anymore.
-    if (!ret && point->pointId() == this->point().id() && point->state() != QQuickEventPoint::Stationary)
+    if (!ret && point->pointId() == this->point().id())
         setPressed(false, true, point);
     return ret;
 }

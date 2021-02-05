@@ -81,7 +81,7 @@ static Qt::HANDLE createChangeNotification(const QString &path, uint flags)
         nativePath.append(QLatin1Char('\\'));
     const HANDLE result = FindFirstChangeNotification(reinterpret_cast<const wchar_t *>(nativePath.utf16()),
                                                       FALSE, flags);
-    DEBUG() << __FUNCTION__ << nativePath << Qt::hex <<showbase << flags << "returns" << result;
+    DEBUG() << __FUNCTION__ << nativePath << Qt::hex << Qt::showbase << flags << "returns" << result;
     return result;
 }
 
@@ -403,6 +403,7 @@ QStringList QWindowsFileSystemWatcherEngine::addPaths(const QStringList &paths,
         const QString absolutePath = isDir ? fileInfo.absoluteFilePath() : fileInfo.absolutePath();
         const uint flags = isDir
                            ? (FILE_NOTIFY_CHANGE_DIR_NAME
+                              | FILE_NOTIFY_CHANGE_ATTRIBUTES
                               | FILE_NOTIFY_CHANGE_FILE_NAME)
                            : (FILE_NOTIFY_CHANGE_DIR_NAME
                               | FILE_NOTIFY_CHANGE_FILE_NAME

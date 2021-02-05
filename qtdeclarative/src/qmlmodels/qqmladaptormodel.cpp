@@ -93,7 +93,7 @@ class QQmlDMCachedModelData : public QQmlDelegateModelItem
 {
 public:
     QQmlDMCachedModelData(
-            QQmlDelegateModelItemMetaType *metaType,
+            const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
             VDMModelDelegateDataType *dataType,
             int index, int row, int column);
 
@@ -199,12 +199,11 @@ public:
             RETURN_RESULT(scope.engine->throwTypeError(QStringLiteral("Not a valid DelegateModel object")));
 
         const QQmlAdaptorModel *const model = static_cast<QQmlDMCachedModelData *>(o->d()->item)->type->model;
-        if (o->d()->item->index >= 0 && *model) {
-            const QAbstractItemModel * const aim = model->aim();
-            RETURN_RESULT(QV4::Encode(aim->hasChildren(aim->index(o->d()->item->index, 0, model->rootIndex))));
-        } else {
-            RETURN_RESULT(QV4::Encode(false));
+        if (o->d()->item->index >= 0) {
+            if (const QAbstractItemModel *const aim = model->aim())
+                RETURN_RESULT(QV4::Encode(aim->hasChildren(aim->index(o->d()->item->index, 0, model->rootIndex))));
         }
+        RETURN_RESULT(QV4::Encode(false));
     }
 
 
@@ -256,7 +255,9 @@ public:
     bool hasModelData;
 };
 
-QQmlDMCachedModelData::QQmlDMCachedModelData(QQmlDelegateModelItemMetaType *metaType, VDMModelDelegateDataType *dataType, int index, int row, int column)
+QQmlDMCachedModelData::QQmlDMCachedModelData(
+        const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
+        VDMModelDelegateDataType *dataType, int index, int row, int column)
     : QQmlDelegateModelItem(metaType, dataType, index, row, column)
     , type(dataType)
 {
@@ -368,10 +369,10 @@ QV4::ReturnedValue QQmlDMCachedModelData::set_property(const QV4::FunctionObject
         QQmlDMCachedModelData *modelData = static_cast<QQmlDMCachedModelData *>(o->d()->item);
         if (!modelData->cachedData.isEmpty()) {
             if (modelData->cachedData.count() > 1) {
-                modelData->cachedData[propertyId] = scope.engine->toVariant(argv[0], QVariant::Invalid);
+                modelData->cachedData[propertyId] = scope.engine->toVariant(argv[0], QMetaType::UnknownType);
                 QMetaObject::activate(o->d()->item, o->d()->item->metaObject(), propertyId, nullptr);
             } else if (modelData->cachedData.count() == 1) {
-                modelData->cachedData[0] = scope.engine->toVariant(argv[0], QVariant::Invalid);
+                modelData->cachedData[0] = scope.engine->toVariant(argv[0], QMetaType::UnknownType);
                 QMetaObject::activate(o->d()->item, o->d()->item->metaObject(), 0, nullptr);
                 QMetaObject::activate(o->d()->item, o->d()->item->metaObject(), 1, nullptr);
             }
@@ -391,7 +392,7 @@ class QQmlDMAbstractItemModelData : public QQmlDMCachedModelData
 
 public:
     QQmlDMAbstractItemModelData(
-            QQmlDelegateModelItemMetaType *metaType,
+            const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
             VDMModelDelegateDataType *dataType,
             int index, int row, int column)
         : QQmlDMCachedModelData(metaType, dataType, index, row, column)
@@ -400,23 +401,24 @@ public:
 
     bool hasModelChildren() const
     {
-        if (index >= 0 && *type->model) {
-            const QAbstractItemModel * const model = type->model->aim();
-            return model->hasChildren(model->index(row, column, type->model->rootIndex));
-        } else {
-            return false;
+        if (index >= 0) {
+            if (const QAbstractItemModel *const model = type->model->aim())
+                return model->hasChildren(model->index(row, column, type->model->rootIndex));
         }
+        return false;
     }
 
     QVariant value(int role) const override
     {
-        return type->model->aim()->index(row, column, type->model->rootIndex).data(role);
+        if (const QAbstractItemModel *aim = type->model->aim())
+            return aim->index(row, column, type->model->rootIndex).data(role);
+        return QVariant();
     }
 
     void setValue(int role, const QVariant &value) override
     {
-        type->model->aim()->setData(
-                type->model->aim()->index(row, column, type->model->rootIndex), value, role);
+        if (QAbstractItemModel *aim = type->model->aim())
+            aim->setData(aim->index(row, column, type->model->rootIndex), value, role);
     }
 
     QV4::ReturnedValue get() override
@@ -444,59 +446,75 @@ public:
 
     int rowCount(const QQmlAdaptorModel &model) const override
     {
-        return model.aim()->rowCount(model.rootIndex);
+        if (const QAbstractItemModel *aim = model.aim())
+            return aim->rowCount(model.rootIndex);
+        return 0;
     }
 
     int columnCount(const QQmlAdaptorModel &model) const override
     {
-        return model.aim()->columnCount(model.rootIndex);
+        if (const QAbstractItemModel *aim = model.aim())
+            return aim->columnCount(model.rootIndex);
+        return 0;
     }
 
     void cleanup(QQmlAdaptorModel &) const override
     {
-        const_cast<VDMAbstractItemModelDataType *>(this)->release();
+        release();
     }
 
     QVariant value(const QQmlAdaptorModel &model, int index, const QString &role) const override
     {
-        QHash<QByteArray, int>::const_iterator it = roleNames.find(role.toUtf8());
-        if (it != roleNames.end()) {
-            return model.aim()->index(model.rowAt(index), model.columnAt(index), model.rootIndex).data(*it);
-        } else if (role == QLatin1String("hasModelChildren")) {
-            return QVariant(model.aim()->hasChildren(model.aim()->index(model.rowAt(index), model.columnAt(index), model.rootIndex)));
-        } else {
-            return QVariant();
+        if (!metaObject) {
+            VDMAbstractItemModelDataType *dataType = const_cast<VDMAbstractItemModelDataType *>(this);
+            dataType->initializeMetaType(model);
         }
+
+        if (const QAbstractItemModel *aim = model.aim()) {
+            QHash<QByteArray, int>::const_iterator it = roleNames.find(role.toUtf8());
+            if (it != roleNames.end()) {
+                return aim->index(model.rowAt(index), model.columnAt(index),
+                                  model.rootIndex).data(*it);
+            } else if (role == QLatin1String("hasModelChildren")) {
+                return QVariant(aim->hasChildren(aim->index(model.rowAt(index),
+                                                            model.columnAt(index),
+                                                            model.rootIndex)));
+            }
+        }
+        return QVariant();
     }
 
     QVariant parentModelIndex(const QQmlAdaptorModel &model) const override
     {
-        return model
-                ? QVariant::fromValue(model.aim()->parent(model.rootIndex))
-                : QVariant();
+        if (const QAbstractItemModel *aim = model.aim())
+            return QVariant::fromValue(aim->parent(model.rootIndex));
+        return QVariant();
     }
 
     QVariant modelIndex(const QQmlAdaptorModel &model, int index) const override
     {
-        return model
-                ? QVariant::fromValue(model.aim()->index(model.rowAt(index), model.columnAt(index), model.rootIndex))
-                : QVariant();
+        if (const QAbstractItemModel *aim = model.aim())
+            return QVariant::fromValue(aim->index(model.rowAt(index), model.columnAt(index),
+                                                  model.rootIndex));
+        return QVariant();
     }
 
     bool canFetchMore(const QQmlAdaptorModel &model) const override
     {
-        return model && model.aim()->canFetchMore(model.rootIndex);
+        if (const QAbstractItemModel *aim = model.aim())
+            return aim->canFetchMore(model.rootIndex);
+        return false;
     }
 
     void fetchMore(QQmlAdaptorModel &model) const override
     {
-        if (model)
-            model.aim()->fetchMore(model.rootIndex);
+        if (QAbstractItemModel *aim = model.aim())
+            aim->fetchMore(model.rootIndex);
     }
 
     QQmlDelegateModelItem *createItem(
             QQmlAdaptorModel &model,
-            QQmlDelegateModelItemMetaType *metaType,
+            const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
             int index, int row, int column) const override
     {
         VDMAbstractItemModelDataType *dataType = const_cast<VDMAbstractItemModelDataType *>(this);
@@ -505,13 +523,14 @@ public:
         return new QQmlDMAbstractItemModelData(metaType, dataType, index, row, column);
     }
 
-    void initializeMetaType(QQmlAdaptorModel &model)
+    void initializeMetaType(const QQmlAdaptorModel &model)
     {
         QMetaObjectBuilder builder;
         setModelDataType<QQmlDMAbstractItemModelData>(&builder, this);
 
         const QByteArray propertyType = QByteArrayLiteral("QVariant");
-        const QHash<int, QByteArray> names = model.aim()->roleNames();
+        const QAbstractItemModel *aim = model.aim();
+        const QHash<int, QByteArray> names = aim ? aim->roleNames() : QHash<int, QByteArray>();
         for (QHash<int, QByteArray>::const_iterator it = names.begin(), cend = names.end(); it != cend; ++it) {
             const int propertyId = propertyRoles.count();
             propertyRoles.append(it.key());
@@ -543,7 +562,7 @@ class QQmlDMListAccessorData : public QQmlDelegateModelItem
     Q_OBJECT
     Q_PROPERTY(QVariant modelData READ modelData WRITE setModelData NOTIFY modelDataChanged)
 public:
-    QQmlDMListAccessorData(QQmlDelegateModelItemMetaType *metaType,
+    QQmlDMListAccessorData(const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
                            QQmlAdaptorModel::Accessors *accessor,
                            int index, int row, int column, const QVariant &value)
         : QQmlDelegateModelItem(metaType, accessor, index, row, column)
@@ -584,7 +603,7 @@ public:
         if (!argc)
             return v4->throwTypeError();
 
-        static_cast<QQmlDMListAccessorData *>(o->d()->item)->setModelData(v4->toVariant(argv[0], QVariant::Invalid));
+        static_cast<QQmlDMListAccessorData *>(o->d()->item)->setModelData(v4->toVariant(argv[0], QMetaType::UnknownType));
         return QV4::Encode::undefined();
     }
 
@@ -659,7 +678,7 @@ public:
 
     QQmlDelegateModelItem *createItem(
             QQmlAdaptorModel &model,
-            QQmlDelegateModelItemMetaType *metaType,
+            const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
             int index, int row, int column) const override
     {
         VDMListDelegateDataType *dataType = const_cast<VDMListDelegateDataType *>(this);
@@ -702,7 +721,7 @@ class QQmlDMObjectData : public QQmlDelegateModelItem, public QQmlAdaptorModelPr
     Q_INTERFACES(QQmlAdaptorModelProxyInterface)
 public:
     QQmlDMObjectData(
-            QQmlDelegateModelItemMetaType *metaType,
+            const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
             VDMObjectDelegateDataType *dataType,
             int index, int row, int column,
             QObject *object);
@@ -773,7 +792,7 @@ public:
 
     QQmlDelegateModelItem *createItem(
             QQmlAdaptorModel &model,
-            QQmlDelegateModelItemMetaType *metaType,
+            const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
             int index, int row, int column) const override
     {
         VDMObjectDelegateDataType *dataType = const_cast<VDMObjectDelegateDataType *>(this);
@@ -913,7 +932,7 @@ public:
     VDMObjectDelegateDataType *m_type;
 };
 
-QQmlDMObjectData::QQmlDMObjectData(QQmlDelegateModelItemMetaType *metaType,
+QQmlDMObjectData::QQmlDMObjectData(const QQmlRefPointer<QQmlDelegateModelItemMetaType> &metaType,
         VDMObjectDelegateDataType *dataType,
         int index, int row, int column,
         QObject *object)
@@ -957,6 +976,9 @@ void QQmlAdaptorModel::setModel(const QVariant &variant, QObject *parent, QQmlEn
             accessors = new VDMObjectDelegateDataType;
     } else if (list.type() == QQmlListAccessor::ListProperty) {
         setObject(static_cast<const QQmlListReference *>(variant.constData())->object(), parent);
+        accessors = new VDMObjectDelegateDataType;
+    } else if (list.type() == QQmlListAccessor::ObjectList) {
+        setObject(nullptr, parent);
         accessors = new VDMObjectDelegateDataType;
     } else if (list.type() != QQmlListAccessor::Invalid
             && list.type() != QQmlListAccessor::Instance) { // Null QObject

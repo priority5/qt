@@ -220,8 +220,7 @@ void ShiftHandler::toggleShift()
     if (d->manualShiftLanguageFilter.contains(d->locale.language())) {
         setCapsLockActive(false);
         setShiftActive(!d->shift);
-    } else if (d->inputContext->inputMethodHints() & Qt::ImhNoAutoUppercase ||
-               d->manualCapsInputModeFilter.contains(d->inputContext->inputEngine()->inputMode())) {
+    } else if (d->manualCapsInputModeFilter.contains(d->inputContext->inputEngine()->inputMode())) {
         bool capsLock = d->capsLock;
         setCapsLockActive(!capsLock);
         setShiftActive(!capsLock);
@@ -299,14 +298,14 @@ void ShiftHandler::autoCapitalize()
         bool preferLowerCase = d->inputContext->inputMethodHints() & Qt::ImhPreferLowercase;
         if (cursorPosition == 0) {
             setShiftActive(!preferLowerCase);
-        } else {
+        } else { // space after sentence-ending character triggers auto-capitalization
             QString text = d->inputContext->surroundingText();
             text.truncate(cursorPosition);
-            text = text.trimmed();
-            if (text.length() == 0)
+            if (text.trimmed().length() == 0)
                 setShiftActive(!preferLowerCase);
-            else if (text.length() > 0 && d->sentenceEndingCharacters.indexOf(text[text.length() - 1]) >= 0)
-                setShiftActive(!preferLowerCase);
+            else if (text.endsWith(QLatin1Char(' ')))
+                setShiftActive(d->sentenceEndingCharacters.contains(text.rightRef(2)[0])
+                               && !preferLowerCase);
             else
                 setShiftActive(false);
         }

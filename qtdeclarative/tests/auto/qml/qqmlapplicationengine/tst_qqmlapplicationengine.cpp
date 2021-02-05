@@ -30,6 +30,7 @@
 #include <QQmlApplicationEngine>
 #include <QScopedPointer>
 #include <QSignalSpy>
+#include <QRegularExpression>
 #if QT_CONFIG(process)
 #include <QProcess>
 #endif
@@ -52,7 +53,9 @@ private slots:
     void removeObjectsWhenDestroyed();
     void loadTranslation_data();
     void loadTranslation();
+    void translationChange();
     void setInitialProperties();
+    void failureToLoadTriggersWarningSignal();
 
 private:
     QString buildDir;
@@ -276,6 +279,28 @@ void tst_qqmlapplicationengine::loadTranslation()
     QCOMPARE(rootObject->property("translation").toString(), translation);
 }
 
+void tst_qqmlapplicationengine::translationChange()
+{
+    if (QLocale().language() == QLocale::SwissGerman) {
+        QSKIP("Skipping this when running under the Swiss locale as we would always load translation.");
+    }
+
+    QQmlApplicationEngine engine(testFileUrl("loadTranslation.qml"));
+
+    QCOMPARE(engine.uiLanguage(), QLocale().bcp47Name());
+
+    QObject *rootObject = engine.rootObjects().first();
+    QVERIFY(rootObject);
+
+    QCOMPARE(rootObject->property("translation").toString(), "translated");
+
+    engine.setUiLanguage("de_CH");
+    QCOMPARE(rootObject->property("translation").toString(), QString::fromUtf8("Gr\u00FCezi"));
+
+    engine.setUiLanguage(QString());
+    QCOMPARE(rootObject->property("translation").toString(), "translate it");
+}
+
 void tst_qqmlapplicationengine::setInitialProperties()
 {
     QQmlApplicationEngine test {};
@@ -291,6 +316,21 @@ void tst_qqmlapplicationengine::setInitialProperties()
         QCOMPARE(test.rootObjects().size(), 2);
         QCOMPARE(test.rootObjects().at(1)->property("success").toBool(), true);
     }
+}
+
+Q_DECLARE_METATYPE(QList<QQmlError>) // for signalspy below
+
+void tst_qqmlapplicationengine::failureToLoadTriggersWarningSignal()
+{
+    auto url = testFileUrl("invalid.qml");
+    qRegisterMetaType<QList<QQmlError>>();
+    QTest::ignoreMessage(QtMsgType::QtWarningMsg, "QQmlApplicationEngine failed to load component");
+    QTest::ignoreMessage(QtMsgType::QtWarningMsg,
+                         QRegularExpression(QRegularExpression::escape(url.toString()) + QLatin1Char('*')));
+    QQmlApplicationEngine test;
+    QSignalSpy warningObserver(&test, &QQmlApplicationEngine::warnings);
+    test.load(url);
+    QTRY_COMPARE(warningObserver.count(), 1);
 }
 
 QTEST_MAIN(tst_qqmlapplicationengine)

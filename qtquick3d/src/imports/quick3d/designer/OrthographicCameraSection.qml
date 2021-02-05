@@ -27,7 +27,7 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.12
+import QtQuick 2.15
 import HelperWidgets 2.0
 import QtQuick.Layouts 1.12
 
@@ -37,7 +37,7 @@ Section {
     SectionLayout {
         Label {
             text: qsTr("Clip Near")
-            tooltip: qsTr("Near distance at which objects disappear")
+            tooltip: qsTr("Sets the near value of the camera view frustum.")
         }
         SecondColumnLayout {
             SpinBox {
@@ -52,14 +52,15 @@ Section {
 
         Label {
             text: qsTr("Clip Far")
-            tooltip: qsTr("Far distance at which objects disappear")
+            tooltip: qsTr("Sets the far value of the camera view frustum.")
         }
         SecondColumnLayout {
             SpinBox {
                 maximumValue: 9999999
                 minimumValue: -9999999
                 realDragRange: 5000
-                decimals: 2
+                decimals: 0
+                stepSize: 100
                 backendValue: backendValues.clipFar
                 Layout.fillWidth: true
             }

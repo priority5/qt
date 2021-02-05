@@ -1067,7 +1067,7 @@ void tst_QJSValue::toVariant()
     }
 
     {
-        QDateTime dateTime = QDateTime(QDate(1980, 10, 4));
+        QDateTime dateTime = QDate(1980, 10, 4).startOfDay();
         QJSValue dateObject = eng.toScriptValue(dateTime);
         QVariant var = dateObject.toVariant();
         QCOMPARE(var, QVariant(dateTime));
@@ -1081,7 +1081,7 @@ void tst_QJSValue::toVariant()
 
         // We can't roundtrip a QRegExp this way, as toVariant() has no information on whether we
         // want QRegExp or QRegularExpression. It will always create a QRegularExpression.
-        QCOMPARE(var.type(), QMetaType::QRegularExpression);
+        QCOMPARE(var.userType(), QMetaType::QRegularExpression);
         QRegularExpression result = var.toRegularExpression();
         QCOMPARE(result.pattern(), rx.pattern());
         QCOMPARE(result.patternOptions() & QRegularExpression::CaseInsensitiveOption, 0);
@@ -1128,13 +1128,17 @@ void tst_QJSValue::toVariant()
 
     // array
     {
+        auto handler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &, const QString &) {
+            if (type == QtMsgType::QtWarningMsg)
+                QFAIL("Converting QJSValue to QVariant should not cause error messages");
+        });
         QVariantList listIn;
         listIn << 123 << "hello";
         QJSValue array = eng.toScriptValue(listIn);
         QVERIFY(array.isArray());
         QCOMPARE(array.property("length").toInt(), 2);
         QVariant ret = array.toVariant();
-        QCOMPARE(ret.type(), QVariant::List);
+        QCOMPARE(ret.userType(), QVariant::List);
         QVariantList listOut = ret.toList();
         QCOMPARE(listOut.size(), listIn.size());
         for (int i = 0; i < listIn.size(); ++i)
@@ -1145,8 +1149,9 @@ void tst_QJSValue::toVariant()
         QCOMPARE(array2.property("length").toInt(), array.property("length").toInt());
         for (int i = 0; i < array.property("length").toInt(); ++i)
             QVERIFY(array2.property(i).strictlyEquals(array.property(i)));
-    }
 
+        qInstallMessageHandler(handler);
+    }
 }
 
 void tst_QJSValue::toQObject_nonQObject_data()
@@ -1217,7 +1222,7 @@ void tst_QJSValue::toDateTime()
     QDateTime dt = eng.evaluate("new Date(0)").toDateTime();
     QVERIFY(dt.isValid());
     QCOMPARE(dt.timeSpec(), Qt::LocalTime);
-    QCOMPARE(dt.toUTC(), QDateTime(QDate(1970, 1, 1), QTime(0, 0, 0), Qt::UTC));
+    QCOMPARE(dt.toUTC(), QDate(1970, 1, 1).startOfDay(Qt::UTC));
 
     QVERIFY(!eng.evaluate("[]").toDateTime().isValid());
     QVERIFY(!eng.evaluate("{}").toDateTime().isValid());
@@ -2140,8 +2145,8 @@ void tst_QJSValue::equals()
     QCOMPARE(str2.equals(QJSValue(321)), false);
     QCOMPARE(str2.equals(QJSValue()), false);
 
-    QJSValue date1 = eng.toScriptValue(QDateTime(QDate(2000, 1, 1)));
-    QJSValue date2 = eng.toScriptValue(QDateTime(QDate(1999, 1, 1)));
+    QJSValue date1 = eng.toScriptValue(QDate(2000, 1, 1).startOfDay());
+    QJSValue date2 = eng.toScriptValue(QDate(1999, 1, 1).startOfDay());
     QCOMPARE(date1.equals(date2), false);
     QCOMPARE(date1.equals(date1), true);
     QCOMPARE(date2.equals(date2), true);
@@ -2273,8 +2278,8 @@ void tst_QJSValue::strictlyEquals()
     QCOMPARE(str2.strictlyEquals(QJSValue(321)), false);
     QVERIFY(!str2.strictlyEquals(QJSValue()));
 
-    QJSValue date1 = eng.toScriptValue(QDateTime(QDate(2000, 1, 1)));
-    QJSValue date2 = eng.toScriptValue(QDateTime(QDate(1999, 1, 1)));
+    QJSValue date1 = eng.toScriptValue(QDate(2000, 1, 1).startOfDay());
+    QJSValue date2 = eng.toScriptValue(QDate(1999, 1, 1).startOfDay());
     QCOMPARE(date1.strictlyEquals(date2), false);
     QCOMPARE(date1.strictlyEquals(date1), true);
     QCOMPARE(date2.strictlyEquals(date2), true);
@@ -2706,6 +2711,70 @@ void tst_QJSValue::nestedObjectToVariant()
     QVERIFY(!o.isError());
     QVERIFY(o.isObject());
     QCOMPARE(o.toVariant(), expected);
+}
+
+static int instanceCount = 0;
+
+struct MyType
+{
+    MyType(int n = 0, const char *t=nullptr): number(n), text(t)
+    {
+        ++instanceCount;
+    }
+    MyType(const MyType &other)
+        : number(other.number), text(other.text)
+    {
+        ++instanceCount;
+    }
+    ~MyType()
+    {
+        --instanceCount;
+    }
+    int number;
+    const char *text;
+};
+
+Q_DECLARE_METATYPE(MyType)
+Q_DECLARE_METATYPE(MyType*)
+
+void tst_QJSValue::jsvalueArrayToSequenceType()
+{
+    QCOMPARE(instanceCount, 0);
+    {
+        QJSEngine eng {};
+        auto testObject = eng.newObject();
+        testObject.setProperty("test", 42);
+        testObject.setProperty("mytypeobject", eng.toScriptValue(QVariant::fromValue(MyType {42, "hello"})));
+        auto array = eng.newArray(4);
+        array.setProperty(0, QLatin1String("Hello World"));
+        array.setProperty(1, 42);
+        array.setProperty(2, QJSValue(QJSValue::UndefinedValue));
+        array.setProperty(3, testObject);
+        auto asVariant = QVariant::fromValue(array);
+        QVERIFY(asVariant.canConvert<QVariantList>());
+        auto asIterable = asVariant.value<QSequentialIterable>();
+        for (auto it = asIterable.begin(); it != asIterable.end(); ++it) {
+            Q_UNUSED(*it)
+        }
+        int i = 0;
+        for (QVariant myVariant: asIterable) {
+            QCOMPARE(myVariant.isValid(), i != 2);
+            ++i;
+        }
+        QVERIFY(asIterable.at(2).value<QVariant>().isNull());
+        QCOMPARE(asIterable.at(3).value<QVariantMap>().find("mytypeobject")->value<MyType>().number, 42);
+        QCOMPARE(asIterable.at(0).value<QVariant>().toString(), QLatin1String("Hello World"));
+        auto it1 = asIterable.begin();
+        auto it2 = asIterable.begin();
+        QCOMPARE((*it1).value<QVariant>().toString(), (*it2).value<QVariant>().toString());
+        QCOMPARE((*it1).value<QVariant>().toString(), QLatin1String("Hello World"));
+        ++it2;
+        QCOMPARE((*it1).value<QVariant>().toString(), QLatin1String("Hello World"));
+        QCOMPARE((*it2).value<QVariant>().toInt(), 42);
+    }
+    // tests need to be done after engine has been destroyed, else it will hold a reference until
+    // the gc decides to collect it
+    QCOMPARE(instanceCount, 0);
 }
 
 void tst_QJSValue::deleteFromDifferentThread()

@@ -105,6 +105,11 @@ inline T *v_cast(QVariant::Private *d, T * = nullptr)
 
 #endif
 
+enum QVariantConstructionFlags : uint {
+    Default = 0x0,
+    PointerType = 0x1,
+    ShouldDeleteVariantData = 0x2 // only used in Q*Iterable
+};
 
 //a simple template that avoids to allocate 2 memory chunks when creating a QVariant
 template <class T> class QVariantPrivateSharedEx : public QVariant::PrivateShared
@@ -357,7 +362,7 @@ class QVariantConstructor
         FilteredConstructor(const QVariantConstructor &tc)
         {
             // ignore types that lives outside of the current library
-            tc.m_x->type = QVariant::Invalid;
+            tc.m_x->type = QMetaType::UnknownType;
         }
     };
 public:
@@ -425,7 +430,7 @@ public:
     {}
     ~QVariantDestructor()
     {
-        m_d->type = QVariant::Invalid;
+        m_d->type = QMetaType::UnknownType;
         m_d->is_null = true;
         m_d->is_shared = false;
     }

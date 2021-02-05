@@ -27,12 +27,19 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.12
-import QtQuick3D 1.0
+import QtQuick 2.15
+import QtQuick3D 1.15
 
 View3D {
     width: 400
     height: 400
+    environment: sceneEnvironment
+
+    SceneEnvironment {
+        id: sceneEnvironment
+        antialiasingMode: SceneEnvironment.MSAA
+        antialiasingQuality: SceneEnvironment.High
+    }
 
     Node {
         id: scene
@@ -43,21 +50,21 @@ View3D {
 
         PerspectiveCamera {
             id: camera
-            z: -350
+            z: 350
         }
 
         Model {
             id: cubeModel
-            rotation.x: 30
-            rotation.y: 45
+            eulerRotation.x: 30
+            eulerRotation.y: 45
 
             source: "#Cube"
 
-            materials: [
-                DefaultMaterial {
-                    diffuseColor: "#4aee45"
-                }
-            ]
+            materials: cubeMaterial
+            DefaultMaterial {
+                id: cubeMaterial
+                diffuseColor: "#4aee45"
+            }
         }
     }
 }

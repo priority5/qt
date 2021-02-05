@@ -112,11 +112,28 @@ QXcbVirtualDesktop::QXcbVirtualDesktop(QXcbConnection *connection, xcb_screen_t 
 
         xcb_depth_next(&depth_iterator);
     }
+
+    auto dpiChangedCallback = [](QXcbVirtualDesktop *desktop, const QByteArray &, const QVariant &property, void *) {
+        bool ok;
+        int dpiTimes1k = property.toInt(&ok);
+        if (!ok)
+            return;
+        int dpi = dpiTimes1k / 1024;
+        if (desktop->m_forcedDpi == dpi)
+            return;
+        desktop->m_forcedDpi = dpi;
+        for (QXcbScreen *screen : desktop->connection()->screens())
+            QWindowSystemInterface::handleScreenLogicalDotsPerInchChange(screen->QPlatformScreen::screen(), dpi, dpi);
+    };
+    xSettings()->registerCallbackForProperty("Xft/DPI", dpiChangedCallback, nullptr);
 }
 
 QXcbVirtualDesktop::~QXcbVirtualDesktop()
 {
     delete m_xSettings;
+
+    for (auto cmap : qAsConst(m_visualColormaps))
+        xcb_free_colormap(xcb_connection(), cmap);
 }
 
 QDpi QXcbVirtualDesktop::dpi() const
@@ -318,9 +335,19 @@ bool QXcbVirtualDesktop::xResource(const QByteArray &identifier,
 
 static bool parseXftInt(const QByteArray& stringValue, int *value)
 {
-    Q_ASSERT(value != 0);
+    Q_ASSERT(value);
     bool ok;
     *value = stringValue.toInt(&ok);
+    return ok;
+}
+
+static bool parseXftDpi(const QByteArray& stringValue, int *value)
+{
+    Q_ASSERT(value);
+    bool ok = parseXftInt(stringValue, value);
+    // Support GNOME 3 bug that wrote DPI with fraction:
+    if (!ok)
+        *value = qRound(stringValue.toDouble(&ok));
     return ok;
 }
 
@@ -380,7 +407,7 @@ void QXcbVirtualDesktop::readXResources()
         int value;
         QByteArray stringValue;
         if (xResource(r, "Xft.dpi:\t", stringValue)) {
-            if (parseXftInt(stringValue, &value))
+            if (parseXftDpi(stringValue, &value))
                 m_forcedDpi = value;
         } else if (xResource(r, "Xft.hintstyle:\t", stringValue)) {
             m_hintStyle = parseXftHintStyle(stringValue);
@@ -457,7 +484,7 @@ const xcb_visualtype_t *QXcbVirtualDesktop::visualForId(xcb_visualid_t visualid)
 {
     QMap<xcb_visualid_t, xcb_visualtype_t>::const_iterator it = m_visuals.find(visualid);
     if (it == m_visuals.constEnd())
-        return 0;
+        return nullptr;
     return &*it;
 }
 
@@ -467,6 +494,22 @@ quint8 QXcbVirtualDesktop::depthOfVisual(xcb_visualid_t visualid) const
     if (it == m_visualDepths.constEnd())
         return 0;
     return *it;
+}
+
+xcb_colormap_t QXcbVirtualDesktop::colormapForVisual(xcb_visualid_t visualid) const
+{
+    auto it = m_visualColormaps.constFind(visualid);
+    if (it != m_visualColormaps.constEnd())
+        return *it;
+
+    auto cmap = xcb_generate_id(xcb_connection());
+    xcb_create_colormap(xcb_connection(),
+                        XCB_COLORMAP_ALLOC_NONE,
+                        cmap,
+                        screen()->root,
+                        visualid);
+    m_visualColormaps.insert(visualid, cmap);
+    return cmap;
 }
 
 QXcbScreen::QXcbScreen(QXcbConnection *connection, QXcbVirtualDesktop *virtualDesktop,
@@ -577,7 +620,7 @@ QWindow *QXcbScreen::topLevelAt(const QPoint &p) const
     do {
         auto translate_reply = Q_XCB_REPLY_UNCHECKED(xcb_translate_coordinates, xcb_connection(), parent, child, x, y);
         if (!translate_reply) {
-            return 0;
+            return nullptr;
         }
 
         parent = child;
@@ -586,14 +629,14 @@ QWindow *QXcbScreen::topLevelAt(const QPoint &p) const
         y = translate_reply->dst_y;
 
         if (!child || child == root)
-            return 0;
+            return nullptr;
 
         QPlatformWindow *platformWindow = connection()->platformWindowFromId(child);
         if (platformWindow)
             return platformWindow->window();
     } while (parent != child);
 
-    return 0;
+    return nullptr;
 }
 
 void QXcbScreen::windowShown(QXcbWindow *window)
@@ -655,7 +698,9 @@ QImage::Format QXcbScreen::format() const
     bool needsRgbSwap;
     qt_xcb_imageFormatForVisual(connection(), screen()->root_depth, visualForId(screen()->root_visual), &format, &needsRgbSwap);
     // We are ignoring needsRgbSwap here and just assumes the backing-store will handle it.
-    return format;
+    if (format != QImage::Format_Invalid)
+        return format;
+    return QImage::Format_RGB32;
 }
 
 int QXcbScreen::forcedDpi() const
@@ -672,7 +717,12 @@ QDpi QXcbScreen::logicalDpi() const
     if (forcedDpi > 0)
         return QDpi(forcedDpi, forcedDpi);
 
-    return m_virtualDesktop->dpi();
+    // Fall back to physical virtual desktop DPI, but prevent
+    // using DPI values lower than 96. This ensuers that connecting
+    // to e.g. a TV works somewhat predictabilly.
+    QDpi virtualDesktopPhysicalDPi = m_virtualDesktop->dpi();
+    return QDpi(std::max(virtualDesktopPhysicalDPi.first, 96.0),
+                std::max(virtualDesktopPhysicalDPi.second, 96.0));
 }
 
 QPlatformCursor *QXcbScreen::cursor() const

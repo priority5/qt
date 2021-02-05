@@ -301,11 +301,11 @@ public:
     static QVector<T> fromList(const QList<T> &list);
     QList<T> toList() const;
 
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
-    Q_DECL_DEPRECATED_X("Use QVector<T>(vector.begin(), vector.end()) instead.")
+#if QT_DEPRECATED_SINCE(5, 14) && QT_VERSION < QT_VERSION_CHECK(6,0,0)
+    QT_DEPRECATED_X("Use QVector<T>(vector.begin(), vector.end()) instead.")
     static inline QVector<T> fromStdVector(const std::vector<T> &vector)
     { return QVector<T>(vector.begin(), vector.end()); }
-    Q_DECL_DEPRECATED_X("Use std::vector<T>(vector.begin(), vector.end()) instead.")
+    QT_DEPRECATED_X("Use std::vector<T>(vector.begin(), vector.end()) instead.")
     inline std::vector<T> toStdVector() const
     { return std::vector<T>(d->begin(), d->end()); }
 #endif
@@ -337,7 +337,6 @@ QVector(InputIterator, InputIterator) -> QVector<ValueType>;
 // behavior change: an object of POD type constructed with an initializer of the form ()
 // will be default-initialized
 #   pragma warning ( push )
-#   pragma warning ( disable : 4345 )
 #   pragma warning(disable : 4127) // conditional expression is constant
 #endif
 
@@ -1132,24 +1131,6 @@ extern template class Q_CORE_EXPORT QVector<QPoint>;
 #endif
 
 QVector<uint> QStringView::toUcs4() const { return QtPrivate::convertToUcs4(*this); }
-
-QVector<QStringRef> QString::splitRef(const QString &sep, Qt::SplitBehavior behavior, Qt::CaseSensitivity cs) const
-{ return splitRef(sep, _sb(behavior), cs); }
-QVector<QStringRef> QString::splitRef(QChar sep, Qt::SplitBehavior behavior, Qt::CaseSensitivity cs) const
-{ return splitRef(sep, _sb(behavior), cs); }
-#ifndef QT_NO_REGEXP
-QVector<QStringRef> QString::splitRef(const QRegExp &sep, Qt::SplitBehavior behavior) const
-{ return splitRef(sep, _sb(behavior)); }
-#endif
-#if QT_CONFIG(regularexpression)
-QVector<QStringRef> QString::splitRef(const QRegularExpression &sep, Qt::SplitBehavior behavior) const
-{ return splitRef(sep, _sb(behavior)); }
-#endif
-QVector<QStringRef> QStringRef::split(const QString &sep, Qt::SplitBehavior behavior, Qt::CaseSensitivity cs) const
-{ return split(sep, QString::_sb(behavior), cs); }
-QVector<QStringRef> QStringRef::split(QChar sep, Qt::SplitBehavior behavior, Qt::CaseSensitivity cs) const
-{ return split(sep, QString::_sb(behavior), cs); }
-
 
 QT_END_NAMESPACE
 

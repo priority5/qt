@@ -48,9 +48,9 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.14
-import QtQuick3D 1.14
-import QtQuick3D.Materials 1.14
+import QtQuick 2.15
+import QtQuick3D 1.15
+import QtQuick3D.Materials 1.15
 
 Rectangle {
     height: 320
@@ -66,15 +66,14 @@ Rectangle {
             probeBrightness: 500
         }
 
-        Camera {
-            z: -100
+        PerspectiveCamera {
+            z: 100
         }
         Model {
             y: -20
             x: 10
-            rotation: Qt.vector3d(45, 30, 0)
+            rotation: Quaternion.fromEulerAngles(-45, -30, 0)
             scale: Qt.vector3d(70, 70, 70)
-            rotationOrder: Node.YZX
 
             source: "../shared/models/barrel/meshes/Barrel.mesh"
 

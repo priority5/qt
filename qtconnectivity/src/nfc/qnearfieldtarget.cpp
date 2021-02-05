@@ -226,7 +226,7 @@ bool QNearFieldTarget::RequestId::isValid() const
 int QNearFieldTarget::RequestId::refCount() const
 {
     if (d)
-        return d->ref.load();
+        return d->ref.loadRelaxed();
 
     return 0;
 }
@@ -544,6 +544,7 @@ bool QNearFieldTarget::handleResponse(const QNearFieldTarget::RequestId &id,
 void QNearFieldTarget::reportError(QNearFieldTarget::Error error,
                                    const QNearFieldTarget::RequestId &id)
 {
+    setResponseForRequest(id, QVariant(), false);
     QMetaObject::invokeMethod(this, [this, error, id]() {
         Q_EMIT this->error(error, id);
     }, Qt::QueuedConnection);

@@ -82,8 +82,10 @@ private slots:
     void layoutChangedWithAllSelected2();
     void layoutChangedTreeSelection();
     void deselectRemovedMiddleRange();
+#if QT_DEPRECATED_SINCE(5, 15)
     void rangeOperatorLessThan_data();
     void rangeOperatorLessThan();
+#endif
     void setModel();
 
     void testDifferentModels();
@@ -2037,12 +2039,16 @@ void tst_QItemSelectionModel::rowIntersectsSelection3()
 
     QModelIndex parent;
     QVERIFY(!selectionModel.rowIntersectsSelection(0, parent));
+    QVERIFY(!selectionModel.columnIntersectsSelection(0, parent));
     parent = model.index(0, 0, parent);
     QVERIFY(selectionModel.rowIntersectsSelection(0, parent));
+    QVERIFY(selectionModel.columnIntersectsSelection(0, parent));
     parent = model.index(0, 0, parent);
     QVERIFY(!selectionModel.rowIntersectsSelection(0, parent));
+    QVERIFY(!selectionModel.columnIntersectsSelection(0, parent));
     parent = model.index(0, 0, parent);
     QVERIFY(!selectionModel.rowIntersectsSelection(0, parent));
+    QVERIFY(!selectionModel.columnIntersectsSelection(0, parent));
 }
 
 void tst_QItemSelectionModel::unselectable()
@@ -2059,7 +2065,7 @@ void tst_QItemSelectionModel::unselectable()
     QCOMPARE(selectionModel.selectedIndexes().count(), 10);
     QCOMPARE(selectionModel.selectedRows().count(), 10);
     for (int j = 0; j < 10; ++j)
-        model.item(j)->setFlags(0);
+        model.item(j)->setFlags({ });
     QCOMPARE(selectionModel.selectedIndexes().count(), 0);
     QCOMPARE(selectionModel.selectedRows().count(), 0);
 }
@@ -2437,6 +2443,7 @@ static QStandardItemModel* getModel(QObject *parent)
     return model;
 }
 
+#if QT_DEPRECATED_SINCE(5, 15)
 enum Result {
     LessThan,
     NotLessThan,
@@ -2571,6 +2578,7 @@ void tst_QItemSelectionModel::rangeOperatorLessThan()
     if (!(r2 < r4))
         QVERIFY(r4 < r2);
 }
+#endif
 
 void tst_QItemSelectionModel::setModel()
 {

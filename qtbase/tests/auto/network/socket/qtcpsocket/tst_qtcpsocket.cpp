@@ -80,6 +80,8 @@
 #include <unistd.h>
 #endif
 
+#include <memory>
+
 #include "private/qhostinfo_p.h"
 
 #include "../../../network-settings.h"
@@ -358,7 +360,8 @@ void tst_QTcpSocket::initTestCase()
      QVERIFY(QtNetworkSettings::verifyConnection(QtNetworkSettings::ftpServerName(), 21));
      QVERIFY(QtNetworkSettings::verifyConnection(QtNetworkSettings::ftpProxyServerName(), 2121));
 #else
-    QVERIFY(QtNetworkSettings::verifyTestNetworkSettings());
+    if (!QtNetworkSettings::verifyTestNetworkSettings())
+        QSKIP("No network test server available");
 #endif
 }
 
@@ -522,7 +525,7 @@ void tst_QTcpSocket::bind_data()
                 continue; // link-local bind will fail, at least on Linux, so skip it.
 
             QString ip(entry.ip().toString());
-            QTest::newRow(ip.toLatin1().constData()) << ip << 0 << true << ip;
+            QTest::addRow("%s:0", ip.toLatin1().constData()) << ip << 0 << true << ip;
 
             if (!testIpv6 && entry.ip().protocol() == QAbstractSocket::IPv6Protocol)
                 testIpv6 = true;
@@ -530,9 +533,9 @@ void tst_QTcpSocket::bind_data()
     }
 
     // test binding to localhost
-    QTest::newRow("0.0.0.0") << "0.0.0.0" << 0 << true << "0.0.0.0";
+    QTest::newRow("0.0.0.0:0") << "0.0.0.0" << 0 << true << "0.0.0.0";
     if (testIpv6)
-        QTest::newRow("[::]") << "::" << 0 << true << "::";
+        QTest::newRow("[::]:0") << "::" << 0 << true << "::";
 
     // and binding with a port number...
     // Since we want to test that we got the port number we asked for, we need a random port number.
@@ -550,16 +553,22 @@ void tst_QTcpSocket::bind_data()
     knownBad << "198.51.100.1";
     knownBad << "2001:0DB8::1";
     foreach (const QString &badAddress, knownBad) {
-        QTest::newRow(badAddress.toLatin1().constData()) << badAddress << 0 << false << QString();
+        QTest::addRow("%s:0", badAddress.toLatin1().constData()) << badAddress << 0 << false << QString();
     }
 
-#ifdef Q_OS_UNIX
     // try to bind to a privileged ports
     // we should fail if we're not root (unless the ports are in use!)
-    QTest::newRow("127.0.0.1:1") << "127.0.0.1" << 1 << !geteuid() << (geteuid() ? QString() : "127.0.0.1");
+#ifdef Q_OS_DARWIN
+    // Alas, some quirk (starting from macOS 10.14): bind with port number 1
+    // fails with IPv4 (not IPv6 though, see below).
+    QTest::newRow("127.0.0.1:1") << "127.0.0.1" << 1 << false << QString();
+#else
+    QTest::newRow("127.0.0.1:1") << "127.0.0.1" << 1 << QtNetworkSettings::canBindToLowPorts()
+                                 << (QtNetworkSettings::canBindToLowPorts() ? "127.0.0.1" : QString());
+#endif // Q_OS_DARWIN
     if (testIpv6)
-        QTest::newRow("[::]:1") << "::" << 1 << !geteuid() << (geteuid() ? QString() : "::");
-#endif
+        QTest::newRow("[::]:1") << "::" << 1 << QtNetworkSettings::canBindToLowPorts()
+                                << (QtNetworkSettings::canBindToLowPorts() ? "::" : QString());
 }
 
 void tst_QTcpSocket::bind()
@@ -578,13 +587,13 @@ void tst_QTcpSocket::bind()
     QTcpSocket dummySocket;     // used only to "use up" a file descriptor
     dummySocket.bind();
 
-    QTcpSocket *socket = newSocket();
+    std::unique_ptr<QTcpSocket> socket(newSocket());
     quint16 boundPort;
     qintptr fd;
 
     if (successExpected) {
         bool randomPort = port == -1;
-        int attemptsLeft = 5;     // only used with randomPort
+        int attemptsLeft = 5;     // only used with randomPort or Windows
         do {
             if (randomPort) {
                 // try to get a random port number
@@ -644,9 +653,24 @@ void tst_QTcpSocket::bind()
         QCOMPARE(acceptedSocket->peerPort(), boundPort);
         QCOMPARE(socket->localAddress(), remoteAddr);
         QCOMPARE(socket->socketDescriptor(), fd);
+#ifdef Q_OS_DARWIN
+        // Normally, we don't see this problem: macOS sometimes does not
+        // allow us to immediately re-use a port, thinking connection is
+        // still alive. With fixed port 1 (we testing starting from
+        // macOS 10.14), this problem shows, making the test flaky:
+        // we run this 'bind' with port 1 several times (different
+        // test cases) and the problem manifests itself as
+        // "The bound address is already in use, tried port 1".
+        QTestEventLoop cleanupHelper;
+        auto client = socket.get();
+        connect(client, &QTcpSocket::disconnected, [&cleanupHelper, client](){
+            client->close();
+            cleanupHelper.exitLoop();
+        });
+        acceptedSocket->close();
+        cleanupHelper.enterLoopMSecs(100);
+#endif // Q_OS_DARWIN
     }
-
-    delete socket;
 }
 
 //----------------------------------------------------------------------------------
@@ -1997,14 +2021,14 @@ void tst_QTcpSocket::remoteCloseError()
     QCOMPARE(clientSocket->bytesAvailable(), qint64(5));
 
     qRegisterMetaType<QAbstractSocket::SocketError>("QAbstractSocket::SocketError");
-    QSignalSpy errorSpy(clientSocket, SIGNAL(error(QAbstractSocket::SocketError)));
+    QSignalSpy errorSpy(clientSocket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)));
     QSignalSpy disconnectedSpy(clientSocket, SIGNAL(disconnected()));
 
     clientSocket->write("World");
     serverSocket->disconnectFromHost();
 
     tmpSocket = clientSocket;
-    connect(clientSocket, SIGNAL(error(QAbstractSocket::SocketError)),
+    connect(clientSocket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)),
             this, SLOT(remoteCloseErrorSlot()));
 
     enterLoop(30);
@@ -2057,7 +2081,7 @@ void tst_QTcpSocket::nestedEventLoopInErrorSlot()
 {
     QTcpSocket *socket = newSocket();
     QPointer<QTcpSocket> p(socket);
-    connect(socket, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(enterLoopSlot()));
+    connect(socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)), this, SLOT(enterLoopSlot()));
 
     socket->connectToHost("hostnotfoundhostnotfound.qt-project.org", 9999);
     enterLoop(30);
@@ -2079,7 +2103,7 @@ void tst_QTcpSocket::connectToHostError_data()
 
 void tst_QTcpSocket::connectToHostError()
 {
-    QTcpSocket *socket = newSocket();
+    std::unique_ptr<QTcpSocket> socket(newSocket());
 
     QAbstractSocket::SocketError error = QAbstractSocket::UnknownSocketError;
 
@@ -2087,15 +2111,14 @@ void tst_QTcpSocket::connectToHostError()
     QFETCH(int, port);
     QFETCH(QAbstractSocket::SocketError, expectedError);
 
-    connect(socket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),[&](QAbstractSocket::SocketError socketError){
+    connect(socket.get(), &QAbstractSocket::errorOccurred, [&](QAbstractSocket::SocketError socketError){
         error = socketError;
     });
     socket->connectToHost(host, port); // no service running here, one suspects
-    QTRY_COMPARE(socket->state(), QTcpSocket::UnconnectedState);
+    QTRY_COMPARE_WITH_TIMEOUT(socket->state(), QTcpSocket::UnconnectedState, 7000);
     if (error != expectedError && error == QAbstractSocket::ConnectionRefusedError)
         QEXPECT_FAIL("unreachable", "CI firewall interfers with this test", Continue);
     QCOMPARE(error, expectedError);
-    delete socket;
 }
 
 //----------------------------------------------------------------------------------
@@ -2304,7 +2327,7 @@ void tst_QTcpSocket::abortiveClose()
 
     qRegisterMetaType<QAbstractSocket::SocketError>("QAbstractSocket::SocketError");
     QSignalSpy readyReadSpy(clientSocket, SIGNAL(readyRead()));
-    QSignalSpy errorSpy(clientSocket, SIGNAL(error(QAbstractSocket::SocketError)));
+    QSignalSpy errorSpy(clientSocket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)));
 
     connect(clientSocket, SIGNAL(disconnected()), this, SLOT(exitLoopSlot()));
     QTimer::singleShot(0, this, SLOT(abortiveClose_abortSlot()));
@@ -2417,14 +2440,14 @@ void tst_QTcpSocket::connectionRefused()
 
     QTcpSocket *socket = newSocket();
     QSignalSpy stateSpy(socket, SIGNAL(stateChanged(QAbstractSocket::SocketState)));
-    QSignalSpy errorSpy(socket, SIGNAL(error(QAbstractSocket::SocketError)));
-    connect(socket, SIGNAL(error(QAbstractSocket::SocketError)),
+    QSignalSpy errorSpy(socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)));
+    connect(socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)),
             &QTestEventLoop::instance(), SLOT(exitLoop()));
 
     socket->connectToHost(QtNetworkSettings::httpServerName(), 144);
 
     enterLoop(10);
-    disconnect(socket, SIGNAL(error(QAbstractSocket::SocketError)),
+    disconnect(socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)),
                &QTestEventLoop::instance(), SLOT(exitLoop()));
     QVERIFY2(!timeout(), "Network timeout");
 
@@ -2751,7 +2774,7 @@ void tst_QTcpSocket::taskQtBug5799ConnectionErrorEventLoop()
     // check that we get a proper error connecting to port 12346
     // This testcase uses an event loop
     QTcpSocket socket;
-    connect(&socket, SIGNAL(error(QAbstractSocket::SocketError)), &QTestEventLoop::instance(), SLOT(exitLoop()));
+    connect(&socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)), &QTestEventLoop::instance(), SLOT(exitLoop()));
     socket.connectToHost(QtNetworkSettings::httpServerName(), 12346);
 
     QTestEventLoop::instance().enterLoop(10);
@@ -3187,7 +3210,7 @@ void tst_QTcpSocket::readNotificationsAfterBind()
     QAbstractSocket socket(QAbstractSocket::TcpSocket, nullptr);
     QVERIFY2(socket.bind(), "Bind error!");
 
-    connect(&socket, SIGNAL(error(QAbstractSocket::SocketError)), &QTestEventLoop::instance(), SLOT(exitLoop()));
+    connect(&socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)), &QTestEventLoop::instance(), SLOT(exitLoop()));
     QSignalSpy spyReadyRead(&socket, SIGNAL(readyRead()));
     socket.connectToHost(QtNetworkSettings::serverName(), 12346);
 

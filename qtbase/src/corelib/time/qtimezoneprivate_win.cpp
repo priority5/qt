@@ -363,7 +363,7 @@ QDate calculateTransitionLocalDate(const SYSTEMTIME &rule, int year)
 }
 
 // Converts a date/time value into msecs
-inline qint64 timeToMSecs(const QDate &date, const QTime &time)
+inline qint64 timeToMSecs(QDate date, QTime time)
 {
     return ((date.toJulianDay() - JULIAN_DAY_FOR_EPOCH) * MSECS_PER_DAY)
            + time.msecsSinceStartOfDay();
@@ -642,6 +642,8 @@ void QWinTimeZonePrivate::init(const QByteArray &ianaId)
         m_id.clear();
         m_windowsId.clear();
         m_displayName.clear();
+    } else if (m_id.isEmpty()) {
+        m_id = m_standardName.toUtf8();
     }
 }
 
@@ -864,12 +866,8 @@ QByteArray QWinTimeZonePrivate::systemTimeZoneId() const
     if (country != QLocale::AnyCountry)
         ianaId = windowsIdToDefaultIanaId(windowsId, country);
     // If we don't have a real country, or there wasn't a specific match, try the global default
-    if (ianaId.isEmpty()) {
+    if (ianaId.isEmpty())
         ianaId = windowsIdToDefaultIanaId(windowsId);
-        // If no global default then probably an unknown Windows ID so return UTC
-        if (ianaId.isEmpty())
-            return utcQByteArray();
-    }
     return ianaId;
 }
 

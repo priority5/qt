@@ -83,6 +83,10 @@
          \li Custom types can easily be added to the test data and test output.
     \endtable
 
+    You can use a Qt Creator wizard to create a project that contains Qt tests
+    and build and run them directly from Qt Creator. For more information, see
+    \l {Qt Creator: Running Autotests}{Running Autotests}.
+
     \section1 Creating a Test
 
     To create a test, subclass QObject and add one or more private slots to it. Each
@@ -133,6 +137,41 @@
     \if !defined(qtforpython)
     \section1 Building a Test
 
+    You can build an executable that contains one test class that typically
+    tests one class of production code. However, usually you would want to
+    test several classes in a project by running one command.
+
+    See \l {Chapter 1: Writing a Unit Test}{Writing a Unit Test} for a step by
+    step explanation.
+
+    \section2 Building with CMake and CTest
+
+    You can use \l {Building with CMake and CTest} to create a test.
+    \l{https://cmake.org/cmake/help/latest/manual/ctest.1.html}{CTest} enables
+    you to include or exclude tests based on a regular expression that is
+    matched against the test name. You can further apply the \c LABELS property
+    to a test and CTest can then include or exclude tests based on those labels.
+    All labeled targets will be run when \c {test} target is called on the
+    command line.
+
+    There are several other advantages with CMake. For example, the result of
+    a test run can be published on a web server using CDash with virtually no
+    effort.
+
+    CTest scales to very different unit test frameworks, and works out of the
+    box with QTest.
+
+    The following is an example of a CMakeLists.txt file that specifies the
+    project name and the language used (here, \e mytest and C++), the Qt
+    modules required for building the test (Qt5Test), and the files that are
+    included in the test (\e tst_mytest.cpp).
+
+    \quotefile code/doc_src_cmakelists.txt
+
+    For more information about the options you have, see \l {Build with CMake}.
+
+    \section2 Building with qmake
+
     If you are using \c qmake as your build tool, just add the
     following to your project file:
 
@@ -143,8 +182,15 @@
 
     \snippet code/doc_src_qtestlib.pro 2
 
+    To prevent the test from being installed to your target, add the
+    additional line:
+
+    \snippet code/doc_src_qtestlib.pro 3
+
     See the \l{Building a Testcase}{qmake manual} for
     more information about \c{make check}.
+
+    \section2 Building with Other Tools
 
     If you are using other build tools, make sure that you add the location
     of the Qt Test header files to your include path (usually \c{include/QtTest}
@@ -152,8 +198,6 @@
     of Qt, link your test to the \c QtTest library. For debug builds, use
     \c{QtTest_debug}.
 
-    See \l {Chapter 1: Writing a Unit Test}{Writing a Unit Test} for a step by
-    step explanation.
     \endif
 
     \section1 Qt Test Command Line Arguments
@@ -198,7 +242,7 @@
     \list
     \li \c -o \e{filename,format} \br
     Writes output to the specified file, in the specified format (one of
-    \c txt, \c xml, \c lightxml, \c xunitxml or \c tap).  The special filename \c -
+    \c txt, \c xml, \c lightxml, \c junitxml or \c tap).  The special filename \c -
     may be used to log to standard output.
     \li \c -o \e filename \br
     Writes output to the specified file.
@@ -208,8 +252,8 @@
     Outputs results as an XML document.
     \li \c -lightxml \br
     Outputs results as a stream of XML tags.
-    \li \c -xunitxml \br
-    Outputs results as an Xunit XML document.
+    \li \c -junitxml \br
+    Outputs results as an JUnit XML document.
     \li \c -csv \br
     Outputs results as comma-separated values (CSV). This mode is only suitable for
     benchmarks, since it suppresses normal pass/fail messages.
@@ -225,7 +269,7 @@
 
     If the first version of the \c -o option is used, neither the second version
     of the \c -o option nor the \c -txt, \c -xml, \c -lightxml, \c -teamcity,
-    \c -xunitxml or \c -tap options should be used.
+    \c -junitxml or \c -tap options should be used.
 
     If neither version of the \c -o option is used, test results will be logged to
     standard output.  If no format option is used, test results will be logged in
@@ -436,13 +480,12 @@
     For example, to test each number provided by \c {roundTripInt_data()} with
     each locale provided by \c {initTestCase_data()}:
 
-    \snippet code/src_qtestlib_qtestcase.cpp 31
+    \snippet code/src_qtestlib_qtestcase_snippet.cpp 31
 */
 
 /*!
     \page qtest-tutorial.html
     \brief A short introduction to testing with Qt Test.
-    \contentspage Qt Test Overview
     \nextpage {Chapter 1: Writing a Unit Test}{Chapter 1}
     \ingroup best-practices
 
@@ -467,7 +510,6 @@
 /*!
     \example tutorial1
 
-    \contentspage {Qt Test Tutorial}{Contents}
     \nextpage {Chapter 2: Data Driven Testing}{Chapter 2}
 
     \title Chapter 1: Writing a Unit Test
@@ -543,7 +585,6 @@
     \example tutorial2
 
     \previouspage {Chapter 1: Writing a Unit Test}{Chapter 1}
-    \contentspage {Qt Test Tutorial}{Contents}
     \nextpage {Chapter 3: Simulating Gui Events}{Chapter 3}
 
     \title Chapter 2: Data Driven Testing
@@ -652,7 +693,6 @@
     \example tutorial3
 
     \previouspage {Chapter 2: Data Driven Testing}{Chapter 2}
-    \contentspage {Qt Test Tutorial}{Contents}
     \nextpage {Chapter 4: Replaying GUI Events}{Chapter 4}
 
     \title Chapter 3: Simulating GUI Events
@@ -713,7 +753,6 @@
     \example tutorial4
 
     \previouspage {Chapter 3: Simulating GUI Events}{Chapter 3}
-    \contentspage {Qt Test Tutorial}{Contents}
     \nextpage {Chapter 5: Writing a Benchmark}{Chapter 5}
 
     \title Chapter 4: Replaying GUI Events
@@ -794,7 +833,6 @@
     \example tutorial5
 
     \previouspage {Chapter 4: Replaying GUI Events}{Chapter 4}
-    \contentspage {Qt Test Tutorial}{Contents}
     \nextpage {Chapter 6: Skipping Tests with QSKIP}{Chapter 6}
 
     \title Chapter 5: Writing a Benchmark
@@ -850,7 +888,6 @@
     \page qttestlib-tutorial6.html
 
     \previouspage {Chapter 5: Writing a Benchmark}{Chapter 5}
-    \contentspage {Qt Test Tutorial}{Contents}
 
     \title Chapter 6: Skipping Tests with QSKIP
     \brief How to skip tests in certain cases.
@@ -870,7 +907,7 @@
 
     Example of QSKIP in a test function:
 
-    \snippet code/doc_src_qtqskip.cpp 0
+    \snippet code/doc_src_qtqskip_snippet.cpp 0
 
     In a data-driven test, each call to QSKIP() skips only the current
     row of test data. If the data-driven test contains an unconditional

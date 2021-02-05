@@ -136,7 +136,7 @@ QT_BEGIN_NAMESPACE
     Constructs a plugin loader with the given \a parent.
 */
 QPluginLoader::QPluginLoader(QObject *parent)
-    : QObject(parent), d(0), did_load(false)
+    : QObject(parent), d(nullptr), did_load(false)
 {
 }
 
@@ -152,7 +152,7 @@ QPluginLoader::QPluginLoader(QObject *parent)
     \sa setFileName()
 */
 QPluginLoader::QPluginLoader(const QString &fileName, QObject *parent)
-    : QObject(parent), d(0), did_load(false)
+    : QObject(parent), d(nullptr), did_load(false)
 {
     setFileName(fileName);
     setLoadHints(QLibrary::PreventUnloadHint);
@@ -195,10 +195,8 @@ QPluginLoader::~QPluginLoader()
 QObject *QPluginLoader::instance()
 {
     if (!isLoaded() && !load())
-        return 0;
-    if (!d->inst && d->instance)
-        d->inst = d->instance();
-    return d->inst.data();
+        return nullptr;
+    return d->pluginInstance();
 }
 
 /*!
@@ -233,7 +231,7 @@ bool QPluginLoader::load()
     if (!d || d->fileName.isEmpty())
         return false;
     if (did_load)
-        return d->pHnd && d->instance;
+        return d->pHnd && d->instanceFactory.loadAcquire();
     if (!d->isPlugin())
         return false;
     did_load = true;
@@ -275,7 +273,7 @@ bool QPluginLoader::unload()
  */
 bool QPluginLoader::isLoaded() const
 {
-    return d && d->pHnd && d->instance;
+    return d && d->pHnd && d->instanceFactory.loadRelaxed();
 }
 
 #if defined(QT_SHARED)
@@ -342,7 +340,7 @@ static QString locatePlugin(const QString& fileName)
     QPluginLoader will automatically look for the file with the appropriate
     suffix (see QLibrary::isLibrary()).
 
-    When loading the plugin, QPluginLoader searches in the current directory and
+    When loading the plugin, QPluginLoader searches
     in all plugin locations specified by QCoreApplication::libraryPaths(),
     unless the file name has an absolute path. After loading the plugin
     successfully, fileName() returns the fully-qualified file name of
@@ -363,7 +361,7 @@ void QPluginLoader::setFileName(const QString &fileName)
     if (d) {
         lh = d->loadHints();
         d->release();
-        d = 0;
+        d = nullptr;
         did_load = false;
     }
 

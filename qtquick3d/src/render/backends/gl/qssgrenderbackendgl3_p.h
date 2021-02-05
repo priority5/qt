@@ -47,15 +47,22 @@
 
 #include <QtQuick3DRender/private/qssgrenderbasetypes_p.h>
 #include <QtQuick3DRender/private/qssgrenderbackendglbase_p.h>
-#include <QtQuick3DRender/private/qssgopenglextensions_p.h>
 
 #include <QtGui/QOpenGLExtraFunctions>
-#include <QtOpenGLExtensions/QtOpenGLExtensions>
 
 QT_BEGIN_NAMESPACE
 
 ///< forward declaration
 class QSSGRenderBackendMiscStateGL;
+
+#if defined(QT_OPENGL_ES_2)
+    class QSSGOpenGLES2Extensions;
+#else
+    class QOpenGLExtension_ARB_timer_query;
+    class QOpenGLExtension_ARB_tessellation_shader;
+    class QOpenGLExtension_ARB_texture_multisample;
+    class QSSGOpenGLExtensions;
+#endif
 
 namespace QSSGGlExtStrings {
 QByteArray extsAstcHDR();
@@ -70,12 +77,14 @@ public:
     /// destructor
     ~QSSGRenderBackendGL3Impl() override;
 
-public:
     qint32 getDepthBits() const override;
     qint32 getStencilBits() const override;
     void generateMipMaps(QSSGRenderBackendTextureObject to,
                          QSSGRenderTextureTargetType target,
                          QSSGRenderHint genType) override;
+
+    QByteArray getShadingLanguageVersion() override;
+    QSSGRenderContextType getRenderContextType() const override;
 
     void setMultisampledTextureData2D(QSSGRenderBackendTextureObject to,
                                       QSSGRenderTextureTargetType target,
@@ -202,6 +211,8 @@ public:
     QSSGRenderBackendSyncObject createSync(QSSGRenderSyncType tpye, QSSGRenderSyncFlags syncFlags) override;
     void releaseSync(QSSGRenderBackendSyncObject so) override;
     void waitSync(QSSGRenderBackendSyncObject so, QSSGRenderCommandFlushFlags syncFlags, quint64 timeout) override;
+
+    void releaseInputAssembler(QSSGRenderBackendInputAssemblerObject iao) override;
 
 protected:
     QSSGRenderBackendMiscStateGL *m_currentMiscState; ///< this holds the current misc state

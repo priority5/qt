@@ -3,6 +3,7 @@
     "depends": [
         "gui"
     ],
+    "condition": "module.gui",
     "testDir": "../../config.tests",
 
     "commandline": {
@@ -53,7 +54,7 @@
             "test": "gstreamer",
             "sources": [
                 { "type": "pkgConfig",
-                  "args": "gstreamer-1.0 gstreamer-base-1.0 gstreamer-audio-1.0 gstreamer-video-1.0 gstreamer-pbutils-1.0" },
+                  "args": "gstreamer-1.0 gstreamer-base-1.0 gstreamer-audio-1.0 gstreamer-video-1.0 gstreamer-pbutils-1.0 gstreamer-allocators-1.0" },
                 { "libs": "-lgstreamer-1.0 -lgstbase-1.0 -lgstaudio-1.0 -lgstvideo-1.0 -lgstpbutils-1.0 -lglib-2.0 -lgobject-2.0",
                   "condition": "config.win32 || config.macos" },
                 { "libs": "", "condition": "config.android && input.gstreamer != ''" }
@@ -106,18 +107,6 @@
             "use": "gstreamer_1_0",
             "sources": [
                 { "type": "pkgConfig", "args": "gstreamer-gl-1.0" }
-            ]
-        },
-        "gstreamer_imxcommon": {
-            "label": "GStreamer i.MX common",
-            "export": "gstreamer_imxcommon",
-            "test": {
-                "include": "gst/allocators/imx/phys_mem_meta.h"
-            },
-            "use": "gstreamer_1_0",
-            "sources": [
-                { "type": "pkgConfig",
-                  "args": "gstimxcommon" }
             ]
         },
         "libresourceqt5": {
@@ -256,12 +245,7 @@
         },
         "gstreamer_gl": {
             "label": "GStreamer OpenGL",
-            "condition": "features.gstreamer_1_0 && libs.gstreamer_gl_1_0",
-            "output": [ "privateFeature" ]
-        },
-        "gstreamer_imxcommon": {
-            "label": "GStreamer i.MX common",
-            "condition": "(features.gstreamer_1_0 && libs.gstreamer_imxcommon)",
+            "condition": "features.opengl && features.gstreamer_1_0 && libs.gstreamer_gl_1_0",
             "output": [ "privateFeature" ]
         },
         "gpu_vivante": {

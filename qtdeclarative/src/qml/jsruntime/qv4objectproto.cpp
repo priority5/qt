@@ -658,6 +658,7 @@ ReturnedValue ObjectPrototype::method_toString(const FunctionObject *b, const Va
 ReturnedValue ObjectPrototype::method_toLocaleString(const FunctionObject *b, const Value *thisObject, const Value *argv, int argc)
 {
     Scope scope(b);
+    CHECK_STACK_LIMITS(scope.engine)
     ScopedObject o(scope, thisObject->toObject(scope.engine));
     if (!o)
         RETURN_UNDEFINED();
@@ -666,7 +667,7 @@ ReturnedValue ObjectPrototype::method_toLocaleString(const FunctionObject *b, co
     if (!f)
         THROW_TYPE_ERROR();
 
-    return f->call(thisObject, argv, argc);
+    return checkedResult(scope.engine, f->call(thisObject, argv, argc));
 }
 
 ReturnedValue ObjectPrototype::method_valueOf(const FunctionObject *b, const Value *thisObject, const Value *, int)

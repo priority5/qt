@@ -31,6 +31,7 @@
 #include <QtTest/QtTest>
 
 #include <qvariant.h>
+#include <QtCore/private/qvariant_p.h>
 #include <qbitarray.h>
 #include <qbytearraylist.h>
 #include <qdatetime.h>
@@ -45,7 +46,7 @@
 #include <limits.h>
 #include <float.h>
 #include <cmath>
-#if QT_HAS_INCLUDE(<variant>) && __cplusplus >= 201703L
+#if __has_include(<variant>) && __cplusplus >= 201703L
 #include <variant>
 #endif
 #include <QLinkedList>
@@ -276,8 +277,14 @@ private slots:
     void nullConvert();
 
     void accessSequentialContainerKey();
-
+    void shouldDeleteVariantDataWorksForSequential();
+    void shouldDeleteVariantDataWorksForAssociative();
     void fromStdVariant();
+    void qt4UuidDataStream();
+    void sequentialIterableEndianessSanityCheck();
+    void sequentialIterableAppend();
+
+    void preferDirectConversionOverInterfaces();
 
 private:
     void dataStream_data(QDataStream::Version version);
@@ -1433,11 +1440,11 @@ void tst_QVariant::checkDataStream()
     QVERIFY(!QMetaType::isRegistered(typeId));
 
     QByteArray errorMessage("Trying to construct an instance of an invalid type, type id: ");
-    errorMessage.append(QString::number(typeId, 10));
+    errorMessage.append(QString::number(typeId, 10).toUtf8());
 
     QTest::ignoreMessage(QtWarningMsg, errorMessage.constData());
     QByteArray settingsHex("000000");
-    settingsHex.append(QString::number(typeId, 16));
+    settingsHex.append(QString::number(typeId, 16).toUtf8());
     settingsHex.append("ffffffffff");
     const QByteArray settings = QByteArray::fromHex(settingsHex);
     QDataStream in(settings);
@@ -3878,12 +3885,17 @@ void tst_QVariant::moreCustomTypes()
         PLAY_WITH_VARIANT(data, false, QString(), 0, false);
     }
 
+#if QT_DEPRECATED_SINCE(5, 15)
+QT_WARNING_PUSH
+QT_WARNING_DISABLE_DEPRECATED
     {
         QList<QLinkedList<int> > data;
         PLAY_WITH_VARIANT(data, false, QString(), 0, false);
         data << (QLinkedList<int>() << 42);
         PLAY_WITH_VARIANT(data, false, QString(), 0, false);
     }
+QT_WARNING_POP
+#endif
 }
 
 void tst_QVariant::movabilityTest()
@@ -4989,9 +5001,102 @@ void tst_QVariant::accessSequentialContainerKey()
     QCOMPARE(nameResult, QStringLiteral("Seven"));
 }
 
+void tst_QVariant::shouldDeleteVariantDataWorksForSequential()
+{
+    QCOMPARE(instanceCount, 0);
+    {
+        QtMetaTypePrivate::QSequentialIterableImpl iterator {};
+        iterator._iteratorCapabilities = QtMetaTypePrivate::RandomAccessCapability |
+                                         QtMetaTypePrivate::BiDirectionalCapability |
+                                         QtMetaTypePrivate::ForwardCapability;
+        iterator._metaType_flags = QVariantConstructionFlags::ShouldDeleteVariantData;
+
+        iterator._size = [](const void *) {return 1;};
+        iterator._metaType_id = qMetaTypeId<MyType>();
+        iterator._moveToBegin = [](const void *, void **) {};
+        iterator._moveToEnd = [](const void *, void **) {};
+        iterator._advance = [](void **, int) {};
+        iterator._destroyIter = [](void **){};
+        iterator._equalIter = [](void * const *, void * const *){return true; /*all iterators are nullptr*/};
+        iterator._destroyIter = [](void **){};
+        iterator._at = [](const void *, int ) -> void const * {
+            MyType mytype {1, "eins"};
+            return QMetaType::create(qMetaTypeId<MyType>(), &mytype);
+        };
+        iterator._get = [](void * const *, int, uint) -> QtMetaTypePrivate::VariantData {
+            MyType mytype {2, "zwei"};
+            return {qMetaTypeId<MyType>(), QMetaType::create(qMetaTypeId<MyType>(), &mytype),  QVariantConstructionFlags::ShouldDeleteVariantData};
+        };
+        QSequentialIterable iterable {iterator};
+        QVariant value1 = iterable.at(0);
+        QVERIFY(value1.canConvert<MyType>());
+        QCOMPARE(value1.value<MyType>().number, 1);
+        QVariant value2 = *iterable.begin();
+        QVERIFY(value2.canConvert<MyType>());
+        QCOMPARE(value2.value<MyType>().number, 2);
+    }
+    QCOMPARE(instanceCount, 0);
+}
+
+void tst_QVariant::shouldDeleteVariantDataWorksForAssociative()
+{
+    QCOMPARE(instanceCount, 0);
+    {
+        QtMetaTypePrivate::QAssociativeIterableImpl iterator {};
+        iterator._metaType_flags_key = QVariantConstructionFlags::ShouldDeleteVariantData;
+        iterator._metaType_flags_value = QVariantConstructionFlags::ShouldDeleteVariantData;
+
+        iterator._size = [](const void *) {return 1;};
+        iterator._metaType_id_value = qMetaTypeId<MyType>();
+        iterator._metaType_id_key = qMetaTypeId<MyType>();
+        iterator._begin = [](const void *, void **) {};
+        iterator._end = [](const void *, void **) {};
+        iterator._advance = [](void **, int) {};
+        iterator._destroyIter = [](void **){};
+        iterator._equalIter = [](void * const *, void * const *){return true; /*all iterators are nullptr*/};
+        iterator._destroyIter = [](void **){};
+        iterator._find = [](const void *, const void *, void **iterator ) -> void  {
+            (*iterator) =  reinterpret_cast<void *>(quintptr(42));
+        };
+        iterator._getKey = [](void * const *iterator, int, uint) -> QtMetaTypePrivate::VariantData {
+            MyType mytype {1, "key"};
+            if (reinterpret_cast<quintptr>(*iterator) == 42) {
+                mytype.number = 42;
+                mytype.text = "find_key";
+            }
+            return {qMetaTypeId<MyType>(), QMetaType::create(qMetaTypeId<MyType>(), &mytype),  QVariantConstructionFlags::ShouldDeleteVariantData};
+        };
+        iterator._getValue = [](void * const *iterator, int, uint) -> QtMetaTypePrivate::VariantData {
+            MyType mytype {2, "value"};
+            if (reinterpret_cast<quintptr>(*iterator) == 42) {
+                mytype.number = 42;
+                mytype.text = "find_value";
+            }
+            return {qMetaTypeId<MyType>(), QMetaType::create(qMetaTypeId<MyType>(), &mytype),  QVariantConstructionFlags::ShouldDeleteVariantData};
+        };
+        QAssociativeIterable iterable {iterator};
+        auto it = iterable.begin();
+        QVariant value1 = it.key();
+        QVERIFY(value1.canConvert<MyType>());
+        QCOMPARE(value1.value<MyType>().number, 1);
+        QCOMPARE(value1.value<MyType>().text, "key");
+        QVariant value2 = it.value();
+        QVERIFY(value2.canConvert<MyType>());
+        QCOMPARE(value2.value<MyType>().number, 2);
+        auto findIt = iterable.find(QVariant::fromValue(MyType {}));
+        value1 = findIt.key();
+        QCOMPARE(value1.value<MyType>().number, 42);
+        QCOMPARE(value1.value<MyType>().text, "find_key");
+        value2 = findIt.value();
+        QCOMPARE(value2.value<MyType>().number, 42);
+        QCOMPARE(value2.value<MyType>().text, "find_value");
+    }
+    QCOMPARE(instanceCount, 0);
+}
+
 void tst_QVariant::fromStdVariant()
 {
-#if QT_HAS_INCLUDE(<variant>) && __cplusplus >= 201703L
+#if __has_include(<variant>) && __cplusplus >= 201703L
     {
         typedef std::variant<int, bool> intorbool_t;
         intorbool_t stdvar = 5;
@@ -5023,6 +5128,103 @@ void tst_QVariant::fromStdVariant()
         QCOMPARE(qvar.value<QChar>(), std::get<QChar>(stdvar));
     }
 #endif
+}
+
+void tst_QVariant::qt4UuidDataStream()
+{
+    qRegisterMetaTypeStreamOperators<QUuid>();
+
+    QByteArray data;
+    QDataStream stream(&data, QIODevice::WriteOnly);
+    stream.setVersion(QDataStream::Qt_4_8);
+    QUuid source(0x12345678,0x1234,0x1234,0x12,0x23,0x34,0x45,0x56,0x67,0x78,0x89);
+    stream << QVariant::fromValue(source);
+    const QByteArray qt4Data = QByteArray::fromHex("0000007f000000000651557569640012345678123412341223344556677889");
+    QCOMPARE(data, qt4Data);
+
+    QDataStream input(&data, QIODevice::ReadOnly);
+    input.setVersion(QDataStream::Qt_4_8);
+    QVariant result;
+    input >> result;
+    QCOMPARE(result.value<QUuid>(), source);
+}
+
+void tst_QVariant::sequentialIterableEndianessSanityCheck()
+{
+    namespace QMTP = QtMetaTypePrivate;
+    uint oldIteratorCaps = QMTP::ForwardCapability | QMTP::BiDirectionalCapability | QMTP::RandomAccessCapability;
+    QMTP::QSequentialIterableImpl seqImpl {};
+    QCOMPARE(seqImpl.revision(), 1u);
+    memcpy(&seqImpl._iteratorCapabilities, &oldIteratorCaps, sizeof(oldIteratorCaps));
+    QCOMPARE(seqImpl.revision(), 0u);
+}
+
+void tst_QVariant::sequentialIterableAppend()
+{
+    {
+        QVector<int> container {1, 2};
+        auto variant = QVariant::fromValue(container);
+        QVERIFY(variant.canConvert<QtMetaTypePrivate::QSequentialIterableImpl>());
+        auto asIterable = variant.value<QtMetaTypePrivate::QSequentialIterableImpl>();
+        const int i = 3, j = 4;
+        asIterable.append(&i);
+        asIterable.append(&j);
+        QCOMPARE(variant.value<QVector<int>>(), QVector<int> ({1, 2, 3, 4}));
+    }
+    {
+        QSet<QByteArray> container { QByteArray{"hello"}, QByteArray{"world"} };
+        auto variant = QVariant::fromValue(std::move(container));
+        QVERIFY(variant.canConvert<QtMetaTypePrivate::QSequentialIterableImpl>());
+        auto asIterable = variant.value<QtMetaTypePrivate::QSequentialIterableImpl>();
+        QByteArray qba1 {"goodbye"};
+        QByteArray qba2 { "moon" };
+        asIterable.append( &qba1 );
+        asIterable.append( &qba2);
+        QSet<QByteArray> reference { "hello", "world", "goodbye", "moon" };
+        QCOMPARE(variant.value<QSet<QByteArray>>(), reference);
+    }
+}
+
+void tst_QVariant::preferDirectConversionOverInterfaces()
+{
+    using namespace QtMetaTypePrivate;
+    bool calledCorrectConverter = false;
+    QMetaType::registerConverter<MyType, QSequentialIterableImpl>([](const MyType &) {
+        return QSequentialIterableImpl {};
+    });
+    QMetaType::registerConverter<MyType, QVariantList>([&calledCorrectConverter](const MyType &) {
+        calledCorrectConverter = true;
+        return QVariantList {};
+    });
+    QMetaType::registerConverter<MyType, QAssociativeIterableImpl>([](const MyType &) {
+        return QAssociativeIterableImpl {};
+    });
+    QMetaType::registerConverter<MyType, QVariantHash>([&calledCorrectConverter](const MyType &) {
+        calledCorrectConverter = true;
+        return QVariantHash {};
+    });
+    QMetaType::registerConverter<MyType, QVariantMap>([&calledCorrectConverter](const MyType &) {
+        calledCorrectConverter = true;
+        return QVariantMap {};
+    });
+    auto holder = QVariant::fromValue(MyType {});
+
+    QVERIFY(holder.canConvert<QSequentialIterableImpl>());
+    QVERIFY(holder.canConvert<QVariantList>());
+    QVERIFY(holder.canConvert<QAssociativeIterableImpl>());
+    QVERIFY(holder.canConvert<QVariantHash>());
+    QVERIFY(holder.canConvert<QVariantMap>());
+
+    holder.value<QVariantList>();
+    QVERIFY(calledCorrectConverter);
+    calledCorrectConverter = false;
+
+    holder.value<QVariantHash>();
+    QVERIFY(calledCorrectConverter);
+    calledCorrectConverter = false;
+
+    holder.value<QVariantMap>();
+    QVERIFY(calledCorrectConverter);
 }
 
 QTEST_MAIN(tst_QVariant)
