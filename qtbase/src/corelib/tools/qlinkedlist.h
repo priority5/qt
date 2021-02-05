@@ -55,21 +55,33 @@
 #include <iterator>
 #include <list>
 
+
+#if 0
+// This is needed because of QTBUG-80347
+#pragma qt_class(QLinkedList)
+#pragma qt_class(QLinkedListData)
+#pragma qt_class(QLinkedListNode)
+#endif
+
+#if QT_DEPRECATED_SINCE(5, 15)
+
+QT_WARNING_PUSH
+QT_WARNING_DISABLE_DEPRECATED
+
 QT_BEGIN_NAMESPACE
 
-
-struct Q_CORE_EXPORT QLinkedListData
+struct QT_DEPRECATED_VERSION_5_15 QLinkedListData
 {
     QLinkedListData *n, *p;
     QtPrivate::RefCount ref;
     int size;
     uint sharable : 1;
 
-    static const QLinkedListData shared_null;
+    Q_CORE_EXPORT static const QLinkedListData shared_null;
 };
 
 template <typename T>
-struct QLinkedListNode
+struct QT_DEPRECATED_VERSION_5_15 QLinkedListNode
 {
     inline QLinkedListNode(const T &arg): t(arg) { }
     QLinkedListNode *n, *p;
@@ -77,7 +89,7 @@ struct QLinkedListNode
 };
 
 template <class T>
-class QLinkedList
+class QT_DEPRECATED_VERSION_X_5_15("Use std::list instead") QLinkedList
 {
     typedef QLinkedListNode<T> Node;
     union { QLinkedListData *d; QLinkedListNode<T> *e; };
@@ -593,6 +605,10 @@ inline QDataStream &operator<<(QDataStream &s, const QLinkedList<T> &l)
 QT_END_NAMESPACE
 
 Q_DECLARE_SEQUENTIAL_CONTAINER_METATYPE(QLinkedList)
+
+QT_WARNING_POP
+
+#endif // QT_DEPRECATED_SINCE(5, 15)
 
 #endif // QT_NO_LINKED_LIST
 

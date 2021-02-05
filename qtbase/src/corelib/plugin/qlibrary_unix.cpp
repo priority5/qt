@@ -1,7 +1,7 @@
 /****************************************************************************
 **
 ** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2018 Intel Corporation
+** Copyright (C) 2020 Intel Corporation
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtCore module of the Qt Toolkit.
@@ -123,6 +123,7 @@ QStringList QLibraryPrivate::prefixes_sys()
 
 bool QLibraryPrivate::load_sys()
 {
+    QMutexLocker locker(&mutex);
     QString attempt;
     QFileSystemEntry fsEntry(fileName);
 
@@ -213,10 +214,14 @@ bool QLibraryPrivate::load_sys()
     }
 #endif
 
+    locker.unlock();
     bool retry = true;
-    for(int prefix = 0; retry && !pHnd && prefix < prefixes.size(); prefix++) {
-        for(int suffix = 0; retry && !pHnd && suffix < suffixes.size(); suffix++) {
+    Handle hnd = nullptr;
+    for (int prefix = 0; retry && !hnd && prefix < prefixes.size(); prefix++) {
+        for (int suffix = 0; retry && !hnd && suffix < suffixes.size(); suffix++) {
             if (!prefixes.at(prefix).isEmpty() && name.startsWith(prefixes.at(prefix)))
+                continue;
+            if (path.isEmpty() && prefixes.at(prefix).contains(QLatin1Char('/')))
                 continue;
             if (!suffixes.at(suffix).isEmpty() && name.endsWith(suffixes.at(suffix)))
                 continue;
@@ -230,23 +235,23 @@ bool QLibraryPrivate::load_sys()
                 attempt = path + prefixes.at(prefix) + name + suffixes.at(suffix);
             }
 
-            pHnd = dlopen(QFile::encodeName(attempt), dlFlags);
+            hnd = dlopen(QFile::encodeName(attempt), dlFlags);
 #ifdef Q_OS_ANDROID
-            if (!pHnd) {
+            if (!hnd) {
                 auto attemptFromBundle = attempt;
-                pHnd = dlopen(QFile::encodeName(attemptFromBundle.replace(QLatin1Char('/'), QLatin1Char('_'))), dlFlags);
+                hnd = dlopen(QFile::encodeName(attemptFromBundle.replace(QLatin1Char('/'), QLatin1Char('_'))), dlFlags);
             }
-            if (pHnd) {
+            if (hnd) {
                 using JniOnLoadPtr = jint (*)(JavaVM *vm, void *reserved);
                 JniOnLoadPtr jniOnLoad = reinterpret_cast<JniOnLoadPtr>(dlsym(pHnd, "JNI_OnLoad"));
                 if (jniOnLoad && jniOnLoad(QtAndroidPrivate::javaVM(), nullptr) == JNI_ERR) {
-                    dlclose(pHnd);
+                    dlclose(hnd);
                     pHnd = nullptr;
                 }
             }
 #endif
 
-            if (!pHnd && fileName.startsWith(QLatin1Char('/')) && QFile::exists(attempt)) {
+            if (!hnd && fileName.startsWith(QLatin1Char('/')) && QFile::exists(attempt)) {
                 // We only want to continue if dlopen failed due to that the shared library did not exist.
                 // However, we are only able to apply this check for absolute filenames (since they are
                 // not influenced by the content of LD_LIBRARY_PATH, /etc/ld.so.cache, DT_RPATH etc...)
@@ -257,7 +262,7 @@ bool QLibraryPrivate::load_sys()
     }
 
 #ifdef Q_OS_MAC
-    if (!pHnd) {
+    if (!hnd) {
         QByteArray utf8Bundle = fileName.toUtf8();
         QCFType<CFURLRef> bundleUrl = CFURLCreateFromFileSystemRepresentation(NULL, reinterpret_cast<const UInt8*>(utf8Bundle.data()), utf8Bundle.length(), true);
         QCFType<CFBundleRef> bundle = CFBundleCreate(NULL, bundleUrl);
@@ -266,23 +271,26 @@ bool QLibraryPrivate::load_sys()
             char executableFile[FILENAME_MAX];
             CFURLGetFileSystemRepresentation(url, true, reinterpret_cast<UInt8*>(executableFile), FILENAME_MAX);
             attempt = QString::fromUtf8(executableFile);
-            pHnd = dlopen(QFile::encodeName(attempt), dlFlags);
+            hnd = dlopen(QFile::encodeName(attempt), dlFlags);
         }
     }
 #endif
-    if (!pHnd) {
+
+    locker.relock();
+    if (!hnd) {
         errorString = QLibrary::tr("Cannot load library %1: %2").arg(fileName, qdlerror());
     }
-    if (pHnd) {
+    if (hnd) {
         qualifiedFileName = attempt;
         errorString.clear();
     }
-    return (pHnd != 0);
+    pHnd.storeRelaxed(hnd);
+    return (hnd != nullptr);
 }
 
 bool QLibraryPrivate::unload_sys()
 {
-    if (dlclose(pHnd)) {
+    if (dlclose(pHnd.loadAcquire())) {
 #if defined (Q_OS_QNX)                // Workaround until fixed in QNX; fixes crash in
         char *error = dlerror();      // QtDeclarative auto test "qqmlenginecleanup" for instance
         if (!qstrcmp(error, "Shared objects still referenced")) // On QNX that's only "informative"
@@ -314,13 +322,7 @@ Q_CORE_EXPORT QFunctionPointer qt_mac_resolve_sys(void *handle, const char *symb
 
 QFunctionPointer QLibraryPrivate::resolve_sys(const char* symbol)
 {
-    QFunctionPointer address = QFunctionPointer(dlsym(pHnd, symbol));
-    if (!address) {
-        errorString = QLibrary::tr("Cannot resolve symbol \"%1\" in %2: %3").arg(
-            QString::fromLatin1(symbol), fileName, qdlerror());
-    } else {
-        errorString.clear();
-    }
+    QFunctionPointer address = QFunctionPointer(dlsym(pHnd.loadAcquire(), symbol));
     return address;
 }
 

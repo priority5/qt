@@ -74,25 +74,11 @@
 
 QT_BEGIN_NAMESPACE
 
-// When SW fallback is defined we can support (some) object/layer advanced blend modes. If defined,
-// the HW implementation is still preperred if available through extensions. SW fallback can't be
-// used in custom shaders.
-#define ADVANCED_BLEND_SW_FALLBACK
-
 enum class QSSGRenderShaderProgramBinaryType
 {
     Unknown = 0,
     NVBinary = 1,
 };
-
-// context dirty flags
-enum class QSSGRenderContextDirtyValues
-{
-    InputAssembler = 1 << 0,
-};
-
-Q_DECLARE_FLAGS(QSSGRenderContextDirtyFlags, QSSGRenderContextDirtyValues)
-Q_DECLARE_OPERATORS_FOR_FLAGS(QSSGRenderContextDirtyFlags)
 
 typedef QHash<QByteArray, QSSGRef<QSSGRenderConstantBuffer>> TContextConstantBufferMap;
 typedef QHash<QByteArray, QSSGRef<QSSGRenderStorageBuffer>> TContextStorageBufferMap;
@@ -127,13 +113,15 @@ public:
     QSSGGLHardPropertyContext m_hardwarePropertyContext;
 
 private:
+    friend class QSSGRenderContextInterface;
+    void releaseResources();
     const QSSGRef<QSSGRenderBackend> m_backend; ///< pointer to our render backend
-    QSSGRenderContextDirtyFlags m_dirtyFlags; ///< context dirty flags
 
     QSSGRenderBackend::QSSGRenderBackendRenderTargetObject m_defaultOffscreenRenderTarget; ///< this is a special target set from outside if we
     /// never render to a window directly (GL only)
     qint32 m_depthBits; ///< this is the depth bits count of the default window render target
     qint32 m_stencilBits; ///< this is the stencil bits count of the default window render target
+    qint32 m_maxSamples; ///< this is the max samples of the default window render target
 
 protected:
     TContextConstantBufferMap m_constantToImpMap;
@@ -159,7 +147,7 @@ public:
 
     void maxTextureSize(qint32 &oWidth, qint32 &oHeight);
 
-    const char *shadingLanguageVersion() { return m_backend->getShadingLanguageVersion(); }
+    QByteArray shadingLanguageVersion() { return m_backend->getShadingLanguageVersion(); }
 
     QSSGRenderContextType renderContextType() const { return m_backend->getRenderContextType(); }
 
@@ -168,8 +156,8 @@ public:
         // only query this if a framebuffer is bound
         if (m_hardwarePropertyContext.m_frameBuffer)
             return m_backend->getDepthBits();
-        else
-            return m_depthBits;
+
+        return m_depthBits;
     }
 
     qint32 stencilBits() const
@@ -177,8 +165,8 @@ public:
         // only query this if a framebuffer is bound
         if (m_hardwarePropertyContext.m_frameBuffer)
             return m_backend->getStencilBits();
-        else
-            return m_stencilBits;
+
+        return m_stencilBits;
     }
 
     bool renderBackendCap(QSSGRenderBackend::QSSGRenderBackendCaps inCap) const
@@ -189,6 +177,15 @@ public:
     bool supportsMultisampleTextures() const
     {
         return renderBackendCap(QSSGRenderBackend::QSSGRenderBackendCaps::MsTexture);
+    }
+
+    qint32 maxSamples() const
+    {
+        // only query this if a framebuffer is bound
+        if (m_hardwarePropertyContext.m_frameBuffer)
+            return m_backend->getMaxSamples();
+
+        return m_maxSamples;
     }
 
     bool supportsConstantBuffer() const
@@ -331,6 +328,9 @@ public:
             QSSGByteView tessControlShaderSource = QSSGByteView(),
             QSSGByteView tessEvaluationShaderSource = QSSGByteView(),
             QSSGByteView geometryShaderSource = QSSGByteView());
+    QSSGRenderVertFragCompilationResult compileBinary(const char *shaderName,
+                                                      quint32 format,
+                                                      const QByteArray &binary);
 
     QSSGRenderVertFragCompilationResult compileComputeSource(const QByteArray &shaderName,
                                                                        QSSGByteView computeShaderSource);
@@ -353,6 +353,7 @@ public:
     {
         return m_hardwarePropertyContext.m_blendEquation;
     }
+    void resetBlendEquation(bool forceSet = false);
 
     void setCullingEnabled(bool inEnabled, bool forceSet = false);
     bool isCullingEnabled() const { return m_hardwarePropertyContext.m_cullingEnabled; }
@@ -451,6 +452,7 @@ public:
     {
         pushPropertySet();
         popPropertySet(true);
+        m_backend->resetStates();
     }
 
     // Used during layer rendering because we can't set the *actual* viewport to what it should

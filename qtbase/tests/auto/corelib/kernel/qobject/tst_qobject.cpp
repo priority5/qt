@@ -6719,16 +6719,16 @@ void tst_QObject::connectWarnings()
     ReceiverObject r1;
     r1.reset();
 
-    QTest::ignoreMessage(QtWarningMsg, "QObject::connect(SenderObject, ReceiverObject): invalid null parameter");
+    QTest::ignoreMessage(QtWarningMsg, "QObject::connect(SenderObject, ReceiverObject): invalid nullptr parameter");
     connect(static_cast<const SenderObject *>(nullptr), &SubSender::signal1, &r1, &ReceiverObject::slot1);
 
-    QTest::ignoreMessage(QtWarningMsg, "QObject::connect(SubSender, Unknown): invalid null parameter");
+    QTest::ignoreMessage(QtWarningMsg, "QObject::connect(SubSender, Unknown): invalid nullptr parameter");
     connect(&sub, &SubSender::signal1, static_cast<ReceiverObject *>(nullptr), &ReceiverObject::slot1);
 
-    QTest::ignoreMessage(QtWarningMsg, "QObject::connect(SenderObject, ReceiverObject): invalid null parameter");
+    QTest::ignoreMessage(QtWarningMsg, "QObject::connect(SenderObject, ReceiverObject): invalid nullptr parameter");
     connect(static_cast<const SenderObject *>(nullptr), &SenderObject::signal1, &r1, &ReceiverObject::slot1);
 
-    QTest::ignoreMessage(QtWarningMsg, "QObject::connect(SenderObject, Unknown): invalid null parameter");
+    QTest::ignoreMessage(QtWarningMsg, "QObject::connect(SenderObject, Unknown): invalid nullptr parameter");
     connect(&obj, &SenderObject::signal1, static_cast<ReceiverObject *>(nullptr), &ReceiverObject::slot1);
 }
 
@@ -7461,6 +7461,12 @@ void tst_QObject::checkArgumentsForNarrowing()
     FITS(QString, long long);
     FITS(bool, const QObject *&);
     FITS(int (*)(bool), void (QObject::*)());
+
+    {
+        // wg21.link/P1957
+        NARROWS(char*, bool);
+        NARROWS(void (QObject::*)(), bool);
+    }
 
 #undef IS_UNSCOPED_ENUM_SIGNED
 

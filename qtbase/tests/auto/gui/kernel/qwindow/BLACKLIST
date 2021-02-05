@@ -2,10 +2,10 @@
 opensuse-leap
 [positioning:default]
 linux
-osx-10.12 ci
+macos ci
 winrt
 [positioning:fake]
-osx-10.12 ci
+macos ci
 [modalWithChildWindow]
 # QTBUG-66851
 # QTBUG-69160
@@ -20,10 +20,6 @@ osx
 windows-10
 [testInputEvents]
 rhel-7.4
-[exposeEventOnShrink_QTBUG54040]
-# QTBUG-69155
-android
-opensuse
 [initialSize]
 # QTBUG-69159
 android

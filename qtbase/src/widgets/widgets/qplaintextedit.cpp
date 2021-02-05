@@ -81,7 +81,7 @@ class QPlainTextDocumentLayoutPrivate : public QAbstractTextDocumentLayoutPrivat
     Q_DECLARE_PUBLIC(QPlainTextDocumentLayout)
 public:
     QPlainTextDocumentLayoutPrivate() {
-        mainViewPrivate = 0;
+        mainViewPrivate = nullptr;
         width = 0;
         maximumWidth = 0;
         maximumWidthBlockNumber = 0;
@@ -755,7 +755,7 @@ void QPlainTextEditPrivate::updateViewport()
 }
 
 QPlainTextEditPrivate::QPlainTextEditPrivate()
-    : control(0),
+    : control(nullptr),
       tabChangesFocus(false),
       lineWrap(QPlainTextEdit::WidgetWidth),
       wordWrap(QTextOption::WrapAtWordBoundaryOrAnywhere),
@@ -839,7 +839,8 @@ void QPlainTextEditPrivate::_q_textChanged()
 
     placeholderVisible = !placeholderText.isEmpty()
             && q->document()->isEmpty()
-            && q->firstVisibleBlock().layout()->preeditAreaText().isEmpty();
+            && (!q->firstVisibleBlock().isValid() ||
+                 q->firstVisibleBlock().layout()->preeditAreaText().isEmpty());
 
     if (placeholderCurrentyVisible != placeholderVisible)
         viewport->update();
@@ -1302,7 +1303,7 @@ QPlainTextEdit::~QPlainTextEdit()
     Q_D(QPlainTextEdit);
     if (d->documentLayoutPtr) {
         if (d->documentLayoutPtr->priv()->mainViewPrivate == d)
-            d->documentLayoutPtr->priv()->mainViewPrivate = 0;
+            d->documentLayoutPtr->priv()->mainViewPrivate = nullptr;
     }
 }
 
@@ -1321,7 +1322,7 @@ QPlainTextEdit::~QPlainTextEdit()
 void QPlainTextEdit::setDocument(QTextDocument *document)
 {
     Q_D(QPlainTextEdit);
-    QPlainTextDocumentLayout *documentLayout = 0;
+    QPlainTextDocumentLayout *documentLayout = nullptr;
 
     if (!document) {
         document = new QTextDocument(d->control);
@@ -1891,7 +1892,7 @@ void QPlainTextEditPrivate::relayoutDocument()
 
     int width = viewport->width();
 
-    if (documentLayout->priv()->mainViewPrivate == 0
+    if (documentLayout->priv()->mainViewPrivate == nullptr
         || documentLayout->priv()->mainViewPrivate == this
         || width > documentLayout->textWidth()) {
         documentLayout->priv()->mainViewPrivate = this;
@@ -2249,17 +2250,17 @@ QVariant QPlainTextEdit::inputMethodQuery(Qt::InputMethodQuery query, QVariant a
     }
 
     const QPointF offset = contentOffset();
-    switch (argument.type()) {
-    case QVariant::RectF:
+    switch (argument.userType()) {
+    case QMetaType::QRectF:
         argument = argument.toRectF().translated(-offset);
         break;
-    case QVariant::PointF:
+    case QMetaType::QPointF:
         argument = argument.toPointF() - offset;
         break;
-    case QVariant::Rect:
+    case QMetaType::QRect:
         argument = argument.toRect().translated(-offset.toPoint());
         break;
-    case QVariant::Point:
+    case QMetaType::QPoint:
         argument = argument.toPoint() - offset;
         break;
     default:
@@ -2267,14 +2268,14 @@ QVariant QPlainTextEdit::inputMethodQuery(Qt::InputMethodQuery query, QVariant a
     }
 
     const QVariant v = d->control->inputMethodQuery(query, argument);
-    switch (v.type()) {
-    case QVariant::RectF:
+    switch (v.userType()) {
+    case QMetaType::QRectF:
         return v.toRectF().translated(offset);
-    case QVariant::PointF:
+    case QMetaType::QPointF:
         return v.toPointF() + offset;
-    case QVariant::Rect:
+    case QMetaType::QRect:
         return v.toRect().translated(offset.toPoint());
-    case QVariant::Point:
+    case QMetaType::QPoint:
         return v.toPoint() + offset.toPoint();
     default:
         break;
@@ -2328,6 +2329,7 @@ void QPlainTextEdit::changeEvent(QEvent *e)
             d->autoScrollTimer.stop();
     } else if (e->type() == QEvent::EnabledChange) {
         e->setAccepted(isEnabled());
+        d->control->setPalette(palette());
         d->sendControlEvent(e);
     } else if (e->type() == QEvent::PaletteChange) {
         d->control->setPalette(palette());

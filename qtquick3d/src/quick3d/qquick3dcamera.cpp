@@ -31,6 +31,9 @@
 
 #include <QtQuick3DRuntimeRender/private/qssgrendercamera_p.h>
 
+#include "qquick3dquaternionutils_p.h"
+#include "qquick3dnode_p_p.h"
+
 #include <QtMath>
 #include <QtQuick3DUtils/private/qssgutils_p.h>
 
@@ -53,7 +56,7 @@ QT_BEGIN_NAMESPACE
     First it is possible to position this Camera like any other spatial Node in
     the scene. This determines where the Camera is in the scene, and what
     direction it is facing. The default direction of the camera is such that the
-    forward vector is looking up the +Z axis, and the up direction vector is up
+    forward vector is looking up the -Z axis, and the up direction vector is up
     the +Y axis. With this in mind any transformation applied to the camera as
     well as the transformations inherited from it's parent Nodes you can define
     exactly where and in what direction your camera is facing.
@@ -81,7 +84,8 @@ QT_BEGIN_NAMESPACE
 /*!
     \internal
 */
-QQuick3DCamera::QQuick3DCamera() {}
+QQuick3DCamera::QQuick3DCamera(QQuick3DNode *parent)
+    : QQuick3DNode(*(new QQuick3DNodePrivate(QQuick3DNodePrivate::Type::Camera)), parent) {}
 
 /*!
     \internal
@@ -125,8 +129,6 @@ void QQuick3DCamera::setFrustumCullingEnabled(bool frustumCullingEnabled)
     If \a scenePos cannot be mapped to a position in the viewport, a
     position of [0, 0, 0] is returned.
 
-    \note \a scenePos should be in the same \l {QtQuick3D::Node::}{orientation} as the camera.
-
     \sa mapFromViewport(), {View3D::mapFrom3DScene()}{View3D.mapFrom3DScene()}
 */
 QVector3D QQuick3DCamera::mapToViewport(const QVector3D &scenePos) const
@@ -135,13 +137,9 @@ QVector3D QQuick3DCamera::mapToViewport(const QVector3D &scenePos) const
         return QVector3D(0, 0, 0);
 
     QVector4D scenePosRightHand(scenePos, 1);
-    if (orientation() == LeftHanded) {
-        // Convert from left-handed to right-handed
-        scenePosRightHand.setZ(-scenePosRightHand.z());
-    }
 
     // Transform position
-    const QMatrix4x4 sceneToCamera = sceneTransformRightHanded().inverted();
+    const QMatrix4x4 sceneToCamera = sceneTransform().inverted();
     const QMatrix4x4 projectionViewMatrix = m_cameraNode->projection * sceneToCamera;
     const QVector4D transformedScenePos = mat44::transform(projectionViewMatrix, scenePosRightHand);
 
@@ -187,8 +185,6 @@ QVector3D QQuick3DCamera::mapToViewport(const QVector3D &scenePos) const
     If \a viewportPos cannot be mapped to a position in the scene, a position of
     [0, 0, 0] is returned.
 
-    \note The returned position will be in the same \l {QtQuick3D::Node::}{orientation} as the camera.
-
     \sa mapToViewport, {View3D::mapTo3DScene()}{View3D.mapTo3DScene()}
 */
 QVector3D QQuick3DCamera::mapFromViewport(const QVector3D &viewportPos) const
@@ -210,7 +206,7 @@ QVector3D QQuick3DCamera::mapFromViewport(const QVector3D &viewportPos) const
     clipFarPos.setZ(0);
 
     // Transform position to scene
-    const QMatrix4x4 sceneToCamera = sceneTransformRightHanded().inverted();
+    const QMatrix4x4 sceneToCamera = sceneTransform().inverted();
     const QMatrix4x4 projectionViewMatrixInv
             = (m_cameraNode->projection * sceneToCamera).inverted();
     const QVector4D transformedClipNearPos = mat44::transform(projectionViewMatrixInv, clipNearPos);
@@ -230,12 +226,109 @@ QVector3D QQuick3DCamera::mapFromViewport(const QVector3D &viewportPos) const
     const float distanceFromClipNear = viewportPos.z();
     QVector3D scenePos = clipNearPosScene + (direction * distanceFromClipNear);
 
-    if (orientation() == LeftHanded) {
-        // Convert from right-handed to left-handed
-        scenePos.setZ(-scenePos.z());
-    }
-
     return scenePos;
 }
 
+/*!
+ * \internal
+ */
+QVector3D QQuick3DCamera::mapToViewport(const QVector3D &scenePos,
+                                        qreal width,
+                                        qreal height)
+{
+    if (!m_cameraNode) {
+        m_cameraNode = new QSSGRenderCamera();
+        // Ignore the returned dirty because of forcing to call calculateGlobalVariables.
+        checkSpatialNode(m_cameraNode);
+        m_cameraNode->calculateGlobalVariables(QRect(0, 0, width, height));
+    }
+
+    return QQuick3DCamera::mapToViewport(scenePos);
+}
+
+/*!
+ * \internal
+ */
+QVector3D QQuick3DCamera::mapFromViewport(const QVector3D &viewportPos,
+                                          qreal width,
+                                          qreal height)
+{
+    if (!m_cameraNode) {
+        m_cameraNode = new QSSGRenderCamera();
+        // Ignore the returned dirty because of forcing to call calculateGlobalVariables.
+        checkSpatialNode(m_cameraNode);
+        m_cameraNode->calculateGlobalVariables(QRect(0, 0, width, height));
+    }
+
+    return QQuick3DCamera::mapFromViewport(viewportPos);
+}
+
+/*!
+    \qmlmethod vector3d Camera::lookAt(vector3d scenePos)
+    \since 5.15
+
+    Sets the rotation value of a camera to be directed at \a scenePos.
+*/
+
+void QQuick3DCamera::lookAt(const QVector3D &scenePos)
+{
+    // Assumption: we never want the camera to roll.
+    // We use Euler angles here to avoid roll to sneak in through numerical instability.
+
+    const auto &targetPosition = scenePos;
+    auto sourcePosition = scenePosition();
+
+    QVector3D targetVector = sourcePosition - targetPosition;
+
+    float yaw = qRadiansToDegrees(atan2(targetVector.x(), targetVector.z()));
+
+    QVector2D p(targetVector.x(), targetVector.z()); // yaw vector projected to horizontal plane
+    float pitch = qRadiansToDegrees(atan2(p.length(), targetVector.y())) - 90;
+
+    const float previousRoll = eulerRotation().z();
+    setEulerRotation(QVector3D(pitch, yaw, previousRoll));
+}
+
+/*!
+    \qmlmethod vector3d Camera::lookAt(QtQuick3D::Node node)
+    \since 5.15
+
+    Sets the rotation value of a camera to be directed at \a node.
+*/
+
+void QQuick3DCamera::lookAt(QQuick3DNode *node)
+{
+    if (!node)
+        return;
+    lookAt(node->scenePosition());
+}
+
+void QQuick3DCamera::updateGlobalVariables(const QRectF &inViewport)
+{
+    QSSGRenderCamera *node = cameraNode();
+    if (node)
+        node->calculateGlobalVariables(inViewport);
+}
+
+/*!
+ * \internal
+ */
+QSSGRenderGraphObject *QQuick3DCamera::updateSpatialNode(QSSGRenderGraphObject *node)
+{
+    if (!node) {
+        markAllDirty();
+        node = new QSSGRenderCamera();
+    }
+
+    QQuick3DNode::updateSpatialNode(node);
+
+    QSSGRenderCamera *camera = static_cast<QSSGRenderCamera *>(node);
+
+    bool changed = checkSpatialNode(camera);
+    setCameraNode(camera);
+
+    if (changed)
+        camera->flags.setFlag(QSSGRenderNode::Flag::CameraDirty);
+    return node;
+}
 QT_END_NAMESPACE

@@ -63,6 +63,7 @@
 #include <private/qv4global_p.h>
 #include <private/qv4staticvalue_p.h>
 #include "qtquickparticlesglobal_p.h"
+#include "qquickparticleflatset_p.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -227,6 +228,8 @@ public:
 private:
     int m_size;
     QQuickParticleSystem* m_system;
+    // Only used in recycle() for tracking of alive particles after latest recycling round
+    QVector<QQuickParticleData*> m_latestAliveParticles;
 };
 
 struct Color4ub {
@@ -349,6 +352,7 @@ class Q_QUICKPARTICLES_PRIVATE_EXPORT QQuickParticleSystem : public QQuickItem
     Q_PROPERTY(bool running READ isRunning WRITE setRunning NOTIFY runningChanged)
     Q_PROPERTY(bool paused READ isPaused WRITE setPaused NOTIFY pausedChanged)
     Q_PROPERTY(bool empty READ isEmpty NOTIFY emptyChanged)
+    QML_NAMED_ELEMENT(ParticleSystem)
 
 public:
     explicit QQuickParticleSystem(QQuickItem *parent = nullptr);
@@ -406,7 +410,7 @@ public:
     int systemSync(QQuickParticlePainter* p);
 
     //Data members here for ease of related class and auto-test usage. Not "public" API. TODO: d_ptrize
-    QSet<QQuickParticleData*> needsReset;
+    QtQuickParticlesPrivate::QFlatSet<QQuickParticleData*> needsReset;
     QVector<QQuickParticleData*> bySysIdx; //Another reference to the data (data owned by group), but by sysIdx
     QQuickStochasticEngine* stateEngine;
 

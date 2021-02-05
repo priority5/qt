@@ -175,6 +175,7 @@ inline Q_DECL_CONSTEXPR int qMetaTypeId();
     F(QVector4D, 84, QVector4D) \
     F(QQuaternion, 85, QQuaternion) \
     F(QPolygonF, 86, QPolygonF) \
+    F(QColorSpace, 87, QColorSpace) \
 
 
 #define QT_FOR_EACH_STATIC_WIDGETS_CLASS(F)\
@@ -437,7 +438,7 @@ public:
         FirstCoreType = Bool,
         LastCoreType = QCborMap,
         FirstGuiType = QFont,
-        LastGuiType = QPolygonF,
+        LastGuiType = QColorSpace,
         FirstWidgetsType = QSizePolicy,
         LastWidgetsType = QSizePolicy,
         HighestInternalId = LastWidgetsType,
@@ -472,12 +473,12 @@ public:
         QIcon = 69, QImage = 70, QPolygon = 71, QRegion = 72, QBitmap = 73,
         QCursor = 74, QKeySequence = 75, QPen = 76, QTextLength = 77, QTextFormat = 78,
         QMatrix = 79, QTransform = 80, QMatrix4x4 = 81, QVector2D = 82,
-        QVector3D = 83, QVector4D = 84, QQuaternion = 85, QPolygonF = 86,
+        QVector3D = 83, QVector4D = 84, QQuaternion = 85, QPolygonF = 86, QColorSpace = 87,
 
         // Widget types
         QSizePolicy = 121,
         LastCoreType = QCborMap,
-        LastGuiType = QPolygonF,
+        LastGuiType = QColorSpace,
         User = 1024
     };
 #endif
@@ -572,7 +573,7 @@ public:
     static bool load(QDataStream &stream, int type, void *data);
 #endif
 
-    explicit QMetaType(const int type); // ### Qt6: drop const
+    explicit QMetaType(const int type = QMetaType::UnknownType); // ### Qt6: drop const
     inline ~QMetaType();
 
     inline bool isValid() const;
@@ -581,11 +582,23 @@ public:
     inline int sizeOf() const;
     inline TypeFlags flags() const;
     inline const QMetaObject *metaObject() const;
+    QT_PREPEND_NAMESPACE(QByteArray) name() const;
 
     inline void *create(const void *copy = nullptr) const;
     inline void destroy(void *data) const;
     inline void *construct(void *where, const void *copy = nullptr) const;
     inline void destruct(void *data) const;
+
+    template<typename T>
+    static QMetaType fromType()
+    { return QMetaType(qMetaTypeId<T>()); }
+
+    friend bool operator==(const QMetaType &a, const QMetaType &b)
+    { return a.m_typeId == b.m_typeId; }
+
+    friend bool operator!=(const QMetaType &a, const QMetaType &b)
+    { return a.m_typeId != b.m_typeId; }
+
 
 public:
     template<typename T>
@@ -977,6 +990,48 @@ enum IteratorCapability
     RandomAccessCapability = 4
 };
 
+enum ContainerCapability
+{
+    ContainerIsAppendable = 1
+};
+
+template<typename Container, typename T = void>
+struct ContainerCapabilitiesImpl
+{
+    enum {ContainerCapabilities = 0};
+    using appendFunction = void(*)(const void *container, const void *newElement);
+    static constexpr const appendFunction appendImpl = nullptr;
+};
+
+template<typename Container>
+struct ContainerCapabilitiesImpl<Container, decltype(std::declval<Container>().push_back(std::declval<typename Container::value_type>()))>
+{
+    enum {ContainerCapabilities = ContainerIsAppendable};
+
+    // The code below invokes undefined behavior if and only if the pointer passed into QSequentialIterableImpl
+    // pointed to a const object to begin with
+    static void appendImpl(const void *container, const void *value)
+    { static_cast<Container *>(const_cast<void *>(container))->push_back(*static_cast<const typename Container::value_type *>(value)); }
+};
+
+namespace QtPrivate {
+namespace ContainerCapabilitiesMetaProgrammingHelper {
+    template<typename... Ts>
+    using void_t = void;
+}
+}
+
+template<typename Container>
+struct ContainerCapabilitiesImpl<Container, QtPrivate::ContainerCapabilitiesMetaProgrammingHelper::void_t<decltype(std::declval<Container>().insert(std::declval<typename Container::value_type>())), decltype(std::declval<typename Container::value_type>() == std::declval<typename Container::value_type>())>>
+{
+    enum {ContainerCapabilities = ContainerIsAppendable};
+
+    // The code below invokes undefined behavior if and only if the pointer passed into QSequentialIterableImpl
+    // pointed to a const object to begin with
+    static void appendImpl(const void *container, const void *value)
+    { static_cast<Container *>(const_cast<void *>(container))->insert(*static_cast<const typename Container::value_type *>(value)); }
+};
+
 template<typename T, typename Category = typename std::iterator_traits<typename T::const_iterator>::iterator_category>
 struct CapabilitiesImpl;
 
@@ -1012,6 +1067,12 @@ template<typename T>
 struct ContainerAPI<std::list<T> > : CapabilitiesImpl<std::list<T> >
 { static int size(const std::list<T> *t) { return int(t->size()); } };
 
+/*
+ revision 0: _iteratorCapabilities is simply a uint, where the bits at _revision were never set
+ revision 1: _iteratorCapabilties is treated as a bitfield, the remaining bits are used to introduce
+             _revision, _containerCapabilities and _unused. The latter contains 21 bits that are
+             not used yet
+*/
 class QSequentialIterableImpl
 {
 public:
@@ -1020,19 +1081,37 @@ public:
     int _metaType_id;
     uint _metaType_flags;
     uint _iteratorCapabilities;
+    // Iterator capabilities looks actually like
+    // uint _iteratorCapabilities:4;
+    // uint _revision:3;
+    // uint _containerCapabilities:4;
+    // uint _unused:21;*/
     typedef int(*sizeFunc)(const void *p);
     typedef const void * (*atFunc)(const void *p, int);
     typedef void (*moveIteratorFunc)(const void *p, void **);
+    enum Position { ToBegin, ToEnd };
+    typedef void (*moveIteratorFunc2)(const void *p, void **, Position position);
     typedef void (*advanceFunc)(void **p, int);
     typedef VariantData (*getFunc)( void * const *p, int metaTypeId, uint flags);
     typedef void (*destroyIterFunc)(void **p);
     typedef bool (*equalIterFunc)(void * const *p, void * const *other);
     typedef void (*copyIterFunc)(void **, void * const *);
+    typedef void(*appendFunction)(const void *container, const void *newElement);
+
+    IteratorCapability iteratorCapabilities() {return static_cast<IteratorCapability>(_iteratorCapabilities & 0xF);}
+    uint revision() {return _iteratorCapabilities >> 4 & 0x7;}
+    uint containerCapabilities() {return _iteratorCapabilities >> 7 & 0xF;}
 
     sizeFunc _size;
     atFunc _at;
-    moveIteratorFunc _moveToBegin;
-    moveIteratorFunc _moveToEnd;
+    union {
+        moveIteratorFunc _moveToBegin;
+        moveIteratorFunc2 _moveTo;
+    };
+    union {
+        moveIteratorFunc _moveToEnd;
+        appendFunction _append;
+    };
     advanceFunc _advance;
     getFunc _get;
     destroyIterFunc _destroyIter;
@@ -1059,6 +1138,15 @@ public:
     static void moveToEndImpl(const void *container, void **iterator)
     { IteratorOwner<typename T::const_iterator>::assign(iterator, static_cast<const T*>(container)->end()); }
 
+    template<class Container>
+    static void moveToImpl(const void *container, void **iterator, Position position)
+    {
+        if (position == ToBegin)
+            moveToBeginImpl<Container>(container, iterator);
+        else
+            moveToEndImpl<Container>(container, iterator);
+    }
+
     template<class T>
     static VariantData getImpl(void * const *iterator, int metaTypeId, uint flags)
     { return VariantData(metaTypeId, IteratorOwner<typename T::const_iterator>::getData(iterator), flags); }
@@ -1069,11 +1157,11 @@ public:
       , _iterator(nullptr)
       , _metaType_id(qMetaTypeId<typename T::value_type>())
       , _metaType_flags(QTypeInfo<typename T::value_type>::isPointer)
-      , _iteratorCapabilities(ContainerAPI<T>::IteratorCapabilities)
+      , _iteratorCapabilities(ContainerAPI<T>::IteratorCapabilities | (1 << 4) | (ContainerCapabilitiesImpl<T>::ContainerCapabilities << (4+3)))
       , _size(sizeImpl<T>)
       , _at(atImpl<T>)
-      , _moveToBegin(moveToBeginImpl<T>)
-      , _moveToEnd(moveToEndImpl<T>)
+      , _moveTo(moveToImpl<T>)
+      , _append(ContainerCapabilitiesImpl<T>::appendImpl)
       , _advance(IteratorOwner<typename T::const_iterator>::advance)
       , _get(getImpl<T>)
       , _destroyIter(IteratorOwner<typename T::const_iterator>::destroy)
@@ -1087,7 +1175,7 @@ public:
       , _iterator(nullptr)
       , _metaType_id(QMetaType::UnknownType)
       , _metaType_flags(0)
-      , _iteratorCapabilities(0)
+      , _iteratorCapabilities(0 | (1 << 4) ) // no iterator capabilities, revision 1
       , _size(nullptr)
       , _at(nullptr)
       , _moveToBegin(nullptr)
@@ -1100,13 +1188,28 @@ public:
     {
     }
 
-    inline void moveToBegin() { _moveToBegin(_iterable, &_iterator); }
-    inline void moveToEnd() { _moveToEnd(_iterable, &_iterator); }
+    inline void moveToBegin() {
+        if (revision() == 0)
+            _moveToBegin(_iterable, &_iterator);
+        else
+            _moveTo(_iterable, &_iterator, ToBegin);
+    }
+    inline void moveToEnd() {
+        if (revision() == 0)
+            _moveToEnd(_iterable, &_iterator);
+        else
+            _moveTo(_iterable, &_iterator, ToEnd);
+    }
     inline bool equal(const QSequentialIterableImpl&other) const { return _equalIter(&_iterator, &other._iterator); }
     inline QSequentialIterableImpl &advance(int i) {
       Q_ASSERT(i > 0 || _iteratorCapabilities & BiDirectionalCapability);
       _advance(&_iterator, i);
       return *this;
+    }
+
+    inline void append(const void *newElement) {
+        if (containerCapabilities() & ContainerIsAppendable)
+            _append(_iterable, newElement);
     }
 
     inline VariantData getCurrent() const { return _get(&_iterator, _metaType_id, _metaType_flags); }
@@ -1212,9 +1315,12 @@ public:
     { IteratorOwner<typename T::const_iterator>::assign(iterator,
                                                         static_cast<const T*>(container)->find(*static_cast<const typename T::key_type*>(p))); }
 
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_DEPRECATED // Hits on the deprecated QHash::iterator::operator--()
     template<class T>
     static void advanceImpl(void **p, int step)
     { std::advance(*static_cast<typename T::const_iterator*>(*p), step); }
+    QT_WARNING_POP
 
     template<class T>
     static void beginImpl(const void *container, void **iterator)

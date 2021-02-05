@@ -78,6 +78,7 @@ private slots:
     void newDate();
     void jsParseDate();
     void newQObject();
+    void newQObjectRace();
     void newQObject_ownership();
     void newQObject_deletedEngine();
     void newQObjectPropertyCache();
@@ -252,6 +253,20 @@ private slots:
     void interrupt();
 
     void triggerBackwardJumpWithDestructuring();
+    void arrayConcatOnSparseArray();
+    void sortSparseArray();
+    void compileBrokenRegexp();
+    void sortNonStringArray();
+    void iterateInvalidProxy();
+    void applyOnHugeArray();
+
+    void tostringRecursionCheck();
+    void arrayIncludesWithLargeArray();
+    void printCircularArray();
+    void typedArraySet();
+    void dataViewCtor();
+
+    void uiLanguage();
 
 public:
     Q_INVOKABLE QJSValue throwingCppMethod1();
@@ -768,6 +783,28 @@ void tst_QJSEngine::newQObject()
         QEXPECT_FAIL("", "FIXME: newly created QObject's prototype is an JS Object", Continue);
         QCOMPARE(qobject.prototype().isQObject(), true);
     }
+}
+
+void tst_QJSEngine::newQObjectRace()
+{
+    class Thread : public QThread
+    {
+        void run() override
+        {
+            for (int i=0;i<100;++i)
+            {
+                QJSEngine e;
+                auto obj = e.newQObject(new QObject);
+            }
+        }
+    };
+
+
+    Thread threads[8];
+    for (auto& t : threads)
+        t.start(); // should not crash
+    for (auto& t : threads)
+        t.wait();
 }
 
 void tst_QJSEngine::newQObject_ownership()
@@ -1532,7 +1569,7 @@ void tst_QJSEngine::valueConversion_QVariant()
     {
         QVariant tmp1;
         QVariant tmp2(QMetaType::QVariant, &tmp1);
-        QCOMPARE(QMetaType::Type(tmp2.type()), QMetaType::QVariant);
+        QCOMPARE(QMetaType::Type(tmp2.userType()), QMetaType::QVariant);
 
         QJSValue val1 = eng.toScriptValue(tmp1);
         QJSValue val2 = eng.toScriptValue(tmp2);
@@ -1547,9 +1584,9 @@ void tst_QJSEngine::valueConversion_QVariant()
         QVariant tmp1(123);
         QVariant tmp2(QMetaType::QVariant, &tmp1);
         QVariant tmp3(QMetaType::QVariant, &tmp2);
-        QCOMPARE(QMetaType::Type(tmp1.type()), QMetaType::Int);
-        QCOMPARE(QMetaType::Type(tmp2.type()), QMetaType::QVariant);
-        QCOMPARE(QMetaType::Type(tmp3.type()), QMetaType::QVariant);
+        QCOMPARE(QMetaType::Type(tmp1.userType()), QMetaType::Int);
+        QCOMPARE(QMetaType::Type(tmp2.userType()), QMetaType::QVariant);
+        QCOMPARE(QMetaType::Type(tmp3.userType()), QMetaType::QVariant);
 
         QJSValue val1 = eng.toScriptValue(tmp2);
         QJSValue val2 = eng.toScriptValue(tmp3);
@@ -3329,7 +3366,7 @@ void tst_QJSEngine::dateRoundtripJSQtJS()
 #ifdef Q_OS_WIN
     QSKIP("This test fails on Windows due to a bug in QDateTime.");
 #endif
-    qint64 secs = QDateTime(QDate(2009, 1, 1)).toUTC().toSecsSinceEpoch();
+    qint64 secs = QDate(2009, 1, 1).startOfDay(Qt::UTC).toSecsSinceEpoch();
     QJSEngine eng;
     for (int i = 0; i < 8000; ++i) {
         QJSValue jsDate = eng.evaluate(QString::fromLatin1("new Date(%0)").arg(secs * 1000.0));
@@ -3346,7 +3383,7 @@ void tst_QJSEngine::dateRoundtripQtJSQt()
 #ifdef Q_OS_WIN
     QSKIP("This test fails on Windows due to a bug in QDateTime.");
 #endif
-    QDateTime qtDate = QDateTime(QDate(2009, 1, 1));
+    QDateTime qtDate = QDate(2009, 1, 1).startOfDay();
     QJSEngine eng;
     for (int i = 0; i < 8000; ++i) {
         QJSValue jsDate = eng.toScriptValue(qtDate);
@@ -3362,7 +3399,7 @@ void tst_QJSEngine::dateConversionJSQt()
 #ifdef Q_OS_WIN
     QSKIP("This test fails on Windows due to a bug in QDateTime.");
 #endif
-    qint64 secs = QDateTime(QDate(2009, 1, 1)).toUTC().toSecsSinceEpoch();
+    qint64 secs = QDate(2009, 1, 1).startOfDay(Qt::UTC).toSecsSinceEpoch();
     QJSEngine eng;
     for (int i = 0; i < 8000; ++i) {
         QJSValue jsDate = eng.evaluate(QString::fromLatin1("new Date(%0)").arg(secs * 1000.0));
@@ -3378,7 +3415,7 @@ void tst_QJSEngine::dateConversionJSQt()
 
 void tst_QJSEngine::dateConversionQtJS()
 {
-    QDateTime qtDate = QDateTime(QDate(2009, 1, 1));
+    QDateTime qtDate = QDate(2009, 1, 1).startOfDay();
     QJSEngine eng;
     for (int i = 0; i < 8000; ++i) {
         QJSValue jsDate = eng.toScriptValue(qtDate);
@@ -4959,6 +4996,219 @@ void tst_QJSEngine::triggerBackwardJumpWithDestructuring()
             "}"
             );
     QVERIFY(!value.isError());
+}
+
+void tst_QJSEngine::arrayConcatOnSparseArray()
+{
+    QJSEngine engine;
+    engine.installExtensions(QJSEngine::GarbageCollectionExtension);
+    const auto value = engine.evaluate(
+            "(function() {\n"
+            "   const v4 = [1,2,3];\n"
+            "   const v7 = [4,5];\n"
+            "   v7.length = 1337;\n"
+            "   const v9 = v4.concat(v7);\n"
+            "   gc();\n"
+            "   return v9;\n"
+            "})();");
+    QCOMPARE(value.property("length").toInt(), 1340);
+    for (int i = 0; i < 5; ++i)
+        QCOMPARE(value.property(i).toInt(), i + 1);
+    for (int i = 5; i < 1340; ++i)
+        QVERIFY(value.property(i).isUndefined());
+}
+
+void tst_QJSEngine::sortSparseArray()
+{
+    QJSEngine engine;
+    engine.installExtensions(QJSEngine::ConsoleExtension);
+    const auto value = engine.evaluate(
+            "(function() {\n"
+            "   var sparse = [0];\n"
+            "   sparse = Object.defineProperty(sparse, \"10\", "
+            "           {get: ()=>{return 2}, set: ()=>{return 2}} );\n"
+            "   return Array.prototype.sort.call(sparse, ()=>{});\n"
+            "})();");
+
+    QCOMPARE(value.property("length").toInt(), 11);
+    QVERIFY(value.property(0).isNumber());
+    QCOMPARE(value.property(0).toInt(), 0);
+    QVERIFY(value.property(1).isNumber());
+    QCOMPARE(value.property(1).toInt(), 2);
+    QVERIFY(value.property(10).isUndefined());
+}
+
+void tst_QJSEngine::compileBrokenRegexp()
+{
+    QJSEngine engine;
+    const auto value = engine.evaluate(
+        "(function() {"
+        "var ret = new RegExp(Array(4097).join("
+        "       String.fromCharCode(58)) + Array(4097).join(String.fromCharCode(480)) "
+        "       + Array(65537).join(String.fromCharCode(5307)));"
+        "return RegExp.prototype.compile.call(ret, 'a','b');"
+        "})();"
+    );
+
+    QVERIFY(value.isError());
+    QCOMPARE(value.toString(), "SyntaxError: Invalid flags supplied to RegExp constructor");
+}
+
+void tst_QJSEngine::tostringRecursionCheck()
+{
+    QJSEngine engine;
+    auto value = engine.evaluate(R"js(
+    var a = {};
+    var b = new Array(1337);
+    function main() {
+        var ret = a.toLocaleString;
+        b[1] = ret;
+        Array = {};
+        Object.toString = b[1];
+        var ret = String.prototype.lastIndexOf.call({}, b[1]);
+        var ret = String.prototype.charAt.call(Function, Object);
+    }
+    main();
+    )js");
+    QVERIFY(value.isError());
+    QCOMPARE(value.toString(), QLatin1String("RangeError: Maximum call stack size exceeded."));
+}
+
+void tst_QJSEngine::arrayIncludesWithLargeArray()
+{
+    QJSEngine engine;
+    auto value = engine.evaluate(R"js(
+        let arr = new Array(10000000)
+        arr.includes(42)
+    )js");
+    QVERIFY(value.isBool());
+    QCOMPARE(value.toBool(), false);
+}
+
+void tst_QJSEngine::printCircularArray()
+{
+    QJSEngine engine;
+    engine.installExtensions(QJSEngine::ConsoleExtension);
+    QTest::ignoreMessage(QtMsgType::QtDebugMsg, "[[Circular]]");
+    auto value = engine.evaluate(R"js(
+    let v1 = []
+    v1.push(v1)
+    console.log(v1)
+    )js");
+}
+
+void tst_QJSEngine::sortNonStringArray()
+{
+    QJSEngine engine;
+    const auto value = engine.evaluate(
+        "const v4 = [Symbol.iterator, 1];"
+        "const v5 = v4.sort();"
+    );
+    QVERIFY(value.isError());
+    QCOMPARE(value.toString(), "TypeError: Cannot convert a symbol to a string.");
+}
+
+void tst_QJSEngine::iterateInvalidProxy()
+{
+    QJSEngine engine;
+    const auto value = engine.evaluate(
+        "const v1 = new Proxy(Reflect, Reflect);"
+        "for (const v2 in v1) {}"
+        "const v3 = { getOwnPropertyDescriptor: eval, getPrototypeOf: eval };"
+        "const v4 = new Proxy(v3, v3);"
+        "for (const v5 in v4) {}"
+    );
+    QVERIFY(value.isError());
+    QCOMPARE(value.toString(), "TypeError: Type error");
+}
+
+void tst_QJSEngine::applyOnHugeArray()
+{
+    QJSEngine engine;
+    const auto value = engine.evaluate(
+        "var a = new Array(10);"
+        "a[536870912] = Function;"
+        "Function.apply('aaaaaaaa', a);"
+    );
+    QVERIFY(value.isError());
+    QCOMPARE(value.toString(), "RangeError: Array too large for apply().");
+}
+
+void tst_QJSEngine::typedArraySet()
+{
+    QJSEngine engine;
+    const auto value = engine.evaluate(
+        "(function() {"
+        "   var length = 0xffffffe;"
+        "   var offset = 0xfffffff0;"
+        "   var e1;"
+        "   var e2;"
+        "   try {"
+        "       var source1 = new Int8Array(length);"
+        "       var target1 = new Int8Array(length);"
+        "       target1.set(source1, offset);"
+        "   } catch (intError) {"
+        "       e1 = intError;"
+        "   }"
+        "   try {"
+        "       var source2 = new Array(length);"
+        "       var target2 = new Int8Array(length);"
+        "       target2.set(source2, offset);"
+        "   } catch (arrayError) {"
+        "       e2 = arrayError;"
+        "   }"
+        "   return [e1, e2];"
+        "})();"
+    );
+
+    QVERIFY(value.isArray());
+    for (int i = 0; i < 2; ++i) {
+        const auto error = value.property(i);
+        QVERIFY(error.isError());
+        QCOMPARE(error.toString(), "RangeError: TypedArray.set: out of range");
+    }
+}
+
+void tst_QJSEngine::dataViewCtor()
+{
+    QJSEngine engine;
+    const auto error = engine.evaluate(R"(
+    (function() { try {
+        var buf = new ArrayBuffer(0x200);
+        var vuln = new DataView(buf, 8, 0xfffffff8);
+    } catch (e) {
+        return e;
+    }})()
+    )");
+    QVERIFY(error.isError());
+    QCOMPARE(error.toString(), "RangeError: DataView: constructor arguments out of range");
+}
+
+void tst_QJSEngine::uiLanguage()
+{
+    {
+        QJSEngine engine;
+
+        QVERIFY(!engine.globalObject().hasProperty("Qt"));
+
+        engine.installExtensions(QJSEngine::TranslationExtension);
+        QVERIFY(engine.globalObject().hasProperty("Qt"));
+        QVERIFY(engine.globalObject().property("Qt").hasProperty("uiLanguage"));
+
+        engine.setUiLanguage("Blah");
+        QCOMPARE(engine.globalObject().property("Qt").property("uiLanguage").toString(), "Blah");
+
+        engine.evaluate("Qt.uiLanguage = \"another\"");
+        QCOMPARE(engine.globalObject().property("Qt").property("uiLanguage").toString(), "another");
+    }
+
+    {
+        QQmlEngine qmlEngine;
+        QVERIFY(qmlEngine.globalObject().hasProperty("Qt"));
+        QVERIFY(qmlEngine.globalObject().property("Qt").hasProperty("uiLanguage"));
+        qmlEngine.setUiLanguage("Blah");
+        QCOMPARE(qmlEngine.globalObject().property("Qt").property("uiLanguage").toString(), "Blah");
+    }
 }
 
 QTEST_MAIN(tst_QJSEngine)

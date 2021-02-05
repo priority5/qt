@@ -87,8 +87,8 @@ public:
         Q_ASSERT(style);
         if (widget) //###
             m_styleOption.initFrom(widget);
-        m_defaultSpacing[0] = style->pixelMetric(QStyle::PM_LayoutHorizontalSpacing);
-        m_defaultSpacing[1] = style->pixelMetric(QStyle::PM_LayoutVerticalSpacing);
+        m_defaultSpacing[0] = style->pixelMetric(QStyle::PM_LayoutHorizontalSpacing, &m_styleOption);
+        m_defaultSpacing[1] = style->pixelMetric(QStyle::PM_LayoutVerticalSpacing, &m_styleOption);
     }
 
     inline void invalidate() { m_valid = false; m_style = nullptr; m_widget = nullptr; }
@@ -103,11 +103,11 @@ public:
 
     inline void setDefaultSpacing(Qt::Orientation o, qreal spacing){
         if (spacing >= 0)
-            m_defaultSpacing[o - 1] = spacing;
+            m_defaultSpacing[int(o) - 1] = spacing;
     }
 
     inline qreal defaultSpacing(Qt::Orientation o) const {
-        return m_defaultSpacing[o - 1];
+        return m_defaultSpacing[int(o) - 1];
     }
 
     inline qreal perItemSpacing(QSizePolicy::ControlType control1,

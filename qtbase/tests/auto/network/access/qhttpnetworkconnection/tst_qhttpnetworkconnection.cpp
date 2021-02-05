@@ -105,7 +105,8 @@ void tst_QHttpNetworkConnection::initTestCase()
 #if defined(QT_TEST_SERVER)
     QVERIFY(QtNetworkSettings::verifyConnection(httpServerName(), 80));
 #else
-    QVERIFY(QtNetworkSettings::verifyTestNetworkSettings());
+    if (!QtNetworkSettings::verifyTestNetworkSettings())
+        QSKIP("No network test server available");
 #endif
 }
 
@@ -1004,10 +1005,8 @@ void tst_QHttpNetworkConnection::overlappingCloseAndWrite()
     for (int i = 0; i < 10; ++i) {
         QNetworkRequest request(url);
         QNetworkReply *reply = accessManager.get(request);
-        // Not using Qt5 connection syntax here because of overly baroque syntax to discern between
-        // different error() methods.
-        QObject::connect(reply, SIGNAL(error(QNetworkReply::NetworkError)),
-                         &server, SLOT(onReply(QNetworkReply::NetworkError)));
+        QObject::connect(reply, &QNetworkReply::errorOccurred,
+                         &server, &TestTcpServer::onReply);
     }
 
     QTRY_COMPARE(server.errorCodeReports, 10);

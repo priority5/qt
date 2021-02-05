@@ -48,14 +48,13 @@
 **
 ****************************************************************************/
 
-import QtQuick3D 1.14
-import QtQuick 2.14
-import QtQuick.Timeline 1.0
+import QtQuick3D 1.15
+import QtQuick 2.15
 
 Rectangle {
     id: defaultCamera
-    width: 1920
-    height: 1080
+    width: 800
+    height: 480
     color: Qt.rgba(0, 0, 0, 1)
 
     View3D {
@@ -72,17 +71,15 @@ Rectangle {
             depthPrePassEnabled: true
         }
 
-        Camera {
+        PerspectiveCamera {
             id: camera
-            position: Qt.vector3d(0, 0, -600)
-            rotationOrder: Node.YZX
+            position: Qt.vector3d(0, 0, 600)
             clipFar: 5000
         }
 
         DirectionalLight {
             id: light
-            rotationOrder: Node.YZX
-            diffuseColor: Qt.rgba(1, 1, 0.964706, 1)
+            color: Qt.rgba(1, 1, 0.964706, 1)
             ambientColor: Qt.rgba(0.168627, 0.164706, 0.160784, 1)
             shadowFactor: 10
         }
@@ -90,14 +87,12 @@ Rectangle {
         Node {
             id: arrowUp
             position: Qt.vector3d(-393.171, 121.883, 0)
-            rotationOrder: Node.YZX
 
             Model {
                 id: cone
-                rotationOrder: Node.YZX
                 source: "#Cone"
-                edgeTess: 4
-                innerTess: 4
+                
+                
 
                 DefaultMaterial {
                     id: default_
@@ -117,10 +112,9 @@ Rectangle {
                 id: cylinder
                 position: Qt.vector3d(0, -97.5005, 0)
                 scale: Qt.vector3d(0.5, 2, 0.5)
-                rotationOrder: Node.YZX
                 source: "#Cylinder"
-                edgeTess: 4
-                innerTess: 4
+                
+                
 
                 DefaultMaterial {
                     id: default_001
@@ -136,11 +130,10 @@ Rectangle {
                 materials: [default_001]
             }
 
-            Camera {
+            PerspectiveCamera {
                 id: camera_001
                 position: Qt.vector3d(0, 98.234, 0)
-                rotation: Qt.vector3d(26, 90, 0)
-                rotationOrder: Node.YZX
+                rotation: Quaternion.fromEulerAngles(26, 90, 0)
                 clipFar: 5000
             }
         }
@@ -148,15 +141,13 @@ Rectangle {
         Node {
             id: arrowForward
             position: Qt.vector3d(-138.558, 0, 0)
-            rotation: Qt.vector3d(90, 0, 0)
-            rotationOrder: Node.YZX
+            rotation: Quaternion.fromEulerAngles(-90, 0, 0)
 
             Model {
                 id: cone_001
-                rotationOrder: Node.YZX
                 source: "#Cone"
-                edgeTess: 4
-                innerTess: 4
+                
+                
 
                 DefaultMaterial {
                     id: default_002
@@ -176,10 +167,9 @@ Rectangle {
                 id: cylinder_001
                 position: Qt.vector3d(0, -97.5005, 0)
                 scale: Qt.vector3d(0.5, 2, 0.5)
-                rotationOrder: Node.YZX
                 source: "#Cylinder"
-                edgeTess: 4
-                innerTess: 4
+                
+                
 
                 DefaultMaterial {
                     id: default_003
@@ -199,15 +189,13 @@ Rectangle {
         Node {
             id: arrowDown
             position: Qt.vector3d(91.1513, 0, 0)
-            rotation: Qt.vector3d(180, 0, 0)
-            rotationOrder: Node.YZX
+            rotation: Quaternion.fromEulerAngles(-180, 0, 0)
 
             Model {
                 id: cone_002
-                rotationOrder: Node.YZX
                 source: "#Cone"
-                edgeTess: 4
-                innerTess: 4
+                
+                
 
                 DefaultMaterial {
                     id: default_004
@@ -227,10 +215,9 @@ Rectangle {
                 id: cylinder_002
                 position: Qt.vector3d(0, -97.5005, 0)
                 scale: Qt.vector3d(0.5, 2, 0.5)
-                rotationOrder: Node.YZX
                 source: "#Cylinder"
-                edgeTess: 4
-                innerTess: 4
+                
+                
 
                 DefaultMaterial {
                     id: default_005
@@ -250,15 +237,13 @@ Rectangle {
         Node {
             id: arrowBackwards
             position: Qt.vector3d(312.117, 0, 0)
-            rotation: Qt.vector3d(-90, 0, 0)
-            rotationOrder: Node.YZX
+            rotation: Quaternion.fromEulerAngles(90, 0, 0)
 
             Model {
                 id: cone_003
-                rotationOrder: Node.YZX
                 source: "#Cone"
-                edgeTess: 4
-                innerTess: 4
+                
+                
 
                 DefaultMaterial {
                     id: default_006
@@ -277,10 +262,9 @@ Rectangle {
                 id: cylinder_003
                 position: Qt.vector3d(0, -97.5005, 0)
                 scale: Qt.vector3d(0.5, 2, 0.5)
-                rotationOrder: Node.YZX
                 source: "#Cylinder"
-                edgeTess: 4
-                innerTess: 4
+                
+                
 
                 DefaultMaterial {
                     id: default_007
@@ -298,45 +282,9 @@ Rectangle {
 
         DirectionalLight {
             id: light2
-            rotation: Qt.vector3d(180, 90, 0)
-            rotationOrder: Node.YZX
-            diffuseColor: Qt.rgba(1, 0.988235, 0.882353, 1)
+            rotation: Quaternion.fromEulerAngles(-180, -90, 0)
+            color: Qt.rgba(1, 0.988235, 0.882353, 1)
             shadowFactor: 10
         }
     }
-
-    Timeline {
-        id: defaultCameraTimeline
-        startFrame: 0
-        endFrame: 10
-        currentFrame: 0
-        enabled: false
-        animations: [
-            TimelineAnimation {
-                id: defaultCameraTimelineAnimation
-                duration: 10000
-                from: 0
-                to: 10
-                running: true
-                loops: -1
-                pingPong: false
-            }
-        ]
-    }
-
-    states: [
-        State {
-            name: "DefaultCamera"
-            PropertyChanges {
-                target: defaultCameraTimeline
-                enabled: true
-                currentFrame: 0
-            }
-            PropertyChanges {
-                target: defaultCameraTimelineAnimation
-                running: true
-            }
-        }
-    ]
-    state: "DefaultCamera"
 }

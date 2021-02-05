@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2019 The Qt Company Ltd.
+** Copyright (C) 2020 The Qt Company Ltd.
 ** Copyright (C) 2016 Intel Corporation.
 ** Contact: https://www.qt.io/licensing/
 **
@@ -87,7 +87,7 @@ public:
         LanguageId, // uint
         CountryId, // uint
         DecimalPoint, // QString
-        GroupSeparator, // QString
+        GroupSeparator, // QString (empty QString means: don't group digits)
         ZeroDigit, // QString
         NegativeSign, // QString
         DateFormatLong, // QString
@@ -213,7 +213,8 @@ public:
         ShowBase            = 0x80,
         UppercaseBase       = 0x100,
         ZeroPadExponent     = 0x200,
-        ForcePoint          = 0x400
+        ForcePoint          = 0x400,
+        IndianNumberGrouping= 0x800
     };
 
     enum NumberMode { IntegerMode, DoubleStandardMode, DoubleScientificMode };
@@ -274,7 +275,6 @@ public:
     qint64 stringToLongLong(QStringView str, int base, bool *ok, QLocale::NumberOptions options) const;
     quint64 stringToUnsLongLong(QStringView str, int base, bool *ok, QLocale::NumberOptions options) const;
 
-    static double bytearrayToDouble(const char *num, bool *ok);
     // this function is used in QIntValidator (QtGui)
     Q_CORE_EXPORT static qint64 bytearrayToLongLong(const char *num, int base, bool *ok);
     static quint64 bytearrayToUnsLongLong(const char *num, int base, bool *ok);

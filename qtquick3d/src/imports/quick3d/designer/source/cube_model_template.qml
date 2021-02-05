@@ -27,15 +27,15 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.12
-import QtQuick3D 1.0
+import QtQuick 2.15
+import QtQuick3D 1.15
 
 Model {
     source: "#Cube"
 
-    materials: [
-        DefaultMaterial {
+    materials: cubeMaterial
+    DefaultMaterial {
+            id: cubeMaterial
             diffuseColor: "#4aee45"
-        }
-    ]
+    }
 }

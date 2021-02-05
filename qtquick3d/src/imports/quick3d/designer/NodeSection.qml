@@ -27,9 +27,10 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.12
+import QtQuick 2.15
 import HelperWidgets 2.0
 import QtQuick.Layouts 1.12
+import StudioTheme 1.0 as StudioTheme
 
 Column {
     width: parent.width
@@ -42,7 +43,7 @@ Column {
 
             Label {
                 text: qsTr("Opacity")
-                tooltip: qsTr("Set local opacity on node")
+                tooltip: qsTr("Controls the local opacity value of the node.")
             }
 
             // ### should be a slider
@@ -50,6 +51,7 @@ Column {
                 minimumValue: 0
                 maximumValue: 1
                 decimals: 2
+                stepSize: 0.1
                 backendValue: backendValues.opacity
                 Layout.fillWidth: true
                 sliderIndicatorVisible: true
@@ -57,7 +59,7 @@ Column {
 
             Label {
                 text: qsTr("Visibility")
-                tooltip: qsTr("Set local visibility of the item")
+                tooltip: qsTr("Sets the local visibility of the node.")
             }
             SecondColumnLayout {
                 // ### should be a slider
@@ -65,32 +67,6 @@ Column {
                     text: qsTr("Is Visible")
                     backendValue: backendValues.visible
                     Layout.fillWidth: true
-                }
-            }
-
-            Label {
-                text: qsTr("Orientation")
-                tooltip: qsTr("The handedness of the transformation")
-            }
-            SecondColumnLayout {
-                ComboBox {
-                    scope: "Node"
-                    model: ["LeftHanded", "RightHanded"]
-                    backendValue: backendValues.orientation
-                    Layout.fillWidth: true
-                }
-            }
-
-            Label {
-                text: qsTr("Rotation Order")
-                tooltip: qsTr("Order that rotation operations are performed")
-            }
-            SecondColumnLayout {
-                ComboBox {
-                    Layout.fillWidth: true
-                    scope: "Node"
-                    model: ["XYZ", "YZX", "ZXY", "XZY", "YXZ", "ZYX", "XYZr", "YZXr", "ZXYr", "XZYr", "YXZr", "ZYXr"]
-                    backendValue: backendValues.rotationOrder
                 }
             }
         }
@@ -115,9 +91,9 @@ Column {
             ColumnLayout {
 
                 Label {
-                    width: 140
+                    width: 100
                     text: qsTr("Translation")
-                    tooltip: qsTr("Position Translation")
+                    tooltip: qsTr("Sets the translation of the node.")
                 }
 
                 RowLayout {
@@ -126,6 +102,7 @@ Column {
                     Label {
                         text: qsTr("X")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisXColor
                     }
                     SpinBox {
                         maximumValue: 9999999
@@ -143,6 +120,7 @@ Column {
                     Label {
                         text: qsTr("Y")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisYColor
                     }
                     SpinBox {
                         maximumValue: 9999999
@@ -160,6 +138,7 @@ Column {
                     Label {
                         text: qsTr("Z")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisZColor
                     }
                     SpinBox {
                         maximumValue: 9999999
@@ -176,8 +155,9 @@ Column {
             ColumnLayout {
 
                 Label {
+                    width: 100
                     text: qsTr("Rotation")
-                    tooltip: qsTr("Rotation in degrees")
+                    tooltip: qsTr("Sets the rotation of the node in degrees.")
                 }
 
                 RowLayout {
@@ -186,13 +166,14 @@ Column {
                     Label {
                         text: qsTr("X")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisXColor
                     }
                     SpinBox {
                         maximumValue: 9999999
                         minimumValue: -9999999
                         realDragRange: 5000
                         decimals: 2
-                        backendValue: backendValues.rotation_x
+                        backendValue: backendValues.eulerRotation_x
                         Layout.fillWidth: true
                         Layout.minimumWidth: transformSection.spinBoxMinimumWidth
                     }
@@ -203,13 +184,14 @@ Column {
                     Label {
                         text: qsTr("Y")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisYColor
                     }
                     SpinBox {
                         maximumValue: 9999999
                         minimumValue: -9999999
                         realDragRange: 5000
                         decimals: 2
-                        backendValue: backendValues.rotation_y
+                        backendValue: backendValues.eulerRotation_y
                         Layout.fillWidth: true
                         Layout.minimumWidth: transformSection.spinBoxMinimumWidth
                     }
@@ -220,13 +202,14 @@ Column {
                     Label {
                         text: qsTr("Z")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisZColor
                     }
                     SpinBox {
                         maximumValue: 9999999
                         minimumValue: -9999999
                         realDragRange: 5000
                         decimals: 2
-                        backendValue: backendValues.rotation_z
+                        backendValue: backendValues.eulerRotation_z
                         Layout.fillWidth: true
                         Layout.minimumWidth: transformSection.spinBoxMinimumWidth
                     }
@@ -237,7 +220,7 @@ Column {
 
                 Label {
                     text: qsTr("Scale")
-                    tooltip: qsTr("Scale")
+                    tooltip: qsTr("Sets the scale of the node.")
                 }
 
                 RowLayout {
@@ -246,12 +229,14 @@ Column {
                     Label {
                         text: qsTr("X")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisXColor
                     }
                     SpinBox {
                         maximumValue: 9999999
                         minimumValue: -9999999
-                        realDragRange: 5000
+                        realDragRange: 50
                         decimals: 2
+                        stepSize: 0.1
                         backendValue: backendValues.scale_x
                         Layout.fillWidth: true
                         Layout.minimumWidth: transformSection.spinBoxMinimumWidth
@@ -263,12 +248,14 @@ Column {
                     Label {
                         text: qsTr("Y")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisYColor
                     }
                     SpinBox {
                         maximumValue: 9999999
                         minimumValue: -9999999
-                        realDragRange: 5000
+                        realDragRange: 50
                         decimals: 2
+                        stepSize: 0.1
                         backendValue: backendValues.scale_y
                         Layout.fillWidth: true
                         Layout.minimumWidth: transformSection.spinBoxMinimumWidth
@@ -280,12 +267,14 @@ Column {
                     Label {
                         text: qsTr("Z")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisZColor
                     }
                     SpinBox {
                         maximumValue: 9999999
                         minimumValue: -9999999
-                        realDragRange: 5000
+                        realDragRange: 50
                         decimals: 2
+                        stepSize: 0.1
                         backendValue: backendValues.scale_z
                         Layout.fillWidth: true
                         Layout.minimumWidth: transformSection.spinBoxMinimumWidth
@@ -297,6 +286,7 @@ Column {
 
                 Label {
                     text: qsTr("Pivot")
+                    tooltip: qsTr("Sets the pivot of the node.")
                 }
 
                 RowLayout {
@@ -305,6 +295,7 @@ Column {
                     Label {
                         text: qsTr("X")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisXColor
                     }
                     SpinBox {
                         maximumValue: 9999999
@@ -322,6 +313,7 @@ Column {
                     Label {
                         text: qsTr("Y")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisYColor
                     }
                     SpinBox {
                         maximumValue: 9999999
@@ -339,6 +331,7 @@ Column {
                     Label {
                         text: qsTr("Z")
                         width: transformSection.labelWidth
+                        color: StudioTheme.Values.theme3DAxisZColor
                     }
                     SpinBox {
                         maximumValue: 9999999

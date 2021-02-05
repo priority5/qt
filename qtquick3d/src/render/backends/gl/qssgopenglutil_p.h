@@ -61,10 +61,7 @@ static bool IsGlEsContext(QSSGRenderContextType inContextType)
     QSSGRenderContextTypes esContextTypes(QSSGRenderContextType::GLES2 |
                                           QSSGRenderContextType::GLES3 |
                                           QSSGRenderContextType::GLES3PLUS);
-    if (esContextTypes & inContextType)
-        return true;
-
-    return false;
+    return ((esContextTypes & inContextType) != 0);
 }
 #endif
 
@@ -635,16 +632,18 @@ struct GLConversion
 
     static QSSGRenderBufferType fromGLToBindBufferFlags(GLenum value)
     {
-        if (value == GL_ARRAY_BUFFER)
+        switch (value) {
+        case GL_ARRAY_BUFFER:
             return QSSGRenderBufferType::Vertex;
-        else if (value == GL_ELEMENT_ARRAY_BUFFER)
+        case GL_ELEMENT_ARRAY_BUFFER:
             return QSSGRenderBufferType::Index;
-        else if (value == GL_UNIFORM_BUFFER)
+        case GL_UNIFORM_BUFFER:
             return QSSGRenderBufferType::Constant;
-        else if (value == GL_SHADER_STORAGE_BUFFER)
+        case GL_SHADER_STORAGE_BUFFER:
             return QSSGRenderBufferType::Storage;
-        else
-            Q_ASSERT(false);
+        default:
+            Q_UNREACHABLE();
+        }
 
         return QSSGRenderBufferType(0);
     }
@@ -1004,6 +1003,7 @@ struct GLConversion
             outInternalFormat = GL_RG8;
             outDataType = GL_UNSIGNED_BYTE;
             return true;
+        case QSSGRenderTextureFormat::RGBE8:
         case QSSGRenderTextureFormat::RGBA8:
             outFormat = GL_RGBA;
             outInternalFormat = GL_RGBA8;
@@ -1576,6 +1576,7 @@ struct GLConversion
             return GL_R32UI;
         case QSSGRenderTextureFormat::R32F:
             return GL_R32F;
+        case QSSGRenderTextureFormat::RGBE8:
         case QSSGRenderTextureFormat::RGBA8:
             return GL_RGBA8;
         case QSSGRenderTextureFormat::SRGB8A8:

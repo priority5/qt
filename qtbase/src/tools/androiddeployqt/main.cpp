@@ -44,6 +44,10 @@
 
 #include <algorithm>
 
+#if defined(Q_OS_WIN32)
+#include <qt_windows.h>
+#endif
+
 #ifdef Q_CC_MSVC
 #define popen _popen
 #define QT_POPEN_READ "rb"
@@ -169,6 +173,8 @@ struct Options
     // Versioning
     QString versionName;
     QString versionCode;
+    QByteArray minSdkVersion{"21"};
+    QByteArray targetSdkVersion{"28"};
 
     // lib c++ path
     QString stdCppPath;
@@ -416,7 +422,8 @@ Options parseOptions()
         } else if (argument.compare(QLatin1String("--aab"), Qt::CaseInsensitive) == 0) {
             options.buildAAB = true;
             options.build = true;
-        } else if (options.buildAAB && argument.compare(QLatin1String("--no-build"), Qt::CaseInsensitive) == 0) {
+            options.jarSigner = true;
+        } else if (!options.buildAAB && argument.compare(QLatin1String("--no-build"), Qt::CaseInsensitive) == 0) {
             options.build = false;
         } else if (argument.compare(QLatin1String("--install"), Qt::CaseInsensitive) == 0) {
             options.installApk = true;
@@ -849,6 +856,18 @@ bool readInputFile(Options *options)
     }
 
     {
+        const QJsonValue ver = jsonObject.value(QLatin1String("android-min-sdk-version"));
+        if (!ver.isUndefined())
+            options->minSdkVersion = ver.toString().toUtf8();
+    }
+
+    {
+        const QJsonValue ver = jsonObject.value(QLatin1String("android-target-sdk-version"));
+        if (!ver.isUndefined())
+            options->targetSdkVersion = ver.toString().toUtf8();
+    }
+
+    {
         const QJsonObject targetArchitectures = jsonObject.value(QLatin1String("architectures")).toObject();
         if (targetArchitectures.isEmpty()) {
             fprintf(stderr, "No target architecture defined in json file.\n");
@@ -895,7 +914,7 @@ bool readInputFile(Options *options)
     {
         const QJsonValue extraLibs = jsonObject.value(QLatin1String("android-extra-libs"));
         if (!extraLibs.isUndefined())
-            options->extraLibs = extraLibs.toString().split(QLatin1Char(','), QString::SkipEmptyParts);
+            options->extraLibs = extraLibs.toString().split(QLatin1Char(','), Qt::SkipEmptyParts);
     }
 
     {
@@ -934,8 +953,9 @@ bool readInputFile(Options *options)
         options->applicationBinary = applicationBinary.toString();
         if (options->build) {
             for (auto it = options->architectures.constBegin(); it != options->architectures.constEnd(); ++it) {
-                if (!QFile::exists(QLatin1String("%1/libs/%2/lib%3_%2.so").arg(options->outputDirectory, it.key(), options->applicationBinary))) {
-                    fprintf(stderr, "Cannot find application binary %s.\n", qPrintable(options->applicationBinary));
+                auto appBinaryPath = QLatin1String("%1/libs/%2/lib%3_%2.so").arg(options->outputDirectory, it.key(), options->applicationBinary);
+                if (!QFile::exists(appBinaryPath)) {
+                    fprintf(stderr, "Cannot find application binary in build dir %s.\n", qPrintable(appBinaryPath));
                     return false;
                 }
             }
@@ -979,7 +999,7 @@ bool readInputFile(Options *options)
     }
     {
         const QJsonValue qrcFiles = jsonObject.value(QLatin1String("qrcFiles"));
-        options->qrcFiles = qrcFiles.toString().split(QLatin1Char(','), QString::SkipEmptyParts);
+        options->qrcFiles = qrcFiles.toString().split(QLatin1Char(','), Qt::SkipEmptyParts);
     }
     options->packageName = packageNameFromAndroidManifest(options->androidSourceDirectory + QLatin1String("/AndroidManifest.xml"));
     if (options->packageName.isEmpty())
@@ -1717,16 +1737,17 @@ bool scanImports(Options *options, QSet<QString> *usedDependencies)
         qmlImportScanner += QLatin1String(" -qrcFiles");
         for (const QString &qrcFile : options->qrcFiles)
             qmlImportScanner += QLatin1Char(' ') + shellQuote(qrcFile);
-    } else {
-        if (rootPath.isEmpty())
-            rootPath = QFileInfo(options->inputFileName).absolutePath();
-        else
-            rootPath = QFileInfo(rootPath).absoluteFilePath();
-
-        if (!rootPath.endsWith(QLatin1Char('/')))
-            rootPath += QLatin1Char('/');
-        qmlImportScanner += QLatin1String(" -rootPath %1").arg(shellQuote(rootPath));
     }
+
+    if (rootPath.isEmpty())
+        rootPath = QFileInfo(options->inputFileName).absolutePath();
+    else
+        rootPath = QFileInfo(rootPath).absoluteFilePath();
+
+    if (!rootPath.endsWith(QLatin1Char('/')))
+        rootPath += QLatin1Char('/');
+
+    qmlImportScanner += QLatin1String(" -rootPath %1").arg(shellQuote(rootPath));
 
     QStringList importPaths;
     importPaths += shellQuote(options->qtInstallDirectory + QLatin1String("/qml"));
@@ -2282,19 +2303,44 @@ static bool mergeGradleProperties(const QString &path, GradleProperties properti
     return true;
 }
 
+#if defined(Q_OS_WIN32)
+void checkAndWarnGradleLongPaths(const QString &outputDirectory)
+{
+    QStringList longFileNames;
+    QDirIterator it(outputDirectory, QStringList(QStringLiteral("*.java")), QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        if (it.next().size() >= MAX_PATH)
+            longFileNames.append(it.next());
+    }
+
+    if (!longFileNames.isEmpty()) {
+        fprintf(stderr,
+                "The maximum path length that can be processed by Gradle on Windows is %d characters.\n"
+                "Consider moving your project to reduce its path length.\n"
+                "The following files have too long paths:\n%s.\n",
+                MAX_PATH, qPrintable(longFileNames.join(QLatin1Char('\n'))));
+    }
+}
+#endif
+
 bool buildAndroidProject(const Options &options)
 {
     GradleProperties localProperties;
-    localProperties["sdk.dir"] = options.sdkPath.toLocal8Bit();
+    localProperties["sdk.dir"] = QDir::fromNativeSeparators(options.sdkPath).toUtf8();
+    localProperties["ndk.dir"] = QDir::fromNativeSeparators(options.ndkPath).toUtf8();
 
     if (!mergeGradleProperties(options.outputDirectory + QLatin1String("local.properties"), localProperties))
         return false;
 
     QString gradlePropertiesPath = options.outputDirectory + QLatin1String("gradle.properties");
     GradleProperties gradleProperties = readGradleProperties(gradlePropertiesPath);
+    gradleProperties["android.bundle.enableUncompressedNativeLibs"] = "false";
     gradleProperties["buildDir"] = "build";
     gradleProperties["qt5AndroidDir"] = (options.qtInstallDirectory + QLatin1String("/src/android/java")).toUtf8();
     gradleProperties["androidCompileSdkVersion"] = options.androidPlatform.split(QLatin1Char('-')).last().toLocal8Bit();
+    gradleProperties["qtMinSdkVersion"] = options.minSdkVersion;
+    gradleProperties["qtTargetSdkVersion"] = options.targetSdkVersion;
     if (gradleProperties["androidBuildToolsVersion"].isEmpty())
         gradleProperties["androidBuildToolsVersion"] = options.sdkBuildToolsVersion.toLocal8Bit();
 
@@ -2318,7 +2364,7 @@ bool buildAndroidProject(const Options &options)
         return false;
     }
 
-    QString commandLine = QLatin1String("%1 --no-daemon %2").arg(shellQuote(gradlePath), options.releasePackage ? QLatin1String(" assembleRelease") : QLatin1String(" assembleDebug"));
+    QString commandLine = QLatin1String("%1 %2").arg(shellQuote(gradlePath), options.releasePackage ? QLatin1String(" assembleRelease") : QLatin1String(" assembleDebug"));
     if (options.buildAAB)
         commandLine += QLatin1String(" bundle");
 
@@ -2342,6 +2388,10 @@ bool buildAndroidProject(const Options &options)
         fprintf(stderr, "Building the android package failed!\n");
         if (!options.verbose)
             fprintf(stderr, "  -- For more information, run this command with --verbose.\n");
+
+#if defined(Q_OS_WIN32)
+        checkAndWarnGradleLongPaths(options.outputDirectory);
+#endif
         return false;
     }
 

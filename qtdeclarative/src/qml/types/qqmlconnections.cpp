@@ -47,12 +47,15 @@
 #include <private/qqmlvmemetaobject_p.h>
 #include <qqmlinfo.h>
 
+#include <QtCore/qloggingcategory.h>
 #include <QtCore/qdebug.h>
 #include <QtCore/qstringlist.h>
 
 #include <private/qobject_p.h>
 
 QT_BEGIN_NAMESPACE
+
+Q_LOGGING_CATEGORY(lcQmlConnections, "qt.qml.connections")
 
 class QQmlConnectionsPrivate : public QObjectPrivate
 {
@@ -238,7 +241,8 @@ void QQmlConnectionsParser::verifyBindings(const QQmlRefPointer<QV4::ExecutableC
         const QV4::CompiledData::Binding *binding = props.at(ii);
         const QString &propName = compilationUnit->stringAt(binding->propertyNameIndex);
 
-        if (!propName.startsWith(QLatin1String("on")) || (propName.length() < 3 || !propName.at(2).isUpper())) {
+        const bool thirdCharacterIsValid = (propName.length() >= 2) && (propName.at(2).isUpper() || propName.at(2) == '_');
+        if (!propName.startsWith(QLatin1String("on")) || !thirdCharacterIsValid) {
             error(props.at(ii), QQmlConnections::tr("Cannot assign to non-existent property \"%1\"").arg(propName));
             return;
         }
@@ -275,8 +279,10 @@ void QQmlConnections::connectSignals()
         connectSignalsToMethods();
     } else {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-        qmlWarning(this) << tr("Implicitly defined onFoo properties in Connections are deprecated. "
-                               "Use this syntax instead: function onFoo(<arguments>) { ... }");
+        if (lcQmlConnections().isWarningEnabled()) {
+            qmlWarning(this) << tr("Implicitly defined onFoo properties in Connections are deprecated. "
+                                    "Use this syntax instead: function onFoo(<arguments>) { ... }");
+        }
 #endif
         connectSignalsToBindings();
     }

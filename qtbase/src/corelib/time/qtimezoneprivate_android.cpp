@@ -1,5 +1,6 @@
 /****************************************************************************
 **
+** Copyright (C) 2020 The Qt Company Ltd.
 ** Copyright (C) 2014 Drew Parsons <dparsons@emerall.com>
 ** Contact: https://www.qt.io/licensing/
 **
@@ -53,9 +54,10 @@ QT_BEGIN_NAMESPACE
 QAndroidTimeZonePrivate::QAndroidTimeZonePrivate()
     : QTimeZonePrivate()
 {
-    // start with system time zone
-    androidTimeZone = QJNIObjectPrivate::callStaticObjectMethod("java.util.TimeZone", "getDefault", "()Ljava/util/TimeZone;");
-    init("UTC");
+    // Keep in sync with systemTimeZoneId():
+    androidTimeZone = QJNIObjectPrivate::callStaticObjectMethod(
+        "java.util.TimeZone", "getDefault", "()Ljava/util/TimeZone;");
+    m_id = androidTimeZone.callObjectMethod("getID", "()Ljava/lang/String;").toString().toUtf8();
 }
 
 // Create a named time zone
@@ -76,32 +78,56 @@ QAndroidTimeZonePrivate::~QAndroidTimeZonePrivate()
 {
 }
 
+static QJNIObjectPrivate getDisplayName(QJNIObjectPrivate zone, jint style, jboolean dst,
+                                        const QLocale &locale)
+{
+    QJNIObjectPrivate jlanguage
+        = QJNIObjectPrivate::fromString(QLocale::languageToString(locale.language()));
+    QJNIObjectPrivate jcountry
+        = QJNIObjectPrivate::fromString(QLocale::countryToString(locale.country()));
+    QJNIObjectPrivate
+        jvariant = QJNIObjectPrivate::fromString(QLocale::scriptToString(locale.script()));
+    QJNIObjectPrivate jlocale("java.util.Locale",
+                              "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+                              static_cast<jstring>(jlanguage.object()),
+                              static_cast<jstring>(jcountry.object()),
+                              static_cast<jstring>(jvariant.object()));
+
+    return zone.callObjectMethod("getDisplayName",
+                                 "(ZILjava/util/Locale;)Ljava/lang/String;",
+                                 dst, style, jlocale.object());
+}
 
 void QAndroidTimeZonePrivate::init(const QByteArray &ianaId)
 {
-    QJNIObjectPrivate jo_ianaId = QJNIObjectPrivate::fromString( QString::fromUtf8(ianaId) );
-    androidTimeZone = QJNIObjectPrivate::callStaticObjectMethod( "java.util.TimeZone", "getTimeZone", "(Ljava/lang/String;)Ljava/util/TimeZone;",  static_cast<jstring>(jo_ianaId.object()) );
+    const QString iana = QString::fromUtf8(ianaId);
+    androidTimeZone = QJNIObjectPrivate::callStaticObjectMethod(
+        "java.util.TimeZone", "getTimeZone", "(Ljava/lang/String;)Ljava/util/TimeZone;",
+        static_cast<jstring>(QJNIObjectPrivate::fromString(iana).object()));
+
+    // The ID or display name of the zone we've got, if it looks like what we asked for:
+    const auto match = [iana](const QJNIObjectPrivate &jname) -> QByteArray {
+        const QString name = jname.toString();
+        if (iana.compare(name, Qt::CaseInsensitive))
+            return name.toUtf8();
+
+        return QByteArray();
+    };
 
     // Painfully, JNI gives us back a default zone object if it doesn't
     // recognize the name; so check for whether ianaId is a recognized name of
     // the zone object we got and ignore the zone if not.
     // Try checking ianaId against getID(), getDisplayName():
-    QJNIObjectPrivate jname = androidTimeZone.callObjectMethod("getID", "()Ljava/lang/String;");
-    bool found = (jname.toString().toUtf8() == ianaId);
-    for (int style = 1; !found && style-- > 0;) {
-        for (int dst = 1; !found && dst-- > 0;) {
-            jname = androidTimeZone.callObjectMethod("getDisplayName", "(ZI;)Ljava/lang/String;",
-                                                     bool(dst), style);
-            found = (jname.toString().toUtf8() == ianaId);
+    m_id = match(androidTimeZone.callObjectMethod("getID", "()Ljava/lang/String;"));
+    for (int style = 1; m_id.isEmpty() && style >= 0; --style) {
+        for (int dst = 1; m_id.isEmpty() && dst >= 0; --dst) {
+            for (int pick = 2; m_id.isEmpty() && pick >= 0; --pick) {
+                QLocale locale = (pick == 0 ? QLocale::system()
+                                  : pick == 1 ? QLocale() : QLocale::c());
+                m_id = match(getDisplayName(androidTimeZone, style, jboolean(dst), locale));
+            }
         }
     }
-
-    if (!found)
-        m_id.clear();
-    else if (ianaId.isEmpty())
-        m_id = systemTimeZoneId();
-    else
-        m_id = ianaId;
 }
 
 QAndroidTimeZonePrivate *QAndroidTimeZonePrivate::clone() const
@@ -121,14 +147,7 @@ QString QAndroidTimeZonePrivate::displayName(QTimeZone::TimeType timeType, QTime
         // treat all NameTypes as java TimeZone style LONG (value 1), except of course QTimeZone::ShortName which is style SHORT (value 0);
         jint style = (nameType == QTimeZone::ShortName ? 0 : 1);
 
-        QJNIObjectPrivate jlanguage = QJNIObjectPrivate::fromString(QLocale::languageToString(locale.language()));
-        QJNIObjectPrivate jcountry = QJNIObjectPrivate::fromString(QLocale::countryToString(locale.country()));
-        QJNIObjectPrivate jvariant = QJNIObjectPrivate::fromString(QLocale::scriptToString(locale.script()));
-        QJNIObjectPrivate jlocale("java.util.Locale", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", static_cast<jstring>(jlanguage.object()), static_cast<jstring>(jcountry.object()), static_cast<jstring>(jvariant.object()));
-
-        QJNIObjectPrivate jname = androidTimeZone.callObjectMethod("getDisplayName", "(ZILjava/util/Locale;)Ljava/lang/String;", daylightTime, style, jlocale.object());
-
-        name = jname.toString();
+        name = getDisplayName(androidTimeZone, style, daylightTime, locale).toString();
     }
 
     return name;
@@ -225,11 +244,10 @@ QTimeZonePrivate::Data QAndroidTimeZonePrivate::previousTransition(qint64 before
 
 QByteArray QAndroidTimeZonePrivate::systemTimeZoneId() const
 {
-    QJNIObjectPrivate androidSystemTimeZone = QJNIObjectPrivate::callStaticObjectMethod("java.util.TimeZone", "getDefault", "()Ljava/util/TimeZone;");
-    QJNIObjectPrivate systemTZIdAndroid = androidSystemTimeZone.callObjectMethod<jstring>("getID");
-    QByteArray systemTZid = systemTZIdAndroid.toString().toUtf8();
-
-    return systemTZid;
+    // Keep in sync with default constructor:
+    QJNIObjectPrivate androidSystemTimeZone = QJNIObjectPrivate::callStaticObjectMethod(
+        "java.util.TimeZone", "getDefault", "()Ljava/util/TimeZone;");
+    return androidSystemTimeZone.callObjectMethod<jstring>("getID").toString().toUtf8();
 }
 
 QList<QByteArray> QAndroidTimeZonePrivate::availableTimeZoneIds() const

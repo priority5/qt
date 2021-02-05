@@ -60,6 +60,10 @@ QT_BEGIN_NAMESPACE
 #define GL_UNSIGNED_INT_ATOMIC_COUNTER 0x92DB
 #endif
 
+#ifndef GL_PROGRAM_BINARY_LENGTH
+#define GL_PROGRAM_BINARY_LENGTH 0x8741
+#endif
+
 namespace QSSGGlExtStrings {
 QByteArray exts3tc()
 {
@@ -100,6 +104,18 @@ QSSGRenderBackendGLBase::QSSGRenderBackendGLBase(const QSurfaceFormat &format)
     m_glExtraFunctions = new QOpenGLExtraFunctions;
     m_glExtraFunctions->initializeOpenGLFunctions();
 
+    const QByteArray languageVersion = getShadingLanguageVersionString();
+    qCInfo(RENDER_TRACE_INFO, "GLSL version: %s", languageVersion.constData());
+
+    const QByteArray apiVersion(getVersionString());
+    qCInfo(RENDER_TRACE_INFO, "GL version: %s", apiVersion.constData());
+
+    const QByteArray apiVendor(getVendorString());
+    qCInfo(RENDER_TRACE_INFO, "HW vendor: %s", apiVendor.constData());
+
+    const QByteArray apiRenderer(getRendererString());
+    qCInfo(RENDER_TRACE_INFO, "Vendor renderer: %s", apiRenderer.constData());
+
     // internal state tracker
     m_currentRasterizerState = new QSSGRenderBackendRasterizerStateGL();
     m_currentDepthStencilState = new QSSGRenderBackendDepthStencilStateGL();
@@ -122,8 +138,7 @@ QSSGRenderContextType QSSGRenderBackendGLBase::getRenderContextType() const
         if (m_format.majorVersion() == 3) {
             if (m_format.minorVersion() >= 1)
                 return QSSGRenderContextType::GLES3PLUS;
-            else
-                return QSSGRenderContextType::GLES3;
+            return QSSGRenderContextType::GLES3;
         }
     } else if (m_format.majorVersion() == 2) {
         return QSSGRenderContextType::GL2;
@@ -141,13 +156,38 @@ bool QSSGRenderBackendGLBase::isESCompatible() const
     return m_format.renderableType() == QSurfaceFormat::OpenGLES;
 }
 
-const char *QSSGRenderBackendGLBase::getShadingLanguageVersion()
+QByteArray QSSGRenderBackendGLBase::getShadingLanguageVersion()
 {
-    const GLubyte *retval = GL_CALL_FUNCTION(glGetString(GL_SHADING_LANGUAGE_VERSION));
-    if (retval == nullptr)
-        return "";
+    QByteArray ver;
+    QTextStream stream(&ver);
+    stream << "#version ";
+    const int minor = m_format.minorVersion();
+    switch (getRenderContextType()) {
+    case QSSGRenderContextType::GLES2:
+        stream << "1" << minor << "0\n";
+        break;
+    case QSSGRenderContextType::GL2:
+        stream << "1" << minor << "0\n";
+        break;
+    case QSSGRenderContextType::GLES3PLUS:
+    case QSSGRenderContextType::GLES3:
+        stream << "3" << minor << "0 es\n";
+        break;
+    case QSSGRenderContextType::GL3:
+        if (minor == 3)
+            stream << "3" << minor << "0\n";
+        else
+            stream << "1" << 3 + minor << "0\n";
+        break;
+    case QSSGRenderContextType::GL4:
+        stream << "4" << minor << "0\n";
+        break;
+    default:
+        Q_ASSERT(false);
+        break;
+    }
 
-    return reinterpret_cast<const char *>(retval);
+    return ver;
 }
 
 qint32 QSSGRenderBackendGLBase::getMaxCombinedTextureUnits()
@@ -309,6 +349,13 @@ qint32 QSSGRenderBackendGLBase::getStencilBits() const
     qint32 stencilBits;
     GL_CALL_FUNCTION(glGetIntegerv(GL_STENCIL_BITS, &stencilBits));
     return stencilBits;
+}
+
+qint32 QSSGRenderBackendGLBase::getMaxSamples() const
+{
+    qint32 maxSamples;
+    GL_CALL_FUNCTION(glGetIntegerv(GL_MAX_SAMPLES, &maxSamples));
+    return maxSamples;
 }
 
 void QSSGRenderBackendGLBase::setMultisample(bool bEnable)
@@ -476,7 +523,7 @@ bool QSSGRenderBackendGLBase::getDepthWrite()
 {
     qint32 value;
     GL_CALL_FUNCTION(glGetIntegerv(GL_DEPTH_WRITEMASK, reinterpret_cast<GLint *>(&value)));
-    return value ? true : false;
+    return (value != 0);
 }
 
 void QSSGRenderBackendGLBase::setDepthWrite(bool bEnable)
@@ -520,13 +567,13 @@ void QSSGRenderBackendGLBase::setBlendFunc(const QSSGRenderBlendFunctionArgument
 void QSSGRenderBackendGLBase::setBlendEquation(const QSSGRenderBlendEquationArgument &)
 {
     // needs GL4 / GLES 3.1
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::setBlendBarrier()
 {
     // needs GL4 / GLES 3.1
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 QSSGCullFaceMode QSSGRenderBackendGLBase::getCullFaceMode()
@@ -591,7 +638,7 @@ QSSGRenderBackend::QSSGRenderBackendBufferObject QSSGRenderBackendGLBase::create
         } else {
             GL_CALL_FUNCTION(glDeleteBuffers(1, &bufID));
             bufID = 0;
-            qCCritical(GL_ERROR, "%s", GLConversion::processGLError(target));
+            qCCritical(RENDER_GL_ERROR, "%s", GLConversion::processGLError(target));
         }
     }
 
@@ -635,7 +682,7 @@ void QSSGRenderBackendGLBase::updateBufferRange(QSSGRenderBackendBufferObject bo
 void *QSSGRenderBackendGLBase::mapBuffer(QSSGRenderBackendBufferObject, QSSGRenderBufferType, size_t, size_t, QSSGRenderBufferAccessFlags)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return nullptr;
 }
@@ -643,7 +690,7 @@ void *QSSGRenderBackendGLBase::mapBuffer(QSSGRenderBackendBufferObject, QSSGRend
 bool QSSGRenderBackendGLBase::unmapBuffer(QSSGRenderBackendBufferObject, QSSGRenderBufferType)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return true;
 }
@@ -651,13 +698,13 @@ bool QSSGRenderBackendGLBase::unmapBuffer(QSSGRenderBackendBufferObject, QSSGRen
 void QSSGRenderBackendGLBase::setMemoryBarrier(QSSGRenderBufferBarrierFlags)
 {
     // needs GL 4 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 QSSGRenderBackend::QSSGRenderBackendQueryObject QSSGRenderBackendGLBase::createQuery()
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return QSSGRenderBackendQueryObject(nullptr);
 }
@@ -665,43 +712,43 @@ QSSGRenderBackend::QSSGRenderBackendQueryObject QSSGRenderBackendGLBase::createQ
 void QSSGRenderBackendGLBase::releaseQuery(QSSGRenderBackendQueryObject)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::beginQuery(QSSGRenderBackendQueryObject, QSSGRenderQueryType)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::endQuery(QSSGRenderBackendQueryObject, QSSGRenderQueryType)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::getQueryResult(QSSGRenderBackendQueryObject, QSSGRenderQueryResultType, quint32 *)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::getQueryResult(QSSGRenderBackendQueryObject, QSSGRenderQueryResultType, quint64 *)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::setQueryTimer(QSSGRenderBackendQueryObject)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 QSSGRenderBackend::QSSGRenderBackendSyncObject QSSGRenderBackendGLBase::createSync(QSSGRenderSyncType, QSSGRenderSyncFlags)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return QSSGRenderBackendSyncObject(nullptr);
 }
@@ -709,13 +756,13 @@ QSSGRenderBackend::QSSGRenderBackendSyncObject QSSGRenderBackendGLBase::createSy
 void QSSGRenderBackendGLBase::releaseSync(QSSGRenderBackendSyncObject)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::waitSync(QSSGRenderBackendSyncObject, QSSGRenderCommandFlushFlags, quint64)
 {
     // needs GL 3 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 QSSGRenderBackend::QSSGRenderBackendRenderTargetObject QSSGRenderBackendGLBase::createRenderTarget()
@@ -771,7 +818,7 @@ void QSSGRenderBackendGLBase::renderTargetAttach(QSSGRenderBackendRenderTargetOb
                                                    qint32)
 {
     // Needs GL3 or GLES 3
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::setRenderTarget(QSSGRenderBackendRenderTargetObject rto)
@@ -788,7 +835,7 @@ bool QSSGRenderBackendGLBase::renderTargetIsValid(QSSGRenderBackendRenderTargetO
     switch (completeStatus) {
 #define HANDLE_INCOMPLETE_STATUS(x)                                                                                    \
     case x:                                                                                                            \
-        qCCritical(INTERNAL_ERROR, "Framebuffer is not complete: %s", #x);                                             \
+        qCCritical(RENDER_INTERNAL_ERROR, "Framebuffer is not complete: %s", #x);                                             \
         return false;
         HANDLE_INCOMPLETE_STATUS(GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT)
         HANDLE_INCOMPLETE_STATUS(GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS)
@@ -815,7 +862,7 @@ QSSGRenderBackend::QSSGRenderBackendRenderbufferObject QSSGRenderBackendGLBase::
     // check for error
     GLenum error = m_glFunctions->glGetError();
     if (error != GL_NO_ERROR) {
-        qCCritical(GL_ERROR, "%s", GLConversion::processGLError(error));
+        qCCritical(RENDER_GL_ERROR, "%s", GLConversion::processGLError(error));
         Q_ASSERT(false);
         GL_CALL_FUNCTION(glDeleteRenderbuffers(1, &bufID));
         bufID = 0;
@@ -854,7 +901,7 @@ bool QSSGRenderBackendGLBase::resizeRenderbuffer(QSSGRenderBackendRenderbufferOb
     // check for error
     GLenum error = m_glFunctions->glGetError();
     if (error != GL_NO_ERROR) {
-        qCCritical(GL_ERROR, "%s", GLConversion::processGLError(error));
+        qCCritical(RENDER_GL_ERROR, "%s", GLConversion::processGLError(error));
         Q_ASSERT(false);
         success = false;
     }
@@ -876,8 +923,17 @@ void QSSGRenderBackendGLBase::bindTexture(QSSGRenderBackendTextureObject to,
 {
     Q_ASSERT(unit >= 0);
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
-    GL_CALL_FUNCTION(glActiveTexture(GL_TEXTURE0 + GLenum(unit)));
+    setActiveTexture(GL_TEXTURE0 + GLenum(unit));
+
     GL_CALL_FUNCTION(glBindTexture(m_conversion.fromTextureTargetToGL(target), texID));
+}
+
+void QSSGRenderBackendGLBase::setActiveTexture(qint32 unit)
+{
+    if (unit != m_activatedTextureUnit) {
+        GL_CALL_FUNCTION(glActiveTexture(GLenum(unit)))
+        m_activatedTextureUnit = unit;
+    }
 }
 
 void QSSGRenderBackendGLBase::bindImageTexture(QSSGRenderBackendTextureObject,
@@ -889,7 +945,7 @@ void QSSGRenderBackendGLBase::bindImageTexture(QSSGRenderBackendTextureObject,
                                                  QSSGRenderTextureFormat)
 {
     // needs GL 4 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::releaseTexture(QSSGRenderBackendTextureObject to)
@@ -910,7 +966,7 @@ void QSSGRenderBackendGLBase::setTextureData2D(QSSGRenderBackendTextureObject to
 {
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
-    GL_CALL_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_FUNCTION(glBindTexture(glTarget, texID));
     bool conversionRequired = format != internalFormat;
 
@@ -953,7 +1009,7 @@ void QSSGRenderBackendGLBase::setTextureDataCubeFace(QSSGRenderBackendTextureObj
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
     GLenum glTexTarget = GLConversion::fromTextureTargetToGL(QSSGRenderTextureTargetType::TextureCube);
-    GL_CALL_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_FUNCTION(glBindTexture(glTexTarget, texID));
     bool conversionRequired = format != internalFormat;
 
@@ -992,7 +1048,7 @@ void QSSGRenderBackendGLBase::createTextureStorage2D(QSSGRenderBackendTextureObj
                                                        qint32)
 {
     // you need GL 4.2 or GLES 3.1
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::setTextureSubData2D(QSSGRenderBackendTextureObject to,
@@ -1007,7 +1063,7 @@ void QSSGRenderBackendGLBase::setTextureSubData2D(QSSGRenderBackendTextureObject
 {
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
-    GL_CALL_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_FUNCTION(glBindTexture(glTarget, texID));
 
     QSSGRenderTextureSwizzleMode swizzleMode = QSSGRenderTextureSwizzleMode::NoSwizzle;
@@ -1031,7 +1087,7 @@ void QSSGRenderBackendGLBase::setCompressedTextureData2D(QSSGRenderBackendTextur
 {
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
-    GL_CALL_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_FUNCTION(glBindTexture(glTarget, texID));
 
     GLenum glformat = GLConversion::fromCompressedTextureFormatToGL(internalFormat);
@@ -1052,7 +1108,7 @@ void QSSGRenderBackendGLBase::setCompressedTextureDataCubeFace(QSSGRenderBackend
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
     GLenum glTexTarget = GLConversion::fromTextureTargetToGL(QSSGRenderTextureTargetType::TextureCube);
-    GL_CALL_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_FUNCTION(glBindTexture(glTexTarget, texID));
 
     GLenum glformat = GLConversion::fromCompressedTextureFormatToGL(internalFormat);
@@ -1073,7 +1129,7 @@ void QSSGRenderBackendGLBase::setCompressedTextureSubData2D(QSSGRenderBackendTex
 {
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
-    GL_CALL_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_FUNCTION(glBindTexture(glTarget, texID));
 
     GLenum glformat = GLConversion::fromCompressedTextureFormatToGL(format);
@@ -1095,7 +1151,7 @@ void QSSGRenderBackendGLBase::setTextureData3D(QSSGRenderBackendTextureObject,
                                                  QSSGByteView)
 {
     // needs GL3 or GLES3
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::generateMipMaps(QSSGRenderBackendTextureObject to,
@@ -1104,7 +1160,7 @@ void QSSGRenderBackendGLBase::generateMipMaps(QSSGRenderBackendTextureObject to,
 {
     GLuint texID = HandleToID_cast(GLuint, quintptr, to);
     GLenum glTarget = GLConversion::fromTextureTargetToGL(target);
-    GL_CALL_FUNCTION(glActiveTexture(GL_TEXTURE0));
+    setActiveTexture(GL_TEXTURE0);
     GL_CALL_FUNCTION(glBindTexture(glTarget, texID));
 
     GLenum glValue = GLConversion::fromHintToGL(genType);
@@ -1258,8 +1314,11 @@ QSSGRenderBackend::QSSGRenderBackendAttribLayoutObject QSSGRenderBackendGLBase::
 void QSSGRenderBackendGLBase::releaseAttribLayout(QSSGRenderBackendAttribLayoutObject ao)
 {
     QSSGRenderBackendAttributeLayoutGL *attribLayout = reinterpret_cast<QSSGRenderBackendAttributeLayoutGL *>(ao);
-
-    delete attribLayout;
+    if (attribLayout) { // Created with malloc, so release with free!
+        attribLayout->~QSSGRenderBackendAttributeLayoutGL();
+        ::free(attribLayout);
+        attribLayout = nullptr;
+    }
 };
 
 QSSGRenderBackend::QSSGRenderBackendInputAssemblerObject QSSGRenderBackendGLBase::createInputAssembler(
@@ -1286,6 +1345,12 @@ void QSSGRenderBackendGLBase::releaseInputAssembler(QSSGRenderBackendInputAssemb
 {
     QSSGRenderBackendInputAssemblerGL *inputAssembler = reinterpret_cast<QSSGRenderBackendInputAssemblerGL *>(iao);
     delete inputAssembler;
+}
+
+void QSSGRenderBackendGLBase::resetStates()
+{
+    m_usedAttribCount = m_maxAttribCount;
+    m_activatedTextureUnit = ACTIVATED_TEXTURE_UNIT_UNKNOWN;
 }
 
 bool QSSGRenderBackendGLBase::compileSource(GLuint shaderID, QSSGByteView source, QByteArray &errorMessage, bool binary)
@@ -1317,7 +1382,7 @@ bool QSSGRenderBackendGLBase::compileSource(GLuint shaderID, QSSGByteView source
         if (binaryError != GL_NO_ERROR) {
             errorMessage = QByteArrayLiteral("Binary shader compilation failed");
             shaderStatus = GL_FALSE;
-            qCCritical(GL_ERROR, "%s", GLConversion::processGLError(binaryError));
+            qCCritical(RENDER_GL_ERROR, "%s", GLConversion::processGLError(binaryError));
         }
     }
 
@@ -1362,7 +1427,7 @@ QSSGRenderBackend::QSSGRenderBackendTessControlShaderObject QSSGRenderBackendGLB
     Q_UNUSED(errorMessage)
     Q_UNUSED(binary)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return nullptr;
 }
@@ -1377,7 +1442,7 @@ QSSGRenderBackend::QSSGRenderBackendTessEvaluationShaderObject QSSGRenderBackend
     Q_UNUSED(errorMessage)
     Q_UNUSED(binary)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return nullptr;
 }
@@ -1391,7 +1456,7 @@ QSSGRenderBackend::QSSGRenderBackendGeometryShaderObject QSSGRenderBackendGLBase
     Q_UNUSED(errorMessage)
     Q_UNUSED(binary)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return nullptr;
 }
@@ -1405,7 +1470,7 @@ QSSGRenderBackend::QSSGRenderBackendComputeShaderObject QSSGRenderBackendGLBase:
     Q_UNUSED(errorMessage)
     Q_UNUSED(binary)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return nullptr;
 }
@@ -1573,12 +1638,77 @@ void QSSGRenderBackendGLBase::releaseShaderProgram(QSSGRenderBackendShaderProgra
 
     GL_CALL_FUNCTION(glDeleteProgram(programID));
 
+    delete pProgram;
+}
+
+void QSSGRenderBackendGLBase::getAttributes(QSSGRenderBackendShaderProgramGL *pProgram)
+{
+    GLuint programID = static_cast<GLuint>(pProgram->m_programID);
+    // release old stuff
     if (pProgram->m_shaderInput) {
         delete pProgram->m_shaderInput;
         pProgram->m_shaderInput = nullptr;
     }
 
-    delete pProgram;
+    GLint numAttribs;
+    GL_CALL_FUNCTION(glGetProgramiv(programID, GL_ACTIVE_ATTRIBUTES, &numAttribs));
+
+    if (numAttribs) {
+        QSSGRenderBackendShaderInputEntryGL *tempShaderInputEntry = static_cast<QSSGRenderBackendShaderInputEntryGL *>(
+                ::malloc(sizeof(QSSGRenderBackendShaderInputEntryGL) * size_t(m_maxAttribCount)));
+
+        GLint maxLength;
+        GL_CALL_FUNCTION(glGetProgramiv(programID, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, &maxLength));
+        qint8 *nameBuf = static_cast<qint8 *>(::malloc(size_t(maxLength)));
+
+        // fill in data
+        qint32 count = 0;
+        for (int idx = 0; idx != numAttribs; ++idx) {
+            GLint size = 0;
+            GLenum glType;
+            QSSGRenderComponentType compType = QSSGRenderComponentType::Unknown;
+            quint32 numComps = 0;
+
+            GL_CALL_FUNCTION(glGetActiveAttrib(programID, idx, maxLength, nullptr, &size, &glType, (char *)nameBuf));
+            // Skip anything named with gl_
+            if (memcmp(nameBuf, "gl_", 3) == 0)
+                continue;
+
+            GLConversion::fromAttribGLToComponentTypeAndNumComps(glType, compType, numComps);
+
+            new (&tempShaderInputEntry[count]) QSSGRenderBackendShaderInputEntryGL();
+            tempShaderInputEntry[count].m_attribName = QByteArray(reinterpret_cast<const char *>(nameBuf));
+            tempShaderInputEntry[count].m_attribLocation = GL_CALL_FUNCTION(glGetAttribLocation(programID, (char *)nameBuf));
+            tempShaderInputEntry[count].m_type = glType;
+            tempShaderInputEntry[count].m_numComponents = numComps;
+
+            ++count;
+        }
+
+        // Now allocate space for the actuall entries
+        quint32 shaderInputSize = sizeof(QSSGRenderBackendShaderInputGL);
+        quint32 entrySize = sizeof(QSSGRenderBackendShaderInputEntryGL) * count;
+        quint8 *newMem = static_cast<quint8 *>(::malloc(shaderInputSize + entrySize));
+        QSSGDataRef<QSSGRenderBackendShaderInputEntryGL> entryRef = PtrAtOffset<QSSGRenderBackendShaderInputEntryGL>(newMem, shaderInputSize, entrySize);
+        // fill data
+        for (int idx = 0; idx != count; ++idx) {
+            new (&entryRef[idx]) QSSGRenderBackendShaderInputEntryGL();
+            entryRef[idx].m_attribName = tempShaderInputEntry[idx].m_attribName;
+            entryRef[idx].m_attribLocation = tempShaderInputEntry[idx].m_attribLocation;
+            entryRef[idx].m_type = tempShaderInputEntry[idx].m_type;
+            entryRef[idx].m_numComponents = tempShaderInputEntry[idx].m_numComponents;
+            // Re-set the entry to release the QByteArray, we can do the plane free later
+            tempShaderInputEntry[idx] = QSSGRenderBackendShaderInputEntryGL();
+        }
+
+        // placement new
+        QSSGRenderBackendShaderInputGL *shaderInput = new (newMem) QSSGRenderBackendShaderInputGL(entryRef);
+        // set the pointer
+        pProgram->m_shaderInput = shaderInput;
+
+        ::free(nameBuf);
+        ::free(tempShaderInputEntry);
+    }
 }
 
 bool QSSGRenderBackendGLBase::linkProgram(QSSGRenderBackendShaderProgramObject po, QByteArray &errorMessage)
@@ -1592,72 +1722,9 @@ bool QSSGRenderBackendGLBase::linkProgram(QSSGRenderBackendShaderProgramObject p
     GL_CALL_FUNCTION(glGetProgramiv(programID, GL_LINK_STATUS, &linkStatus));
     GL_CALL_FUNCTION(glGetProgramiv(programID, GL_INFO_LOG_LENGTH, &logLen));
 
-    // if succesfuly linked get the attribute information
-    if (linkStatus) {
-        // release old stuff
-        if (pProgram->m_shaderInput) {
-            delete pProgram->m_shaderInput;
-            pProgram->m_shaderInput = nullptr;
-        }
-
-        GLint numAttribs;
-        GL_CALL_FUNCTION(glGetProgramiv(programID, GL_ACTIVE_ATTRIBUTES, &numAttribs));
-
-        if (numAttribs) {
-            QSSGRenderBackendShaderInputEntryGL *tempShaderInputEntry = static_cast<QSSGRenderBackendShaderInputEntryGL *>(
-                    ::malloc(sizeof(QSSGRenderBackendShaderInputEntryGL) * size_t(m_maxAttribCount)));
-
-            GLint maxLength;
-            GL_CALL_FUNCTION(glGetProgramiv(programID, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, &maxLength));
-            qint8 *nameBuf = static_cast<qint8 *>(::malloc(size_t(maxLength)));
-
-            // fill in data
-            qint32 count = 0;
-            for (int idx = 0; idx != numAttribs; ++idx) {
-                GLint size = 0;
-                GLenum glType;
-                QSSGRenderComponentType compType = QSSGRenderComponentType::Unknown;
-                quint32 numComps = 0;
-
-                GL_CALL_FUNCTION(glGetActiveAttrib(programID, idx, maxLength, nullptr, &size, &glType, (char *)nameBuf));
-                // Skip anything named with gl_
-                if (memcmp(nameBuf, "gl_", 3) == 0)
-                    continue;
-
-                GLConversion::fromAttribGLToComponentTypeAndNumComps(glType, compType, numComps);
-
-                new (&tempShaderInputEntry[count]) QSSGRenderBackendShaderInputEntryGL();
-                tempShaderInputEntry[count].m_attribName = QByteArray(reinterpret_cast<const char *>(nameBuf));
-                tempShaderInputEntry[count].m_attribLocation = GL_CALL_FUNCTION(glGetAttribLocation(programID, (char *)nameBuf));
-                tempShaderInputEntry[count].m_type = glType;
-                tempShaderInputEntry[count].m_numComponents = numComps;
-
-                ++count;
-            }
-
-            // Now allocate space for the actuall entries
-            quint32 shaderInputSize = sizeof(QSSGRenderBackendShaderInputGL);
-            quint32 entrySize = sizeof(QSSGRenderBackendShaderInputEntryGL) * count;
-            quint8 *newMem = static_cast<quint8 *>(::malloc(shaderInputSize + entrySize));
-            QSSGDataRef<QSSGRenderBackendShaderInputEntryGL> entryRef = PtrAtOffset<QSSGRenderBackendShaderInputEntryGL>(newMem, shaderInputSize, entrySize);
-            // fill data
-            for (int idx = 0; idx != count; ++idx) {
-                new (&entryRef[idx]) QSSGRenderBackendShaderInputEntryGL();
-                entryRef[idx].m_attribName = tempShaderInputEntry[idx].m_attribName;
-                entryRef[idx].m_attribLocation = tempShaderInputEntry[idx].m_attribLocation;
-                entryRef[idx].m_type = tempShaderInputEntry[idx].m_type;
-                entryRef[idx].m_numComponents = tempShaderInputEntry[idx].m_numComponents;
-            }
-
-            // placement new
-            QSSGRenderBackendShaderInputGL *shaderInput = new (newMem) QSSGRenderBackendShaderInputGL(entryRef);
-            // set the pointer
-            pProgram->m_shaderInput = shaderInput;
-
-            ::free(nameBuf);
-            ::free(tempShaderInputEntry);
-        }
-    }
+    // if successfully linked get the attribute information
+    if (linkStatus)
+        getAttributes(pProgram);
 
     // Check if some log exists. We also write warnings here
     // Should at least contain more than the null termination
@@ -1669,6 +1736,53 @@ bool QSSGRenderBackendGLBase::linkProgram(QSSGRenderBackendShaderProgramObject p
     }
 
     return (linkStatus == GL_TRUE);
+}
+
+bool QSSGRenderBackendGLBase::linkProgram(QSSGRenderBackendShaderProgramObject po,
+                                          QByteArray &errorMessage,
+                                          quint32 format, const QByteArray &binary)
+{
+    QSSGRenderBackendShaderProgramGL *pProgram = reinterpret_cast<QSSGRenderBackendShaderProgramGL *>(po);
+    GLuint programID = static_cast<GLuint>(pProgram->m_programID);
+
+    GL_CALL_EXTRA_FUNCTION(glProgramBinary(programID, GLenum(format), binary.constData(), binary.size()));
+
+    GLint linkStatus, logLen;
+    GL_CALL_FUNCTION(glGetProgramiv(programID, GL_LINK_STATUS, &linkStatus));
+    GL_CALL_FUNCTION(glGetProgramiv(programID, GL_INFO_LOG_LENGTH, &logLen));
+
+    // if successfully linked get the attribute information
+    if (linkStatus)
+        getAttributes(pProgram);
+
+    // Check if some log exists. We also write warnings here
+    // Should at least contain more than the null termination
+    if (logLen > 2) {
+        errorMessage.resize(logLen + 1);
+
+        GLint lenWithoutNull;
+        GL_CALL_FUNCTION(glGetProgramInfoLog(programID, logLen, &lenWithoutNull, errorMessage.data()));
+    }
+
+    return (linkStatus == GL_TRUE);
+}
+
+void QSSGRenderBackendGLBase::getProgramBinary(QSSGRenderBackendShaderProgramObject po, quint32 &format, QByteArray &binary)
+{
+    QSSGRenderBackendShaderProgramGL *pProgram = reinterpret_cast<QSSGRenderBackendShaderProgramGL *>(po);
+    GLuint programID = static_cast<GLuint>(pProgram->m_programID);
+    GLint binLen, linkStatus;
+
+    GL_CALL_FUNCTION(glGetProgramiv(programID, GL_LINK_STATUS, &linkStatus));
+    Q_ASSERT(linkStatus == GL_TRUE);
+
+    GL_CALL_FUNCTION(glGetProgramiv(programID, GL_PROGRAM_BINARY_LENGTH, &binLen));
+
+    binary.resize(binLen);
+    GLenum fmt;
+    GL_CALL_EXTRA_FUNCTION(glGetProgramBinary(programID, binLen, nullptr, &fmt,
+                                              binary.data()));
+    format = fmt;
 }
 
 void QSSGRenderBackendGLBase::setActiveProgram(QSSGRenderBackendShaderProgramObject po)
@@ -1686,14 +1800,14 @@ void QSSGRenderBackendGLBase::setActiveProgram(QSSGRenderBackendShaderProgramObj
 QSSGRenderBackend::QSSGRenderBackendProgramPipeline QSSGRenderBackendGLBase::createProgramPipeline()
 {
     // needs GL 4 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
     return QSSGRenderBackend::QSSGRenderBackendProgramPipeline(nullptr);
 }
 
 void QSSGRenderBackendGLBase::releaseProgramPipeline(QSSGRenderBackendProgramPipeline)
 {
     // needs GL 4 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::setActiveProgramPipeline(QSSGRenderBackendProgramPipeline)
@@ -1706,13 +1820,13 @@ void QSSGRenderBackendGLBase::setActiveProgramPipeline(QSSGRenderBackendProgramP
 void QSSGRenderBackendGLBase::setProgramStages(QSSGRenderBackendProgramPipeline, QSSGRenderShaderTypeFlags, QSSGRenderBackendShaderProgramObject)
 {
     // needs GL 4 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::dispatchCompute(QSSGRenderBackendShaderProgramObject, quint32, quint32, quint32)
 {
     // needs GL 4 context
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 qint32 QSSGRenderBackendGLBase::getConstantCount(QSSGRenderBackendShaderProgramObject po)
@@ -1779,7 +1893,7 @@ qint32 QSSGRenderBackendGLBase::getConstantBufferInfoByID(QSSGRenderBackendShade
     Q_UNUSED(length)
     Q_UNUSED(nameBuf)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return -1;
 }
@@ -1791,7 +1905,7 @@ void QSSGRenderBackendGLBase::getConstantBufferParamIndices(QSSGRenderBackendSha
     Q_UNUSED(id)
     Q_UNUSED(indices)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::getConstantBufferParamInfoByIndices(QSSGRenderBackendShaderProgramObject po,
@@ -1809,7 +1923,7 @@ void QSSGRenderBackendGLBase::getConstantBufferParamInfoByIndices(QSSGRenderBack
     Q_UNUSED(size)
     Q_UNUSED(offset)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::programSetConstantBlock(QSSGRenderBackendShaderProgramObject po, quint32 blockIndex, quint32 binding)
@@ -1819,7 +1933,7 @@ void QSSGRenderBackendGLBase::programSetConstantBlock(QSSGRenderBackendShaderPro
     Q_UNUSED(blockIndex)
     Q_UNUSED(binding)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 void QSSGRenderBackendGLBase::programSetConstantBuffer(quint32 index, QSSGRenderBackendBufferObject bo)
@@ -1828,7 +1942,7 @@ void QSSGRenderBackendGLBase::programSetConstantBuffer(quint32 index, QSSGRender
     Q_UNUSED(index)
     Q_UNUSED(bo)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 }
 
 qint32 QSSGRenderBackendGLBase::getStorageBufferCount(QSSGRenderBackendShaderProgramObject po)
@@ -1856,7 +1970,7 @@ qint32 QSSGRenderBackendGLBase::getStorageBufferInfoByID(QSSGRenderBackendShader
     Q_UNUSED(length)
     Q_UNUSED(nameBuf)
 
-    qCCritical(INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
+    qCCritical(RENDER_INVALID_OPERATION) << QObject::tr("Unsupported method: ") << __FUNCTION__;
 
     return -1;
 }
@@ -1894,10 +2008,8 @@ void QSSGRenderBackendGLBase::setConstantValue(QSSGRenderBackendShaderProgramObj
         GL_CALL_FUNCTION(glUniform1iv(GLint(id), count, reinterpret_cast<const GLint *>(value)));
         break;
     case GL_BOOL: {
-        // Cast int value to be 0 or 1, matching to bool
-        GLint *boolValue = (GLint *)value;
-        *boolValue = *(GLboolean *)value;
-        GL_CALL_FUNCTION(glUniform1iv(GLint(id), count, boolValue));
+        const GLint boolValue = value ? *reinterpret_cast<const bool *>(value) : false;
+        GL_CALL_FUNCTION(glUniform1iv(GLint(id), count, &boolValue));
     } break;
     case GL_INT_VEC2:
     case GL_BOOL_VEC2:
@@ -1930,7 +2042,7 @@ void QSSGRenderBackendGLBase::setConstantValue(QSSGRenderBackendShaderProgramObj
         }
     } break;
     default:
-        qCCritical(INTERNAL_ERROR, "Unknown shader type format %d", int(type));
+        qCCritical(RENDER_INTERNAL_ERROR, "Unknown shader type format %d", int(type));
         Q_ASSERT(false);
         break;
     }
@@ -1968,6 +2080,15 @@ void QSSGRenderBackendGLBase::readPixel(QSSGRenderBackendRenderTargetObject /* r
 }
 
 ///< private calls
+const char *QSSGRenderBackendGLBase::getShadingLanguageVersionString()
+{
+    const GLubyte *retval = GL_CALL_FUNCTION(glGetString(GL_SHADING_LANGUAGE_VERSION));
+    if (retval == nullptr)
+        return "";
+
+    return reinterpret_cast<const char *>(retval);
+}
+
 const char *QSSGRenderBackendGLBase::getVersionString()
 {
     const GLubyte *retval = GL_CALL_FUNCTION(glGetString(GL_VERSION));
@@ -2015,7 +2136,7 @@ const char *QSSGRenderBackendGLBase::getExtensionString()
 void QSSGRenderBackendGLBase::setAndInspectHardwareCaps()
 {
     QByteArray apiVersion(getVersionString());
-    qCInfo(TRACE_INFO, "GL version: %s", apiVersion.constData());
+    qCInfo(RENDER_TRACE_INFO, "GL version: %s", apiVersion.constData());
 
     // we assume all GLES versions running on mobile with shared memory
     // this means framebuffer blits are slow and should be optimized or avoided

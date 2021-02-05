@@ -163,11 +163,14 @@ private:
     ComPtr<QNetworkConnectionEvents> connectionEvents;
     // We can assume we have access to internet/subnet when this class is created because
     // connection has already been established to the peer:
-    NLM_CONNECTIVITY connectivity =
-            NLM_CONNECTIVITY(NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET
-                             | NLM_CONNECTIVITY_IPV4_SUBNET | NLM_CONNECTIVITY_IPV6_SUBNET);
+    NLM_CONNECTIVITY connectivity = NLM_CONNECTIVITY(
+            NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET
+            | NLM_CONNECTIVITY_IPV4_SUBNET | NLM_CONNECTIVITY_IPV6_SUBNET
+            | NLM_CONNECTIVITY_IPV4_LOCALNETWORK | NLM_CONNECTIVITY_IPV6_LOCALNETWORK
+            | NLM_CONNECTIVITY_IPV4_NOTRAFFIC | NLM_CONNECTIVITY_IPV6_NOTRAFFIC);
 
     bool sameSubnet = false;
+    bool isLinkLocal = false;
     bool monitoring = false;
     bool comInitFailed = false;
     bool remoteIsIPv6 = false;
@@ -370,6 +373,7 @@ bool QNetworkConnectionMonitorPrivate::setTargets(const QHostAddress &local,
         return false;
     }
     sameSubnet = remote.isInSubnet(local, it->prefixLength());
+    isLinkLocal = remote.isLinkLocal() && local.isLinkLocal();
     remoteIsIPv6 = remote.protocol() == QAbstractSocket::IPv6Protocol;
 
     return connectionEvents->setTarget(iface);
@@ -461,9 +465,28 @@ void QNetworkConnectionMonitor::stopMonitoring()
 bool QNetworkConnectionMonitor::isReachable()
 {
     Q_D(QNetworkConnectionMonitor);
-    NLM_CONNECTIVITY required = d->sameSubnet
-            ? (d->remoteIsIPv6 ? NLM_CONNECTIVITY_IPV6_SUBNET : NLM_CONNECTIVITY_IPV4_SUBNET)
-            : (d->remoteIsIPv6 ? NLM_CONNECTIVITY_IPV6_INTERNET : NLM_CONNECTIVITY_IPV4_INTERNET);
+
+    const NLM_CONNECTIVITY RequiredSameSubnetIPv6 =
+            NLM_CONNECTIVITY(NLM_CONNECTIVITY_IPV6_SUBNET | NLM_CONNECTIVITY_IPV6_LOCALNETWORK
+                             | NLM_CONNECTIVITY_IPV6_INTERNET);
+    const NLM_CONNECTIVITY RequiredSameSubnetIPv4 =
+            NLM_CONNECTIVITY(NLM_CONNECTIVITY_IPV4_SUBNET | NLM_CONNECTIVITY_IPV4_LOCALNETWORK
+                             | NLM_CONNECTIVITY_IPV4_INTERNET);
+
+    NLM_CONNECTIVITY required;
+    if (d->isLinkLocal) {
+        required = NLM_CONNECTIVITY(
+                d->remoteIsIPv6 ? NLM_CONNECTIVITY_IPV6_NOTRAFFIC | RequiredSameSubnetIPv6
+                                : NLM_CONNECTIVITY_IPV4_NOTRAFFIC | RequiredSameSubnetIPv4);
+    } else if (d->sameSubnet) {
+        required =
+                NLM_CONNECTIVITY(d->remoteIsIPv6 ? RequiredSameSubnetIPv6 : RequiredSameSubnetIPv4);
+
+    } else {
+        required = NLM_CONNECTIVITY(d->remoteIsIPv6 ? NLM_CONNECTIVITY_IPV6_INTERNET
+                                                    : NLM_CONNECTIVITY_IPV4_INTERNET);
+    }
+
     return d_func()->connectivity & required;
 }
 
@@ -489,7 +512,6 @@ public:
 
     Q_REQUIRED_RESULT
     bool start();
-    Q_REQUIRED_RESULT
     bool stop();
 
 private:
@@ -595,6 +617,14 @@ bool QNetworkListManagerEvents::start()
                             << errorStringFromHResult(hr);
         return false;
     }
+
+    // Update connectivity since it might have changed since this class was constructed
+    NLM_CONNECTIVITY connectivity;
+    hr = networkListManager->GetConnectivity(&connectivity);
+    if (FAILED(hr))
+        qCWarning(lcNetMon) << "Could not get connectivity:" << errorStringFromHResult(hr);
+    else
+        monitor->setConnectivity(connectivity);
     return true;
 }
 
@@ -628,8 +658,6 @@ QNetworkStatusMonitorPrivate::~QNetworkStatusMonitorPrivate()
         return;
     if (monitoring)
         stop();
-    managerEvents.Reset();
-    CoUninitialize();
 }
 
 void QNetworkStatusMonitorPrivate::setConnectivity(NLM_CONNECTIVITY newConnectivity)
@@ -645,10 +673,20 @@ void QNetworkStatusMonitorPrivate::setConnectivity(NLM_CONNECTIVITY newConnectiv
 
 bool QNetworkStatusMonitorPrivate::start()
 {
-    if (comInitFailed)
-        return false;
-    Q_ASSERT(managerEvents);
     Q_ASSERT(!monitoring);
+
+    if (comInitFailed) {
+        auto hr = CoInitialize(nullptr);
+        if (FAILED(hr)) {
+            qCWarning(lcNetMon) << "Failed to initialize COM:" << errorStringFromHResult(hr);
+            comInitFailed = true;
+            return false;
+        }
+        comInitFailed = false;
+    }
+    if (!managerEvents)
+        managerEvents = new QNetworkListManagerEvents(this);
+
     if (managerEvents->start())
         monitoring = true;
     return monitoring;
@@ -658,11 +696,19 @@ void QNetworkStatusMonitorPrivate::stop()
 {
     Q_ASSERT(managerEvents);
     Q_ASSERT(monitoring);
-    if (managerEvents->stop())
-        monitoring = false;
+    // Can return false but realistically shouldn't since that would break everything:
+    managerEvents->stop();
+    monitoring = false;
+    managerEvents.Reset();
+
+    CoUninitialize();
+    comInitFailed = true; // we check this value in start() to see if we need to re-initialize
 }
 
-QNetworkStatusMonitor::QNetworkStatusMonitor() : QObject(*new QNetworkStatusMonitorPrivate) {}
+QNetworkStatusMonitor::QNetworkStatusMonitor(QObject *parent)
+    : QObject(*new QNetworkStatusMonitorPrivate, parent)
+{
+}
 
 QNetworkStatusMonitor::~QNetworkStatusMonitor() {}
 
@@ -695,7 +741,18 @@ bool QNetworkStatusMonitor::isNetworkAccessible()
 {
     return d_func()->connectivity
             & (NLM_CONNECTIVITY_IPV4_INTERNET | NLM_CONNECTIVITY_IPV6_INTERNET
-               | NLM_CONNECTIVITY_IPV4_SUBNET | NLM_CONNECTIVITY_IPV6_SUBNET);
+               | NLM_CONNECTIVITY_IPV4_SUBNET | NLM_CONNECTIVITY_IPV6_SUBNET
+               | NLM_CONNECTIVITY_IPV4_LOCALNETWORK | NLM_CONNECTIVITY_IPV6_LOCALNETWORK);
+}
+
+bool QNetworkStatusMonitor::event(QEvent *event)
+{
+    if (event->type() == QEvent::ThreadChange && isMonitoring()) {
+        stop();
+        QMetaObject::invokeMethod(this, &QNetworkStatusMonitor::start, Qt::QueuedConnection);
+    }
+
+    return QObject::event(event);
 }
 
 bool QNetworkStatusMonitor::isEnabled()

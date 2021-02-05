@@ -1149,7 +1149,7 @@ void tst_QSettings::setValue()
     QCOMPARE(settings.value("key 2").toStringList(), QStringList() << "" << "a" << "" << "bc" << "");
 
     settings.setValue("key 3", QList<QVariant>());
-    QCOMPARE(settings.value("key 3").toList(), QList<QVariant>());
+    QVERIFY(settings.value("key 3").toList().isEmpty());
     settings.setValue("key 3", QList<QVariant>() << 1 << QString("a"));
     QCOMPARE(settings.value("key 3").toList(), QList<QVariant>() << 1 << QString("a"));
 
@@ -2331,14 +2331,15 @@ void tst_QSettings::testRegistry32And64Bit()
 
 void tst_QSettings::trailingWhitespace()
 {
+    const QString path = settingsPath("trailingWhitespace");
     {
-        QSettings s("tst_QSettings_trailingWhitespace");
+        QSettings s(path, QSettings::IniFormat);
         s.setValue("trailingSpace", "x  ");
         s.setValue("trailingTab", "x\t");
         s.setValue("trailingNewline", "x\n");
     }
     {
-        QSettings s("tst_QSettings_trailingWhitespace");
+        QSettings s(path, QSettings::IniFormat);
         QCOMPARE(s.value("trailingSpace").toString(), QLatin1String("x  "));
         QCOMPARE(s.value("trailingTab").toString(), QLatin1String("x\t"));
         QCOMPARE(s.value("trailingNewline").toString(), QLatin1String("x\n"));
@@ -2931,8 +2932,10 @@ void tst_QSettings::testEscapes()
     testVariant(QString("Hello, World!"), QString("Hello, World!"), toString);
     testVariant(QString("@Hello World!"), QString("@@Hello World!"), toString);
     testVariant(QString("@@Hello World!"), QString("@@@Hello World!"), toString);
+#if QT_DEPRECATED_SINCE(5, 15)
     testVariant(QByteArray("Hello World!"), QString("@ByteArray(Hello World!)"), toString);
     testVariant(QByteArray("@Hello World!"), QString("@ByteArray(@Hello World!)"), toString);
+#endif
     testVariant(QVariant(100), QString("100"), toString);
     testVariant(QStringList() << "ene" << "due" << "rike", QString::fromLatin1("@Variant(\x0\x0\x0\xb\x0\x0\x0\x3\x0\x0\x0\x6\x0\x65\x0n\x0\x65\x0\x0\x0\x6\x0\x64\x0u\x0\x65\x0\x0\x0\x8\x0r\x0i\x0k\x0\x65)", 50), toStringList);
     testVariant(QRect(1, 2, 3, 4), QString("@Rect(1 2 3 4)"), toRect);

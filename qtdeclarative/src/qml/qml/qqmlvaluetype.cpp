@@ -42,11 +42,13 @@
 #include <QtCore/qmutex.h>
 #include <private/qqmlglobal_p.h>
 #include <QtCore/qdebug.h>
+#include <private/qqmlengine_p.h>
 #include <private/qmetaobjectbuilder_p.h>
 #if QT_CONFIG(qml_itemmodel)
 #include <private/qqmlmodelindexvaluetype_p.h>
 #endif
-#include <private/qmetatype_p.h>
+
+Q_DECLARE_METATYPE(QQmlProperty)
 
 QT_BEGIN_NAMESPACE
 
@@ -62,7 +64,7 @@ struct QQmlValueTypeFactoryImpl
     const QMetaObject *metaObjectForMetaType(int);
     QQmlValueType *valueType(int);
 
-    QQmlValueType *valueTypes[QVariant::UserType];
+    QQmlValueType *valueTypes[QMetaType::User];
     QHash<int, QQmlValueType *> userTypes;
     QMutex mutex;
 
@@ -71,7 +73,7 @@ struct QQmlValueTypeFactoryImpl
 
 QQmlValueTypeFactoryImpl::QQmlValueTypeFactoryImpl()
 {
-    std::fill_n(valueTypes, int(QVariant::UserType), &invalidValueType);
+    std::fill_n(valueTypes, int(QMetaType::User), &invalidValueType);
 
 #if QT_CONFIG(qml_itemmodel)
     // See types wrapped in qqmlmodelindexvaluetype_p.h
@@ -118,24 +120,24 @@ bool QQmlValueTypeFactoryImpl::isValueType(int idx)
 const QMetaObject *QQmlValueTypeFactoryImpl::metaObjectForMetaType(int t)
 {
     switch (t) {
-    case QVariant::Point:
+    case QMetaType::QPoint:
         return &QQmlPointValueType::staticMetaObject;
-    case QVariant::PointF:
+    case QMetaType::QPointF:
         return &QQmlPointFValueType::staticMetaObject;
-    case QVariant::Size:
+    case QMetaType::QSize:
         return &QQmlSizeValueType::staticMetaObject;
-    case QVariant::SizeF:
+    case QMetaType::QSizeF:
         return &QQmlSizeFValueType::staticMetaObject;
-    case QVariant::Rect:
+    case QMetaType::QRect:
         return &QQmlRectValueType::staticMetaObject;
-    case QVariant::RectF:
+    case QMetaType::QRectF:
         return &QQmlRectFValueType::staticMetaObject;
-    case QVariant::EasingCurve:
+    case QMetaType::QEasingCurve:
         return &QQmlEasingValueType::staticMetaObject;
 #if QT_CONFIG(qml_itemmodel)
-    case QVariant::ModelIndex:
+    case QMetaType::QModelIndex:
         return &QQmlModelIndexValueType::staticMetaObject;
-    case QVariant::PersistentModelIndex:
+    case QMetaType::QPersistentModelIndex:
         return &QQmlPersistentModelIndexValueType::staticMetaObject;
 #endif
     default:
@@ -143,7 +145,8 @@ const QMetaObject *QQmlValueTypeFactoryImpl::metaObjectForMetaType(int t)
         if (t == qMetaTypeId<QItemSelectionRange>())
             return &QQmlItemSelectionRangeValueType::staticMetaObject;
 #endif
-
+        if (t == qMetaTypeId<QQmlProperty>())
+            return &QQmlPropertyValueType::staticMetaObject;
         if (const QMetaObject *mo = QQml_valueTypeProvider()->metaObjectForMetaType(t))
             return mo;
         break;
@@ -157,7 +160,7 @@ const QMetaObject *QQmlValueTypeFactoryImpl::metaObjectForMetaType(int t)
 
 QQmlValueType *QQmlValueTypeFactoryImpl::valueType(int idx)
 {
-    if (idx >= (int)QVariant::UserType) {
+    if (idx >= (int)QMetaType::User) {
         // Protect the hash with a mutex
         mutex.lock();
 
@@ -214,61 +217,82 @@ void QQmlValueTypeFactory::registerValueTypes(const char *uri, int versionMajor,
     qmlRegisterValueTypeEnums<QQmlEasingValueType>(uri, versionMajor, versionMinor, "Easing");
 }
 
-QQmlValueType::QQmlValueType() :
-    _metaObject(nullptr),
-    gadgetPtr(nullptr),
-    metaType(QMetaType::UnknownType)
-{
-}
-
 QQmlValueType::QQmlValueType(int typeId, const QMetaObject *gadgetMetaObject)
-    : gadgetPtr(QMetaType::create(typeId))
-    , metaType(typeId)
+    : metaType(typeId)
 {
-    QObjectPrivate *op = QObjectPrivate::get(this);
-    Q_ASSERT(!op->metaObject);
-    op->metaObject = this;
-
     QMetaObjectBuilder builder(gadgetMetaObject);
-    _metaObject = builder.toMetaObject();
-
-    *static_cast<QMetaObject*>(this) = *_metaObject;
+    dynamicMetaObject = builder.toMetaObject();
+    *static_cast<QMetaObject*>(this) = *dynamicMetaObject;
 }
 
 QQmlValueType::~QQmlValueType()
 {
-    QObjectPrivate *op = QObjectPrivate::get(this);
-    Q_ASSERT(op->metaObject == nullptr || op->metaObject == this);
-    op->metaObject = nullptr;
-    ::free(const_cast<QMetaObject *>(_metaObject));
-    metaType.destroy(gadgetPtr);
+    ::free(dynamicMetaObject);
 }
 
-void QQmlValueType::read(QObject *obj, int idx)
+QQmlGadgetPtrWrapper *QQmlGadgetPtrWrapper::instance(QQmlEngine *engine, int index)
 {
-    void *a[] = { gadgetPtr, nullptr };
+    return engine ? QQmlEnginePrivate::get(engine)->valueTypeInstance(index) : nullptr;
+}
+
+QQmlGadgetPtrWrapper::QQmlGadgetPtrWrapper(QQmlValueType *valueType, QObject *parent)
+    : QObject(parent), m_gadgetPtr(valueType->create())
+{
+    QObjectPrivate *d = QObjectPrivate::get(this);
+    Q_ASSERT(!d->metaObject);
+    d->metaObject = valueType;
+}
+
+QQmlGadgetPtrWrapper::~QQmlGadgetPtrWrapper()
+{
+    QObjectPrivate *d = QObjectPrivate::get(this);
+    static_cast<const QQmlValueType *>(d->metaObject)->destroy(m_gadgetPtr);
+    d->metaObject = nullptr;
+}
+
+void QQmlGadgetPtrWrapper::read(QObject *obj, int idx)
+{
+    Q_ASSERT(m_gadgetPtr);
+    void *a[] = { m_gadgetPtr, nullptr };
     QMetaObject::metacall(obj, QMetaObject::ReadProperty, idx, a);
 }
 
-void QQmlValueType::write(QObject *obj, int idx, QQmlPropertyData::WriteFlags flags)
+void QQmlGadgetPtrWrapper::write(QObject *obj, int idx, QQmlPropertyData::WriteFlags flags)
 {
-    Q_ASSERT(gadgetPtr);
+    Q_ASSERT(m_gadgetPtr);
     int status = -1;
-    void *a[] = { gadgetPtr, nullptr, &status, &flags };
+    void *a[] = { m_gadgetPtr, nullptr, &status, &flags };
     QMetaObject::metacall(obj, QMetaObject::WriteProperty, idx, a);
 }
 
-QVariant QQmlValueType::value()
+QVariant QQmlGadgetPtrWrapper::value()
 {
-    Q_ASSERT(gadgetPtr);
-    return QVariant(metaType.id(), gadgetPtr);
+    Q_ASSERT(m_gadgetPtr);
+    return QVariant(metaTypeId(), m_gadgetPtr);
 }
 
-void QQmlValueType::setValue(const QVariant &value)
+void QQmlGadgetPtrWrapper::setValue(const QVariant &value)
 {
-    Q_ASSERT(metaType.id() == value.userType());
-    metaType.destruct(gadgetPtr);
-    metaType.construct(gadgetPtr, value.constData());
+    Q_ASSERT(m_gadgetPtr);
+    Q_ASSERT(metaTypeId() == value.userType());
+    const QQmlValueType *type = valueType();
+    type->destruct(m_gadgetPtr);
+    type->construct(m_gadgetPtr, value.constData());
+}
+
+int QQmlGadgetPtrWrapper::metaCall(QMetaObject::Call type, int id, void **argv)
+{
+    Q_ASSERT(m_gadgetPtr);
+    const QMetaObject *metaObject = valueType();
+    QQmlMetaObject::resolveGadgetMethodOrPropertyIndex(type, &metaObject, &id);
+    metaObject->d.static_metacall(static_cast<QObject *>(m_gadgetPtr), type, id, argv);
+    return id;
+}
+
+const QQmlValueType *QQmlGadgetPtrWrapper::valueType() const
+{
+    const QObjectPrivate *d = QObjectPrivate::get(this);
+    return static_cast<const QQmlValueType *>(d->metaObject);
 }
 
 QAbstractDynamicMetaObject *QQmlValueType::toDynamicMetaObject(QObject *)
@@ -280,12 +304,9 @@ void QQmlValueType::objectDestroyed(QObject *)
 {
 }
 
-int QQmlValueType::metaCall(QObject *, QMetaObject::Call type, int _id, void **argv)
+int QQmlValueType::metaCall(QObject *object, QMetaObject::Call type, int _id, void **argv)
 {
-    const QMetaObject *mo = _metaObject;
-    QQmlMetaObject::resolveGadgetMethodOrPropertyIndex(type, &mo, &_id);
-    mo->d.static_metacall(reinterpret_cast<QObject*>(gadgetPtr), type, _id, argv);
-    return _id;
+    return static_cast<QQmlGadgetPtrWrapper *>(object)->metaCall(type, _id, argv);
 }
 
 QString QQmlPointFValueType::toString() const
@@ -578,6 +599,16 @@ void QQmlEasingValueType::setBezierCurve(const QVariantList &customCurveVariant)
     }
 
     v = newEasingCurve;
+}
+
+QObject *QQmlPropertyValueType::object() const
+{
+    return v.object();
+}
+
+QString QQmlPropertyValueType::name() const
+{
+    return v.name();
 }
 
 QVariantList QQmlEasingValueType::bezierCurve() const

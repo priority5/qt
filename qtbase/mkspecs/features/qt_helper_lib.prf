@@ -58,9 +58,9 @@ win32|CONFIG(static, static|shared) {
         "QMAKE_DEPENDS_$${ucmodule}_LD =$$join(LD_USES, " ", " ")" \
         "QMAKE_INCDIR_$${ucmodule} = $$val_escape(MODULE_INCLUDEPATH)" \
         "QMAKE_DEFINES_$${ucmodule} = $$val_escape(MODULE_DEFINES)"
-    android {
+    !single_android_abi:android {
         MODULE_PRI_CONT += "QMAKE_LIBS_$${ucmodule} ="
-    } else: debug_and_release {
+    } else: if(msvc|qtConfig(debug_and_release)): {
         win32: \
             MODULE_DEBUG_LIBS = $$DESTDIR/$$prefix$${TARGET}d.$$suffix
         else: darwin: \

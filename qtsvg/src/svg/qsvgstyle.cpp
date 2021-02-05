@@ -232,7 +232,7 @@ void QSvgFontStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &states
     QFont font = m_oldQFont;
     if (m_familySet) {
         states.svgFont = m_svgFont;
-        font.setFamily(m_qfont.family());
+        font.setFamilies(m_qfont.families());
     }
 
     if (m_sizeSet)
@@ -421,16 +421,16 @@ QBrush QSvgGradientStyle::brush(QPainter *, QSvgExtraStates &)
 
     QBrush b(*m_gradient);
 
-    if (!m_matrix.isIdentity())
-        b.setMatrix(m_matrix);
+    if (!m_transform.isIdentity())
+        b.setTransform(m_transform);
 
     return b;
 }
 
 
-void QSvgGradientStyle::setMatrix(const QMatrix &mat)
+void QSvgGradientStyle::setTransform(const QTransform &transform)
 {
-    m_matrix = mat;
+    m_transform = transform;
 }
 
 QSvgTransformStyle::QSvgTransformStyle(const QTransform &trans)

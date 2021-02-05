@@ -42,12 +42,17 @@
 
 #include "components/viz/service/display_embedder/output_surface_provider_impl.h"
 #include "gpu/ipc/in_process_command_buffer.h"
+#include <qtgui-config.h>
 
 std::unique_ptr<viz::OutputSurface>
 viz::OutputSurfaceProviderImpl::CreateGLOutputSurface(
         scoped_refptr<VizProcessContextProvider> context_provider)
 {
+#if QT_CONFIG(opengl)
     return std::make_unique<QtWebEngineCore::DisplayGLOutputSurface>(std::move(context_provider));
+#else
+    return nullptr;
+#endif // QT_CONFIG(opengl)
 }
 
 std::unique_ptr<viz::OutputSurface>
@@ -71,7 +76,10 @@ void gpu::InProcessCommandBuffer::GetTextureQt(
 void gpu::InProcessCommandBuffer::GetTextureQtOnGpuThread(
         unsigned int client_id, GetTextureCallback callback)
 {
-    MakeCurrent();
+    if (!MakeCurrent()) {
+        LOG(ERROR) << "MakeCurrent failed for GetTextureQt";
+        return;
+    }
     gpu::TextureBase *texture = decoder_->GetTextureBase(client_id);
     std::move(callback).Run(texture ? texture->service_id() : 0, gl::GLFence::Create());
 }

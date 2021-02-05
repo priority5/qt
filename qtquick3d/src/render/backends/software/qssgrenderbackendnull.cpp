@@ -42,7 +42,7 @@ struct QSSGNullBackend : public QSSGRenderBackend
     /// backend interface
 
     QSSGRenderContextType getRenderContextType() const override { return QSSGRenderContextType::NullContext; }
-    const char *getShadingLanguageVersion() override { return ""; }
+    QByteArray getShadingLanguageVersion() override { return ""; }
     qint32 getMaxCombinedTextureUnits() override { return 32; }
     bool getRenderBackendCap(QSSGRenderBackendCaps) const override { return false; }
     void getRenderBackendValue(QSSGRenderBackendQuery inQuery, qint32 *params) const override
@@ -64,6 +64,7 @@ struct QSSGNullBackend : public QSSGRenderBackend
     }
     qint32 getDepthBits() const override { return 16; }
     qint32 getStencilBits() const override { return 0; }
+    qint32 getMaxSamples() const override { return 4; }
     void setRenderState(bool, const QSSGRenderState) override {}
     bool getRenderState(const QSSGRenderState) override { return false; }
     QSSGRenderBackendDepthStencilStateObject createDepthStencilState(bool,
@@ -283,6 +284,7 @@ struct QSSGNullBackend : public QSSGRenderBackend
     {
     }
     void bindTexture(QSSGRenderBackendTextureObject, QSSGRenderTextureTargetType, qint32) override {}
+    void setActiveTexture(qint32) override {}
     void bindImageTexture(QSSGRenderBackendTextureObject, quint32, qint32, bool, qint32, QSSGRenderImageAccessType, QSSGRenderTextureFormat) override
     {
     }
@@ -357,6 +359,7 @@ struct QSSGNullBackend : public QSSGRenderBackend
     {
         return false;
     }
+    void resetStates() override {};
     void setPatchVertexCount(QSSGRenderBackendInputAssemblerObject, quint32) override {}
     QSSGRenderBackendVertexShaderObject createVertexShader(QSSGByteView, QByteArray &, bool) override
     {
@@ -412,6 +415,8 @@ struct QSSGNullBackend : public QSSGRenderBackend
     void releaseProgramPipeline(QSSGRenderBackendProgramPipeline) override {}
 
     bool linkProgram(QSSGRenderBackendShaderProgramObject, QByteArray &) override { return false; }
+    bool linkProgram(QSSGRenderBackendShaderProgramObject , QByteArray &, quint32 , const QByteArray &) override { return false; }
+    void getProgramBinary(QSSGRenderBackendShaderProgramObject ,quint32 &, QByteArray &) override {};
     void setActiveProgram(QSSGRenderBackendShaderProgramObject) override {}
     void setActiveProgramPipeline(QSSGRenderBackendProgramPipeline) override {}
     void setProgramStages(QSSGRenderBackendProgramPipeline, QSSGRenderShaderTypeFlags, QSSGRenderBackendShaderProgramObject) override

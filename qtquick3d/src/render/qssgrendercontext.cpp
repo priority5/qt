@@ -42,6 +42,7 @@ QSSGRenderContext::QSSGRenderContext(const QSSGRef<QSSGRenderBackend> &inBackend
     , m_defaultOffscreenRenderTarget(nullptr)
     , m_depthBits(16)
     , m_stencilBits(8)
+    , m_maxSamples(4)
     , m_nextTextureUnit(1)
     , m_nextConstantBufferUnit(1)
 {
@@ -201,7 +202,6 @@ void QSSGRenderContext::setInputAssembler(const QSSGRef<QSSGRenderInputAssembler
         return;
 
     m_hardwarePropertyContext.m_inputAssembler = inputAssembler;
-    m_dirtyFlags |= QSSGRenderContextDirtyValues::InputAssembler;
 }
 
 QSSGRenderVertFragCompilationResult QSSGRenderContext::compileSource(const char *shaderName,
@@ -255,6 +255,23 @@ QSSGRenderVertFragCompilationResult QSSGRenderContext::compileBinary(const char 
 #endif
 }
 
+QSSGRenderVertFragCompilationResult QSSGRenderContext::compileBinary(const char *shaderName,
+                                                                     quint32 format,
+                                                                     const QByteArray &binary)
+{
+#ifndef _MACOSX
+    QSSGRenderVertFragCompilationResult result = QSSGRenderShaderProgram::create(this,
+                                                                                 shaderName,
+                                                                                 format,
+                                                                                 binary);
+
+    return result;
+#else
+    Q_ASSERT(false);
+    return QSSGRenderVertFragCompilationResult();
+#endif
+}
+
 QSSGRenderVertFragCompilationResult QSSGRenderContext::compileComputeSource(const QByteArray &shaderName,
                                                                                 QSSGByteView computeShaderSource)
 {
@@ -300,6 +317,16 @@ void QSSGRenderContext::setBlendEquation(QSSGRenderBlendEquationArgument inEquat
 
     m_hardwarePropertyContext.m_blendEquation = inEquations;
     m_backend->setBlendEquation(inEquations);
+}
+
+void QSSGRenderContext::resetBlendEquation(bool forceSet)
+{
+    const QSSGRenderBlendEquationArgument defaultBlendEqua;
+    if (!forceSet && m_hardwarePropertyContext.m_blendEquation == defaultBlendEqua)
+        return;
+
+    m_hardwarePropertyContext.m_blendEquation = defaultBlendEqua;
+    m_backend->setBlendEquation(defaultBlendEqua);
 }
 
 void QSSGRenderContext::setCullingEnabled(bool inEnabled, bool forceSet)
@@ -572,7 +599,7 @@ void QSSGRenderContext::popPropertySet(bool inForceSetProperties)
 
 void QSSGRenderContext::clear(QSSGRenderClearFlags flags)
 {
-    if ((flags & QSSGRenderClearValues::Depth) && m_hardwarePropertyContext.m_depthWriteEnabled == false) {
+    if (Q_UNLIKELY((flags & QSSGRenderClearValues::Depth) && !m_hardwarePropertyContext.m_depthWriteEnabled)) {
         Q_ASSERT(false);
         setDepthWriteEnabled(true);
     }
@@ -618,6 +645,13 @@ void QSSGRenderContext::copyFramebufferTexture(qint32 srcX0,
                                       QSSGRenderTextureTargetType::Texture2D);
 }
 
+void QSSGRenderContext::releaseResources()
+{
+    m_hardwarePropertyContext = QSSGGLHardPropertyContext();
+    m_constantToImpMap.clear();
+    m_storageToImpMap.clear();
+}
+
 bool QSSGRenderContext::bindShaderToInputAssembler(const QSSGRef<QSSGRenderInputAssembler> &inputAssembler,
                                                      const QSSGRef<QSSGRenderShaderProgram> &shader)
 {
@@ -636,7 +670,7 @@ bool QSSGRenderContext::applyPreDrawProperties()
         shader = m_hardwarePropertyContext.m_activeProgramPipeline->vertexStage();
 
     if (inputAssembler == nullptr || shader == nullptr) {
-        qCCritical(INVALID_OPERATION, "Attempting to render no valid shader or input assembler setup");
+        qCCritical(RENDER_INVALID_OPERATION, "Attempting to render no valid shader or input assembler setup");
         Q_ASSERT(false);
         return false;
     }
@@ -646,6 +680,9 @@ bool QSSGRenderContext::applyPreDrawProperties()
 
 void QSSGRenderContext::onPostDraw()
 {
+    // Reset to default blend equation if needed
+    resetBlendEquation();
+
     // reset input assembler binding
     m_backend->setInputAssembler(nullptr, nullptr);
     // Texture unit 0 is used for setting up and loading textures.

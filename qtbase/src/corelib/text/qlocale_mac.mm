@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2020 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtCore module of the Qt Toolkit.
@@ -67,21 +67,21 @@ static QByteArray envVarLocale()
     return lang;
 }
 
-static QByteArray getMacLocaleName()
+static QString getMacLocaleName()
 {
-    QByteArray result = envVarLocale();
+    QString result = QString::fromLocal8Bit(envVarLocale());
 
     QString lang, script, cntry;
     if (result.isEmpty()
-        || (result != "C" && !qt_splitLocaleName(QString::fromLocal8Bit(result), lang, script, cntry))) {
+        || (result != QLatin1String("C") && !qt_splitLocaleName(result, lang, script, cntry))) {
         QCFType<CFLocaleRef> l = CFLocaleCopyCurrent();
         CFStringRef locale = CFLocaleGetIdentifier(l);
-        result = QString::fromCFString(locale).toUtf8();
+        result = QString::fromCFString(locale);
     }
     return result;
 }
 
-static QString macMonthName(int month, bool short_format)
+static QString macMonthName(int month, QSystemLocale::QueryType type)
 {
     month -= 1;
     if (month < 0 || month > 11)
@@ -90,10 +90,28 @@ static QString macMonthName(int month, bool short_format)
     QCFType<CFDateFormatterRef> formatter
         = CFDateFormatterCreate(0, QCFType<CFLocaleRef>(CFLocaleCopyCurrent()),
                                 kCFDateFormatterNoStyle,  kCFDateFormatterNoStyle);
+
+    CFDateFormatterKey formatterType;
+    switch (type) {
+        case QSystemLocale::MonthNameLong:
+            formatterType = kCFDateFormatterMonthSymbols;
+            break;
+        case QSystemLocale::MonthNameShort:
+            formatterType = kCFDateFormatterShortMonthSymbols;
+            break;
+        case QSystemLocale::StandaloneMonthNameLong:
+            formatterType = kCFDateFormatterStandaloneMonthSymbols;
+            break;
+        case QSystemLocale::StandaloneMonthNameShort:
+            formatterType = kCFDateFormatterShortStandaloneMonthSymbols;
+            break;
+        default:
+            qWarning("macMonthName: Unsupported query type %d", type);
+            return QString();
+    }
     QCFType<CFArrayRef> values
-        = static_cast<CFArrayRef>(CFDateFormatterCopyProperty(formatter,
-                                  short_format ? kCFDateFormatterShortMonthSymbols
-                                               : kCFDateFormatterMonthSymbols));
+        = static_cast<CFArrayRef>(CFDateFormatterCopyProperty(formatter, formatterType));
+
     if (values != 0) {
         CFStringRef cfstring = static_cast<CFStringRef>(CFArrayGetValueAtIndex(values, month));
         return QString::fromCFString(cfstring);
@@ -119,7 +137,7 @@ static QString macDayName(int day, bool short_format)
     return QString();
 }
 
-static QString macDateToString(const QDate &date, bool short_format)
+static QString macDateToString(QDate date, bool short_format)
 {
     QCFType<CFDateRef> myDate = QDateTime(date, QTime()).toCFDate();
     QCFType<CFLocaleRef> mylocale = CFLocaleCopyCurrent();
@@ -131,7 +149,7 @@ static QString macDateToString(const QDate &date, bool short_format)
     return QCFString(CFDateFormatterCreateStringWithDate(0, myFormatter, myDate));
 }
 
-static QString macTimeToString(const QTime &time, bool short_format)
+static QString macTimeToString(QTime time, bool short_format)
 {
     QCFType<CFDateRef> myDate = QDateTime(QDate::currentDate(), time).toCFDate();
     QCFType<CFLocaleRef> mylocale = CFLocaleCopyCurrent();
@@ -283,10 +301,12 @@ static QString getMacTimeFormat(CFDateFormatterStyle style)
     return macToQtFormat(QString::fromCFString(CFDateFormatterGetFormat(formatter)));
 }
 
-static QString getCFLocaleValue(CFStringRef key)
+static QVariant getCFLocaleValue(CFStringRef key)
 {
     QCFType<CFLocaleRef> locale = CFLocaleCopyCurrent();
     CFTypeRef value = CFLocaleGetValue(locale, key);
+    if (!value)
+        return QVariant();
     return QString::fromCFString(CFStringRef(static_cast<CFTypeRef>(value)));
 }
 
@@ -402,23 +422,19 @@ static QVariant macQuoteString(QSystemLocale::QueryType type, const QStringRef &
 
 QLocale QSystemLocale::fallbackUiLocale() const
 {
-    return QLocale(QString::fromUtf8(getMacLocaleName().constData()));
+    return QLocale(getMacLocaleName());
 }
 
-QVariant QSystemLocale::query(QueryType type, QVariant in = QVariant()) const
+QVariant QSystemLocale::query(QueryType type, QVariant in) const
 {
     QMacAutoReleasePool pool;
     switch(type) {
 //     case Name:
 //         return getMacLocaleName();
-    case DecimalPoint: {
-        QString value = getCFLocaleValue(kCFLocaleDecimalSeparator);
-        return value.isEmpty() ? QVariant() : value;
-    }
-    case GroupSeparator: {
-        QString value = getCFLocaleValue(kCFLocaleGroupingSeparator);
-        return value.isEmpty() ? QVariant() : value;
-    }
+    case DecimalPoint:
+        return getCFLocaleValue(kCFLocaleDecimalSeparator);
+    case GroupSeparator:
+        return getCFLocaleValue(kCFLocaleGroupingSeparator);
     case DateFormatLong:
     case DateFormatShort:
         return getMacDateFormat(type == DateFormatShort
@@ -436,7 +452,7 @@ QVariant QSystemLocale::query(QueryType type, QVariant in = QVariant()) const
     case MonthNameShort:
     case StandaloneMonthNameLong:
     case StandaloneMonthNameShort:
-        return macMonthName(in.toInt(), (type == MonthNameShort || type == StandaloneMonthNameShort));
+        return macMonthName(in.toInt(), type);
     case DateToStringShort:
     case DateToStringLong:
         return macDateToString(in.toDate(), (type == DateToStringShort));

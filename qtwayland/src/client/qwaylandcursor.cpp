@@ -219,7 +219,7 @@ wl_cursor *QWaylandCursorTheme::requestCursor(WaylandCursor shape)
     return nullptr;
 }
 
-::wl_cursor_image *QWaylandCursorTheme::cursorImage(Qt::CursorShape shape, uint millisecondsIntoAnimation)
+::wl_cursor *QWaylandCursorTheme::cursor(Qt::CursorShape shape)
 {
     struct wl_cursor *waylandCursor = nullptr;
 
@@ -237,15 +237,7 @@ wl_cursor *QWaylandCursorTheme::requestCursor(WaylandCursor shape)
         return nullptr;
     }
 
-    int frame = wl_cursor_frame(waylandCursor, millisecondsIntoAnimation);
-    ::wl_cursor_image *image = waylandCursor->images[frame];
-    ::wl_buffer *buffer = wl_cursor_image_get_buffer(image);
-    if (!buffer) {
-        qCWarning(lcQpaWayland) << "Could not find buffer for cursor";
-        return nullptr;
-    }
-
-    return image;
+    return waylandCursor;
 }
 
 QWaylandCursor::QWaylandCursor(QWaylandDisplay *display)
@@ -259,7 +251,7 @@ QSharedPointer<QWaylandBuffer> QWaylandCursor::cursorBitmapBuffer(QWaylandDispla
     const QImage &img = cursor->pixmap().toImage();
     QSharedPointer<QWaylandShmBuffer> buffer(new QWaylandShmBuffer(display, img.size(), img.format()));
     memcpy(buffer->image()->bits(), img.bits(), size_t(img.sizeInBytes()));
-    return std::move(buffer);
+    return buffer;
 }
 
 void QWaylandCursor::changeCursor(QCursor *cursor, QWindow *window)

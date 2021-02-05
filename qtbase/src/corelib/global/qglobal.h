@@ -305,6 +305,8 @@ typedef double qreal;
 #  define QT_DEPRECATED_VARIABLE
 #  undef QT_DEPRECATED_CONSTRUCTOR
 #  define QT_DEPRECATED_CONSTRUCTOR
+#  undef Q_DECL_ENUMERATOR_DEPRECATED
+#  define Q_DECL_ENUMERATOR_DEPRECATED
 #endif
 
 #ifndef QT_DEPRECATED_WARNINGS_SINCE
@@ -769,7 +771,7 @@ inline void qt_noop(void) {}
 
 #if !defined(QT_NO_EXCEPTIONS)
 #  if !defined(Q_MOC_RUN)
-#    if (defined(Q_CC_CLANG) && !defined(Q_CC_INTEL) && !QT_HAS_FEATURE(cxx_exceptions)) || \
+#    if (defined(Q_CC_CLANG) && !defined(Q_CC_INTEL) && !__has_feature(cxx_exceptions)) || \
         (defined(Q_CC_GNU) && !defined(__EXCEPTIONS))
 #      define QT_NO_EXCEPTIONS
 #    endif
@@ -944,6 +946,10 @@ QT_WARNING_POP
 #  define Q_DUMMY_COMPARISON_OPERATOR(C)
 #endif
 
+QT_WARNING_PUSH
+// warning: noexcept-expression evaluates to 'false' because of a call to 'void swap(..., ...)'
+QT_WARNING_DISABLE_GCC("-Wnoexcept")
+
 namespace QtPrivate
 {
 namespace SwapExceptionTester { // insulate users from the "using std::swap" below
@@ -962,6 +968,8 @@ inline void qSwap(T &value1, T &value2)
     using std::swap;
     swap(value1, value2);
 }
+
+QT_WARNING_POP
 
 #if QT_DEPRECATED_SINCE(5, 0)
 Q_CORE_EXPORT QT_DEPRECATED void *qMalloc(size_t size) Q_ALLOC_SIZE(1);
@@ -1266,15 +1274,17 @@ inline int qIntCast(float f) { return int(f); }
 /*
   Reentrant versions of basic rand() functions for random number generation
 */
-Q_CORE_EXPORT void qsrand(uint seed);
-Q_CORE_EXPORT int qrand();
+#if QT_DEPRECATED_SINCE(5, 15)
+Q_CORE_EXPORT QT_DEPRECATED_VERSION_X_5_15("use QRandomGenerator instead") void qsrand(uint seed);
+Q_CORE_EXPORT QT_DEPRECATED_VERSION_X_5_15("use QRandomGenerator instead") int qrand();
+#endif
 
 #define QT_MODULE(x)
 
 #if !defined(QT_BOOTSTRAPPED) && defined(QT_REDUCE_RELOCATIONS) && defined(__ELF__) && \
     (!defined(__PIC__) || (defined(__PIE__) && defined(Q_CC_GNU) && Q_CC_GNU >= 500))
 #  error "You must build your code with position independent code if Qt was built with -reduce-relocations. "\
-         "Compile your code with -fPIC (-fPIE is not enough)."
+         "Compile your code with -fPIC (and not with -fPIE)."
 #endif
 
 namespace QtPrivate {

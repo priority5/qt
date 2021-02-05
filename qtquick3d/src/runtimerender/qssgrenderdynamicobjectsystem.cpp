@@ -37,6 +37,7 @@
 #include <QtQuick3DRuntimeRender/private/qssgrenderdynamicobjectsystemcommands_p.h>
 #include <QtQuick3DRuntimeRender/private/qssgrenderdynamicobjectsystemutil_p.h>
 #include <QtQuick3DRuntimeRender/private/qssgrendershadercodegenerator_p.h>
+#include <QtQuick3DRuntimeRender/private/qssgruntimerenderlogging_p.h>
 
 #include <QtQuick3DRender/private/qssgrendershaderconstant_p.h>
 #include <QtQuick3DRender/private/qssgrendershaderprogram_p.h>
@@ -367,7 +368,7 @@ void QSSGDynamicObjectSystem::insertSnapperDirectives(QString &str)
             QTextStream stream(&insertStr);
             stream << "uniform sampler2D " << list[0] << ";\n";
             stream << "uniform int flag" << list[0] << ";\n";
-            stream << "vec4 " << list[0] << "Info;\n";
+            stream << "uniform vec4 " << list[0] << "Info;\n";
             stream << "vec4 texture2D_" << list[0] << "(vec2 uv) "
                    << "{ return GetTextureValue( " << list[0] << ", uv, " << list[0] << "Info.z ); }\n";
             str.insert(beginIndex, insertStr);
@@ -383,7 +384,7 @@ void QSSGDynamicObjectSystem::insertSnapperDirectives(QString &str)
             QTextStream stream(&insertStr);
             stream << "uniform sampler2D " << list[0] << ";\n";
             stream << "uniform int flag" << list[0] << ";\n";
-            stream << "vec4 " << list[0] << "Info;\n";
+            stream << "uniform vec4 " << list[0] << "Info;\n";
             stream << "vec4 texture2D_" << list[0] << "(vec2 uv) "
                    << "{ return GetTextureValue( " << list[0] << ", uv, " << list[0] << "Info.z ); }\n";
             str.insert(beginIndex, insertStr);
@@ -504,7 +505,7 @@ TShaderAndFlags QSSGDynamicObjectSystem::getShaderProgram(const QByteArray &inPa
         if (!theProgram || inForceCompilation) {
             QSSGDynamicObjectShaderInfo
                     &theShaderInfo = m_shaderInfoMap.insert(inPath, QSSGDynamicObjectShaderInfo()).value();
-            if (theShaderInfo.m_isComputeShader == false) {
+            if (!theShaderInfo.m_isComputeShader) {
                 QByteArray programSource = doLoadShader(inPath);
                 if (theShaderInfo.m_hasGeomShader)
                     theFlags |= ShaderCacheProgramFlagValues::GeometryShaderEnabled;
@@ -527,7 +528,7 @@ TShaderAndFlags QSSGDynamicObjectSystem::getShaderProgram(const QByteArray &inPa
 TShaderAndFlags QSSGDynamicObjectSystem::getDepthPrepassShader(const QByteArray &inPath, const QByteArray &inPMacro, const ShaderFeatureSetList &inFeatureSet)
 {
     QSSGDynamicObjectShaderInfo &theShaderInfo = m_shaderInfoMap.insert(inPath, QSSGDynamicObjectShaderInfo()).value();
-    if (theShaderInfo.m_hasGeomShader == false)
+    if (!theShaderInfo.m_hasGeomShader)
         return TShaderAndFlags();
     // else, here we go...
     dynamic::QSSGDynamicShaderProgramFlags theFlags;

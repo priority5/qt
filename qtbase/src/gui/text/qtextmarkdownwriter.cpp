@@ -56,10 +56,13 @@ QT_BEGIN_NAMESPACE
 Q_LOGGING_CATEGORY(lcMDW, "qt.text.markdown.writer")
 
 static const QChar Space = QLatin1Char(' ');
+static const QChar Tab = QLatin1Char('\t');
 static const QChar Newline = QLatin1Char('\n');
+static const QChar CarriageReturn = QLatin1Char('\r');
 static const QChar LineBreak = QChar(0x2028);
 static const QChar DoubleQuote = QLatin1Char('"');
 static const QChar Backtick = QLatin1Char('`');
+static const QChar Backslash = QLatin1Char('\\');
 static const QChar Period = QLatin1Char('.');
 
 QTextMarkdownWriter::QTextMarkdownWriter(QTextStream &stream, QTextDocument::MarkdownFeatures features)
@@ -291,6 +294,72 @@ static void maybeEscapeFirstChar(QString &s)
     }
 }
 
+struct LineEndPositions {
+    const QChar *lineEnd;
+    const QChar *nextLineBegin;
+};
+
+static LineEndPositions findLineEnd(const QChar *begin, const QChar *end)
+{
+    LineEndPositions result{ end, end };
+
+    while (begin < end) {
+        if (*begin == Newline) {
+            result.lineEnd = begin;
+            result.nextLineBegin = begin + 1;
+            break;
+        } else if (*begin == CarriageReturn) {
+            result.lineEnd = begin;
+            result.nextLineBegin = begin + 1;
+            if (((begin + 1) < end) && begin[1] == Newline)
+                ++result.nextLineBegin;
+            break;
+        }
+
+        ++begin;
+    }
+
+    return result;
+}
+
+static bool isBlankLine(const QChar *begin, const QChar *end)
+{
+    while (begin < end) {
+        if (*begin != Space && *begin != Tab)
+            return false;
+        ++begin;
+    }
+    return true;
+}
+
+static QString createLinkTitle(const QString &title)
+{
+    QString result;
+    result.reserve(title.size() + 2);
+    result += DoubleQuote;
+
+    const QChar *data = title.data();
+    const QChar *end = data + title.size();
+
+    while (data < end) {
+        const auto lineEndPositions = findLineEnd(data, end);
+
+        if (!isBlankLine(data, lineEndPositions.lineEnd)) {
+            while (data < lineEndPositions.nextLineBegin) {
+                if (*data == DoubleQuote)
+                    result += Backslash;
+                result += *data;
+                ++data;
+            }
+        }
+
+        data = lineEndPositions.nextLineBegin;
+    }
+
+    result += DoubleQuote;
+    return result;
+}
+
 int QTextMarkdownWriter::writeBlock(const QTextBlock &block, bool wrap, bool ignoreFormat, bool ignoreEmpty)
 {
     if (block.text().isEmpty() && ignoreEmpty)
@@ -298,6 +367,14 @@ int QTextMarkdownWriter::writeBlock(const QTextBlock &block, bool wrap, bool ign
     const int ColumnLimit = 80;
     QTextBlockFormat blockFmt = block.blockFormat();
     bool missedBlankCodeBlockLine = false;
+    const bool codeBlock = blockFmt.hasProperty(QTextFormat::BlockCodeFence) ||
+            blockFmt.stringProperty(QTextFormat::BlockCodeLanguage).length() > 0;
+    if (m_fencedCodeBlock && !codeBlock) {
+        m_stream << m_linePrefix << QString(m_wrappedLineIndent, Space)
+                 << m_codeBlockFence << Newline;
+        m_fencedCodeBlock = false;
+        m_codeBlockFence.clear();
+    }
     if (block.textList()) { // it's a list-item
         auto fmt = block.textList()->format();
         const int listLevel = fmt.indent();
@@ -358,7 +435,7 @@ int QTextMarkdownWriter::writeBlock(const QTextBlock &block, bool wrap, bool ign
     } else if (blockFmt.hasProperty(QTextFormat::BlockTrailingHorizontalRulerWidth)) {
         m_stream << "- - -\n"; // unambiguous horizontal rule, not an underline under a heading
         return 0;
-    } else if (blockFmt.hasProperty(QTextFormat::BlockCodeFence) || blockFmt.stringProperty(QTextFormat::BlockCodeLanguage).length() > 0) {
+    } else if (codeBlock) {
         // It's important to preserve blank lines in code blocks.  But blank lines in code blocks
         // inside block quotes are getting preserved anyway (along with the "> " prefix).
         if (!blockFmt.hasProperty(QTextFormat::BlockQuoteLevel))
@@ -370,16 +447,11 @@ int QTextMarkdownWriter::writeBlock(const QTextBlock &block, bool wrap, bool ign
             m_codeBlockFence = QString(3, fenceChar.at(0));
             // A block quote can contain an indented code block, but not vice-versa.
             m_stream << m_linePrefix << QString(m_wrappedLineIndent, Space) << m_codeBlockFence
-                     << Space << blockFmt.stringProperty(QTextFormat::BlockCodeLanguage) << Newline;
+                     << blockFmt.stringProperty(QTextFormat::BlockCodeLanguage) << Newline;
             m_fencedCodeBlock = true;
         }
+        wrap = false;
     } else if (!blockFmt.indent()) {
-        if (m_fencedCodeBlock) {
-            m_stream << m_linePrefix << QString(m_wrappedLineIndent, Space)
-                     << m_codeBlockFence << Newline;
-            m_fencedCodeBlock = false;
-            m_codeBlockFence.clear();
-        }
         m_wrappedLineIndent = 0;
         m_linePrefix.clear();
         if (blockFmt.hasProperty(QTextFormat::BlockQuoteLevel)) {
@@ -445,7 +517,12 @@ int QTextMarkdownWriter::writeBlock(const QTextBlock &block, bool wrap, bool ign
             col += s.length();
         } else if (fmt.hasProperty(QTextFormat::AnchorHref)) {
             QString s = QLatin1Char('[') + fragmentText + QLatin1String("](") +
-                    fmt.property(QTextFormat::AnchorHref).toString() + QLatin1Char(')');
+                    fmt.property(QTextFormat::AnchorHref).toString();
+            if (fmt.hasProperty(QTextFormat::TextToolTip)) {
+                s += Space;
+                s += createLinkTitle(fmt.property(QTextFormat::TextToolTip).toString());
+            }
+            s += QLatin1Char(')');
             if (wrap && col + s.length() > ColumnLimit) {
                 m_stream << Newline << wrapIndentString;
                 col = m_wrappedLineIndent;

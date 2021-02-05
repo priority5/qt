@@ -63,10 +63,10 @@ namespace {
 
         for (const QQmlJS::DiagnosticMessage &e : errors)  {
             QString errorString = QLatin1String("qmldir");
-            if (e.line > 0) {
-                errorString += QLatin1Char(':') + QString::number(e.line);
-                if (e.column > 0)
-                    errorString += QLatin1Char(':') + QString::number(e.column);
+            if (e.loc.startLine > 0) {
+                errorString += QLatin1Char(':') + QString::number(e.loc.startLine);
+                if (e.loc.startColumn > 0)
+                    errorString += QLatin1Char(':') + QString::number(e.loc.startColumn);
             }
 
             errorString += QLatin1String(": ") + e.message;
@@ -375,6 +375,9 @@ void tst_qqmldirparser::parse()
     QCOMPARE(toStringList(p.dependencies()), dependencies);
 
     QCOMPARE(p.designerSupported(), designerSupported);
+
+    p.clear();
+    QVERIFY(p.typeNamespace().isEmpty());
 }
 
 QTEST_MAIN(tst_qqmldirparser)

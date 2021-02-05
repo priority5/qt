@@ -256,7 +256,7 @@ static bool findPatternUnloaded(const QString &library, QLibraryPrivate *lib)
     qsizetype fdlen = qMin(file.size(), MaxMemoryMapSize);
     const char *filedata = reinterpret_cast<char *>(file.map(0, fdlen));
 
-    if (filedata == 0) {
+    if (filedata == nullptr) {
         // Try reading the data into memory instead (up to 64 MB).
         data = file.read(64 * 1024 * 1024);
         filedata = data.constData();
@@ -387,12 +387,12 @@ private:
 };
 
 static QBasicMutex qt_library_mutex;
-static QLibraryStore *qt_library_data = 0;
+static QLibraryStore *qt_library_data = nullptr;
 static bool qt_library_data_once;
 
 QLibraryStore::~QLibraryStore()
 {
-    qt_library_data = 0;
+    qt_library_data = nullptr;
 }
 
 inline void QLibraryStore::cleanup()
@@ -407,7 +407,7 @@ inline void QLibraryStore::cleanup()
         QLibraryPrivate *lib = it.value();
         if (lib->libraryRefCount.loadRelaxed() == 1) {
             if (lib->libraryUnloadCount.loadRelaxed() > 0) {
-                Q_ASSERT(lib->pHnd);
+                Q_ASSERT(lib->pHnd.loadRelaxed());
                 lib->libraryUnloadCount.storeRelaxed(1);
 #ifdef __GLIBC__
                 // glibc has a bug in unloading from global destructors
@@ -459,7 +459,7 @@ inline QLibraryPrivate *QLibraryStore::findOrCreate(const QString &fileName, con
     QLibraryStore *data = instance();
 
     // check if this library is already loaded
-    QLibraryPrivate *lib = 0;
+    QLibraryPrivate *lib = nullptr;
     if (Q_LIKELY(data)) {
         lib = data->libraryMap.value(fileName);
         if (lib)
@@ -498,8 +498,7 @@ inline void QLibraryStore::releaseLibrary(QLibraryPrivate *lib)
 }
 
 QLibraryPrivate::QLibraryPrivate(const QString &canonicalFileName, const QString &version, QLibrary::LoadHints loadHints)
-    : pHnd(0), fileName(canonicalFileName), fullVersion(version), instance(0),
-      libraryRefCount(0), libraryUnloadCount(0), pluginState(MightBeAPlugin)
+    : fileName(canonicalFileName), fullVersion(version), pluginState(MightBeAPlugin)
 {
     loadHintsInt.storeRelaxed(loadHints);
     if (canonicalFileName.isEmpty())
@@ -519,7 +518,7 @@ QLibraryPrivate::~QLibraryPrivate()
 void QLibraryPrivate::mergeLoadHints(QLibrary::LoadHints lh)
 {
     // if the library is already loaded, we can't change the load hints
-    if (pHnd)
+    if (pHnd.loadRelaxed())
         return;
 
     loadHintsInt.storeRelaxed(lh);
@@ -527,8 +526,8 @@ void QLibraryPrivate::mergeLoadHints(QLibrary::LoadHints lh)
 
 QFunctionPointer QLibraryPrivate::resolve(const char *symbol)
 {
-    if (!pHnd)
-        return 0;
+    if (!pHnd.loadRelaxed())
+        return nullptr;
     return resolve_sys(symbol);
 }
 
@@ -539,9 +538,36 @@ void QLibraryPrivate::setLoadHints(QLibrary::LoadHints lh)
     mergeLoadHints(lh);
 }
 
+QObject *QLibraryPrivate::pluginInstance()
+{
+    // first, check if the instance is cached and hasn't been deleted
+    QObject *obj = (QMutexLocker(&mutex), inst.data());
+    if (obj)
+        return obj;
+
+    // We need to call the plugin's factory function. Is that cached?
+    // skip increasing the reference count (why? -Thiago)
+    QtPluginInstanceFunction factory = instanceFactory.loadAcquire();
+    if (!factory)
+        factory = loadPlugin();
+
+    if (!factory)
+        return nullptr;
+
+    obj = factory();
+
+    // cache again
+    QMutexLocker locker(&mutex);
+    if (inst)
+        obj = inst;
+    else
+        inst = obj;
+    return obj;
+}
+
 bool QLibraryPrivate::load()
 {
-    if (pHnd) {
+    if (pHnd.loadRelaxed()) {
         libraryUnloadCount.ref();
         return true;
     }
@@ -573,9 +599,10 @@ bool QLibraryPrivate::load()
 
 bool QLibraryPrivate::unload(UnloadFlag flag)
 {
-    if (!pHnd)
+    if (!pHnd.loadRelaxed())
         return false;
     if (libraryUnloadCount.loadRelaxed() > 0 && !libraryUnloadCount.deref()) { // only unload if ALL QLibrary instance wanted to
+        QMutexLocker locker(&mutex);
         delete inst.data();
         if (flag == NoUnloadSys || unload_sys()) {
             if (qt_debug_component())
@@ -584,12 +611,13 @@ bool QLibraryPrivate::unload(UnloadFlag flag)
             //when the library is unloaded, we release the reference on it so that 'this'
             //can get deleted
             libraryRefCount.deref();
-            pHnd = 0;
-            instance = 0;
+            pHnd.storeRelaxed(nullptr);
+            instanceFactory.storeRelaxed(nullptr);
+            return true;
         }
     }
 
-    return (pHnd == 0);
+    return false;
 }
 
 void QLibraryPrivate::release()
@@ -597,22 +625,23 @@ void QLibraryPrivate::release()
     QLibraryStore::releaseLibrary(this);
 }
 
-bool QLibraryPrivate::loadPlugin()
+QtPluginInstanceFunction QLibraryPrivate::loadPlugin()
 {
-    if (instance) {
+    if (auto ptr = instanceFactory.loadAcquire()) {
         libraryUnloadCount.ref();
-        return true;
+        return ptr;
     }
     if (pluginState == IsNotAPlugin)
-        return false;
+        return nullptr;
     if (load()) {
-        instance = (QtPluginInstanceFunction)resolve("qt_plugin_instance");
-        return instance;
+        auto ptr = reinterpret_cast<QtPluginInstanceFunction>(resolve("qt_plugin_instance"));
+        instanceFactory.storeRelease(ptr); // two threads may store the same value
+        return ptr;
     }
     if (qt_debug_component())
         qWarning() << "QLibraryPrivate::loadPlugin failed on" << fileName << ":" << errorString;
     pluginState = IsNotAPlugin;
-    return false;
+    return nullptr;
 }
 
 /*!
@@ -719,6 +748,7 @@ bool QLibraryPrivate::isPlugin()
 
 void QLibraryPrivate::updatePluginState()
 {
+    QMutexLocker locker(&mutex);
     errorString.clear();
     if (pluginState != MightBeAPlugin)
         return;
@@ -739,7 +769,7 @@ void QLibraryPrivate::updatePluginState()
     }
 #endif
 
-    if (!pHnd) {
+    if (!pHnd.loadRelaxed()) {
         // scan for the plugin metadata without loading
         success = findPatternUnloaded(fileName, this);
     } else {
@@ -803,7 +833,7 @@ bool QLibrary::load()
     if (!d)
         return false;
     if (did_load)
-        return d->pHnd;
+        return d->pHnd.loadRelaxed();
     did_load = true;
     return d->load();
 }
@@ -839,7 +869,7 @@ bool QLibrary::unload()
  */
 bool QLibrary::isLoaded() const
 {
-    return d && d->pHnd;
+    return d && d->pHnd.loadRelaxed();
 }
 
 
@@ -847,7 +877,7 @@ bool QLibrary::isLoaded() const
     Constructs a library with the given \a parent.
  */
 QLibrary::QLibrary(QObject *parent)
-    :QObject(parent), d(0), did_load(false)
+    :QObject(parent), d(nullptr), did_load(false)
 {
 }
 
@@ -862,7 +892,7 @@ QLibrary::QLibrary(QObject *parent)
     ".dylib" on \macos and iOS, and ".dll" on Windows. (See \l{fileName}.)
  */
 QLibrary::QLibrary(const QString& fileName, QObject *parent)
-    :QObject(parent), d(0), did_load(false)
+    :QObject(parent), d(nullptr), did_load(false)
 {
     setFileName(fileName);
 }
@@ -879,7 +909,7 @@ QLibrary::QLibrary(const QString& fileName, QObject *parent)
     ".dylib" on \macos and iOS, and ".dll" on Windows. (See \l{fileName}.)
 */
 QLibrary::QLibrary(const QString& fileName, int verNum, QObject *parent)
-    :QObject(parent), d(0), did_load(false)
+    :QObject(parent), d(nullptr), did_load(false)
 {
     setFileNameAndVersion(fileName, verNum);
 }
@@ -895,7 +925,7 @@ QLibrary::QLibrary(const QString& fileName, int verNum, QObject *parent)
     ".dylib" on \macos and iOS, and ".dll" on Windows. (See \l{fileName}.)
  */
 QLibrary::QLibrary(const QString& fileName, const QString &version, QObject *parent)
-    :QObject(parent), d(0), did_load(false)
+    :QObject(parent), d(nullptr), did_load(false)
 {
     setFileNameAndVersion(fileName, version);
 }
@@ -942,7 +972,7 @@ void QLibrary::setFileName(const QString &fileName)
     if (d) {
         lh = d->loadHints();
         d->release();
-        d = 0;
+        d = nullptr;
         did_load = false;
     }
     d = QLibraryPrivate::findOrCreate(fileName, QString(), lh);
@@ -950,8 +980,10 @@ void QLibrary::setFileName(const QString &fileName)
 
 QString QLibrary::fileName() const
 {
-    if (d)
+    if (d) {
+        QMutexLocker locker(&d->mutex);
         return d->qualifiedFileName.isEmpty() ? d->fileName : d->qualifiedFileName;
+    }
     return QString();
 }
 
@@ -970,7 +1002,7 @@ void QLibrary::setFileNameAndVersion(const QString &fileName, int verNum)
     if (d) {
         lh = d->loadHints();
         d->release();
-        d = 0;
+        d = nullptr;
         did_load = false;
     }
     d = QLibraryPrivate::findOrCreate(fileName, verNum >= 0 ? QString::number(verNum) : QString(), lh);
@@ -991,7 +1023,7 @@ void QLibrary::setFileNameAndVersion(const QString &fileName, const QString &ver
     if (d) {
         lh = d->loadHints();
         d->release();
-        d = 0;
+        d = nullptr;
         did_load = false;
     }
     d = QLibraryPrivate::findOrCreate(fileName, version, lh);
@@ -1020,7 +1052,7 @@ void QLibrary::setFileNameAndVersion(const QString &fileName, const QString &ver
 QFunctionPointer QLibrary::resolve(const char *symbol)
 {
     if (!isLoaded() && !load())
-        return 0;
+        return nullptr;
     return d->resolve(symbol);
 }
 
@@ -1092,7 +1124,12 @@ QFunctionPointer QLibrary::resolve(const QString &fileName, const QString &versi
 */
 QString QLibrary::errorString() const
 {
-    return (!d || d->errorString.isEmpty()) ? tr("Unknown error") : d->errorString;
+    QString str;
+    if (d) {
+        QMutexLocker locker(&d->mutex);
+        str = d->errorString;
+    }
+    return str.isEmpty() ? tr("Unknown error") : str;
 }
 
 /*!

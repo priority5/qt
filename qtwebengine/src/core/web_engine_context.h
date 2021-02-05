@@ -40,9 +40,13 @@
 #ifndef WEB_ENGINE_CONTEXT_H
 #define WEB_ENGINE_CONTEXT_H
 
+#include "qtwebenginecoreglobal_p.h"
+
 #include "build_config_qt.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
+
+#include <QtGui/qtgui-config.h>
 #include <QVector>
 
 namespace base {
@@ -75,6 +79,12 @@ class PrintJobManager;
 }
 #endif
 
+#ifdef Q_OS_WIN
+namespace sandbox {
+struct SandboxInterfaceInfo;
+}
+#endif
+
 QT_FORWARD_DECLARE_CLASS(QObject)
 
 namespace QtWebEngineCore {
@@ -85,6 +95,10 @@ class DevToolsServerQt;
 class ProfileAdapter;
 
 bool usingSoftwareDynamicGL();
+
+#ifdef Q_OS_WIN
+Q_WEBENGINECORE_PRIVATE_EXPORT sandbox::SandboxInterfaceInfo *staticSandboxInterfaceInfo(sandbox::SandboxInterfaceInfo *info = nullptr);
+#endif
 
 typedef std::tuple<bool, QString, QString> ProxyAuthentication;
 
@@ -109,13 +123,15 @@ public:
 
     static gpu::SyncPointManager *syncPointManager();
 
+    static bool isGpuServiceOnUIThread();
+
 private:
     friend class base::RefCounted<WebEngineContext>;
     friend class ProfileAdapter;
     WebEngineContext();
     ~WebEngineContext();
 
-    static void registerMainThreadFactories(bool threaded);
+    static void registerMainThreadFactories();
     static void destroyGpuProcess();
 
     std::unique_ptr<base::RunLoop> m_runLoop;
@@ -129,7 +145,7 @@ private:
     std::unique_ptr<ProfileAdapter> m_defaultProfileAdapter;
     std::unique_ptr<DevToolsServerQt> m_devtoolsServer;
     QVector<ProfileAdapter*> m_profileAdapters;
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
     std::unique_ptr<AccessibilityActivationObserver> m_accessibilityActivationObserver;
 #endif
 

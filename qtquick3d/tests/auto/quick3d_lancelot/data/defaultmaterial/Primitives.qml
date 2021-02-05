@@ -48,9 +48,8 @@
 **
 ****************************************************************************/
 
-import QtQuick3D 1.14
-import QtQuick 2.14
-import QtQuick.Timeline 1.0
+import QtQuick3D 1.15
+import QtQuick 2.15
 
 Rectangle {
     id: primitives
@@ -72,26 +71,23 @@ Rectangle {
             depthPrePassEnabled: true
         }
 
-        Camera {
+        PerspectiveCamera {
             id: camera
-            position: Qt.vector3d(0, 0, -600)
-            rotationOrder: Node.YZX
+            position: Qt.vector3d(0, 0, 600)
             clipFar: 5000
         }
 
         DirectionalLight {
             id: light
-            rotationOrder: Node.YZX
             shadowFactor: 10
         }
 
         Model {
             id: rectangle
             position: Qt.vector3d(-409.906, 211.328, 0)
-            rotationOrder: Node.YZX
             source: "#Rectangle"
-            edgeTess: 4
-            innerTess: 4
+            
+            
 
             DefaultMaterial {
                 id: default_
@@ -109,10 +105,9 @@ Rectangle {
         Model {
             id: sphere
             position: Qt.vector3d(-404.139, 0, 0)
-            rotationOrder: Node.YZX
             source: "#Sphere"
-            edgeTess: 4
-            innerTess: 4
+            
+            
 
             DefaultMaterial {
                 id: default_001
@@ -130,10 +125,9 @@ Rectangle {
         Model {
             id: cube
             position: Qt.vector3d(8.66024, 170.318, 0)
-            rotationOrder: Node.YZX
             source: "#Cube"
-            edgeTess: 4
-            innerTess: 4
+            
+            
 
             DefaultMaterial {
                 id: default_002
@@ -151,10 +145,9 @@ Rectangle {
         Model {
             id: cylinder
             position: Qt.vector3d(0, -152.968, 0)
-            rotationOrder: Node.YZX
             source: "#Cylinder"
-            edgeTess: 4
-            innerTess: 4
+            
+            
 
             DefaultMaterial {
                 id: default_003
@@ -172,10 +165,9 @@ Rectangle {
         Model {
             id: cone
             position: Qt.vector3d(349.224, 0, 0)
-            rotationOrder: Node.YZX
             source: "#Cone"
-            edgeTess: 4
-            innerTess: 4
+            
+            
 
             DefaultMaterial {
                 id: default_004
@@ -190,39 +182,4 @@ Rectangle {
             materials: [default_004]
         }
     }
-
-    Timeline {
-        id: slide1Timeline
-        startFrame: 0
-        endFrame: 10
-        currentFrame: 0
-        enabled: false
-        animations: [
-            TimelineAnimation {
-                id: slide1TimelineAnimation
-                duration: 10000
-                from: 0
-                to: 10
-                running: true
-                loops: 1
-                pingPong: false
-            }
-        ]
-    }
-
-    states: [
-        State {
-            name: "Slide1"
-            PropertyChanges {
-                target: slide1Timeline
-                enabled: true
-                currentFrame: 0
-            }
-            PropertyChanges {
-                target: slide1TimelineAnimation
-                running: true
-            }
-        }
-    ]
-    state: "Slide1"
 }

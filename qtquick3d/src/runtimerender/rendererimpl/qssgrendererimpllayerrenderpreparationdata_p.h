@@ -51,6 +51,10 @@
 #include <QtQuick3DRuntimeRender/private/qssgrendershadowmap_p.h>
 #include <QtQuick3DRuntimeRender/private/qssgrenderableobjects_p.h>
 
+#include <QtQuick3DRuntimeRender/private/qssgrenderitem2d_p.h>
+
+#define QSSG_RENDER_MINIMUM_RENDER_OPACITY .01f
+
 QT_BEGIN_NAMESPACE
 struct QSSGLayerRenderData;
 class QSSGRendererImpl;
@@ -62,32 +66,25 @@ enum class QSSGLayerRenderPreparationResultFlag
     WasLayerDataDirty = 1,
     // Was the data in this layer dirty *or* this layer *or* any effect dirty.
     WasDirty = 1 << 1,
-    // An effect or flag or rotation on the layer dictates this object should
-    // render to the texture.
-    ShouldRenderToTexture = 1 << 2,
-    // Some effects require depth texturing, this should be set on the effect
-    // instance.
-    RequiresDepthTexture = 1 << 3,
 
     // Should create independent viewport
     // If we aren't rendering to texture we still may have width/height manipulations
     // that require our own viewport.
-    ShouldCreateIndependentViewport = 1 << 4,
+    ShouldCreateIndependentViewport = 1 << 2,
+
+    RequiresDepthTexture = 1 << 3,
 
     // SSAO should be done in a separate pass
     // Note that having an AO pass necessitates a DepthTexture so this flag should
     // never be set without the RequiresDepthTexture flag as well.
-    RequiresSsaoPass = 1 << 5,
+    RequiresSsaoPass = 1 << 4,
 
     // if some light cause shadow
     // we need a separate per light shadow map pass
-    RequiresShadowMapPass = 1 << 6,
-
-    // Currently we use a stencil-cover algorithm to render bezier curves.
-    RequiresStencilBuffer = 1 << 7,
+    RequiresShadowMapPass = 1 << 5,
 
     // This is the case when direct rendering, and need to clear an FBO, but not a Window
-    RequiresTransparentClear = 1 << 8
+    RequiresTransparentClear = 1 << 6
 };
 
 struct QSSGLayerRenderPreparationResultFlags : public QFlags<QSSGLayerRenderPreparationResultFlag>
@@ -104,13 +101,13 @@ struct QSSGLayerRenderPreparationResultFlags : public QFlags<QSSGLayerRenderPrep
     bool wasDirty() const { return this->operator&(QSSGLayerRenderPreparationResultFlag::WasDirty); }
     void setWasDirty(bool inValue) { setFlag(QSSGLayerRenderPreparationResultFlag::WasDirty, inValue); }
 
-    bool shouldRenderToTexture() const
+    bool shouldCreateIndependentViewport() const
     {
-        return this->operator&(QSSGLayerRenderPreparationResultFlag::ShouldRenderToTexture);
+        return this->operator&(QSSGLayerRenderPreparationResultFlag::ShouldCreateIndependentViewport);
     }
-    void setShouldRenderToTexture(bool inValue)
+    void setShouldCreateIndependentViewport(bool inValue)
     {
-        setFlag(QSSGLayerRenderPreparationResultFlag::ShouldRenderToTexture, inValue);
+        setFlag(QSSGLayerRenderPreparationResultFlag::ShouldCreateIndependentViewport, inValue);
     }
 
     bool requiresDepthTexture() const
@@ -120,15 +117,6 @@ struct QSSGLayerRenderPreparationResultFlags : public QFlags<QSSGLayerRenderPrep
     void setRequiresDepthTexture(bool inValue)
     {
         setFlag(QSSGLayerRenderPreparationResultFlag::RequiresDepthTexture, inValue);
-    }
-
-    bool shouldCreateIndependentViewport() const
-    {
-        return this->operator&(QSSGLayerRenderPreparationResultFlag::ShouldCreateIndependentViewport);
-    }
-    void setShouldCreateIndependentViewport(bool inValue)
-    {
-        setFlag(QSSGLayerRenderPreparationResultFlag::ShouldCreateIndependentViewport, inValue);
     }
 
     bool requiresSsaoPass() const { return this->operator&(QSSGLayerRenderPreparationResultFlag::RequiresSsaoPass); }
@@ -146,15 +134,6 @@ struct QSSGLayerRenderPreparationResultFlags : public QFlags<QSSGLayerRenderPrep
         setFlag(QSSGLayerRenderPreparationResultFlag::RequiresShadowMapPass, inValue);
     }
 
-    bool requiresStencilBuffer() const
-    {
-        return this->operator&(QSSGLayerRenderPreparationResultFlag::RequiresStencilBuffer);
-    }
-    void setRequiresStencilBuffer(bool inValue)
-    {
-        setFlag(QSSGLayerRenderPreparationResultFlag::RequiresStencilBuffer, inValue);
-    }
-
     bool requiresTransparentClear() const
     {
         return this->operator&(QSSGLayerRenderPreparationResultFlag::RequiresTransparentClear);
@@ -169,12 +148,12 @@ struct QSSGLayerRenderPreparationResultFlags : public QFlags<QSSGLayerRenderPrep
 
 struct QSSGLayerRenderPreparationResult : public QSSGLayerRenderHelper
 {
+    QSSGRenderEffect *lastEffect = nullptr;
     QSSGLayerRenderPreparationResultFlags flags;
     quint32 maxAAPassIndex = 0;
     QSSGLayerRenderPreparationResult() = default;
     QSSGLayerRenderPreparationResult(const QSSGLayerRenderHelper &inHelper)
-        : QSSGLayerRenderHelper(inHelper)
-        , maxAAPassIndex(0)
+        : QSSGLayerRenderHelper(inHelper), lastEffect(nullptr), maxAAPassIndex(0)
     {
     }
 };
@@ -251,6 +230,8 @@ struct QSSGLayerRenderPreparationData
 
     // TNodeLightEntryPoolType m_RenderableNodeLightEntryPool;
     QVector<QSSGRenderableNodeEntry> renderableNodes;
+    QVector<QSSGRenderableNodeEntry> renderableItem2Ds;
+    QVector<QSSGRenderableNodeEntry> renderedItem2Ds;
     TLightToNodeMap lightToNodeMap; // map of lights to nodes to cache if we have looked up a
     // given scoped light yet.
     // Built at the same time as the renderable nodes map.
@@ -306,7 +287,10 @@ struct QSSGLayerRenderPreparationData
                                QSSGRenderableImage *&ioNextImage,
                                QSSGRenderableObjectFlags &ioFlags,
                                QSSGShaderDefaultMaterialKey &ioGeneratedShaderKey,
-                               quint32 inImageIndex);
+                               quint32 inImageIndex, QSSGRenderDefaultMaterial *inMaterial = nullptr);
+
+    void setVertexInputPresence(const QSSGRenderableObjectFlags &renderableFlags,
+                                QSSGShaderDefaultMaterialKey &key);
 
     QSSGDefaultMaterialPreparationResult prepareDefaultMaterialForRender(QSSGRenderDefaultMaterial &inMaterial,
                                                                            QSSGRenderableObjectFlags &inExistingFlags,
@@ -328,7 +312,7 @@ struct QSSGLayerRenderPreparationData
 
     // returns true if this object will render something different than it rendered the last
     // time.
-    virtual void prepareForRender(const QSize &inViewportDimensions, bool forceDirectRender = false);
+    virtual void prepareForRender(const QSize &inViewportDimensions);
     bool checkLightProbeDirty(QSSGRenderImage &inLightProbe);
     void setShaderFeature(const char *inName, bool inValue);
     ShaderFeatureSetList getShaderFeatureSet();
@@ -339,10 +323,9 @@ struct QSSGLayerRenderPreparationData
     const QVector<QSSGRenderableObjectHandle> &getOpaqueRenderableObjects(bool performSort = true);
     // If layer depth test is false, this may also contain opaque objects.
     const QVector<QSSGRenderableObjectHandle> &getTransparentRenderableObjects();
+    const QVector<QSSGRenderableNodeEntry> &getRenderableItem2Ds();
 
     virtual void resetForFrame();
-
-    virtual QSSGRef<QSSGRenderTask> createRenderToTextureRunnable() = 0;
 };
 QT_END_NAMESPACE
 #endif

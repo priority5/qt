@@ -43,15 +43,16 @@
 //
 
 #include <QtQuick3DRender/private/qssgrenderbackendglbase_p.h>
-#include <QtQuick3DRender/private/qssgopenglextensions_p.h>
 
 #include <QtGui/qopenglextrafunctions.h>
-#include <QtOpenGLExtensions/QtOpenGLExtensions>
 
 QT_BEGIN_NAMESPACE
 
 ///< forward declaration
 class QSSGRenderBackendMiscStateGL;
+#if defined(QT_OPENGL_ES) || defined(QT_OPENGL_ES_2_ANGLE)
+    class QSSGOpenGLES2Extensions;
+#endif
 
 class QSSGRenderBackendGLES2Impl : public QSSGRenderBackendGLBase
 {
@@ -59,14 +60,16 @@ public:
     /// constructor
     QSSGRenderBackendGLES2Impl(const QSurfaceFormat &format);
     /// destructor
-    virtual ~QSSGRenderBackendGLES2Impl();
+    virtual ~QSSGRenderBackendGLES2Impl() override;
 
-public:
     qint32 getDepthBits() const override;
     qint32 getStencilBits() const override;
     void generateMipMaps(QSSGRenderBackendTextureObject to,
                          QSSGRenderTextureTargetType target,
                          QSSGRenderHint genType) override;
+
+    QByteArray getShadingLanguageVersion() final;
+    QSSGRenderContextType getRenderContextType() const final { return QSSGRenderContextType::GLES2; }
 
     void setMultisampledTextureData2D(QSSGRenderBackendTextureObject to,
                                       QSSGRenderTextureTargetType target,

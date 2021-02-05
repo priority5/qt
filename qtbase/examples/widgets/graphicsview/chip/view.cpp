@@ -234,11 +234,11 @@ void View::setupMatrix()
 {
     qreal scale = qPow(qreal(2), (zoomSlider->value() - 250) / qreal(50));
 
-    QMatrix matrix;
+    QTransform matrix;
     matrix.scale(scale, scale);
     matrix.rotate(rotateSlider->value());
 
-    graphicsView->setMatrix(matrix);
+    graphicsView->setTransform(matrix);
     setResetButtonEnabled();
 }
 
@@ -264,7 +264,7 @@ void View::toggleAntialiasing()
 
 void View::print()
 {
-#if QT_CONFIG(printdialog)
+#if defined(QT_PRINTSUPPORT_LIB) && QT_CONFIG(printdialog)
     QPrinter printer;
     QPrintDialog dialog(&printer, this);
     if (dialog.exec() == QDialog::Accepted) {

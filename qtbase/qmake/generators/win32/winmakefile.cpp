@@ -301,7 +301,7 @@ void Win32MakefileGenerator::processRcFileVar()
     if (Option::qmake_mode == Option::QMAKE_GENERATE_NOTHING)
         return;
 
-    const QString manifestFile = getManifestFileForRcFile();
+    const QString manifestFile = project->first("QMAKE_MANIFEST").toQString();
     if (((!project->values("VERSION").isEmpty() || !project->values("RC_ICONS").isEmpty() || !manifestFile.isEmpty())
         && project->values("RC_FILE").isEmpty()
         && project->values("RES_FILE").isEmpty()
@@ -312,7 +312,7 @@ void Win32MakefileGenerator::processRcFileVar()
         QByteArray rcString;
         QTextStream ts(&rcString, QFile::WriteOnly);
 
-        QStringList vers = project->first("VERSION").toQString().split(".", QString::SkipEmptyParts);
+        QStringList vers = project->first("VERSION").toQString().split(".", Qt::SkipEmptyParts);
         for (int i = vers.size(); i < 4; i++)
             vers += "0";
         QString versionString = vers.join('.');
@@ -736,6 +736,18 @@ QString Win32MakefileGenerator::defaultInstall(const QString &t)
     if(targetdir.right(1) != Option::dir_sep)
         targetdir += Option::dir_sep;
 
+    const ProStringList &targets = project->values(ProKey(t + ".targets"));
+    for (int i = 0; i < targets.size(); ++i) {
+        QString src = targets.at(i).toQString(),
+                dst = escapeFilePath(filePrefixRoot(root, targetdir + src.section('/', -1)));
+        if (!ret.isEmpty())
+            ret += "\n\t";
+        ret += "$(QINSTALL) " + escapeFilePath(Option::fixPathToTargetOS(src, false)) + ' ' + dst;
+        if (!uninst.isEmpty())
+            uninst.append("\n\t");
+        uninst.append("-$(DEL_FILE) " + dst);
+    }
+
     if(t == "target" && project->first("TEMPLATE") == "lib") {
         if(project->isActiveConfig("create_prl") && !project->isActiveConfig("no_install_prl") &&
            !project->isEmpty("QMAKE_INTERNAL_PRL_FILE")) {
@@ -744,6 +756,8 @@ QString Win32MakefileGenerator::defaultInstall(const QString &t)
             if(slsh != -1)
                 dst_prl = dst_prl.right(dst_prl.length() - slsh - 1);
             dst_prl = filePrefixRoot(root, targetdir + dst_prl);
+            if (!ret.isEmpty())
+                ret += "\n\t";
             ret += installMetaFile(ProKey("QMAKE_PRL_INSTALL_REPLACE"), project->first("QMAKE_INTERNAL_PRL_FILE").toQString(), dst_prl);
             if(!uninst.isEmpty())
                 uninst.append("\n\t");
@@ -842,11 +856,6 @@ QString Win32MakefileGenerator::cQuoted(const QString &str)
     ret.prepend(QLatin1Char('"'));
     ret.append(QLatin1Char('"'));
     return ret;
-}
-
-QString Win32MakefileGenerator::getManifestFileForRcFile() const
-{
-    return QString();
 }
 
 ProKey Win32MakefileGenerator::fullTargetVariable() const

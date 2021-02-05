@@ -611,13 +611,16 @@ public:
 
     template<typename V> void setProps(const V &attrs, PropSetFlags flags);
 
+    void outputAAModeAndQuality(QTextStream &output, int tabLevel, const QString &propertyName);
+
     QSize m_explicitSize;
 
     Flags m_layerFlags = FastIBL;
     ProgressiveAA m_progressiveAA = NoPAA;
     MultisampleAA m_multisampleAA = NoMSAA;
+    bool m_antialiasingSet = false;
     LayerBackground m_layerBackground = Transparent;
-    QColor m_backgroundColor;
+    QColor m_backgroundColor = Qt::black;
     BlendType m_blendType = Normal;
 
     HorizontalFields m_horizontalFields = LeftWidth;
@@ -660,25 +663,6 @@ class CameraNode : public Node
 {
 
 public:
-    enum ScaleMode {
-        SameSize = 0,
-        Fit,
-        FitHorizontal,
-        FitVertical
-    };
-
-    enum ScaleAnchor {
-        Center = 0,
-        N,
-        NE,
-        E,
-        SE,
-        S,
-        SW,
-        W,
-        NW
-    };
-
     CameraNode();
 
     void setProperties(const QXmlStreamAttributes &attrs, PropSetFlags flags) override;
@@ -691,8 +675,7 @@ public:
     bool m_fovHorizontal = false;
     float m_clipNear = 10;
     float m_clipFar = 5000;
-    ScaleMode m_scaleMode = Fit;
-    ScaleAnchor m_scaleAnchor = Center;
+    bool m_frustumCulling = false;
     float m_zoom = 1.0;
 
     // GraphObject interface
@@ -885,7 +868,6 @@ public:
     void writeQmlHeader(QTextStream &output, int tabLevel) override;
     void writeQmlProperties(QTextStream &output, int tabLevel, bool isInRootLevel = false) override;
     void writeQmlProperties(const PropertyChangeList &changeList, QTextStream &output, int tabLevel) override;
-    void writeQmlFooter(QTextStream &output, int tabLevel) override;
 };
 
 class DefaultMaterial : public GraphObject
