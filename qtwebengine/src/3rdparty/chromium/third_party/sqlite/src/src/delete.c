@@ -31,7 +31,7 @@
 Table *sqlite3SrcListLookup(Parse *pParse, SrcList *pSrc){
   struct SrcList_item *pItem = pSrc->a;
   Table *pTab;
-  assert( pItem && pSrc->nSrc==1 );
+  assert( pItem && pSrc->nSrc>=1 );
   pTab = sqlite3LocateTableItem(pParse, 0, pItem);
   sqlite3DeleteTable(pParse->db, pItem->pTab);
   pItem->pTab = pTab;
@@ -51,7 +51,7 @@ Table *sqlite3SrcListLookup(Parse *pParse, SrcList *pSrc){
 **   1) It is a virtual table and no implementation of the xUpdate method
 **      has been provided
 **
-**   2) It is a system table (i.e. sqlite_master), this call is not
+**   2) It is a system table (i.e. sqlite_schema), this call is not
 **      part of a nested parse and writable_schema pragma has not 
 **      been specified
 **
@@ -425,7 +425,7 @@ void sqlite3DeleteFrom(
   }else
 #endif /* SQLITE_OMIT_TRUNCATE_OPTIMIZATION */
   {
-    u16 wcf = WHERE_ONEPASS_DESIRED|WHERE_DUPLICATES_OK|WHERE_SEEK_TABLE;
+    u16 wcf = WHERE_ONEPASS_DESIRED|WHERE_DUPLICATES_OK;
     if( sNC.ncFlags & NC_VarSelect ) bComplex = 1;
     wcf |= (bComplex ? 0 : WHERE_ONEPASS_MULTIROW);
     if( HasRowid(pTab) ){
@@ -461,6 +461,9 @@ void sqlite3DeleteFrom(
     assert( IsVirtual(pTab)==0 || eOnePass!=ONEPASS_MULTI );
     assert( IsVirtual(pTab) || bComplex || eOnePass!=ONEPASS_OFF );
     if( eOnePass!=ONEPASS_SINGLE ) sqlite3MultiWrite(pParse);
+    if( sqlite3WhereUsesDeferredSeek(pWInfo) ){
+      sqlite3VdbeAddOp1(v, OP_FinishSeek, iTabCur);
+    }
   
     /* Keep track of the number of rows to be deleted */
     if( memCnt ){
@@ -495,6 +498,7 @@ void sqlite3DeleteFrom(
       if( aiCurOnePass[0]>=0 ) aToOpen[aiCurOnePass[0]-iTabCur] = 0;
       if( aiCurOnePass[1]>=0 ) aToOpen[aiCurOnePass[1]-iTabCur] = 0;
       if( addrEphOpen ) sqlite3VdbeChangeToNoop(v, addrEphOpen);
+      addrBypass = sqlite3VdbeMakeLabel(pParse);
     }else{
       if( pPk ){
         /* Add the PK key for this row to the temporary table */
@@ -508,13 +512,6 @@ void sqlite3DeleteFrom(
         nKey = 1;  /* OP_DeferredSeek always uses a single rowid */
         sqlite3VdbeAddOp2(v, OP_RowSetAdd, iRowSet, iKey);
       }
-    }
-  
-    /* If this DELETE cannot use the ONEPASS strategy, this is the 
-    ** end of the WHERE loop */
-    if( eOnePass!=ONEPASS_OFF ){
-      addrBypass = sqlite3VdbeMakeLabel(pParse);
-    }else{
       sqlite3WhereEnd(pWInfo);
     }
   
@@ -533,7 +530,9 @@ void sqlite3DeleteFrom(
                                  iTabCur, aToOpen, &iDataCur, &iIdxCur);
       assert( pPk || IsVirtual(pTab) || iDataCur==iTabCur );
       assert( pPk || IsVirtual(pTab) || iIdxCur==iDataCur+1 );
-      if( eOnePass==ONEPASS_MULTI ) sqlite3VdbeJumpHere(v, iAddrOnce);
+      if( eOnePass==ONEPASS_MULTI ){
+        sqlite3VdbeJumpHereOrPopInst(v, iAddrOnce);
+      }
     }
   
     /* Set up a loop over the rowids/primary-keys that were found in the
@@ -856,6 +855,7 @@ void sqlite3GenerateRowIndexDelete(
         &iPartIdxLabel, pPrior, r1);
     sqlite3VdbeAddOp3(v, OP_IdxDelete, iIdxCur+i, r1,
         pIdx->uniqNotNull ? pIdx->nKeyCol : pIdx->nColumn);
+    sqlite3VdbeChangeP5(v, 1);  /* Cause IdxDelete to error if no entry found */
     sqlite3ResolvePartIdxLabel(pParse, iPartIdxLabel);
     pPrior = pIdx;
   }
@@ -942,10 +942,6 @@ int sqlite3GenerateIndexKey(
   }
   if( regOut ){
     sqlite3VdbeAddOp3(v, OP_MakeRecord, regBase, nCol, regOut);
-    if( pIdx->pTable->pSelect ){
-      const char *zAff = sqlite3IndexAffinityStr(pParse->db, pIdx);
-      sqlite3VdbeChangeP4(v, -1, zAff, P4_TRANSIENT);
-    }
   }
   sqlite3ReleaseTempRange(pParse, regBase, nCol);
   return regBase;
