@@ -51,6 +51,8 @@ function InstallXCode() {
     echo "Uncompressing and installing '$sourceFile'"
     if [[ $sourceFile =~ tar ]]; then
         cd /Applications/ && sudo tar -zxf "$sourceFile"
+    elif [[ $sourceFile =~ "xip" ]]; then
+        cd /Applications/ && xip -x "$sourceFile"
     else
         xzcat < "$sourceFile" | (cd /Applications/ && sudo cpio -dmi)
     fi
