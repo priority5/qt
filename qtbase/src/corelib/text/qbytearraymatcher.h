@@ -40,8 +40,6 @@
 #ifndef QBYTEARRAYMATCHER_H
 #define QBYTEARRAYMATCHER_H
 
-#include <limits>
-
 #include <QtCore/qbytearray.h>
 
 #include <limits>
