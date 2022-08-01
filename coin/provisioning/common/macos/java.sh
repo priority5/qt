@@ -45,10 +45,11 @@ url=ci-files01-hki.intra.qt.io:/hdd/www/input/mac
 # url_alt=http://download.oracle.com/otn-pub/java/jdk/8u102-b14/jdk-8u102-macosx-x64.dmg
 
 echo "Mounting $targetFile"
-sudo mount "$url" /Volumes
+sudo mkdir -p /Volumes/files
+sudo mount "$url" /Volumes/files
 
-sudo cp "/Volumes/$targetFile" /tmp
-sudo umount /Volumes
+sudo cp "/Volumes/files/$targetFile" /tmp
+sudo umount /Volumes/files
 sudo hdiutil attach "/tmp/$targetFile"
 
 echo Installing JDK
