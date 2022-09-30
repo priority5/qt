@@ -8,9 +8,8 @@
 #include <stddef.h>
 
 #include <bitset>
-#include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
@@ -18,10 +17,10 @@
 #include "net/log/net_log_with_source.h"
 #include "net/quic/quic_event_logger.h"
 #include "net/socket/socket_performance_watcher.h"
-#include "net/third_party/quiche/src/quic/core/crypto/crypto_handshake_message.h"
-#include "net/third_party/quiche/src/quic/core/http/quic_spdy_session.h"
-#include "net/third_party/quiche/src/quic/core/quic_connection.h"
-#include "net/third_party/quiche/src/quic/core/quic_packets.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_handshake_message.h"
+#include "net/third_party/quiche/src/quiche/quic/core/http/quic_spdy_session.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_connection.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
 
 namespace base {
 class HistogramBase;
@@ -40,15 +39,23 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
       std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
       const NetLogWithSource& net_log);
 
+  QuicConnectionLogger(const QuicConnectionLogger&) = delete;
+  QuicConnectionLogger& operator=(const QuicConnectionLogger&) = delete;
+
   ~QuicConnectionLogger() override;
 
   // quic::QuicPacketCreator::DebugDelegateInterface
   void OnFrameAddedToPacket(const quic::QuicFrame& frame) override;
   void OnStreamFrameCoalesced(const quic::QuicStreamFrame& frame) override;
 
-  // QuicConnectionDebugVisitor Interface
-  void OnPacketSent(const quic::SerializedPacket& serialized_packet,
+  // quic::QuicConnectionDebugVisitor Interface
+  void OnPacketSent(quic::QuicPacketNumber packet_number,
+                    quic::QuicPacketLength packet_length,
+                    bool has_crypto_handshake,
                     quic::TransmissionType transmission_type,
+                    quic::EncryptionLevel encryption_level,
+                    const quic::QuicFrames& retransmittable_frames,
+                    const quic::QuicFrames& nonretransmittable_frames,
                     quic::QuicTime sent_time) override;
   void OnIncomingAck(quic::QuicPacketNumber ack_packet_number,
                      quic::EncryptionLevel ack_decrypted_level,
@@ -73,7 +80,9 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
       quic::EncryptionLevel decryption_level) override;
   void OnDuplicatePacket(quic::QuicPacketNumber packet_number) override;
   void OnProtocolVersionMismatch(quic::ParsedQuicVersion version) override;
-  void OnPacketHeader(const quic::QuicPacketHeader& header) override;
+  void OnPacketHeader(const quic::QuicPacketHeader& header,
+                      quic::QuicTime receive_time,
+                      quic::EncryptionLevel level) override;
   void OnPathChallengeFrame(const quic::QuicPathChallengeFrame& frame) override;
   void OnPathResponseFrame(const quic::QuicPathResponseFrame& frame) override;
   void OnCryptoFrame(const quic::QuicCryptoFrame& frame) override;
@@ -141,7 +150,7 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   // the overall packet loss rate, and record it into a histogram.
   void RecordAggregatePacketLossRate() const;
 
-  quic::QuicSession* session_;  // Unowned.
+  raw_ptr<quic::QuicSession> session_;  // Unowned.
   // The last packet number received.
   quic::QuicPacketNumber last_received_packet_number_;
   // The size of the most recently received packet.
@@ -204,8 +213,6 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   const std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher_;
 
   QuicEventLogger event_logger_;
-
-  DISALLOW_COPY_AND_ASSIGN(QuicConnectionLogger);
 };
 
 }  // namespace net

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qtpropertymanager.h"
 #include "qtpropertybrowserutils_p.h"
@@ -43,6 +7,7 @@
 #include <QtCore/QLocale>
 #include <QtCore/QMap>
 #include <QtCore/QTimer>
+#include <QtCore/QRegularExpression>
 #include <QtGui/QIcon>
 #include <QtCore/QMetaEnum>
 #include <QtGui/QFontDatabase>
@@ -270,7 +235,7 @@ static void setBorderValues(PropertyManager *manager, PropertyManagerPrivate *ma
             void (PropertyManager::*propertyChangedSignal)(QtProperty *),
             void (PropertyManager::*valueChangedSignal)(QtProperty *, ValueChangeParameter),
             void (PropertyManager::*rangeChangedSignal)(QtProperty *, ValueChangeParameter, ValueChangeParameter),
-            QtProperty *property, const Value &minVal, const Value &maxVal,
+            QtProperty *property, ValueChangeParameter minVal, ValueChangeParameter maxVal,
             void (PropertyManagerPrivate::*setSubPropertyRange)(QtProperty *,
                     ValueChangeParameter, ValueChangeParameter, ValueChangeParameter))
 {
@@ -385,33 +350,33 @@ public:
 
     QStringList policyEnumNames() const { return m_policyEnumNames; }
     QStringList languageEnumNames() const { return m_languageEnumNames; }
-    QStringList countryEnumNames(QLocale::Language language) const { return m_countryEnumNames.value(language); }
+    QStringList territoryEnumNames(QLocale::Language language) const { return m_territoryEnumNames.value(language); }
 
     QSizePolicy::Policy indexToSizePolicy(int index) const;
     int sizePolicyToIndex(QSizePolicy::Policy policy) const;
 
-    void indexToLocale(int languageIndex, int countryIndex, QLocale::Language *language, QLocale::Country *country) const;
-    void localeToIndex(QLocale::Language language, QLocale::Country country, int *languageIndex, int *countryIndex) const;
+    void indexToLocale(int languageIndex, int territoryIndex, QLocale::Language *language, QLocale::Territory *territory) const;
+    void localeToIndex(QLocale::Language language, QLocale::Territory territory, int *languageIndex, int *territoryIndex) const;
 
 private:
     void initLocale();
 
     QStringList m_policyEnumNames;
     QStringList m_languageEnumNames;
-    QMap<QLocale::Language, QStringList> m_countryEnumNames;
+    QMap<QLocale::Language, QStringList> m_territoryEnumNames;
     QMap<int, QLocale::Language> m_indexToLanguage;
     QMap<QLocale::Language, int> m_languageToIndex;
-    QMap<int, QMap<int, QLocale::Country> > m_indexToCountry;
-    QMap<QLocale::Language, QMap<QLocale::Country, int> > m_countryToIndex;
+    QMap<int, QMap<int, QLocale::Territory> > m_indexToTerritory;
+    QMap<QLocale::Language, QMap<QLocale::Territory, int> > m_territoryToIndex;
     QMetaEnum m_policyEnum;
 };
 
-static QList<QLocale::Country> sortCountries(const QList<QLocale::Country> &countries)
+static QList<QLocale::Territory> sortTerritories(const QList<QLocale::Territory> &territories)
 {
-    QMultiMap<QString, QLocale::Country> nameToCountry;
-    for (QLocale::Country country : countries)
-        nameToCountry.insert(QLocale::countryToString(country), country);
-    return nameToCountry.values();
+    QMultiMap<QString, QLocale::Territory> nameToTerritory;
+    for (QLocale::Territory territory : territories)
+        nameToTerritory.insert(QLocale::territoryToString(territory), territory);
+    return nameToTerritory.values();
 }
 
 void QtMetaEnumProvider::initLocale()
@@ -430,26 +395,29 @@ void QtMetaEnumProvider::initLocale()
 
     const auto languages = nameToLanguage.values();
     for (QLocale::Language language : languages) {
-        QList<QLocale::Country> countries;
-        countries = QLocale::countriesForLanguage(language);
-        if (countries.isEmpty() && language == system.language())
-            countries << system.country();
+        const auto localesForLanguage = QLocale::matchingLocales(language, QLocale::AnyScript, QLocale::AnyTerritory);
+        QList<QLocale::Territory> territories;
+        territories.reserve(localesForLanguage.size());
+        for (const auto &locale : localesForLanguage)
+            territories << locale.territory();
+        if (territories.isEmpty() && language == system.language())
+            territories << system.territory();
 
-        if (!countries.isEmpty() && !m_languageToIndex.contains(language)) {
-            countries = sortCountries(countries);
+        if (!territories.isEmpty() && !m_languageToIndex.contains(language)) {
+            territories = sortTerritories(territories);
             int langIdx = m_languageEnumNames.count();
             m_indexToLanguage[langIdx] = language;
             m_languageToIndex[language] = langIdx;
-            QStringList countryNames;
-            int countryIdx = 0;
-            for (QLocale::Country country : qAsConst(countries)) {
-                countryNames << QLocale::countryToString(country);
-                m_indexToCountry[langIdx][countryIdx] = country;
-                m_countryToIndex[language][country] = countryIdx;
-                ++countryIdx;
+            QStringList territoryNames;
+            int territoryIdx = 0;
+            for (QLocale::Territory territory : qAsConst(territories)) {
+                territoryNames << QLocale::territoryToString(territory);
+                m_indexToTerritory[langIdx][territoryIdx] = territory;
+                m_territoryToIndex[language][territory] = territoryIdx;
+                ++territoryIdx;
             }
             m_languageEnumNames << QLocale::languageToString(language);
-            m_countryEnumNames[language] = countryNames;
+            m_territoryEnumNames[language] = territoryNames;
         }
     }
 }
@@ -482,35 +450,35 @@ int QtMetaEnumProvider::sizePolicyToIndex(QSizePolicy::Policy policy) const
     return -1;
 }
 
-void QtMetaEnumProvider::indexToLocale(int languageIndex, int countryIndex, QLocale::Language *language, QLocale::Country *country) const
+void QtMetaEnumProvider::indexToLocale(int languageIndex, int territoryIndex, QLocale::Language *language, QLocale::Territory *territory) const
 {
     QLocale::Language l = QLocale::C;
-    QLocale::Country c = QLocale::AnyCountry;
+    QLocale::Territory c = QLocale::AnyTerritory;
     if (m_indexToLanguage.contains(languageIndex)) {
         l = m_indexToLanguage[languageIndex];
-        if (m_indexToCountry.contains(languageIndex) && m_indexToCountry[languageIndex].contains(countryIndex))
-            c = m_indexToCountry[languageIndex][countryIndex];
+        if (m_indexToTerritory.contains(languageIndex) && m_indexToTerritory[languageIndex].contains(territoryIndex))
+            c = m_indexToTerritory[languageIndex][territoryIndex];
     }
     if (language)
         *language = l;
-    if (country)
-        *country = c;
+    if (territory)
+        *territory = c;
 }
 
-void QtMetaEnumProvider::localeToIndex(QLocale::Language language, QLocale::Country country, int *languageIndex, int *countryIndex) const
+void QtMetaEnumProvider::localeToIndex(QLocale::Language language, QLocale::Territory territory, int *languageIndex, int *territoryIndex) const
 {
     int l = -1;
     int c = -1;
     if (m_languageToIndex.contains(language)) {
         l = m_languageToIndex[language];
-        if (m_countryToIndex.contains(language) && m_countryToIndex[language].contains(country))
-            c = m_countryToIndex[language][country];
+        if (m_territoryToIndex.contains(language) && m_territoryToIndex[language].contains(territory))
+            c = m_territoryToIndex[language][territory];
     }
 
     if (languageIndex)
         *languageIndex = l;
-    if (countryIndex)
-        *countryIndex = c;
+    if (territoryIndex)
+        *territoryIndex = c;
 }
 
 Q_GLOBAL_STATIC(QtMetaEnumProvider, metaEnumProvider)
@@ -1188,11 +1156,8 @@ public:
 
     struct Data
     {
-        Data() : regExp(QString(QLatin1Char('*')),  Qt::CaseSensitive, QRegExp::Wildcard)
-        {
-        }
         QString val;
-        QRegExp regExp;
+        QRegularExpression regExp;
     };
 
     typedef QMap<const QtProperty *, Data> PropertyValueMap;
@@ -1233,7 +1198,7 @@ public:
 */
 
 /*!
-    \fn void QtStringPropertyManager::regExpChanged(QtProperty *property, const QRegExp &regExp)
+    \fn void QtStringPropertyManager::regExpChanged(QtProperty *property, const QRegularExpression &regExp)
 
     This signal is emitted whenever a property created by this manager
     changes its currenlty set regular expression, passing a pointer to
@@ -1280,9 +1245,9 @@ QString QtStringPropertyManager::value(const QtProperty *property) const
 
     \sa setRegExp()
 */
-QRegExp QtStringPropertyManager::regExp(const QtProperty *property) const
+QRegularExpression QtStringPropertyManager::regExp(const QtProperty *property) const
 {
-    return getData<QRegExp>(d_ptr->m_values, &QtStringPropertyManagerPrivate::Data::regExp, property, QRegExp());
+    return getData<QRegularExpression>(d_ptr->m_values, &QtStringPropertyManagerPrivate::Data::regExp, property, QRegularExpression());
 }
 
 /*!
@@ -1317,8 +1282,10 @@ void QtStringPropertyManager::setValue(QtProperty *property, const QString &val)
     if (data.val == val)
         return;
 
-    if (data.regExp.isValid() && !data.regExp.exactMatch(val))
+    if (data.regExp.isValid() && !data.regExp.pattern().isEmpty()
+        && !data.regExp.match(val).hasMatch()) {
         return;
+    }
 
     data.val = val;
 
@@ -1333,7 +1300,7 @@ void QtStringPropertyManager::setValue(QtProperty *property, const QString &val)
 
     \sa regExp(), setValue(), regExpChanged()
 */
-void QtStringPropertyManager::setRegExp(QtProperty *property, const QRegExp &regExp)
+void QtStringPropertyManager::setRegExp(QtProperty *property, const QRegularExpression &regExp)
 {
     const QtStringPropertyManagerPrivate::PropertyValueMap::iterator it = d_ptr->m_values.find(property);
     if (it == d_ptr->m_values.end())
@@ -1545,8 +1512,8 @@ public:
         QDate maxVal{QDate(9999, 12, 31)};
         QDate minimumValue() const { return minVal; }
         QDate maximumValue() const { return maxVal; }
-        void setMinimumValue(const QDate &newMinVal) { setSimpleMinimumData(this, newMinVal); }
-        void setMaximumValue(const QDate &newMaxVal) { setSimpleMaximumData(this, newMaxVal); }
+        void setMinimumValue(QDate newMinVal) { setSimpleMinimumData(this, newMinVal); }
+        void setMaximumValue(QDate newMaxVal) { setSimpleMaximumData(this, newMaxVal); }
     };
 
     QString m_format;
@@ -1587,7 +1554,7 @@ QtDatePropertyManagerPrivate::QtDatePropertyManagerPrivate(QtDatePropertyManager
 */
 
 /*!
-    \fn void QtDatePropertyManager::valueChanged(QtProperty *property, const QDate &value)
+    \fn void QtDatePropertyManager::valueChanged(QtProperty *property, QDate value)
 
     This signal is emitted whenever a property created by this manager
     changes its value, passing a pointer to the \a property and the new
@@ -1597,7 +1564,7 @@ QtDatePropertyManagerPrivate::QtDatePropertyManagerPrivate(QtDatePropertyManager
 */
 
 /*!
-    \fn void QtDatePropertyManager::rangeChanged(QtProperty *property, const QDate &minimum, const QDate &maximum)
+    \fn void QtDatePropertyManager::rangeChanged(QtProperty *property, QDate minimum, QDate maximum)
 
     This signal is emitted whenever a property created by this manager
     changes its range of valid dates, passing a pointer to the \a
@@ -1667,7 +1634,7 @@ QString QtDatePropertyManager::valueText(const QtProperty *property) const
 }
 
 /*!
-    \fn void QtDatePropertyManager::setValue(QtProperty *property, const QDate &value)
+    \fn void QtDatePropertyManager::setValue(QtProperty *property, QDate value)
 
     Sets the value of the given \a property to \a value.
 
@@ -1677,10 +1644,10 @@ QString QtDatePropertyManager::valueText(const QtProperty *property) const
 
     \sa value(), setRange(), valueChanged()
 */
-void QtDatePropertyManager::setValue(QtProperty *property, const QDate &val)
+void QtDatePropertyManager::setValue(QtProperty *property, QDate val)
 {
-    void (QtDatePropertyManagerPrivate::*setSubPropertyValue)(QtProperty *, const QDate &) = 0;
-    setValueInRange<const QDate &, QtDatePropertyManagerPrivate, QtDatePropertyManager, const QDate>(this, d_ptr.data(),
+    void (QtDatePropertyManagerPrivate::*setSubPropertyValue)(QtProperty *, QDate) = 0;
+    setValueInRange<QDate, QtDatePropertyManagerPrivate, QtDatePropertyManager, const QDate>(this, d_ptr.data(),
                 &QtDatePropertyManager::propertyChanged,
                 &QtDatePropertyManager::valueChanged,
                 property, val, setSubPropertyValue);
@@ -1695,9 +1662,9 @@ void QtDatePropertyManager::setValue(QtProperty *property, const QDate &val)
 
     \sa minimum(), setRange()
 */
-void QtDatePropertyManager::setMinimum(QtProperty *property, const QDate &minVal)
+void QtDatePropertyManager::setMinimum(QtProperty *property, QDate minVal)
 {
-    setMinimumValue<const QDate &, QtDatePropertyManagerPrivate, QtDatePropertyManager, QDate, QtDatePropertyManagerPrivate::Data>(this, d_ptr.data(),
+    setMinimumValue<QDate, QtDatePropertyManagerPrivate, QtDatePropertyManager, QDate, QtDatePropertyManagerPrivate::Data>(this, d_ptr.data(),
                 &QtDatePropertyManager::propertyChanged,
                 &QtDatePropertyManager::valueChanged,
                 &QtDatePropertyManager::rangeChanged,
@@ -1713,9 +1680,9 @@ void QtDatePropertyManager::setMinimum(QtProperty *property, const QDate &minVal
 
     \sa maximum(), setRange()
 */
-void QtDatePropertyManager::setMaximum(QtProperty *property, const QDate &maxVal)
+void QtDatePropertyManager::setMaximum(QtProperty *property, QDate maxVal)
 {
-    setMaximumValue<const QDate &, QtDatePropertyManagerPrivate, QtDatePropertyManager, QDate, QtDatePropertyManagerPrivate::Data>(this, d_ptr.data(),
+    setMaximumValue<QDate, QtDatePropertyManagerPrivate, QtDatePropertyManager, QDate, QtDatePropertyManagerPrivate::Data>(this, d_ptr.data(),
                 &QtDatePropertyManager::propertyChanged,
                 &QtDatePropertyManager::valueChanged,
                 &QtDatePropertyManager::rangeChanged,
@@ -1723,7 +1690,7 @@ void QtDatePropertyManager::setMaximum(QtProperty *property, const QDate &maxVal
 }
 
 /*!
-    \fn void QtDatePropertyManager::setRange(QtProperty *property, const QDate &minimum, const QDate &maximum)
+    \fn void QtDatePropertyManager::setRange(QtProperty *property, QDate minimum, QDate maximum)
 
     Sets the range of valid dates.
 
@@ -1736,11 +1703,10 @@ void QtDatePropertyManager::setMaximum(QtProperty *property, const QDate &maxVal
 
     \sa setMinimum(), setMaximum(), rangeChanged()
 */
-void QtDatePropertyManager::setRange(QtProperty *property, const QDate &minVal, const QDate &maxVal)
+void QtDatePropertyManager::setRange(QtProperty *property, QDate minVal, QDate maxVal)
 {
-    void (QtDatePropertyManagerPrivate::*setSubPropertyRange)(QtProperty *, const QDate &,
-          const QDate &, const QDate &) = 0;
-    setBorderValues<const QDate &, QtDatePropertyManagerPrivate, QtDatePropertyManager, QDate>(this, d_ptr.data(),
+    void (QtDatePropertyManagerPrivate::*setSubPropertyRange)(QtProperty *, QDate, QDate, QDate) = 0;
+    setBorderValues<QDate, QtDatePropertyManagerPrivate, QtDatePropertyManager, QDate>(this, d_ptr.data(),
                 &QtDatePropertyManager::propertyChanged,
                 &QtDatePropertyManager::valueChanged,
                 &QtDatePropertyManager::rangeChanged,
@@ -1803,7 +1769,7 @@ QtTimePropertyManagerPrivate::QtTimePropertyManagerPrivate(QtTimePropertyManager
 */
 
 /*!
-    \fn void QtTimePropertyManager::valueChanged(QtProperty *property, const QTime &value)
+    \fn void QtTimePropertyManager::valueChanged(QtProperty *property, QTime value)
 
     This signal is emitted whenever a property created by this manager
     changes its value, passing a pointer to the \a property and the
@@ -1853,15 +1819,15 @@ QString QtTimePropertyManager::valueText(const QtProperty *property) const
 }
 
 /*!
-    \fn void QtTimePropertyManager::setValue(QtProperty *property, const QTime &value)
+    \fn void QtTimePropertyManager::setValue(QtProperty *property, QTime value)
 
     Sets the value of the given \a property to \a value.
 
     \sa value(), valueChanged()
 */
-void QtTimePropertyManager::setValue(QtProperty *property, const QTime &val)
+void QtTimePropertyManager::setValue(QtProperty *property, QTime val)
 {
-    setSimpleValue<const QTime &, QTime, QtTimePropertyManager>(d_ptr->m_values, this,
+    setSimpleValue<QTime, QTime, QtTimePropertyManager>(d_ptr->m_values, this,
                 &QtTimePropertyManager::propertyChanged,
                 &QtTimePropertyManager::valueChanged,
                 property, val);
@@ -2239,10 +2205,10 @@ public:
     QtEnumPropertyManager *m_enumPropertyManager;
 
     QMap<const QtProperty *, QtProperty *> m_propertyToLanguage;
-    QMap<const QtProperty *, QtProperty *> m_propertyToCountry;
+    QMap<const QtProperty *, QtProperty *> m_propertyToTerritory;
 
     QMap<const QtProperty *, QtProperty *> m_languageToProperty;
-    QMap<const QtProperty *, QtProperty *> m_countryToProperty;
+    QMap<const QtProperty *, QtProperty *> m_territoryToProperty;
 };
 
 QtLocalePropertyManagerPrivate::QtLocalePropertyManagerPrivate()
@@ -2254,16 +2220,16 @@ void QtLocalePropertyManagerPrivate::slotEnumChanged(QtProperty *property, int v
     if (QtProperty *prop = m_languageToProperty.value(property, 0)) {
         const QLocale loc = m_values[prop];
         QLocale::Language newLanguage = loc.language();
-        QLocale::Country newCountry = loc.country();
+        QLocale::Territory newTerritory = loc.territory();
         metaEnumProvider()->indexToLocale(value, 0, &newLanguage, 0);
-        QLocale newLoc(newLanguage, newCountry);
+        QLocale newLoc(newLanguage, newTerritory);
         q_ptr->setValue(prop, newLoc);
-    } else if (QtProperty *prop = m_countryToProperty.value(property, 0)) {
+    } else if (QtProperty *prop = m_territoryToProperty.value(property, 0)) {
         const QLocale loc = m_values[prop];
         QLocale::Language newLanguage = loc.language();
-        QLocale::Country newCountry = loc.country();
-        metaEnumProvider()->indexToLocale(m_enumPropertyManager->value(m_propertyToLanguage.value(prop)), value, &newLanguage, &newCountry);
-        QLocale newLoc(newLanguage, newCountry);
+        QLocale::Territory newTerritory = loc.territory();
+        metaEnumProvider()->indexToLocale(m_enumPropertyManager->value(m_propertyToLanguage.value(prop)), value, &newLanguage, &newTerritory);
+        QLocale newLoc(newLanguage, newTerritory);
         q_ptr->setValue(prop, newLoc);
     }
 }
@@ -2273,9 +2239,9 @@ void QtLocalePropertyManagerPrivate::slotPropertyDestroyed(QtProperty *property)
     if (QtProperty *subProp = m_languageToProperty.value(property, 0)) {
         m_propertyToLanguage[subProp] = 0;
         m_languageToProperty.remove(property);
-    } else if (QtProperty *subProp = m_countryToProperty.value(property, 0)) {
-        m_propertyToCountry[subProp] = 0;
-        m_countryToProperty.remove(property);
+    } else if (QtProperty *subProp = m_territoryToProperty.value(property, 0)) {
+        m_propertyToTerritory[subProp] = 0;
+        m_territoryToProperty.remove(property);
     }
 }
 
@@ -2377,19 +2343,19 @@ QString QtLocalePropertyManager::valueText(const QtProperty *property) const
     const QLocale loc = it.value();
 
     int langIdx = 0;
-    int countryIdx = 0;
+    int territoryIdx = 0;
     const QtMetaEnumProvider *me = metaEnumProvider();
-    me->localeToIndex(loc.language(), loc.country(), &langIdx, &countryIdx);
+    me->localeToIndex(loc.language(), loc.territory(), &langIdx, &territoryIdx);
     if (langIdx < 0) {
         qWarning("QtLocalePropertyManager::valueText: Unknown language %d", loc.language());
         return tr("<Invalid>");
     }
     const QString languageName = me->languageEnumNames().at(langIdx);
-    if (countryIdx < 0) {
-        qWarning("QtLocalePropertyManager::valueText: Unknown country %d for %s", loc.country(), qPrintable(languageName));
+    if (territoryIdx < 0) {
+        qWarning("QtLocalePropertyManager::valueText: Unknown territory %d for %s", loc.territory(), qPrintable(languageName));
         return languageName;
     }
-    const QString countryName = me->countryEnumNames(loc.language()).at(countryIdx);
+    const QString countryName = me->territoryEnumNames(loc.language()).at(territoryIdx);
     return tr("%1, %2").arg(languageName, countryName);
 }
 
@@ -2414,14 +2380,14 @@ void QtLocalePropertyManager::setValue(QtProperty *property, const QLocale &val)
     it.value() = val;
 
     int langIdx = 0;
-    int countryIdx = 0;
-    metaEnumProvider()->localeToIndex(val.language(), val.country(), &langIdx, &countryIdx);
+    int territoryIdx = 0;
+    metaEnumProvider()->localeToIndex(val.language(), val.territory(), &langIdx, &territoryIdx);
     if (loc.language() != val.language()) {
         d_ptr->m_enumPropertyManager->setValue(d_ptr->m_propertyToLanguage.value(property), langIdx);
-        d_ptr->m_enumPropertyManager->setEnumNames(d_ptr->m_propertyToCountry.value(property),
-                    metaEnumProvider()->countryEnumNames(val.language()));
+        d_ptr->m_enumPropertyManager->setEnumNames(d_ptr->m_propertyToTerritory.value(property),
+                    metaEnumProvider()->territoryEnumNames(val.language()));
     }
-    d_ptr->m_enumPropertyManager->setValue(d_ptr->m_propertyToCountry.value(property), countryIdx);
+    d_ptr->m_enumPropertyManager->setValue(d_ptr->m_propertyToTerritory.value(property), territoryIdx);
 
     emit propertyChanged(property);
     emit valueChanged(property, val);
@@ -2436,8 +2402,8 @@ void QtLocalePropertyManager::initializeProperty(QtProperty *property)
     d_ptr->m_values[property] = val;
 
     int langIdx = 0;
-    int countryIdx = 0;
-    metaEnumProvider()->localeToIndex(val.language(), val.country(), &langIdx, &countryIdx);
+    int territoryIdx = 0;
+    metaEnumProvider()->localeToIndex(val.language(), val.territory(), &langIdx, &territoryIdx);
 
     QtProperty *languageProp = d_ptr->m_enumPropertyManager->addProperty();
     languageProp->setPropertyName(tr("Language"));
@@ -2447,13 +2413,13 @@ void QtLocalePropertyManager::initializeProperty(QtProperty *property)
     d_ptr->m_languageToProperty[languageProp] = property;
     property->addSubProperty(languageProp);
 
-    QtProperty *countryProp = d_ptr->m_enumPropertyManager->addProperty();
-    countryProp->setPropertyName(tr("Country"));
-    d_ptr->m_enumPropertyManager->setEnumNames(countryProp, metaEnumProvider()->countryEnumNames(val.language()));
-    d_ptr->m_enumPropertyManager->setValue(countryProp, countryIdx);
-    d_ptr->m_propertyToCountry[property] = countryProp;
-    d_ptr->m_countryToProperty[countryProp] = property;
-    property->addSubProperty(countryProp);
+    QtProperty *territoryProp = d_ptr->m_enumPropertyManager->addProperty();
+    territoryProp->setPropertyName(tr("Country"));
+    d_ptr->m_enumPropertyManager->setEnumNames(territoryProp, metaEnumProvider()->territoryEnumNames(val.language()));
+    d_ptr->m_enumPropertyManager->setValue(territoryProp, territoryIdx);
+    d_ptr->m_propertyToTerritory[property] = territoryProp;
+    d_ptr->m_territoryToProperty[territoryProp] = property;
+    property->addSubProperty(territoryProp);
 }
 
 /*!
@@ -2468,12 +2434,12 @@ void QtLocalePropertyManager::uninitializeProperty(QtProperty *property)
     }
     d_ptr->m_propertyToLanguage.remove(property);
 
-    QtProperty *countryProp = d_ptr->m_propertyToCountry[property];
+    QtProperty *countryProp = d_ptr->m_propertyToTerritory[property];
     if (countryProp) {
-        d_ptr->m_countryToProperty.remove(countryProp);
+        d_ptr->m_territoryToProperty.remove(countryProp);
         delete countryProp;
     }
-    d_ptr->m_propertyToCountry.remove(property);
+    d_ptr->m_propertyToTerritory.remove(property);
 
     d_ptr->m_values.remove(property);
 }
@@ -5513,8 +5479,6 @@ void QtSizePolicyPropertyManager::uninitializeProperty(QtProperty *property)
 // enumeration manager to re-set its strings and index values
 // for each property.
 
-Q_GLOBAL_STATIC(QFontDatabase, fontDatabase)
-
 class QtFontPropertyManagerPrivate
 {
     QtFontPropertyManager *q_ptr;
@@ -5657,7 +5621,7 @@ void QtFontPropertyManagerPrivate::slotFontDatabaseDelayedChange()
     typedef QMap<const QtProperty *, QtProperty *> PropertyPropertyMap;
     // rescan available font names
     const QStringList oldFamilies = m_familyNames;
-    m_familyNames = fontDatabase()->families();
+    m_familyNames = QFontDatabase::families();
 
     // Adapt all existing properties
     if (!m_propertyToFamily.isEmpty()) {
@@ -5842,7 +5806,7 @@ void QtFontPropertyManager::setValue(QtProperty *property, const QFont &val)
         return;
 
     const QFont oldVal = it.value();
-    if (oldVal == val && oldVal.resolve() == val.resolve())
+    if (oldVal == val && oldVal.resolveMask() == val.resolveMask())
         return;
 
     it.value() = val;
@@ -5876,7 +5840,7 @@ void QtFontPropertyManager::initializeProperty(QtProperty *property)
     QtProperty *familyProp = d_ptr->m_enumPropertyManager->addProperty();
     familyProp->setPropertyName(tr("Family"));
     if (d_ptr->m_familyNames.isEmpty())
-        d_ptr->m_familyNames = fontDatabase()->families();
+        d_ptr->m_familyNames = QFontDatabase::families();
     d_ptr->m_enumPropertyManager->setEnumNames(familyProp, d_ptr->m_familyNames);
     int idx = d_ptr->m_familyNames.indexOf(val.family());
     if (idx == -1)

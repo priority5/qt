@@ -29,7 +29,8 @@
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -60,8 +61,8 @@ class CORE_EXPORT DOMTokenList : public ScriptWrappable {
                const AtomicString& new_token,
                ExceptionState&);
   bool supports(const AtomicString&, ExceptionState&);
-  virtual AtomicString value() const;
-  virtual void setValue(const AtomicString&);
+  AtomicString value() const;
+  void setValue(const AtomicString&);
   AtomicString toString() const { return value(); }
 
   // This function should be called when the associated attribute value was

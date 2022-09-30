@@ -15,7 +15,9 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace content {
 
@@ -30,6 +32,7 @@ SignedExchangePrefetchHandler::SignedExchangePrefetchHandler(
     scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory,
     URLLoaderThrottlesGetter loader_throttles_getter,
     network::mojom::URLLoaderClient* forwarding_client,
+    const net::NetworkIsolationKey& network_isolation_key,
     scoped_refptr<SignedExchangePrefetchMetricRecorder> metric_recorder,
     const std::string& accept_langs,
     bool keep_entry_for_prefetch_cache)
@@ -42,19 +45,19 @@ SignedExchangePrefetchHandler::SignedExchangePrefetchHandler(
 
   auto reporter = SignedExchangeReporter::MaybeCreate(
       resource_request.url, resource_request.referrer.spec(), *response_head,
-      frame_tree_node_id);
+      network_isolation_key, frame_tree_node_id);
   auto devtools_proxy = std::make_unique<SignedExchangeDevToolsProxy>(
       resource_request.url, response_head.Clone(), frame_tree_node_id,
-      base::nullopt /* devtools_navigation_token */,
-      resource_request.report_raw_headers);
+      absl::nullopt /* devtools_navigation_token */,
+      resource_request.devtools_request_id.has_value());
   signed_exchange_loader_ = std::make_unique<SignedExchangeLoader>(
       resource_request, std::move(response_head), std::move(response_body),
       loader_client_receiver_.BindNewPipeAndPassRemote(), std::move(endpoints),
       network::mojom::kURLLoadOptionNone,
       false /* should_redirect_to_fallback */, std::move(devtools_proxy),
       std::move(reporter), std::move(url_loader_factory),
-      loader_throttles_getter, frame_tree_node_id, std::move(metric_recorder),
-      accept_langs, keep_entry_for_prefetch_cache);
+      loader_throttles_getter, network_isolation_key, frame_tree_node_id,
+      std::move(metric_recorder), accept_langs, keep_entry_for_prefetch_cache);
 }
 
 SignedExchangePrefetchHandler::~SignedExchangePrefetchHandler() = default;
@@ -77,8 +80,14 @@ SignedExchangePrefetchHandler::TakePrefetchedSignedExchangeCacheEntry() {
   return signed_exchange_loader_->TakePrefetchedSignedExchangeCacheEntry();
 }
 
+void SignedExchangePrefetchHandler::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {
+  NOTREACHED();
+}
+
 void SignedExchangePrefetchHandler::OnReceiveResponse(
-    network::mojom::URLResponseHeadPtr head) {
+    network::mojom::URLResponseHeadPtr head,
+    mojo::ScopedDataPipeConsumerHandle body) {
   NOTREACHED();
 }
 

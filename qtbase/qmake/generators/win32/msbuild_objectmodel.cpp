@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the qmake application of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "msbuild_objectmodel.h"
 
@@ -34,7 +9,8 @@
 #include <qscopedpointer.h>
 #include <qstringlist.h>
 #include <qfileinfo.h>
-#include <qregexp.h>
+#include <qregularexpression.h>
+#include <qvarlengtharray.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -144,6 +120,7 @@ const char _IntermediateDirectory[]             = "IntermediateDirectory";
 const char _KeyContainer[]                      = "KeyContainer";
 const char _KeyFile[]                           = "KeyFile";
 const char _LanguageStandard[]                  = "LanguageStandard";
+const char _LanguageStandard_C[]                = "LanguageStandard_C";
 const char _LargeAddressAware[]                 = "LargeAddressAware";
 const char _LinkDLL[]                           = "LinkDLL";
 const char _LinkErrorReporting[]                = "LinkErrorReporting";
@@ -612,14 +589,12 @@ void VCXProjectWriter::write(XmlOutput &xml, VCProject &tool)
         << tag("ItemGroup")
         << attrTag("Label", "ProjectConfigurations");
 
-    bool isWinRT = false;
     for (int i = 0; i < tool.SingleProjects.count(); ++i) {
         xml << tag("ProjectConfiguration")
             << attrTag("Include" , tool.SingleProjects.at(i).Configuration.Name)
             << tagValue("Configuration", tool.SingleProjects.at(i).Configuration.ConfigurationName)
             << tagValue("Platform", tool.SingleProjects.at(i).PlatformName)
             << closetag();
-        isWinRT = isWinRT || tool.SingleProjects.at(i).Configuration.WinRT;
     }
 
     xml << closetag()
@@ -629,13 +604,6 @@ void VCXProjectWriter::write(XmlOutput &xml, VCProject &tool)
         << tagValue("RootNamespace", tool.Name)
         << tagValue("Keyword", tool.Keyword);
 
-    if (isWinRT) {
-        xml << tagValue("MinimumVisualStudioVersion", tool.Version)
-            << tagValue("DefaultLanguage", "en")
-            << tagValue("AppContainerApplication", "true")
-            << tagValue("ApplicationType", "Windows Store")
-            << tagValue("ApplicationTypeRevision", tool.SdkVersion);
-    }
     if (!tool.WindowsTargetPlatformVersion.isEmpty())
         xml << tagValue("WindowsTargetPlatformVersion", tool.WindowsTargetPlatformVersion);
     if (!tool.WindowsTargetPlatformMinVersion.isEmpty())
@@ -824,40 +792,6 @@ void VCXProjectWriter::write(XmlOutput &xml, VCProject &tool)
         outputFilter(tool, xml, xmlFilter, tool.ExtraCompilers.at(x));
     }
     outputFilter(tool, xml, xmlFilter, "Root Files");
-
-    // App manifest
-    if (isWinRT) {
-        const QString manifest = QStringLiteral("Package.appxmanifest");
-
-        // Find all icons referenced in the manifest
-        QSet<QString> icons;
-        QFile manifestFile(Option::output_dir + QLatin1Char('/') + manifest);
-        if (manifestFile.open(QFile::ReadOnly)) {
-            const QString contents = manifestFile.readAll();
-            QRegExp regexp("[\\\\/a-zA-Z0-9_\\-\\!]*\\.(png|jpg|jpeg)");
-            int pos = 0;
-            while (pos > -1) {
-                pos = regexp.indexIn(contents, pos);
-                if (pos >= 0) {
-                    const QString match = regexp.cap(0);
-                    icons.insert(match);
-                    pos += match.length();
-                }
-            }
-        }
-
-        // Write out manifest + icons as content items
-        xml << tag(_ItemGroup)
-            << tag("AppxManifest")
-            << attrTag("Include", manifest)
-            << closetag();
-        for (const QString &icon : qAsConst(icons)) {
-            xml << tag("Image")
-                << attrTag("Include", icon)
-                << closetag();
-        }
-        xml << closetag();
-    }
 
     xml << import("Project", "$(VCTargetsPath)\\Microsoft.Cpp.targets")
         << tag("ImportGroup")
@@ -1130,6 +1064,8 @@ static inline QString toString(optLinkTimeCodeGenType option)
         break;
     case optLTCGEnabled:
         return "UseLinkTimeCodeGeneration";
+    case optLTCGIncremental:
+        return "UseFastLinkTimeCodeGeneration";
     case optLTCGInstrument:
         return "PGInstrument";
     case optLTCGOptimize:
@@ -1163,6 +1099,8 @@ static inline QString toString(triState genDebugInfo, linkerDebugOption option)
     case _True:
         if (option == linkerDebugOptionFastLink)
             return "DebugFastLink";
+        else if (option == linkerDebugOptionFull)
+            return "DebugFull";
         return "true";
     }
     return QString();
@@ -1483,6 +1421,7 @@ void VCXProjectWriter::write(XmlOutput &xml, const VCCLCompilerTool &tool)
             << attrTagT(_MinimalRebuild, tool.MinimalRebuild)
             << attrTagT(_MultiProcessorCompilation, tool.MultiProcessorCompilation)
             << attrTagS(_LanguageStandard, tool.LanguageStandard)
+            << attrTagS(_LanguageStandard_C, tool.LanguageStandard_C)
             << attrTagS(_ObjectFileName, tool.ObjectFile)
             << attrTagT(_OmitDefaultLibName, tool.OmitDefaultLibName)
             << attrTagT(_OmitFramePointers, tool.OmitFramePointers)

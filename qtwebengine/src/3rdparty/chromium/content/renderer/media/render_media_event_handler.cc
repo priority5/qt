@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "content/renderer/media/render_media_event_handler.h"
-#include "content/common/view_messages.h"
 #include "content/public/renderer/render_thread.h"
 
 namespace content {
@@ -13,7 +12,11 @@ void RenderMediaEventHandler::SendQueuedMediaEvents(
   GetMediaInternalRecordLogRemote().Log(events_to_send);
 }
 
-RenderMediaEventHandler::RenderMediaEventHandler() = default;
+RenderMediaEventHandler::RenderMediaEventHandler() {
+  DCHECK(RenderThread::Get())
+      << "RenderMediaEventHandler must be constructed on the render thread";
+}
+
 RenderMediaEventHandler::~RenderMediaEventHandler() = default;
 
 // This media log doesn't care, since the RenderThread outlives us for

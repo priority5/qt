@@ -6,7 +6,6 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom-blink.h"
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_image_resource.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -207,7 +206,7 @@ TEST(ImageResourceConverter, BlinkToMojoTypeTest) {
   EXPECT_EQ(mojo_icon.type, blink::WebString("image/jpeg").Utf16());
   EXPECT_EQ(mojo_icon.sizes[1], gfx::Size(64, 64));
   EXPECT_EQ(mojo_icon.purpose[0],
-            blink::Manifest::ImageResource::Purpose::MONOCHROME);
+            blink::mojom::ManifestImageResource_Purpose::MONOCHROME);
 }
 
 }  // namespace

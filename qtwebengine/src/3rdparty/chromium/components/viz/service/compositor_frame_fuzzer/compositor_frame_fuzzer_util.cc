@@ -15,6 +15,7 @@
 #include "components/viz/common/resources/bitmap_allocation.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/geometry/mask_filter_info.h"
 
 namespace viz {
 namespace {
@@ -35,7 +36,8 @@ float MakeNormal(float x) {
 // Normalizes value to a float in [0, 1]. Use to convert a fuzzed
 // uint32 into a percentage.
 float Normalize(uint32_t x) {
-  return static_cast<float>(x) / std::numeric_limits<uint32_t>::max();
+  return static_cast<float>(x) /
+         static_cast<float>(std::numeric_limits<uint32_t>::max());
 }
 
 gfx::Size GetSizeFromProtobuf(const proto::Size& proto_size) {
@@ -98,6 +100,11 @@ void ExpandToMinSize(gfx::Rect* rect, int min_size) {
 class FuzzedCompositorFrameBuilder {
  public:
   FuzzedCompositorFrameBuilder() = default;
+
+  FuzzedCompositorFrameBuilder(const FuzzedCompositorFrameBuilder&) = delete;
+  FuzzedCompositorFrameBuilder& operator=(const FuzzedCompositorFrameBuilder&) =
+      delete;
+
   ~FuzzedCompositorFrameBuilder() = default;
 
   FuzzedData Build(const proto::CompositorRenderPass& render_pass_spec);
@@ -148,8 +155,6 @@ class FuzzedCompositorFrameBuilder {
 
   // Frame and data being built.
   FuzzedData data_;
-
-  DISALLOW_COPY_AND_ASSIGN(FuzzedCompositorFrameBuilder);
 };
 
 FuzzedData FuzzedCompositorFrameBuilder::Build(
@@ -340,12 +345,15 @@ void FuzzedCompositorFrameBuilder::ConfigureSharedQuadState(
     SharedQuadState* shared_quad_state,
     const proto::DrawQuad& quad_spec) {
   if (quad_spec.has_sqs()) {
+    absl::optional<gfx::Rect> clip_rect;
+    if (quad_spec.sqs().is_clipped()) {
+      clip_rect = GetRectFromProtobuf(quad_spec.sqs().clip_rect());
+    }
     shared_quad_state->SetAll(
         GetTransformFromProtobuf(quad_spec.sqs().transform()),
         GetRectFromProtobuf(quad_spec.sqs().layer_rect()),
-        GetRectFromProtobuf(quad_spec.sqs().visible_rect()), gfx::RRectF(),
-        GetRectFromProtobuf(quad_spec.sqs().clip_rect()),
-        quad_spec.sqs().is_clipped(), quad_spec.sqs().are_contents_opaque(),
+        GetRectFromProtobuf(quad_spec.sqs().visible_rect()),
+        gfx::MaskFilterInfo(), clip_rect, quad_spec.sqs().are_contents_opaque(),
         Normalize(quad_spec.sqs().opacity()), SkBlendMode::kSrcOver,
         quad_spec.sqs().sorting_context_id());
   } else {
@@ -360,12 +368,11 @@ void FuzzedCompositorFrameBuilder::ConfigureSharedQuadState(
                                                .transform_to_root_target());
     }
 
-    shared_quad_state->SetAll(transform, GetRectFromProtobuf(quad_spec.rect()),
-                              GetRectFromProtobuf(quad_spec.visible_rect()),
-                              gfx::RRectF(), gfx::Rect(), /*is_clipped=*/false,
-                              /*are_contents_opaque=*/true, /*opacity=*/1.0,
-                              SkBlendMode::kSrcOver,
-                              /*sorting_context_id=*/0);
+    shared_quad_state->SetAll(
+        transform, GetRectFromProtobuf(quad_spec.rect()),
+        GetRectFromProtobuf(quad_spec.visible_rect()), gfx::MaskFilterInfo(),
+        /*clip_rect=*/absl::nullopt, /*are_contents_opaque=*/true,
+        /*opacity=*/1.0, SkBlendMode::kSrcOver, /*sorting_context_id=*/0);
   }
 }
 

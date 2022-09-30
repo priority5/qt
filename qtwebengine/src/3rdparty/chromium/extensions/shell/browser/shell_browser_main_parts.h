@@ -8,9 +8,9 @@
 #include <memory>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "base/task/cancelable_task_tracker.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/nacl/common/buildflags.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/main_function_params.h"
@@ -31,7 +31,7 @@ class ShellExtensionsBrowserClient;
 class ShellExtensionSystem;
 class ShellUpdateQueryParamsDelegate;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 class ShellAudioController;
 class ShellNetworkController;
 #endif
@@ -39,8 +39,12 @@ class ShellNetworkController;
 // Handles initialization of AppShell.
 class ShellBrowserMainParts : public content::BrowserMainParts {
  public:
-  ShellBrowserMainParts(const content::MainFunctionParams& parameters,
+  ShellBrowserMainParts(content::MainFunctionParams parameters,
                         ShellBrowserMainDelegate* browser_main_delegate);
+
+  ShellBrowserMainParts(const ShellBrowserMainParts&) = delete;
+  ShellBrowserMainParts& operator=(const ShellBrowserMainParts&) = delete;
+
   ~ShellBrowserMainParts() override;
 
   ShellBrowserContext* browser_context() { return browser_context_.get(); }
@@ -49,11 +53,11 @@ class ShellBrowserMainParts : public content::BrowserMainParts {
 
   // BrowserMainParts overrides.
   int PreEarlyInitialization() override;
-  void PreMainMessageLoopStart() override;
-  void PostMainMessageLoopStart() override;
+  void PostCreateMainMessageLoop() override;
   int PreCreateThreads() override;
-  void PreMainMessageLoopRun() override;
-  bool MainMessageLoopRun(int* result_code) override;
+  int PreMainMessageLoopRun() override;
+  void WillRunMainMessageLoop(
+      std::unique_ptr<base::RunLoop>& run_loop) override;
   void PostMainMessageLoopRun() override;
   void PostDestroyThreads() override;
 
@@ -61,7 +65,7 @@ class ShellBrowserMainParts : public content::BrowserMainParts {
   // Initializes the ExtensionSystem.
   void InitExtensionSystem();
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<ShellNetworkController> network_controller_;
 #endif
 
@@ -69,7 +73,7 @@ class ShellBrowserMainParts : public content::BrowserMainParts {
   std::unique_ptr<PrefService> local_state_;
   std::unique_ptr<PrefService> user_pref_service_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<ShellAudioController> audio_controller_;
 #endif
 
@@ -81,22 +85,12 @@ class ShellBrowserMainParts : public content::BrowserMainParts {
   std::unique_ptr<ShellUpdateQueryParamsDelegate> update_query_params_delegate_;
 
   // Owned by the KeyedService system.
-  ShellExtensionSystem* extension_system_;
+  raw_ptr<ShellExtensionSystem> extension_system_;
 
   // For running app browsertests.
-  const content::MainFunctionParams parameters_;
-
-  // If true, indicates the main message loop should be run
-  // in MainMessageLoopRun. If false, it has already been run.
-  bool run_message_loop_;
+  content::MainFunctionParams parameters_;
 
   std::unique_ptr<ShellBrowserMainDelegate> browser_main_delegate_;
-
-#if BUILDFLAG(ENABLE_NACL)
-  base::CancelableTaskTracker task_tracker_;
-#endif
-
-  DISALLOW_COPY_AND_ASSIGN(ShellBrowserMainParts);
 };
 
 }  // namespace extensions

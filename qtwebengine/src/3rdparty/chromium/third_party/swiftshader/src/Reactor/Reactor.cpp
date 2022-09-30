@@ -14,11 +14,9 @@
 
 #include "Reactor.hpp"
 
+#include "CPUID.hpp"
 #include "Debug.hpp"
 #include "Print.hpp"
-
-#include <algorithm>
-#include <cmath>
 
 #if defined(_WIN32)
 #	ifndef WIN32_LEAN_AND_MEAN
@@ -27,18 +25,24 @@
 #	include <windows.h>
 #endif
 
-namespace rr {
+#include <algorithm>
+#include <cmath>
 
-const Config::Edit Config::Edit::None = {};
+// Define REACTOR_MATERIALIZE_LVALUES_ON_DEFINITION to non-zero to ensure all
+// variables have a stack location obtained through alloca().
+#ifndef REACTOR_MATERIALIZE_LVALUES_ON_DEFINITION
+#	define REACTOR_MATERIALIZE_LVALUES_ON_DEFINITION 0
+#endif
+
+namespace rr {
 
 Config Config::Edit::apply(const Config &cfg) const
 {
-	if(this == &None) { return cfg; }
-
+	auto newDebugCfg = debugCfgChanged ? debugCfg : cfg.debugCfg;
 	auto level = optLevelChanged ? optLevel : cfg.optimization.getLevel();
 	auto passes = cfg.optimization.getPasses();
 	apply(optPassEdits, passes);
-	return Config{ Optimization{ level, passes } };
+	return Config{ Optimization{ level, passes }, newDebugCfg };
 }
 
 template<typename T>
@@ -48,40 +52,89 @@ void rr::Config::Edit::apply(const std::vector<std::pair<ListEdit, T>> &edits, s
 	{
 		switch(edit.first)
 		{
-			case ListEdit::Add:
-				list.push_back(edit.second);
-				break;
-			case ListEdit::Remove:
-				list.erase(std::remove_if(list.begin(), list.end(), [&](T item) {
-					           return item == edit.second;
-				           }),
-				           list.end());
-				break;
-			case ListEdit::Clear:
-				list.clear();
-				break;
+		case ListEdit::Add:
+			list.push_back(edit.second);
+			break;
+		case ListEdit::Remove:
+			list.erase(std::remove_if(list.begin(), list.end(), [&](T item) {
+				           return item == edit.second;
+			           }),
+			           list.end());
+			break;
+		case ListEdit::Clear:
+			list.clear();
+			break;
 		}
 	}
 }
 
-// Set of variables that do not have a stack location yet.
-thread_local std::unordered_set<const Variable *> *Variable::unmaterializedVariables = nullptr;
+thread_local Variable::UnmaterializedVariables *Variable::unmaterializedVariables = nullptr;
 
-Variable::Variable()
+void Variable::UnmaterializedVariables::add(const Variable *v)
 {
-	unmaterializedVariables->emplace(this);
+	variables.emplace(v, counter++);
+}
+
+void Variable::UnmaterializedVariables::remove(const Variable *v)
+{
+	auto iter = variables.find(v);
+	if(iter != variables.end())
+	{
+		variables.erase(iter);
+	}
+}
+
+void Variable::UnmaterializedVariables::clear()
+{
+	variables.clear();
+}
+
+void Variable::UnmaterializedVariables::materializeAll()
+{
+	// Flatten map of Variable* to monotonically increasing counter to a vector,
+	// then sort it by the counter, so that we materialize in variable usage order.
+	std::vector<std::pair<const Variable *, int>> sorted;
+	sorted.resize(variables.size());
+	std::copy(variables.begin(), variables.end(), sorted.begin());
+	std::sort(sorted.begin(), sorted.end(), [&](auto &lhs, auto &rhs) {
+		return lhs.second < rhs.second;
+	});
+
+	for(auto &v : sorted)
+	{
+		v.first->materialize();
+	}
+
+	variables.clear();
+}
+
+Variable::Variable(Type *type, int arraySize)
+    : type(type)
+    , arraySize(arraySize)
+{
+#if REACTOR_MATERIALIZE_LVALUES_ON_DEFINITION
+	materialize();
+#else
+	unmaterializedVariables->add(this);
+#endif
 }
 
 Variable::~Variable()
 {
-	unmaterializedVariables->erase(this);
+	// `unmaterializedVariables` can be null at this point due to the function
+	// already having been finalized, while classes derived from `Function<>`
+	// can have member `Variable` fields which are destructed afterwards.
+	if(unmaterializedVariables)
+	{
+		unmaterializedVariables->remove(this);
+	}
 }
 
 void Variable::materialize() const
 {
 	if(!address)
 	{
-		address = allocate();
+		address = Nucleus::allocateStackVariable(getType(), arraySize);
 		RR_DEBUG_INFO_EMIT_VAR(address);
 
 		if(rvalue)
@@ -132,19 +185,9 @@ Value *Variable::getElementPointer(Value *index, bool unsignedIndex) const
 	return Nucleus::createGEP(getBaseAddress(), getType(), index, unsignedIndex);
 }
 
-Value *Variable::allocate() const
-{
-	return Nucleus::allocateStackVariable(getType());
-}
-
 void Variable::materializeAll()
 {
-	for(auto *var : *unmaterializedVariables)
-	{
-		var->materialize();
-	}
-
-	unmaterializedVariables->clear();
+	unmaterializedVariables->materializeAll();
 }
 
 void Variable::killUnmaterialized()
@@ -1018,6 +1061,13 @@ UShort::UShort(RValue<Int> cast)
 	storeValue(integer);
 }
 
+UShort::UShort(RValue<Byte> cast)
+{
+	Value *integer = Nucleus::createZExt(cast.value(), UShort::type());
+
+	storeValue(integer);
+}
+
 UShort::UShort(unsigned short x)
 {
 	storeValue(Nucleus::createConstantShort(x));
@@ -1286,6 +1336,11 @@ RValue<Byte4> Byte4::operator=(RValue<Byte4> rhs)
 RValue<Byte4> Byte4::operator=(const Byte4 &rhs)
 {
 	return store(rhs.load());
+}
+
+RValue<Byte4> Insert(RValue<Byte4> val, RValue<Byte> element, int i)
+{
+	return RValue<Byte4>(Nucleus::createInsertElement(val.value(), element.value(), i));
 }
 
 Byte8::Byte8(uint8_t x0, uint8_t x1, uint8_t x2, uint8_t x3, uint8_t x4, uint8_t x5, uint8_t x6, uint8_t x7)
@@ -1734,6 +1789,11 @@ Short4::Short4(RValue<Int> cast)
 	storeValue(swizzle);
 }
 
+Short4::Short4(RValue<UInt4> cast)
+    : Short4(As<Int4>(cast))
+{
+}
+
 //	Short4::Short4(RValue<Float> cast)
 //	{
 //	}
@@ -1963,6 +2023,11 @@ RValue<Short> Extract(RValue<Short4> val, int i)
 	return RValue<Short>(Nucleus::createExtractElement(val.value(), Short::type(), i));
 }
 
+UShort4::UShort4(RValue<UInt4> cast)
+    : UShort4(As<Int4>(cast))
+{
+}
+
 UShort4::UShort4(RValue<Int4> cast)
 {
 	*this = Short4(cast);
@@ -2085,6 +2150,11 @@ RValue<UShort4> operator~(RValue<UShort4> val)
 	return RValue<UShort4>(Nucleus::createNot(val.value()));
 }
 
+RValue<UShort4> Insert(RValue<UShort4> val, RValue<UShort> element, int i)
+{
+	return RValue<UShort4>(Nucleus::createInsertElement(val.value(), element.value(), i));
+}
+
 Short8::Short8(short c)
 {
 	int64_t constantVector[8] = { c, c, c, c, c, c, c, c };
@@ -2138,13 +2208,6 @@ RValue<Short8> operator+(RValue<Short8> lhs, RValue<Short8> rhs)
 RValue<Short8> operator&(RValue<Short8> lhs, RValue<Short8> rhs)
 {
 	return RValue<Short8>(Nucleus::createAnd(lhs.value(), rhs.value()));
-}
-
-RValue<Int4> Abs(RValue<Int4> x)
-{
-	// TODO: Optimize.
-	auto negative = x >> 31;
-	return (x ^ negative) - negative;
 }
 
 UShort8::UShort8(unsigned short c)
@@ -3312,6 +3375,11 @@ Int4::Int4(const Reference<Int> &rhs)
 	*this = RValue<Int>(rhs.loadValue());
 }
 
+RValue<Int4> Int4::operator=(int x)
+{
+	return *this = Int4(x, x, x, x);
+}
+
 RValue<Int4> Int4::operator=(RValue<Int4> rhs)
 {
 	return store(rhs);
@@ -3835,6 +3903,11 @@ Float::Float(Argument<Float> argument)
 	store(argument.rvalue());
 }
 
+RValue<Float> Float::operator=(float rhs)
+{
+	return RValue<Float>(storeValue(Nucleus::createConstantFloat(rhs)));
+}
+
 RValue<Float> Float::operator=(RValue<Float> rhs)
 {
 	return store(rhs);
@@ -4078,6 +4151,15 @@ Float4::Float4(const Reference<Float> &rhs)
 	*this = RValue<Float>(rhs.loadValue());
 }
 
+Float4::Float4(RValue<Float2> lo, RValue<Float2> hi)
+    : XYZW(this)
+{
+	int shuffle[4] = { 0, 1, 4, 5 };  // Real type is v4i32
+	Value *packed = Nucleus::createShuffleVector(lo.value(), hi.value(), shuffle);
+
+	storeValue(packed);
+}
+
 RValue<Float4> Float4::operator=(float x)
 {
 	return *this = Float4(x, x, x, x);
@@ -4166,16 +4248,6 @@ RValue<Float4> operator+(RValue<Float4> val)
 RValue<Float4> operator-(RValue<Float4> val)
 {
 	return RValue<Float4>(Nucleus::createFNeg(val.value()));
-}
-
-RValue<Float4> Abs(RValue<Float4> x)
-{
-	// TODO: Optimize.
-	Value *vector = Nucleus::createBitCast(x.value(), Int4::type());
-	int64_t constantVector[4] = { 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF };
-	Value *result = Nucleus::createAnd(vector, Nucleus::createConstantVector(constantVector, Int4::type()));
-
-	return As<Float4>(result);
 }
 
 RValue<Float4> Insert(RValue<Float4> x, RValue<Float> element, int i)
@@ -4605,5 +4677,116 @@ int DebugPrintf(const char *format, ...)
 }
 
 #endif  // ENABLE_RR_PRINT
+
+// Functions implemented by backends
+bool HasRcpApprox();
+RValue<Float4> RcpApprox(RValue<Float4> x, bool exactAtPow2 = false);
+RValue<Float> RcpApprox(RValue<Float> x, bool exactAtPow2 = false);
+
+template<typename T>
+static RValue<T> DoRcp(RValue<T> x, bool relaxedPrecision, bool exactAtPow2)
+{
+#if defined(__i386__) || defined(__x86_64__)  // On x86, 1/x is fast enough, except for lower precision
+	bool approx = HasRcpApprox() && relaxedPrecision;
+#else
+	bool approx = HasRcpApprox();
+#endif
+
+	T rcp;
+
+	if(approx)
+	{
+		rcp = RcpApprox(x, exactAtPow2);
+
+		if(!relaxedPrecision)
+		{
+			// Perform one more iteration of Newton-Rhapson division to increase precision
+			rcp = (rcp + rcp) - (x * rcp * rcp);
+		}
+	}
+	else
+	{
+		rcp = T(1.0f) / x;
+	}
+
+	return rcp;
+}
+
+RValue<Float4> Rcp(RValue<Float4> x, bool relaxedPrecision, bool exactAtPow2)
+{
+	RR_DEBUG_INFO_UPDATE_LOC();
+	return DoRcp(x, relaxedPrecision, exactAtPow2);
+}
+
+RValue<Float> Rcp(RValue<Float> x, bool relaxedPrecision, bool exactAtPow2)
+{
+	RR_DEBUG_INFO_UPDATE_LOC();
+	return DoRcp(x, relaxedPrecision, exactAtPow2);
+}
+
+// Functions implemented by backends
+bool HasRcpSqrtApprox();
+RValue<Float4> RcpSqrtApprox(RValue<Float4> x);
+RValue<Float> RcpSqrtApprox(RValue<Float> x);
+
+template<typename T>
+struct CastToIntType;
+
+template<>
+struct CastToIntType<Float4>
+{
+	using type = Int4;
+};
+
+template<>
+struct CastToIntType<Float>
+{
+	using type = Int;
+};
+
+// TODO: move to Reactor.hpp?
+RValue<Int> CmpNEQ(RValue<Int> x, RValue<Int> y)
+{
+	return IfThenElse(x != y, Int(~0), Int(0));
+}
+
+template<typename T>
+static RValue<T> DoRcpSqrt(RValue<T> x, bool relaxedPrecision)
+{
+#if defined(__i386__) || defined(__x86_64__)  // On x86, 1/x is fast enough, except for lower precision
+	bool approx = HasRcpApprox() && relaxedPrecision;
+#else
+	bool approx = HasRcpApprox();
+#endif
+
+	if(approx)
+	{
+		using IntType = typename CastToIntType<T>::type;
+
+		T rsq = RcpSqrtApprox(x);
+
+		if(!relaxedPrecision)
+		{
+			rsq = rsq * (T(3.0f) - rsq * rsq * x) * T(0.5f);
+			rsq = As<T>(CmpNEQ(As<IntType>(x), IntType(0x7F800000)) & As<IntType>(rsq));
+		}
+
+		return rsq;
+	}
+	else
+	{
+		return T(1.0f) / Sqrt(x);
+	}
+}
+
+RValue<Float4> RcpSqrt(RValue<Float4> x, bool relaxedPrecision)
+{
+	return DoRcpSqrt(x, relaxedPrecision);
+}
+
+RValue<Float> RcpSqrt(RValue<Float> x, bool relaxedPrecision)
+{
+	return DoRcpSqrt(x, relaxedPrecision);
+}
 
 }  // namespace rr

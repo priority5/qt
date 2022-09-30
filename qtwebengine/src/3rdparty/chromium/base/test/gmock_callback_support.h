@@ -54,9 +54,10 @@ template <size_t I,
           typename Tuple,
           std::enable_if_t<std::is_copy_constructible<Tuple>::value, int> = 0>
 auto RunOnceCallbackImpl(Tuple&& tuple) {
-  return [tuple = std::move(tuple)](auto&&... args) -> decltype(auto) {
-    return RunImpl(std::move(internal::get<I>(args...)), tuple);
-  };
+  return
+      [tuple = std::forward<Tuple>(tuple)](auto&&... args) -> decltype(auto) {
+        return RunImpl(std::move(internal::get<I>(args...)), tuple);
+      };
 }
 
 // Invoked when the arguments to a OnceCallback are not copy constructible. In
@@ -68,8 +69,8 @@ template <size_t I,
 auto RunOnceCallbackImpl(Tuple&& tuple) {
   // Mock actions need to be copyable, but `tuple` is not. Wrap it in in a
   // `scoped_refptr` to allow it to be copied.
-  auto tuple_ptr =
-      base::MakeRefCounted<base::RefCountedData<Tuple>>(std::move(tuple));
+  auto tuple_ptr = base::MakeRefCounted<base::RefCountedData<Tuple>>(
+      std::forward<Tuple>(tuple));
   return [tuple_ptr =
               std::move(tuple_ptr)](auto&&... args) mutable -> decltype(auto) {
     // Since running the action will move out of the arguments, `tuple_ptr` is
@@ -85,9 +86,10 @@ auto RunOnceCallbackImpl(Tuple&& tuple) {
 // multiple times. Move-only arguments are not supported.
 template <size_t I, typename Tuple>
 auto RunRepeatingCallbackImpl(Tuple&& tuple) {
-  return [tuple = std::move(tuple)](auto&&... args) -> decltype(auto) {
-    return RunImpl(internal::get<I>(args...), tuple);
-  };
+  return
+      [tuple = std::forward<Tuple>(tuple)](auto&&... args) -> decltype(auto) {
+        return RunImpl(internal::get<I>(args...), tuple);
+      };
 }
 
 }  // namespace internal
@@ -115,11 +117,7 @@ ACTION_P(RunClosure, closure) {
 // a CHECK failure.
 inline auto RunOnceClosure(base::OnceClosure cb) {
   // Mock actions need to be copyable, but OnceClosure is not. Wrap the closure
-  // in a base::RefCountedData<> to allow it to be copied. An alternative would
-  // be to use AdaptCallbackForRepeating(), but that allows the closure to be
-  // run more than once and silently ignores any invocation after the first.
-  // Since this is for use by tests, it's better to crash or CHECK-fail and
-  // surface the incorrect usage, rather than have a silent unexpected success.
+  // in a base::RefCountedData<> to allow it to be copied.
   using RefCountedOnceClosure = base::RefCountedData<base::OnceClosure>;
   scoped_refptr<RefCountedOnceClosure> copyable_cb =
       base::MakeRefCounted<RefCountedOnceClosure>(std::move(cb));

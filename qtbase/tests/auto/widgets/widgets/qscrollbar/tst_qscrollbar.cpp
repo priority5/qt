@@ -1,37 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <QScrollBar>
 #include <QStyleOptionSlider>
 #include <QScrollArea>
 #include <QScreen>
+#include <QSignalSpy>
 
 #include <QtTest/private/qtesthelpers_p.h>
 
@@ -52,7 +28,7 @@ private slots:
 class SingleStepTestScrollBar : public QScrollBar {
     Q_OBJECT
 public:
-    explicit SingleStepTestScrollBar(Qt::Orientation o, QWidget *parent = 0) : QScrollBar(o, parent) {}
+    explicit SingleStepTestScrollBar(Qt::Orientation o, QWidget *parent = nullptr) : QScrollBar(o, parent) {}
 
 public slots:
     void hideAndShow()
@@ -99,10 +75,10 @@ void tst_QScrollBar::task_209492()
     {
     public:
         int scrollCount;
-        MyScrollArea(QWidget *parent = 0) : QScrollArea(parent), scrollCount(0) {}
+        MyScrollArea(QWidget *parent = nullptr) : QScrollArea(parent), scrollCount(0) {}
     protected:
-        void paintEvent(QPaintEvent *) { QTest::qSleep(600); }
-        void scrollContentsBy(int, int) { ++scrollCount; viewport()->update(); }
+        void paintEvent(QPaintEvent *) override { QTest::qSleep(600); }
+        void scrollContentsBy(int, int) override { ++scrollCount; viewport()->update(); }
     };
 
     MyScrollArea scrollArea;
@@ -118,7 +94,7 @@ void tst_QScrollBar::task_209492()
 
     // Simulate a mouse click on the "scroll down button".
     const QPoint pressPoint(verticalScrollBar->width() / 2, verticalScrollBar->height() - 10);
-    const QPoint globalPressPoint = verticalScrollBar->mapToGlobal(globalPressPoint);
+    const QPoint globalPressPoint = verticalScrollBar->mapToGlobal(pressPoint);
     QMouseEvent mousePressEvent(QEvent::MouseButtonPress, pressPoint, globalPressPoint,
                                 Qt::LeftButton, Qt::LeftButton, {});
     QApplication::sendEvent(verticalScrollBar, &mousePressEvent);
@@ -191,13 +167,20 @@ void tst_QScrollBar::QTBUG_42871()
     QMouseEvent mousePressEvent(QEvent::MouseButtonPress, pressPoint, globalPressPoint,
                                 Qt::LeftButton, Qt::LeftButton, {});
     QApplication::sendEvent(&scrollBarWidget, &mousePressEvent);
+    QElapsedTimer timer;
+    timer.start();
     QTest::qWait(1);
     QMouseEvent mouseReleaseEvent(QEvent::MouseButtonRelease, pressPoint, globalPressPoint,
                                   Qt::LeftButton, Qt::LeftButton, {});
     QApplication::sendEvent(&scrollBarWidget, &mouseReleaseEvent);
+    if (timer.elapsed() > 40) {
+        // took too long, we need to tolerate auto-repeat
+        if (myHandler.updatesCount > 1)
+            QEXPECT_FAIL("", "Took too long to process events, repeat timer fired", Continue);
+    }
     // Check that the action was triggered once.
     QCOMPARE(myHandler.updatesCount, 1);
-    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.count(), myHandler.updatesCount);
 }
 
 QTEST_MAIN(tst_QScrollBar)

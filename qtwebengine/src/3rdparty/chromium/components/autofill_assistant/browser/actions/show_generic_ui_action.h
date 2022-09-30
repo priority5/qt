@@ -6,19 +6,18 @@
 #define COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_ACTIONS_SHOW_GENERIC_UI_ACTION_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/containers/flat_map.h"
 #include "base/memory/weak_ptr.h"
-#include "components/autofill/core/browser/personal_data_manager.h"
-#include "components/autofill/core/browser/personal_data_manager_observer.h"
+#include "base/time/time.h"
 #include "components/autofill_assistant/browser/actions/action.h"
-#include "components/autofill_assistant/browser/element_precondition.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
+#include "components/autofill_assistant/browser/batch_element_checker.h"
+#include "components/autofill_assistant/browser/wait_for_dom_observer.h"
+#include "components/autofill_assistant/browser/web/element.h"
 
 namespace autofill_assistant {
 
 // Action to show generic UI in the sheet.
-class ShowGenericUiAction : public Action,
-                            public autofill::PersonalDataManagerObserver {
+class ShowGenericUiAction : public Action, public WaitForDomObserver {
  public:
   explicit ShowGenericUiAction(ActionDelegate* delegate,
                                const ActionProto& proto);
@@ -27,6 +26,10 @@ class ShowGenericUiAction : public Action,
   ShowGenericUiAction(const ShowGenericUiAction&) = delete;
   ShowGenericUiAction& operator=(const ShowGenericUiAction&) = delete;
 
+  // Overrides WaitForDomObserver:
+  void OnInterruptStarted() override;
+  void OnInterruptFinished() override;
+
  private:
   // Overrides Action:
   void InternalProcessAction(ProcessActionCallback callback) override;
@@ -34,9 +37,12 @@ class ShowGenericUiAction : public Action,
   void RegisterChecks(
       BatchElementChecker* checker,
       base::OnceCallback<void(const ClientStatus&)> wait_for_dom_callback);
-  void OnPreconditionResult(size_t choice_index,
-                            const ClientStatus& status,
-                            const std::vector<std::string>& ignored_payloads);
+  void OnPreconditionResult(
+      size_t choice_index,
+      const ClientStatus& status,
+      const std::vector<std::string>& ignored_payloads,
+      const std::vector<std::string>& ignored_tags,
+      const base::flat_map<std::string, DomObjectFrameStack>& ignored_elements);
   void OnElementChecksDone(
       base::OnceCallback<void(const ClientStatus&)> wait_for_dom_callback);
   void OnDoneWaitForDom(const ClientStatus& status);
@@ -45,15 +51,14 @@ class ShowGenericUiAction : public Action,
   void OnEndActionInteraction(const ClientStatus& status);
   void EndAction(const ClientStatus& status);
 
-  void OnViewInflationFinished(const ClientStatus& status);
+  void OnViewInflationFinished(bool first_inflation,
+                               const ClientStatus& status);
   void OnNavigationEnded();
 
-  // From autofill::PersonalDataManagerObserver.
-  void OnPersonalDataChanged() override;
-
+  base::TimeTicks wait_time_start_;
   bool has_pending_wait_for_dom_ = false;
   bool should_end_action_ = false;
-  std::vector<std::unique_ptr<ElementPrecondition>> preconditions_;
+  std::vector<ElementConditionProto> preconditions_;
   ProcessActionCallback callback_;
   base::WeakPtrFactory<ShowGenericUiAction> weak_ptr_factory_{this};
 };

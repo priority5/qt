@@ -10,7 +10,6 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
@@ -19,6 +18,7 @@
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/web_audio_device.h"
 #include "third_party/blink/public/platform/web_audio_latency_hint.h"
+#include "third_party/blink/public/platform/web_vector.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -33,6 +33,10 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
     : public blink::WebAudioDevice,
       public media::AudioRendererSink::RenderCallback {
  public:
+  RendererWebAudioDeviceImpl(const RendererWebAudioDeviceImpl&) = delete;
+  RendererWebAudioDeviceImpl& operator=(const RendererWebAudioDeviceImpl&) =
+      delete;
+
   ~RendererWebAudioDeviceImpl() override;
 
   static std::unique_ptr<RendererWebAudioDeviceImpl> Create(
@@ -90,12 +94,17 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
  private:
   scoped_refptr<base::SingleThreadTaskRunner> GetSuspenderTaskRunner();
 
+  void SendLogMessage(const std::string& message);
+
   media::AudioParameters sink_params_;
 
   const blink::WebAudioLatencyHint latency_hint_;
 
   // Weak reference to the callback into WebKit code.
   blink::WebAudioDevice::RenderCallback* const client_callback_;
+
+  // Used to wrap AudioBus to be passed into |client_callback_|.
+  blink::WebVector<float*> web_audio_dest_data_;
 
   // To avoid the need for locking, ensure the control methods of the
   // blink::WebAudioDevice implementation are called on the same thread.
@@ -105,7 +114,7 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
   scoped_refptr<media::AudioRendererSink> sink_;
 
   // ID to allow browser to select the correct input device for unified IO.
-  base::UnguessableToken session_id_;
+  const base::UnguessableToken session_id_;
 
   // Used to suspend |sink_| usage when silence has been detected for too long.
   std::unique_ptr<media::SilentSinkSuspender> webaudio_suspender_;
@@ -116,7 +125,9 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
   // Allow unit tests to set a custom TaskRunner for |webaudio_suspender_|.
   scoped_refptr<base::SingleThreadTaskRunner> suspender_task_runner_;
 
-  DISALLOW_COPY_AND_ASSIGN(RendererWebAudioDeviceImpl);
+  // Used to trigger one single textlog indicating that rendering started as
+  // intended. Set to true once in the first call to the Render callback.
+  bool is_rendering_ = false;
 };
 
 }  // namespace content

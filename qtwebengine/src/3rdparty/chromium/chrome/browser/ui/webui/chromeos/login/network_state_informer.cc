@@ -6,10 +6,10 @@
 
 #include "base/bind.h"
 #include "base/notreached.h"
+#include "chrome/browser/ash/login/screens/network_error.h"
+#include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/chromeos/login/screens/network_error.h"
-#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/proxy/proxy_config_handler.h"
@@ -36,10 +36,8 @@ NetworkStateInformer::State GetStateForDefaultNetwork() {
     return NetworkStateInformer::OFFLINE;
 
   if (network_portal_detector::GetInstance()->IsEnabled()) {
-    NetworkPortalDetector::CaptivePortalState state =
-        network_portal_detector::GetInstance()->GetCaptivePortalState(
-            network->guid());
-    NetworkPortalDetector::CaptivePortalStatus status = state.status;
+    NetworkPortalDetector::CaptivePortalStatus status =
+        network_portal_detector::GetInstance()->GetCaptivePortalStatus();
     if (status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN &&
         NetworkState::StateIsConnecting(network->connection_state())) {
       return NetworkStateInformer::CONNECTING;
@@ -59,16 +57,14 @@ NetworkStateInformer::State GetStateForDefaultNetwork() {
             ->HasDefaultNetworkProxyConfigured()) {
       return NetworkStateInformer::PROXY_AUTH_REQUIRED;
     }
-    if (status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL ||
-        (status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN &&
-         network->is_captive_portal()))
+    if (status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL)
       return NetworkStateInformer::CAPTIVE_PORTAL;
   } else {
     if (NetworkState::StateIsConnecting(network->connection_state()))
       return NetworkStateInformer::CONNECTING;
     if (network->connection_state() == shill::kStateOnline)
       return NetworkStateInformer::ONLINE;
-    if (network->is_captive_portal())
+    if (network->IsCaptivePortal())
       return NetworkStateInformer::CAPTIVE_PORTAL;
   }
 
@@ -77,8 +73,8 @@ NetworkStateInformer::State GetStateForDefaultNetwork() {
   // the server.
   // TODO(rsorokin): Fix reporting network connectivity for Active Directory
   // devices. (see crbug.com/685691)
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  policy::BrowserPolicyConnectorAsh* connector =
+      g_browser_process->platform_part()->browser_policy_connector_ash();
   if (connector->IsActiveDirectoryManaged())
     return NetworkStateInformer::ONLINE;
 
@@ -121,7 +117,7 @@ void NetworkStateInformer::DefaultNetworkChanged(const NetworkState* network) {
 
 void NetworkStateInformer::OnPortalDetectionCompleted(
     const NetworkState* network,
-    const NetworkPortalDetector::CaptivePortalState& state) {
+    const NetworkPortalDetector::CaptivePortalStatus status) {
   UpdateStateAndNotify();
 }
 
@@ -208,7 +204,7 @@ bool NetworkStateInformer::UpdateState() {
 
   state_ = new_state;
   network_path_ = new_network_path;
-  proxy_config_.reset();
+  proxy_config_ = base::Value();
 
   if (state_ == ONLINE) {
     for (NetworkStateInformerObserver& observer : observers_)
@@ -221,13 +217,12 @@ bool NetworkStateInformer::UpdateState() {
 bool NetworkStateInformer::UpdateProxyConfig() {
   const NetworkState* default_network =
       NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-  if (!default_network || !default_network->proxy_config())
+  if (!default_network)
     return false;
 
-  if (proxy_config_ && *proxy_config_ == *default_network->proxy_config())
+  if (proxy_config_ == default_network->proxy_config())
     return false;
-  proxy_config_ =
-      std::make_unique<base::Value>(default_network->proxy_config()->Clone());
+  proxy_config_ = default_network->proxy_config().Clone();
   return true;
 }
 

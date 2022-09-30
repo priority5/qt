@@ -4,12 +4,10 @@
 
 #include "ui/base/ime/dummy_text_input_client.h"
 
-#if defined(OS_WIN)
-#include <vector>
-#endif
-
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -43,7 +41,9 @@ void DummyTextInputClient::ClearCompositionText() {
   SetCompositionText(CompositionText());
 }
 
-void DummyTextInputClient::InsertText(const base::string16& text) {
+void DummyTextInputClient::InsertText(
+    const std::u16string& text,
+    InsertTextCursorBehavior cursor_behavior) {
   insert_text_history_.push_back(text);
 }
 
@@ -73,6 +73,11 @@ bool DummyTextInputClient::CanComposeInline() const {
 }
 
 gfx::Rect DummyTextInputClient::GetCaretBounds() const {
+  return gfx::Rect();
+}
+
+gfx::Rect DummyTextInputClient::GetSelectionBoundingBox() const {
+  NOTIMPLEMENTED_LOG_ONCE();
   return gfx::Rect();
 }
 
@@ -112,7 +117,7 @@ bool DummyTextInputClient::DeleteRange(const gfx::Range& range) {
 }
 
 bool DummyTextInputClient::GetTextFromRange(const gfx::Range& range,
-                                            base::string16* text) const {
+                                            std::u16string* text) const {
   return false;
 }
 
@@ -146,7 +151,7 @@ bool DummyTextInputClient::ShouldDoLearning() {
   return false;
 }
 
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 bool DummyTextInputClient::SetCompositionFromExistingText(
     const gfx::Range& range,
     const std::vector<ui::ImeTextSpan>& ui_ime_text_spans) {
@@ -154,7 +159,7 @@ bool DummyTextInputClient::SetCompositionFromExistingText(
 }
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 gfx::Range DummyTextInputClient::GetAutocorrectRange() const {
   return autocorrect_range_;
 }
@@ -163,30 +168,44 @@ gfx::Rect DummyTextInputClient::GetAutocorrectCharacterBounds() const {
 }
 
 bool DummyTextInputClient::SetAutocorrectRange(
-    const base::string16& autocorrect_text,
     const gfx::Range& range) {
-  // Clears autocorrect range if text is empty.
-  // autocorrect_text content is ignored.
-  if (autocorrect_text.empty()) {
-    autocorrect_range_ = gfx::Range();
-  } else {
-    autocorrect_range_ = range;
-  }
+  autocorrect_range_ = range;
   return true;
 }
 
-void DummyTextInputClient::ClearAutocorrectRange() {}
+absl::optional<GrammarFragment> DummyTextInputClient::GetGrammarFragment(
+    const gfx::Range& range) {
+  for (const auto& fragment : grammar_fragments_) {
+    if (fragment.range.Contains(range)) {
+      return fragment;
+    }
+  }
+  return absl::nullopt;
+}
 
+bool DummyTextInputClient::ClearGrammarFragments(const gfx::Range& range) {
+  grammar_fragments_.clear();
+  return true;
+}
+
+bool DummyTextInputClient::AddGrammarFragments(
+    const std::vector<GrammarFragment>& fragments) {
+  grammar_fragments_.insert(grammar_fragments_.end(), fragments.begin(),
+                            fragments.end());
+  return true;
+}
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
 void DummyTextInputClient::GetActiveTextInputControlLayoutBounds(
-    base::Optional<gfx::Rect>* control_bounds,
-    base::Optional<gfx::Rect>* selection_bounds) {}
+    absl::optional<gfx::Rect>* control_bounds,
+    absl::optional<gfx::Rect>* selection_bounds) {}
+#endif
 
+#if BUILDFLAG(IS_WIN)
 void DummyTextInputClient::SetActiveCompositionForAccessibility(
     const gfx::Range& range,
-    const base::string16& active_composition_text,
+    const std::u16string& active_composition_text,
     bool is_composition_committed) {}
 #endif
 

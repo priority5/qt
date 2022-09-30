@@ -9,6 +9,7 @@
 #include "base/strings/stringprintf.h"
 #include "ui/gfx/color_transform.h"
 #include "ui/gl/gl_helper.h"
+#include "ui/gl/gl_utils.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/scoped_binders.h"
 
@@ -122,9 +123,8 @@ STRINGIZE(
 YUVToRGBConverter::YUVToRGBConverter(const GLVersionInfo& gl_version_info,
                                      const gfx::ColorSpace& color_space) {
   std::unique_ptr<gfx::ColorTransform> color_transform =
-      gfx::ColorTransform::NewColorTransform(
-          color_space, color_space.GetAsFullRangeRGB(),
-          gfx::ColorTransform::Intent::INTENT_PERCEPTUAL);
+      gfx::ColorTransform::NewColorTransform(color_space,
+                                             color_space.GetAsFullRangeRGB());
   std::string do_color_conversion = color_transform->GetShaderSource();
 
   // On MacOS, the default texture target for native GpuMemoryBuffers is
@@ -158,17 +158,30 @@ YUVToRGBConverter::YUVToRGBConverter(const GLVersionInfo& gl_version_info,
 
   glGenFramebuffersEXT(1, &framebuffer_);
 
-  vertex_buffer_ = GLHelper::SetupQuadVertexBuffer();
-  vertex_shader_ = GLHelper::LoadShader(
-      GL_VERTEX_SHADER,
-      base::StringPrintf("%s\n%s", vertex_header, kVertexShader).c_str());
-  fragment_shader_ = GLHelper::LoadShader(
-      GL_FRAGMENT_SHADER,
-      base::StringPrintf("%s\n%s\n%s", fragment_header,
-                         do_color_conversion.c_str(),
-                         (is_rect ? kFragmentShaderRect : kFragmentShader2D))
-          .c_str());
-  program_ = GLHelper::SetupProgram(vertex_shader_, fragment_shader_);
+  {
+    // In contexts that are in WebGL compatibility mode, we need to temporarily
+    // enable GL_ANGLE_TEXTURE_RECTANGLE in order to compile the fragment
+    // shader.  Furthermore, in ES2 contexts, the GL_ANGLE_webgl_compatibility
+    // extension is required for using GL_ANGLE_TEXTURE_RECTANGLE as an argument
+    // to glEnable/Disable.  Therefore the GL_ANGLE_webgl_compatibility
+    // extension is a necessary and sufficient condition for determining whether
+    // GL_ANGLE_TEXTURE_RECTANGLE needs to be temporarily enabled.
+    ScopedEnableTextureRectangleInShaderCompiler enable(
+        (is_rect && g_current_gl_driver->ext.b_GL_ANGLE_webgl_compatibility)
+            ? g_current_gl_context
+            : nullptr);
+    vertex_buffer_ = GLHelper::SetupQuadVertexBuffer();
+    vertex_shader_ = GLHelper::LoadShader(
+        GL_VERTEX_SHADER,
+        base::StringPrintf("%s\n%s", vertex_header, kVertexShader).c_str());
+    fragment_shader_ = GLHelper::LoadShader(
+        GL_FRAGMENT_SHADER,
+        base::StringPrintf("%s\n%s\n%s", fragment_header,
+                           do_color_conversion.c_str(),
+                           (is_rect ? kFragmentShaderRect : kFragmentShader2D))
+            .c_str());
+    program_ = GLHelper::SetupProgram(vertex_shader_, fragment_shader_);
+  }
 
   ScopedUseProgram use_program(program_);
   size_location_ = glGetUniformLocation(program_, "a_texScale");
@@ -189,6 +202,16 @@ YUVToRGBConverter::YUVToRGBConverter(const GLVersionInfo& gl_version_info,
   if (has_vertex_array_objects) {
     glGenVertexArraysOES(1, &vertex_array_object_);
   }
+
+  has_get_tex_level_parameter_ =
+      !gl_version_info.is_es || gl_version_info.IsAtLeastGLES(3, 1) ||
+      g_current_gl_driver->ext.b_GL_ANGLE_get_tex_level_parameter;
+  has_robust_resource_init_ =
+      g_current_gl_driver->ext.b_GL_ANGLE_robust_resource_initialization;
+
+  has_sampler_objects_ = gl_version_info.IsAtLeastGLES(3, 0) ||
+                         gl_version_info.IsAtLeastGL(3, 3) ||
+                         g_current_gl_driver->ext.b_GL_ARB_sampler_objects;
 }
 
 YUVToRGBConverter::~YUVToRGBConverter() {
@@ -227,15 +250,54 @@ void YUVToRGBConverter::CopyYUV420ToRGB(unsigned target,
   GLint old_texture0_binding = -1;
   glActiveTexture(GL_TEXTURE0);
   glGetIntegerv(source_target_getter, &old_texture0_binding);
+  GLint old_sampler0_binding = -1;
+  if (has_sampler_objects_) {
+    glGetIntegerv(GL_SAMPLER_BINDING, &old_sampler0_binding);
+    glBindSampler(0, 0);
+  }
   GLint old_texture1_binding = -1;
   glActiveTexture(GL_TEXTURE1);
   glGetIntegerv(source_target_getter, &old_texture1_binding);
+  GLint old_sampler1_binding = -1;
+  if (has_sampler_objects_) {
+    glGetIntegerv(GL_SAMPLER_BINDING, &old_sampler1_binding);
+    glBindSampler(1, 0);
+  }
 
   // Allocate the rgb texture.
   glActiveTexture(old_active_texture);
   glBindTexture(target, rgb_texture);
-  glTexImage2D(target, 0, GL_RGB, size.width(), size.height(), 0, GL_RGB,
-               rgb_texture_type, nullptr);
+
+  bool needs_texture_init = true;
+  if (has_get_tex_level_parameter_) {
+    GLint current_internal_format = 0;
+    glGetTexLevelParameteriv(target, 0, GL_TEXTURE_INTERNAL_FORMAT,
+                             &current_internal_format);
+
+    GLint current_type = 0;
+    glGetTexLevelParameteriv(target, 0, GL_TEXTURE_RED_TYPE, &current_type);
+
+    GLint current_width = 0;
+    glGetTexLevelParameteriv(target, 0, GL_TEXTURE_WIDTH, &current_width);
+
+    GLint current_height = 0;
+    glGetTexLevelParameteriv(target, 0, GL_TEXTURE_HEIGHT, &current_height);
+
+    if (current_internal_format == GL_RGBA &&
+        static_cast<unsigned>(current_type) == rgb_texture_type &&
+        current_width == size.width() && current_height == size.height()) {
+      needs_texture_init = false;
+    }
+  }
+  if (needs_texture_init) {
+    glTexImage2D(target, 0, GL_RGBA, size.width(), size.height(), 0, GL_RGBA,
+                 rgb_texture_type, nullptr);
+    if (has_robust_resource_init_) {
+      // We're about to overwrite the whole texture with a draw, notify the
+      // driver that it doesn't need to perform robust resource init.
+      glTexParameteri(target, GL_RESOURCE_INITIALIZED_ANGLE, GL_TRUE);
+    }
+  }
 
   // Set up and issue the draw call.
   glActiveTexture(GL_TEXTURE0);
@@ -277,6 +339,10 @@ void YUVToRGBConverter::CopyYUV420ToRGB(unsigned target,
   glActiveTexture(GL_TEXTURE1);
   glBindTexture(source_texture_target_, old_texture1_binding);
   glActiveTexture(old_active_texture);
+  if (old_sampler0_binding > 0)
+    glBindSampler(0, old_sampler0_binding);
+  if (old_sampler1_binding > 0)
+    glBindSampler(1, old_sampler1_binding);
 }
 
 }  // namespace gl

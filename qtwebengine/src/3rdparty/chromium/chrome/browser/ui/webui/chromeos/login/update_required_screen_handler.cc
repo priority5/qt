@@ -7,8 +7,8 @@
 #include <memory>
 
 #include "base/values.h"
-#include "chrome/browser/chromeos/login/oobe_screen.h"
-#include "chrome/browser/chromeos/login/screens/update_required_screen.h"
+#include "chrome/browser/ash/login/oobe_screen.h"
+#include "chrome/browser/ash/login/screens/update_required_screen.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/login/localized_values_builder.h"
@@ -20,10 +20,9 @@ namespace chromeos {
 
 constexpr StaticOobeScreenId UpdateRequiredView::kScreenId;
 
-UpdateRequiredScreenHandler::UpdateRequiredScreenHandler(
-    JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(kScreenId, js_calls_container) {
-  set_user_acted_method_path("login.UpdateRequiredScreen.userActed");
+UpdateRequiredScreenHandler::UpdateRequiredScreenHandler()
+    : BaseScreenHandler(kScreenId) {
+  set_user_acted_method_path_deprecated("login.UpdateRequiredScreen.userActed");
 }
 
 UpdateRequiredScreenHandler::~UpdateRequiredScreenHandler() {
@@ -68,9 +67,21 @@ void UpdateRequiredScreenHandler::DeclareLocalizedValues(
   builder->Add("noNetworkMessage",
                IDS_UPDATE_REQUIRED_SCREEN_NO_NETWORK_MESSAGE);
   builder->Add("eolAdminMessageTitle", IDS_UPDATE_REQUIRED_EOL_ADMIN_MESSAGE);
+  builder->Add("eolDeleteUsersDataMessage",
+               IDS_UPDATE_REQUIRED_EOL_DELETE_USERS_DATA_MESSAGE);
+  builder->Add("eolNoUsersDataMessage",
+               IDS_UPDATE_REQUIRED_EOL_NO_USERS_DATA_MESSAGE);
+  builder->Add("eolDeleteUsersDataPopupMessage",
+               IDS_UPDATE_REQUIRED_EOL_DELETE_USERS_DATA_POPUP_MESSAGE);
+  builder->Add("eolDeleteUsersDataPopupTitle",
+               IDS_UPDATE_REQUIRED_EOL_DELETE_USERS_DATA_POPUP_TITLE);
+  builder->Add("eolDeleteUsersDataConfirm",
+               IDS_UPDATE_REQUIRED_EOL_DELETE_USERS_DATA_CONFIRM);
+  builder->Add("eolDeleteUsersDataCancel",
+               IDS_UPDATE_REQUIRED_EOL_DELETE_USERS_DATA_CANCEL);
 }
 
-void UpdateRequiredScreenHandler::Initialize() {
+void UpdateRequiredScreenHandler::InitializeDeprecated() {
   if (show_on_init_) {
     Show();
     show_on_init_ = false;
@@ -79,7 +90,7 @@ void UpdateRequiredScreenHandler::Initialize() {
 
 void UpdateRequiredScreenHandler::SetEnterpriseAndDeviceName(
     const std::string& enterpriseDomain,
-    const base::string16& deviceName) {
+    const std::u16string& deviceName) {
   CallJS("login.UpdateRequiredScreen.setEnterpriseAndDeviceName",
          enterpriseDomain, deviceName);
 }
@@ -89,23 +100,23 @@ void UpdateRequiredScreenHandler::SetEolMessage(const std::string& eolMessage) {
 }
 
 void UpdateRequiredScreenHandler::Show() {
-  if (!page_is_ready()) {
+  if (!IsJavascriptAllowed()) {
     show_on_init_ = true;
     return;
   }
-  ShowScreen(kScreenId);
+  ShowInWebUI();
 }
 
 void UpdateRequiredScreenHandler::Hide() {}
 
 void UpdateRequiredScreenHandler::Bind(UpdateRequiredScreen* screen) {
   screen_ = screen;
-  BaseScreenHandler::SetBaseScreen(screen_);
+  BaseScreenHandler::SetBaseScreenDeprecated(screen_);
 }
 
 void UpdateRequiredScreenHandler::Unbind() {
   screen_ = nullptr;
-  BaseScreenHandler::SetBaseScreen(nullptr);
+  BaseScreenHandler::SetBaseScreenDeprecated(nullptr);
 }
 
 void UpdateRequiredScreenHandler::SetIsConnected(bool connected) {
@@ -123,7 +134,7 @@ void UpdateRequiredScreenHandler::SetUpdateProgressValue(int progress) {
 }
 
 void UpdateRequiredScreenHandler::SetUpdateProgressMessage(
-    const base::string16& message) {
+    const std::u16string& message) {
   CallJS("login.UpdateRequiredScreen.setUpdateProgressMessage", message);
 }
 
@@ -138,6 +149,10 @@ void UpdateRequiredScreenHandler::SetEstimatedTimeLeft(int seconds_left) {
 void UpdateRequiredScreenHandler::SetUIState(
     UpdateRequiredView::UIState ui_state) {
   CallJS("login.UpdateRequiredScreen.setUIState", static_cast<int>(ui_state));
+}
+
+void UpdateRequiredScreenHandler::SetIsUserDataPresent(bool data_present) {
+  CallJS("login.UpdateRequiredScreen.setIsUserDataPresent", data_present);
 }
 
 }  // namespace chromeos

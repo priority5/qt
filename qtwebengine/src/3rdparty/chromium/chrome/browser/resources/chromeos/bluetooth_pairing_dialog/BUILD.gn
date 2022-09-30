@@ -4,54 +4,63 @@
 
 import("//chrome/common/features.gni")
 import("//third_party/closure_compiler/compile_js.gni")
-import("//tools/grit/grit_rule.gni")
+import("//tools/grit/preprocess_if_expr.gni")
 import("//tools/polymer/html_to_js.gni")
-import("//tools/polymer/polymer.gni")
-import("//ui/webui/resources/tools/js_modulizer.gni")
-import("../../optimize_webui.gni")
+import("//ui/webui/resources/tools/generate_grd.gni")
+import("../../tools/optimize_webui.gni")
+
+preprocess_folder = "preprocessed"
+preprocess_gen_manifest = "preprocessed_gen_manifest.json"
 
 if (optimize_webui) {
-  bluetooth_dialog_pak_file = "bluetooth_pairing_dialog_resources.pak"
-  unpak_folder = "bluetooth_pairing_dialog_resources.unpak"
+  build_manifest = "build_manifest.json"
 
   optimize_webui("build") {
     host = "bluetooth-pairing"
     js_out_files = [ "bluetooth_pairing_dialog.rollup.js" ]
     js_module_in_files = [ "bluetooth_pairing_dialog.js" ]
-    input = rebase_path("$target_gen_dir/$unpak_folder", root_build_dir)
+    input = rebase_path("$target_gen_dir/$preprocess_folder", root_build_dir)
+    out_manifest = "$target_gen_dir/$build_manifest"
 
     deps = [
-      ":unpak",
+      ":preprocess_generated",
+      "../../../../../ui/webui/resources:library",
       "../../../../../ui/webui/resources:preprocess",
     ]
 
-    excludes = [ "chrome://resources/js/cr.m.js" ]
-  }
-
-  unpak("unpak") {
-    pak_file = bluetooth_dialog_pak_file
-    out_folder = unpak_folder
-
-    deps = [ ":flattened_resources" ]
-  }
-
-  grit("flattened_resources") {
-    source = "bluetooth_pairing_dialog_resources.grd"
-
-    deps = [ ":web_components" ]
-    defines = chrome_grit_defines
-    grit_flags = [
-      "-E",
-      "root_gen_dir=" + rebase_path(root_gen_dir, root_build_dir),
+    excludes = [
+      "chrome://resources/js/cr.m.js",
+      "chrome://resources/mojo/mojo/public/js/mojo_bindings_lite.js",
+      "chrome://resources/mojo/mojo/public/mojom/base/big_buffer.mojom-lite.js",
+      "chrome://resources/mojo/mojo/public/mojom/base/string16.mojom-lite.js",
+      "chrome://resources/mojo/chromeos/services/bluetooth_config/public/mojom/cros_bluetooth_config.mojom-lite.js",
+      "chrome://resources/cr_components/chromeos/bluetooth/cros_bluetooth_config.js",
     ]
-    outputs = [
-      "grit/bluetooth_pairing_dialog_resources.h",
-      "grit/bluetooth_pairing_dialog_resources_map.cc",
-      "grit/bluetooth_pairing_dialog_resources_map.h",
-      bluetooth_dialog_pak_file,
-    ]
-    output_dir = "$root_gen_dir/chrome/browser/resources/chromeos/bluetooth_pairing_dialog"
   }
+}
+
+generate_grd("build_grd") {
+  input_files = [ "bluetooth_pairing_dialog_container.html" ]
+  input_files_base_dir = rebase_path(".", "//")
+  if (optimize_webui) {
+    deps = [ ":build" ]
+    resource_path_rewrites =
+        [ "bluetooth_pairing_dialog.rollup.js|bluetooth_pairing_dialog.js" ]
+    manifest_files = [ "$target_gen_dir/$build_manifest" ]
+  } else {
+    deps = [ ":preprocess_generated" ]
+    manifest_files = [ "$target_gen_dir/$preprocess_gen_manifest" ]
+  }
+  grd_prefix = "bluetooth_pairing_dialog"
+  out_grd = "$target_gen_dir/${grd_prefix}_resources.grd"
+}
+
+preprocess_if_expr("preprocess_generated") {
+  deps = [ ":web_components" ]
+  in_folder = target_gen_dir
+  out_folder = "$target_gen_dir/$preprocess_folder"
+  out_manifest = "$target_gen_dir/$preprocess_gen_manifest"
+  in_files = [ "bluetooth_pairing_dialog.js" ]
 }
 
 js_type_check("closure_compile") {
@@ -61,7 +70,8 @@ js_type_check("closure_compile") {
 
 js_library("bluetooth_pairing_dialog") {
   deps = [
-    "//ui/webui/resources/cr_components/chromeos/bluetooth:bluetooth_dialog.m",
+    "//ui/webui/resources/cr_components/chromeos/bluetooth:bluetooth_dialog",
+    "//ui/webui/resources/cr_components/chromeos/bluetooth:bluetooth_pairing_ui",
     "//ui/webui/resources/js:cr.m",
     "//ui/webui/resources/js:i18n_behavior.m",
   ]

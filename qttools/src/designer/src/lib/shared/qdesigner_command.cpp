@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qdesigner_command_p.h"
 #include "qdesigner_propertycommand_p.h"
@@ -266,8 +241,8 @@ void ChangeZOrderCommand::init(QWidget *widget)
     setText(QApplication::translate("Command", "Change Z-order of '%1'").arg(widget->objectName()));
 
     m_oldParentZOrder = qvariant_cast<QWidgetList>(widget->parentWidget()->property("_q_zOrder"));
-    const int index = m_oldParentZOrder.indexOf(m_widget);
-    if (index != -1 && index + 1 < m_oldParentZOrder.count())
+    const qsizetype index = m_oldParentZOrder.indexOf(m_widget);
+    if (index != -1 && index + 1 < m_oldParentZOrder.size())
         m_oldPreceding = m_oldParentZOrder.at(index + 1);
 }
 
@@ -2528,7 +2503,7 @@ void TreeWidgetContents::applyToTreeWidget(QTreeWidget *treeWidget, DesignerIcon
 {
     treeWidget->clear();
 
-    treeWidget->setColumnCount(m_headerItem.m_items.count());
+    treeWidget->setColumnCount(m_headerItem.m_items.size());
     treeWidget->setHeaderItem(m_headerItem.createTreeItem(iconCache));
     for (const ItemContents &ic : m_rootItems)
         treeWidget->addTopLevelItem(ic.createTreeItem(iconCache, editor));
@@ -2653,19 +2628,20 @@ static RemoveActionCommand::ActionData findActionIn(QAction *action)
 {
     RemoveActionCommand::ActionData result;
     // We only want menus and toolbars, no toolbuttons.
-    const QWidgetList &associatedWidgets = action->associatedWidgets();
-    for (QWidget *widget : associatedWidgets) {
-        if (qobject_cast<const QMenu *>(widget) || qobject_cast<const QToolBar *>(widget)) {
-            const auto actionList = widget->actions();
-            const int size = actionList.size();
-            for (int i = 0; i < size; ++i) {
-                if (actionList.at(i) == action) {
-                    QAction *before = nullptr;
-                    if (i + 1 < size)
-                        before = actionList.at(i + 1);
-                    result.append(RemoveActionCommand::ActionDataItem(before, widget));
-                    break;
-                }
+    const QObjectList associatedObjects = action->associatedObjects();
+    for (QObject *obj : associatedObjects) {
+        if (!qobject_cast<const QMenu *>(obj) && !qobject_cast<const QToolBar *>(obj))
+            continue;
+        QWidget *widget = static_cast<QWidget *>(obj);
+        const auto actionList = widget->actions();
+        const int size = actionList.size();
+        for (int i = 0; i < size; ++i) {
+            if (actionList.at(i) == action) {
+                QAction *before = nullptr;
+                if (i + 1 < size)
+                    before = actionList.at(i + 1);
+                result.append(RemoveActionCommand::ActionDataItem(before, widget));
+                break;
             }
         }
     }

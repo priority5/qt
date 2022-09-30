@@ -5,10 +5,8 @@
 #include "components/embedder_support/android/metrics/android_metrics_log_uploader.h"
 
 #include "base/android/jni_array.h"
-#include "base/check.h"
 #include "components/embedder_support/android/metrics/jni/AndroidMetricsLogUploader_jni.h"
 #include "components/metrics/log_decoder.h"
-#include "third_party/metrics_proto/chrome_user_metrics_extension.pb.h"
 
 using base::android::ScopedJavaLocalRef;
 using base::android::ToJavaByteArray;
@@ -36,24 +34,13 @@ void AndroidMetricsLogUploader::UploadLog(
     return;
   }
 
-  // Speculative CHECKs to see why WebView UMA (and probably other embedders of
-  // this component) are missing system_profiles for a small fraction of
-  // records. TODO(https://crbug.com/1081925): downgrade these to DCHECKs or
-  // remove entirely when we figure out the issue.
-  CHECK(!log_data.empty());
-  metrics::ChromeUserMetricsExtension uma_log;
-  bool can_parse = uma_log.ParseFromString(log_data);
-  CHECK(can_parse);
-  CHECK(uma_log.has_system_profile());
-
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jbyteArray> java_data = ToJavaByteArray(
       env, reinterpret_cast<const uint8_t*>(log_data.data()), log_data.size());
   Java_AndroidMetricsLogUploader_uploadLog(env, java_data);
 
-  // The platform mechanism doesn't provide a response code or any way to handle
-  // failures, so we have nothing to pass to on_upload_complete. Just pass 200
-  // (HTTP OK) with error code 0 and pretend everything is peachy.
+  // Just pass 200 (HTTP OK) with error code 0 and pretend everything is peachy.
+  // TODO(crbug.com/1264425): propagate the status code down the callstack.
   on_upload_complete_.Run(200, 0, true);
 }
 

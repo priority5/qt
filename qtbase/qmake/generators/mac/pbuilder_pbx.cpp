@@ -1,36 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the qmake application of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "pbuilder_pbx.h"
 #include "option.h"
 #include "meta.h"
 #include <qdir.h>
-#include <qregexp.h>
+#include <qregularexpression.h>
 #include <qcryptographichash.h>
 #include <qdebug.h>
 #include <qsettings.h>
@@ -499,9 +474,14 @@ static QList<QVariantMap> provisioningTeams()
     QList<QVariantMap> flatTeams;
     for (QVariantMap::const_iterator it = teamMap.begin(), end = teamMap.end(); it != end; ++it) {
         const QString emailAddress = it.key();
-        QVariantMap team = it.value().toMap();
-        team[QLatin1String("emailAddress")] = emailAddress;
-        flatTeams.append(team);
+        const QVariantList emailTeams = it.value().toList();
+
+        for (QVariantList::const_iterator teamIt = emailTeams.begin(),
+             teamEnd = emailTeams.end(); teamIt != teamEnd; ++teamIt) {
+            QVariantMap team = teamIt->toMap();
+            team[QLatin1String("emailAddress")] = emailAddress;
+            flatTeams.append(team);
+        }
     }
 
     // Sort teams so that Free Provisioning teams come last
@@ -644,7 +624,7 @@ ProjectBuilderMakefileGenerator::writeMakeParts(QTextStream &t)
                 bool isObj = project->values(ProKey(*it + ".CONFIG")).indexOf("no_link") == -1;
                 if (!isObj) {
                     for (int i = 0; i < sources.size(); ++i) {
-                        if (sources.at(i).keyName() == inputs.at(input)) {
+                        if (sources.at(i).keyName() == inputs.at(input).toQStringView()) {
                             duplicate = true;
                             break;
                         }
@@ -868,6 +848,7 @@ ProjectBuilderMakefileGenerator::writeMakeParts(QTextStream &t)
           << "\t\t\t" << writeSettings("shellScript", "make -C " + IoUtils::shellQuoteUnix(Option::output_dir)
                                                       + " -f " + IoUtils::shellQuoteUnix(mkfile)) << ";\n"
           << "\t\t\t" << writeSettings("showEnvVarsInLog", "0") << ";\n"
+          << "\t\t\t" << writeSettings("alwaysOutOfDate", "1") << ";\n"
           << "\t\t};\n";
    }
 
@@ -1630,6 +1611,12 @@ ProjectBuilderMakefileGenerator::writeMakeParts(QTextStream &t)
                             plist_in_text.replace(QLatin1String("@TYPEINFO@"),
                                 (project->isEmpty("QMAKE_PKGINFO_TYPEINFO")
                                     ? QString::fromLatin1("????") : project->first("QMAKE_PKGINFO_TYPEINFO").left(4).toQString()));
+                            QString launchScreen = var("QMAKE_IOS_LAUNCH_SCREEN");
+                            if (launchScreen.isEmpty())
+                                launchScreen = QLatin1String("LaunchScreen");
+                            else
+                                launchScreen = QFileInfo(launchScreen).baseName();
+                            plist_in_text.replace(QLatin1String("${IOS_LAUNCH_SCREEN}"), launchScreen);
                             QFile plist_out_file(Option::output_dir + "/Info.plist");
                             if (plist_out_file.open(QIODevice::WriteOnly | QIODevice::Text)) {
                                 QTextStream plist_out(&plist_out_file);
@@ -1880,11 +1867,12 @@ QString
 ProjectBuilderMakefileGenerator::fixForOutput(const QString &values)
 {
     //get the environment variables references
-    QRegExp reg_var("\\$\\((.*)\\)");
-    for(int rep = 0; (rep = reg_var.indexIn(values, rep)) != -1;) {
-        if(project->values("QMAKE_PBX_VARS").indexOf(reg_var.cap(1)) == -1)
-            project->values("QMAKE_PBX_VARS").append(reg_var.cap(1));
-        rep += reg_var.matchedLength();
+    QRegularExpression reg_var("\\$\\((.*)\\)");
+    QRegularExpressionMatch match;
+    for (int rep = 0; (match = reg_var.match(values, rep)).hasMatch();) {
+        if (project->values("QMAKE_PBX_VARS").indexOf(match.captured(1)) == -1)
+            project->values("QMAKE_PBX_VARS").append(match.captured(1));
+        rep = match.capturedEnd();
     }
 
     return values;
@@ -2034,7 +2022,7 @@ ProjectBuilderMakefileGenerator::writeSettings(const QString &var, const ProStri
     for(int i = 0; i < indent_level; ++i)
         newline += "\t";
 
-    static QRegExp allowedVariableCharacters("^[a-zA-Z0-9_]*$");
+    static QRegularExpression allowedVariableCharacters("^[a-zA-Z0-9_]*$");
     ret += var.contains(allowedVariableCharacters) ? var : quotedStringLiteral(var);
 
     ret += " = ";
@@ -2059,6 +2047,12 @@ ProjectBuilderMakefileGenerator::writeSettings(const QString &var, const ProStri
         ret += val;
     }
     return ret;
+}
+
+bool
+ProjectBuilderMakefileGenerator::inhibitMakeDirOutPath(const ProKey &path) const
+{
+    return path == "OBJECTS_DIR";
 }
 
 QT_END_NAMESPACE

@@ -8,10 +8,7 @@
 #include <stddef.h>
 
 #include "base/base_export.h"
-#include "base/compiler_specific.h"
 #include "base/containers/queue.h"
-#include "base/macros.h"
-#include "base/optional.h"
 #include "base/sequence_token.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool/pooled_parallel_task_runner.h"
@@ -50,11 +47,13 @@ class BASE_EXPORT Sequence : public TaskSource {
   class BASE_EXPORT Transaction : public TaskSource::Transaction {
    public:
     Transaction(Transaction&& other);
+    Transaction(const Transaction&) = delete;
+    Transaction& operator=(const Transaction&) = delete;
     ~Transaction();
 
     // Returns true if the sequence would need to be queued after receiving a
     // new Task.
-    bool WillPushTask() const WARN_UNUSED_RESULT;
+    [[nodiscard]] bool WillPushTask() const;
 
     // Adds |task| in a new slot at the end of the Sequence. This must only be
     // called after invoking WillPushTask().
@@ -66,8 +65,6 @@ class BASE_EXPORT Sequence : public TaskSource {
     friend class Sequence;
 
     explicit Transaction(Sequence* sequence);
-
-    DISALLOW_COPY_AND_ASSIGN(Transaction);
   };
 
   // |traits| is metadata that applies to all Tasks in the Sequence.
@@ -78,15 +75,18 @@ class BASE_EXPORT Sequence : public TaskSource {
   Sequence(const TaskTraits& traits,
            TaskRunner* task_runner,
            TaskSourceExecutionMode execution_mode);
+  Sequence(const Sequence&) = delete;
+  Sequence& operator=(const Sequence&) = delete;
 
   // Begins a Transaction. This method cannot be called on a thread which has an
   // active Sequence::Transaction.
-  Transaction BeginTransaction() WARN_UNUSED_RESULT;
+  [[nodiscard]] Transaction BeginTransaction();
 
   // TaskSource:
   ExecutionEnvironment GetExecutionEnvironment() override;
   size_t GetRemainingConcurrency() const override;
-  TaskSourceSortKey GetSortKey() const override;
+  TaskSourceSortKey GetSortKey(
+      bool disable_fair_scheduling = false) const override;
 
   // Returns a token that uniquely identifies this Sequence.
   const SequenceToken& token() const { return token_; }
@@ -119,8 +119,6 @@ class BASE_EXPORT Sequence : public TaskSource {
 
   // Holds data stored through the SequenceLocalStorageSlot API.
   SequenceLocalStorageMap sequence_local_storage_;
-
-  DISALLOW_COPY_AND_ASSIGN(Sequence);
 };
 
 }  // namespace internal

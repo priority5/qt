@@ -16,6 +16,7 @@ class CSSParserContext;
 class CSSParserTokenStream;
 class CSSParserObserver;
 class CSSSelectorList;
+class Node;
 class StyleSheetContents;
 
 // FIXME: We should consider building CSSSelectors directly instead of using
@@ -37,6 +38,13 @@ class CORE_EXPORT CSSSelectorParser {
   static bool SupportsComplexSelector(CSSParserTokenRange,
                                       const CSSParserContext*);
 
+  static CSSSelector::PseudoType ParsePseudoType(const AtomicString&,
+                                                 bool has_arguments);
+  static PseudoId ParsePseudoElement(const String&, const Node*);
+  // Returns the argument of a parameterized pseudo-element. For example, for
+  // '::highlight(foo)' it returns 'foo'.
+  static AtomicString ParsePseudoElementArgument(const String&);
+
  private:
   CSSSelectorParser(const CSSParserContext*, StyleSheetContents*);
 
@@ -46,9 +54,39 @@ class CORE_EXPORT CSSSelectorParser {
   CSSSelectorList ConsumeComplexSelectorList(CSSParserTokenStream&,
                                              CSSParserObserver*);
   CSSSelectorList ConsumeCompoundSelectorList(CSSParserTokenRange&);
+  // Consumes a complex selector list if inside_compound_pseudo_ is false,
+  // otherwise consumes a compound selector list.
+  CSSSelectorList ConsumeNestedSelectorList(CSSParserTokenRange&);
+  CSSSelectorList ConsumeForgivingNestedSelectorList(CSSParserTokenRange&);
+  // https://drafts.csswg.org/selectors/#typedef-forgiving-selector-list
+  CSSSelectorList ConsumeForgivingComplexSelectorList(CSSParserTokenRange&);
+  CSSSelectorList ConsumeForgivingCompoundSelectorList(CSSParserTokenRange&);
+  // https://drafts.csswg.org/selectors/#typedef-relative-selector-list
+  CSSSelectorList ConsumeRelativeSelectorList(CSSParserTokenRange&);
 
+  std::unique_ptr<CSSParserSelector> ConsumeRelativeSelector(
+      CSSParserTokenRange&);
   std::unique_ptr<CSSParserSelector> ConsumeComplexSelector(
       CSSParserTokenRange&);
+
+  // ConsumePartialComplexSelector() method provides the common logic of
+  // consuming a complex selector and consuming a relative selector.
+  //
+  // After consuming the left-most combinator of a relative selector, we can
+  // consume the remaining selectors with the common logic.
+  // For example, after consuming the left-most combinator '~' of the relative
+  // selector '~ .a ~ .b', we can consume remaining selectors '.a ~ .b'
+  // with this method.
+  //
+  // After consuming the left-most compound selector and a combinator of a
+  // complex selector, we can also use this method to consume the remaining
+  // selectors of the complex selector.
+  std::unique_ptr<CSSParserSelector> ConsumePartialComplexSelector(
+      CSSParserTokenRange&,
+      CSSSelector::RelationType& /* current combinator */,
+      std::unique_ptr<CSSParserSelector> /* previous compound selector */,
+      unsigned& /* previous compound flags */);
+
   std::unique_ptr<CSSParserSelector> ConsumeCompoundSelector(
       CSSParserTokenRange&);
   // This doesn't include element names, since they're handled specially
@@ -90,12 +128,32 @@ class CORE_EXPORT CSSSelectorParser {
 
   bool failed_parsing_ = false;
   bool disallow_pseudo_elements_ = false;
-  // We don't allow mixing ShadowDOMv0 features and nested complex selectors,
-  // such as :is(). When :is() or :where() is encountered, ShadowDOM V0 features
-  // are disallowed, and whenever /deep/, ::content or ::shadow is encountered
-  // we disallow :is()/:where().
-  bool disallow_shadow_dom_v0_ = false;
-  bool disallow_nested_complex_ = false;
+  // If we're inside a pseudo class that only accepts compound selectors,
+  // for example :host, inner :is()/:where() pseudo classes are also only
+  // allowed to contain compound selectors.
+  bool inside_compound_pseudo_ = false;
+  // When parsing a compound which includes a pseudo-element, the simple
+  // selectors permitted to follow that pseudo-element may be restricted.
+  // If this is the case, then restricting_pseudo_element_ will be set to the
+  // PseudoType of the pseudo-element causing the restriction.
+  CSSSelector::PseudoType restricting_pseudo_element_ =
+      CSSSelector::kPseudoUnknown;
+  // If we're _resisting_ the default namespace, it means that we are inside
+  // a nested selector (:is(), :where(), etc) where we should _consider_
+  // ignoring the default namespace (depending on circumstance). See the
+  // relevant spec text [1] regarding default namespaces for information about
+  // those circumstances.
+  //
+  // [1] https://drafts.csswg.org/selectors/#matches
+  bool resist_default_namespace_ = false;
+  // While this flag is true, the default namespace is ignored. In other words,
+  // the default namespace is '*' while this flag is true.
+  bool ignore_default_namespace_ = false;
+
+  // The 'found_pseudo_in_has_argument flag is true when we found any pseudo in
+  // ':has()' argument while parsing.
+  bool found_pseudo_in_has_argument_ = false;
+  bool is_inside_has_argument_ = false;
 
   class DisallowPseudoElementsScope {
     STACK_ALLOCATED();

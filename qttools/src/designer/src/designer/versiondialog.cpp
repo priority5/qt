@@ -1,40 +1,18 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
-#include <QtCore/qvector.h>
+#include <QtCore/qlist.h>
+
 #include <QtGui/qevent.h>
+#include <QtGui/qpainter.h>
+#include <QtGui/qpainterpath.h>
+
+#include <QtWidgets/qdialogbuttonbox.h>
 #include <QtWidgets/qgridlayout.h>
 #include <QtWidgets/qlabel.h>
 #include <QtWidgets/qpushbutton.h>
-#include <QtWidgets/qdialogbuttonbox.h>
-#include <QtGui/qpainter.h>
-#include <QtGui/qpainterpath.h>
 #include <QtWidgets/qstyleoption.h>
+
 #include "versiondialog.h"
 
 QT_BEGIN_NAMESPACE
@@ -54,8 +32,8 @@ protected:
     void mouseReleaseEvent(QMouseEvent *me) override;
     void paintEvent(QPaintEvent *pe) override;
 private:
-    QVector<QPoint> hitPoints;
-    QVector<QPoint> missPoints;
+    QList<QPoint> hitPoints;
+    QList<QPoint> missPoints;
     QPainterPath m_path;
     bool secondStage = false;
     bool m_pushed = false;
@@ -132,7 +110,7 @@ void VersionLabel::paintEvent(QPaintEvent *pe)
     if (secondStage) {
         QPainter p(this);
         QStyleOptionButton opt;
-        opt.init(this);
+        opt.initFrom(this);
         if (!m_pushed)
             opt.state |= QStyle::State_Raised;
         else
@@ -160,7 +138,7 @@ VersionDialog::VersionDialog(QWidget *parent)
 
     lbl->setText(tr("%1"
                     "<br/>Copyright (C) %2 The Qt Company Ltd."
-                    ).arg(version, QStringLiteral("2021")));
+                    ).arg(version, QStringLiteral("2022")));
 
     lbl->setWordWrap(true);
     lbl->setOpenExternalLinks(true);

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QQUICKPATH_H
 #define QQUICKPATH_H
@@ -62,6 +26,7 @@ QT_REQUIRE_CONFIG(quick_path);
 #include <private/qtquickglobal_p.h>
 
 #include <QtCore/QObject>
+#include <QtCore/QHash>
 #include <QtGui/QPainterPath>
 #include <QtGui/QFont>
 
@@ -79,6 +44,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathElement : public QObject
 {
     Q_OBJECT
     QML_ANONYMOUS
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPathElement(QObject *parent=nullptr) : QObject(parent) {}
 Q_SIGNALS:
@@ -92,6 +58,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathAttribute : public QQuickPathElement
     Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged)
     Q_PROPERTY(qreal value READ value WRITE setValue NOTIFY valueChanged)
     QML_NAMED_ELEMENT(PathAttribute)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPathAttribute(QObject *parent=nullptr) : QQuickPathElement(parent) {}
 
@@ -120,6 +87,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickCurve : public QQuickPathElement
     Q_PROPERTY(qreal relativeX READ relativeX WRITE setRelativeX NOTIFY relativeXChanged)
     Q_PROPERTY(qreal relativeY READ relativeY WRITE setRelativeY NOTIFY relativeYChanged)
     QML_ANONYMOUS
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickCurve(QObject *parent=nullptr) : QQuickPathElement(parent) {}
 
@@ -158,6 +126,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathLine : public QQuickCurve
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(PathLine)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPathLine(QObject *parent=nullptr) : QQuickCurve(parent) {}
 
@@ -168,7 +137,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathMove : public QQuickCurve
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(PathMove)
-    QML_ADDED_IN_MINOR_VERSION(9)
+    QML_ADDED_IN_VERSION(2, 9)
 public:
     QQuickPathMove(QObject *parent=nullptr) : QQuickCurve(parent) {}
 
@@ -185,6 +154,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathQuad : public QQuickCurve
     Q_PROPERTY(qreal relativeControlY READ relativeControlY WRITE setRelativeControlY NOTIFY relativeControlYChanged)
 
     QML_NAMED_ELEMENT(PathQuad)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPathQuad(QObject *parent=nullptr) : QQuickCurve(parent) {}
 
@@ -230,6 +200,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathCubic : public QQuickCurve
     Q_PROPERTY(qreal relativeControl2X READ relativeControl2X WRITE setRelativeControl2X NOTIFY relativeControl2XChanged)
     Q_PROPERTY(qreal relativeControl2Y READ relativeControl2Y WRITE setRelativeControl2Y NOTIFY relativeControl2YChanged)
     QML_NAMED_ELEMENT(PathCubic)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPathCubic(QObject *parent=nullptr) : QQuickCurve(parent) {}
 
@@ -288,6 +259,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathCatmullRomCurve : public QQuickCurve
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(PathCurve)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPathCatmullRomCurve(QObject *parent=nullptr) : QQuickCurve(parent) {}
 
@@ -301,8 +273,9 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathArc : public QQuickCurve
     Q_PROPERTY(qreal radiusY READ radiusY WRITE setRadiusY NOTIFY radiusYChanged)
     Q_PROPERTY(bool useLargeArc READ useLargeArc WRITE setUseLargeArc NOTIFY useLargeArcChanged)
     Q_PROPERTY(ArcDirection direction READ direction WRITE setDirection NOTIFY directionChanged)
-    Q_PROPERTY(qreal xAxisRotation READ xAxisRotation WRITE setXAxisRotation NOTIFY xAxisRotationChanged REVISION 9)
+    Q_PROPERTY(qreal xAxisRotation READ xAxisRotation WRITE setXAxisRotation NOTIFY xAxisRotationChanged REVISION(2, 9))
     QML_NAMED_ELEMENT(PathArc)
+    QML_ADDED_IN_VERSION(2, 0)
 
 public:
     QQuickPathArc(QObject *parent=nullptr)
@@ -333,7 +306,7 @@ Q_SIGNALS:
     void radiusYChanged();
     void useLargeArcChanged();
     void directionChanged();
-    Q_REVISION(9) void xAxisRotationChanged();
+    Q_REVISION(2, 9) void xAxisRotationChanged();
 
 private:
     qreal _radiusX = 0;
@@ -355,7 +328,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathAngleArc : public QQuickCurve
     Q_PROPERTY(bool moveToStart READ moveToStart WRITE setMoveToStart NOTIFY moveToStartChanged)
 
     QML_NAMED_ELEMENT(PathAngleArc)
-    QML_ADDED_IN_MINOR_VERSION(11)
+    QML_ADDED_IN_VERSION(2, 11)
 
 public:
     QQuickPathAngleArc(QObject *parent=nullptr)
@@ -408,6 +381,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathSvg : public QQuickCurve
     Q_OBJECT
     Q_PROPERTY(QString path READ path WRITE setPath NOTIFY pathChanged)
     QML_NAMED_ELEMENT(PathSvg)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPathSvg(QObject *parent=nullptr) : QQuickCurve(parent) {}
 
@@ -428,6 +402,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathPercent : public QQuickPathElement
     Q_OBJECT
     Q_PROPERTY(qreal value READ value WRITE setValue NOTIFY valueChanged)
     QML_NAMED_ELEMENT(PathPercent)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPathPercent(QObject *parent=nullptr) : QQuickPathElement(parent) {}
 
@@ -447,7 +422,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathPolyline : public QQuickCurve
     Q_PROPERTY(QPointF start READ start NOTIFY startChanged)
     Q_PROPERTY(QVariant path READ path WRITE setPath NOTIFY pathChanged)
     QML_NAMED_ELEMENT(PathPolyline)
-    QML_ADDED_IN_MINOR_VERSION(14)
+    QML_ADDED_IN_VERSION(2, 14)
 public:
     QQuickPathPolyline(QObject *parent=nullptr);
 
@@ -471,7 +446,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathMultiline : public QQuickCurve
     Q_PROPERTY(QPointF start READ start NOTIFY startChanged)
     Q_PROPERTY(QVariant paths READ paths WRITE setPaths NOTIFY pathsChanged)
     QML_NAMED_ELEMENT(PathMultiline)
-    QML_ADDED_IN_MINOR_VERSION(14)
+    QML_ADDED_IN_VERSION(2, 14)
 public:
     QQuickPathMultiline(QObject *parent=nullptr);
 
@@ -512,10 +487,10 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPath : public QObject, public QQmlParserStatu
     Q_PROPERTY(qreal startX READ startX WRITE setStartX NOTIFY startXChanged)
     Q_PROPERTY(qreal startY READ startY WRITE setStartY NOTIFY startYChanged)
     Q_PROPERTY(bool closed READ isClosed NOTIFY changed)
-    Q_PROPERTY(QSizeF scale READ scale WRITE setScale NOTIFY scaleChanged REVISION 14)
+    Q_PROPERTY(QSizeF scale READ scale WRITE setScale NOTIFY scaleChanged REVISION(2, 14))
     Q_CLASSINFO("DefaultProperty", "pathElements")
     QML_NAMED_ELEMENT(Path)
-    Q_INTERFACES(QQmlParserStatus)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPath(QObject *parent=nullptr);
     ~QQuickPath() override;
@@ -535,7 +510,7 @@ public:
     QPainterPath path() const;
     QStringList attributes() const;
     qreal attributeAt(const QString &, qreal) const;
-    Q_REVISION(14) Q_INVOKABLE QPointF pointAtPercent(qreal t) const;
+    Q_REVISION(2, 14) Q_INVOKABLE QPointF pointAtPercent(qreal t) const;
     QPointF sequentialPointAt(qreal p, qreal *angle = nullptr) const;
     void invalidateSequentialHistory() const;
 
@@ -546,7 +521,7 @@ Q_SIGNALS:
     void changed();
     void startXChanged();
     void startYChanged();
-    Q_REVISION(14) void scaleChanged();
+    Q_REVISION(2, 14) void scaleChanged();
 
 protected:
     QQuickPath(QQuickPathPrivate &dd, QObject *parent = nullptr);
@@ -557,9 +532,9 @@ protected:
     void gatherAttributes();
 
     // pathElements property
-    static QQuickPathElement *pathElements_at(QQmlListProperty<QQuickPathElement> *, int);
+    static QQuickPathElement *pathElements_at(QQmlListProperty<QQuickPathElement> *, qsizetype);
     static void pathElements_append(QQmlListProperty<QQuickPathElement> *, QQuickPathElement *);
-    static int pathElements_count(QQmlListProperty<QQuickPathElement> *);
+    static qsizetype pathElements_count(QQmlListProperty<QQuickPathElement> *);
     static void pathElements_clear(QQmlListProperty<QQuickPathElement> *);
 
 private Q_SLOTS:
@@ -609,7 +584,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPathText : public QQuickPathElement
     Q_PROPERTY(QString text READ text WRITE setText NOTIFY textChanged)
     Q_PROPERTY(QFont font READ font WRITE setFont NOTIFY fontChanged)
     QML_NAMED_ELEMENT(PathText)
-    QML_ADDED_IN_MINOR_VERSION(15)
+    QML_ADDED_IN_VERSION(2, 15)
 public:
     QQuickPathText(QObject *parent=nullptr) : QQuickPathElement(parent)
     {

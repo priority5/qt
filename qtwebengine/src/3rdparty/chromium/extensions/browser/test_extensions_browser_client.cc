@@ -6,6 +6,7 @@
 
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/extension_host_delegate.h"
 #include "extensions/browser/test_runtime_api_delegate.h"
@@ -13,7 +14,7 @@
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chromeos/login/login_state/login_state.h"
 #endif
 
@@ -34,8 +35,8 @@ TestExtensionsBrowserClient::TestExtensionsBrowserClient()
 TestExtensionsBrowserClient::~TestExtensionsBrowserClient() = default;
 
 void TestExtensionsBrowserClient::SetUpdateClientFactory(
-    const base::Callback<update_client::UpdateClient*(void)>& factory) {
-  update_client_factory_ = factory;
+    base::RepeatingCallback<update_client::UpdateClient*(void)> factory) {
+  update_client_factory_ = std::move(factory);
 }
 
 void TestExtensionsBrowserClient::SetMainContext(
@@ -91,7 +92,7 @@ BrowserContext* TestExtensionsBrowserClient::GetOriginalContext(
   return main_context_;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 std::string TestExtensionsBrowserClient::GetUserIdHashFromContext(
     content::BrowserContext* context) {
   if (context != main_context_ || !chromeos::LoginState::IsInitialized())
@@ -130,16 +131,15 @@ void TestExtensionsBrowserClient::LoadResourceFromResourceBundle(
     mojo::PendingReceiver<network::mojom::URLLoader> loader,
     const base::FilePath& resource_relative_path,
     int resource_id,
-    const std::string& content_security_policy,
-    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
-    bool send_cors_header) {
+    scoped_refptr<net::HttpResponseHeaders> headers,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
   // Should not be called because GetBundleResourcePath() returned empty path.
   NOTREACHED() << "Resource is not from a bundle.";
 }
 
 bool TestExtensionsBrowserClient::AllowCrossRendererResourceLoad(
-    const GURL& url,
-    blink::mojom::ResourceType resource_type,
+    const network::ResourceRequest& request,
+    network::mojom::RequestDestination destination,
     ui::PageTransition page_transition,
     int child_id,
     bool is_incognito,
@@ -165,7 +165,7 @@ ProcessManagerDelegate* TestExtensionsBrowserClient::GetProcessManagerDelegate()
 
 std::unique_ptr<ExtensionHostDelegate>
 TestExtensionsBrowserClient::CreateExtensionHostDelegate() {
-  return std::unique_ptr<ExtensionHostDelegate>();
+  return nullptr;
 }
 
 bool TestExtensionsBrowserClient::DidVersionUpdate(BrowserContext* context) {

@@ -17,6 +17,18 @@ const char kPolicySwitchesEnd[] = "policy-switches-end";
 // Flag passed to the browser if the system is running in dev-mode.
 const char kSystemInDevMode[] = "system-developer-mode";
 
+// Used to pass JSON-encoded list of strings specifying enabled feature flags.
+// The format of the entries is the same that Chrome uses for persisting
+// chrome://flags configuration, i.e. the "internal name" of the feature flag,
+// optionally followed by an '@' and the index of the selected choice (for
+// multi-value items). Example: ["dark-light-mode@1","tint-composited-content"]
+const char kFeatureFlags[] = "feature-flags";
+
+// Passes JSON-encoded dictionary of origin list flags (i.e. feature flags that
+// take an optional string argument which is supposed to specify a list of web
+// origins). Example: {"isolate-origins":"http://example.com"}
+const char kFeatureFlagsOriginList[] = "feature-flags-origin-list";
+
 }  // namespace switches
 }  // namespace chromeos
 

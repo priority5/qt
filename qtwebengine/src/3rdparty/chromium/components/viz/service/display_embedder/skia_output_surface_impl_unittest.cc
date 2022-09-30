@@ -6,9 +6,9 @@
 
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/pixel_test_utils.h"
@@ -58,6 +58,7 @@ class SkiaOutputSurfaceImplTest : public testing::Test {
  protected:
   DebugRendererSettings debug_settings_;
   gl::DisableNullDrawGLBindings enable_pixel_output_;
+  std::unique_ptr<DisplayCompositorMemoryAndTaskController> display_controller_;
   std::unique_ptr<SkiaOutputSurface> output_surface_;
   cc::FakeOutputSurfaceClient output_surface_client_;
   base::WaitableEvent wait_;
@@ -76,10 +77,13 @@ SkiaOutputSurfaceImplTest::~SkiaOutputSurfaceImplTest() {
 void SkiaOutputSurfaceImplTest::SetUpSkiaOutputSurfaceImpl() {
   RendererSettings settings;
   settings.use_skia_renderer = true;
-  output_surface_ = SkiaOutputSurfaceImpl::Create(
-      std::make_unique<SkiaOutputSurfaceDependencyImpl>(
-          GetGpuService(), gpu::kNullSurfaceHandle),
-      settings, &debug_settings_);
+  auto skia_deps = std::make_unique<SkiaOutputSurfaceDependencyImpl>(
+      GetGpuService(), gpu::kNullSurfaceHandle);
+  display_controller_ =
+      std::make_unique<DisplayCompositorMemoryAndTaskController>(
+          std::move(skia_deps));
+  output_surface_ = SkiaOutputSurfaceImpl::Create(display_controller_.get(),
+                                                  settings, &debug_settings_);
   output_surface_->BindToClient(&output_surface_client_);
 }
 
@@ -91,7 +95,8 @@ gpu::SyncToken SkiaOutputSurfaceImplTest::PaintRootRenderPass(
   SkCanvas* root_canvas = output_surface_->BeginPaintCurrentFrame();
   root_canvas->drawRect(
       SkRect::MakeXYWH(rect.x(), rect.y(), rect.height(), rect.width()), paint);
-  return output_surface_->SubmitPaint(std::move(closure));
+  output_surface_->EndPaint(std::move(closure));
+  return output_surface_->Flush();
 }
 
 void SkiaOutputSurfaceImplTest::BlockMainThread() {
@@ -114,7 +119,8 @@ void SkiaOutputSurfaceImplTest::CopyRequestCallbackOnGpuThread(
     const gfx::Rect& output_rect,
     const gfx::ColorSpace& color_space,
     std::unique_ptr<CopyOutputResult> result) {
-  SkBitmap result_bitmap(result->AsSkBitmap());
+  auto scoped_bitmap = result->ScopedAccessSkBitmap();
+  auto result_bitmap = scoped_bitmap.bitmap();
   EXPECT_EQ(result_bitmap.width(), output_rect.width());
   EXPECT_EQ(result_bitmap.height(), output_rect.height());
 
@@ -129,7 +135,7 @@ void SkiaOutputSurfaceImplTest::CopyRequestCallbackOnGpuThread(
   UnblockMainThread();
 }
 
-TEST_F(SkiaOutputSurfaceImplTest, SubmitPaint) {
+TEST_F(SkiaOutputSurfaceImplTest, EndPaint) {
   output_surface_->Reshape(kSurfaceRect.size(), 1, gfx::ColorSpace(),
                            gfx::BufferFormat::RGBX_8888, /*use_stencil=*/false);
   constexpr gfx::Rect output_rect(0, 0, 10, 10);
@@ -145,7 +151,8 @@ TEST_F(SkiaOutputSurfaceImplTest, SubmitPaint) {
   // Copy the output
   const gfx::ColorSpace color_space = gfx::ColorSpace::CreateSRGB();
   auto request = std::make_unique<CopyOutputRequest>(
-      CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
       base::BindOnce(&SkiaOutputSurfaceImplTest::CopyRequestCallbackOnGpuThread,
                      base::Unretained(this), output_rect, color_space));
   request->set_result_task_runner(
@@ -157,11 +164,12 @@ TEST_F(SkiaOutputSurfaceImplTest, SubmitPaint) {
   geometry.readback_offset = gfx::Vector2d(0, 0);
 
   output_surface_->CopyOutput(AggregatedRenderPassId{0}, geometry, color_space,
-                              std::move(request));
-  output_surface_->SwapBuffersSkipped();
+                              std::move(request), gpu::Mailbox());
+  output_surface_->SwapBuffersSkipped(kSurfaceRect);
+  output_surface_->Flush();
   BlockMainThread();
 
-  // SubmitPaint draw is deferred until CopyOutput.
+  // EndPaint draw is deferred until CopyOutput.
   base::OnceClosure closure =
       base::BindOnce(&SkiaOutputSurfaceImplTest::CheckSyncTokenOnGpuThread,
                      base::Unretained(this), sync_token);
@@ -186,9 +194,90 @@ TEST_F(SkiaOutputSurfaceImplTest, SupportsColorSpaceChange) {
     OutputSurfaceFrame frame;
     frame.size = kSurfaceRect.size();
     output_surface_->SwapBuffers(std::move(frame));
+    output_surface_->Flush();
 
     run_loop.Run();
   }
+}
+
+// Tests that the destination color space is preserved across a CopyOutput for
+// ColorSpaces supported by SkColorSpace.
+TEST_F(SkiaOutputSurfaceImplTest, CopyOutputBitmapSupportedColorSpace) {
+  output_surface_->Reshape(kSurfaceRect.size(), 1, gfx::ColorSpace(),
+                           gfx::BufferFormat::RGBX_8888, /*use_stencil=*/false);
+
+  constexpr gfx::Rect output_rect(0, 0, 10, 10);
+  const gfx::ColorSpace color_space = gfx::ColorSpace(
+      gfx::ColorSpace::PrimaryID::BT709, gfx::ColorSpace::TransferID::LINEAR);
+  base::RunLoop run_loop;
+  std::unique_ptr<CopyOutputResult> result;
+  auto request = std::make_unique<CopyOutputRequest>(
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
+      base::BindOnce(
+          [](std::unique_ptr<CopyOutputResult>* result_out,
+             base::OnceClosure quit_closure,
+             std::unique_ptr<CopyOutputResult> tmp_result) {
+            *result_out = std::move(tmp_result);
+            std::move(quit_closure).Run();
+          },
+          &result, run_loop.QuitClosure()));
+  request->set_result_task_runner(
+      TestGpuServiceHolder::GetInstance()->gpu_thread_task_runner());
+  copy_output::RenderPassGeometry geometry;
+  geometry.result_bounds = output_rect;
+  geometry.result_selection = output_rect;
+  geometry.sampling_bounds = output_rect;
+  geometry.readback_offset = gfx::Vector2d(0, 0);
+
+  PaintRootRenderPass(kSurfaceRect, base::DoNothing());
+  output_surface_->CopyOutput(AggregatedRenderPassId{0}, geometry, color_space,
+                              std::move(request), gpu::Mailbox());
+  output_surface_->SwapBuffersSkipped(kSurfaceRect);
+  output_surface_->Flush();
+  run_loop.Run();
+
+  EXPECT_EQ(color_space, result->GetRGBAColorSpace());
+}
+
+// Tests that copying from a source with a color space that can't be converted
+// to a SkColorSpace will fallback to a transform to sRGB.
+TEST_F(SkiaOutputSurfaceImplTest, CopyOutputBitmapUnsupportedColorSpace) {
+  output_surface_->Reshape(kSurfaceRect.size(), 1, gfx::ColorSpace(),
+                           gfx::BufferFormat::RGBX_8888, /*use_stencil=*/false);
+
+  constexpr gfx::Rect output_rect(0, 0, 10, 10);
+  const gfx::ColorSpace color_space = gfx::ColorSpace::CreatePiecewiseHDR(
+      gfx::ColorSpace::PrimaryID::BT2020, 0.5, 1.5);
+  base::RunLoop run_loop;
+  std::unique_ptr<CopyOutputResult> result;
+  auto request = std::make_unique<CopyOutputRequest>(
+      CopyOutputRequest::ResultFormat::RGBA,
+      CopyOutputRequest::ResultDestination::kSystemMemory,
+      base::BindOnce(
+          [](std::unique_ptr<CopyOutputResult>* result_out,
+             base::OnceClosure quit_closure,
+             std::unique_ptr<CopyOutputResult> tmp_result) {
+            *result_out = std::move(tmp_result);
+            std::move(quit_closure).Run();
+          },
+          &result, run_loop.QuitClosure()));
+  request->set_result_task_runner(
+      TestGpuServiceHolder::GetInstance()->gpu_thread_task_runner());
+  copy_output::RenderPassGeometry geometry;
+  geometry.result_bounds = output_rect;
+  geometry.result_selection = output_rect;
+  geometry.sampling_bounds = output_rect;
+  geometry.readback_offset = gfx::Vector2d(0, 0);
+
+  PaintRootRenderPass(kSurfaceRect, base::DoNothing());
+  output_surface_->CopyOutput(AggregatedRenderPassId{0}, geometry, color_space,
+                              std::move(request), gpu::Mailbox());
+  output_surface_->SwapBuffersSkipped(kSurfaceRect);
+  output_surface_->Flush();
+  run_loop.Run();
+
+  EXPECT_EQ(gfx::ColorSpace::CreateSRGB(), result->GetRGBAColorSpace());
 }
 
 }  // namespace viz

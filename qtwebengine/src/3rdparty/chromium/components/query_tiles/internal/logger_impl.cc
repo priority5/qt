@@ -4,6 +4,7 @@
 
 #include "components/query_tiles/internal/logger_impl.h"
 
+#include "base/observer_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 
@@ -85,7 +86,7 @@ base::Value LoggerImpl::GetTileData() {
 }
 
 void LoggerImpl::OnServiceStatusChanged() {
-  if (!observers_.might_have_observers())
+  if (observers_.empty())
     return;
   base::Value service_status = GetServiceStatus();
   for (auto& observer : observers_)
@@ -93,7 +94,7 @@ void LoggerImpl::OnServiceStatusChanged() {
 }
 
 void LoggerImpl::OnTileDataAvailable() {
-  if (!observers_.might_have_observers())
+  if (observers_.empty())
     return;
   base::Value tile_data = GetTileData();
   for (auto& observer : observers_)

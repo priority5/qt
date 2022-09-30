@@ -23,8 +23,6 @@
 
 #include <stdint.h>
 
-#include "libavutil/avassert.h"
-
 #include "avcodec.h"
 #include "bytestream.h"
 #include "get_bits.h"
@@ -83,10 +81,14 @@ enum CFHDParam {
     Precision        =  70,
     InputFormat      =  71,
     BandCodingFlags  =  72,
+    PeakLevel        =  74,
+    PeakOffsetLow    =  75,
+    PeakOffsetHigh   =  76,
     Version          =  79,
     BandSecondPass   =  82,
     PrescaleTable    =  83,
     EncodedFormat    =  84,
+    DisplayHeight    =  85,
     ChannelWidth     = 104,
     ChannelHeight    = 105,
 };
@@ -110,6 +112,7 @@ typedef struct SubBand {
     int width;
     int a_height;
     int height;
+    int8_t read_ok;
 } SubBand;
 
 typedef struct Plane {
@@ -161,6 +164,7 @@ typedef struct CFHDContext {
     int a_width;
     int a_height;
     int a_format;
+    int a_transform_type;
 
     int bpc; // bits per channel/component
     int channel_cnt;

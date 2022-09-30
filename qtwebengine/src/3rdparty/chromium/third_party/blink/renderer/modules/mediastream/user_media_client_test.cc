@@ -15,11 +15,12 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "media/audio/audio_device_description.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/mediastream/media_devices.h"
-#include "third_party/blink/public/common/widget/screen_info.h"
+#include "third_party/blink/public/mojom/media/capture_handle_config.mojom-blink.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream_source.h"
@@ -37,7 +38,7 @@
 #include "third_party/blink/renderer/modules/mediastream/mock_constraint_factory.h"
 #include "third_party/blink/renderer/modules/mediastream/mock_media_stream_video_source.h"
 #include "third_party/blink/renderer/modules/mediastream/mock_mojo_media_stream_dispatcher_host.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
@@ -46,6 +47,7 @@
 #include "third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h"
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "ui/display/screen_info.h"
 
 using testing::_;
 using testing::Mock;
@@ -129,8 +131,7 @@ void CheckVideoSourceAndTrack(blink::MediaStreamVideoSource* source,
                    expected_source_frame_rate);
   EXPECT_EQ(component->Source()->GetReadyState(),
             MediaStreamSource::kReadyStateLive);
-  MediaStreamVideoTrack* track =
-      MediaStreamVideoTrack::GetVideoTrack(WebMediaStreamTrack(component));
+  MediaStreamVideoTrack* track = MediaStreamVideoTrack::From(component);
   EXPECT_EQ(track->source(), source);
 
   MediaStreamTrackPlatform::Settings settings;
@@ -193,7 +194,7 @@ class MockMediaDevicesDispatcherHost
         blink::mojom::blink::VideoInputDeviceCapabilities::New();
     device->device_id = kFakeVideoInputDeviceId1;
     device->group_id = String("dummy");
-    device->facing_mode = media::MEDIA_VIDEO_FACING_USER;
+    device->facing_mode = mojom::blink::FacingMode::USER;
     if (!video_source_ || !video_source_->IsRunning() ||
         !video_source_->GetCurrentFormat()) {
       device->formats.push_back(media::VideoCaptureFormat(
@@ -211,7 +212,7 @@ class MockMediaDevicesDispatcherHost
     device = blink::mojom::blink::VideoInputDeviceCapabilities::New();
     device->device_id = kFakeVideoInputDeviceId2;
     device->group_id = String("dummy");
-    device->facing_mode = media::MEDIA_VIDEO_FACING_ENVIRONMENT;
+    device->facing_mode = mojom::blink::FacingMode::ENVIRONMENT;
     device->formats.push_back(media::VideoCaptureFormat(
         gfx::Size(640, 480), 30.0f, media::PIXEL_FORMAT_I420));
     result.push_back(std::move(device));
@@ -259,6 +260,20 @@ class MockMediaDevicesDispatcherHost
     NOTREACHED();
   }
 
+  void SetCaptureHandleConfig(mojom::blink::CaptureHandleConfigPtr) override {
+    NOTREACHED();
+  }
+
+#if !BUILDFLAG(IS_ANDROID)
+  void CloseFocusWindowOfOpportunity(const String& label) override {
+    NOTREACHED();
+  }
+
+  void ProduceCropId(ProduceCropIdCallback callback) override {
+    std::move(callback).Run("");
+  }
+#endif
+
   void GetAllVideoInputDeviceFormats(
       const String&,
       GetAllVideoInputDeviceFormatsCallback callback) override {
@@ -297,10 +312,10 @@ class MockMediaDevicesDispatcherHost
 };
 
 enum RequestState {
-  REQUEST_NOT_STARTED,
-  REQUEST_NOT_COMPLETE,
-  REQUEST_SUCCEEDED,
-  REQUEST_FAILED,
+  kRequestNotStarted,
+  kRequestNotComplete,
+  kRequestSucceeded,
+  kRequestFailed,
 };
 
 class UserMediaProcessorUnderTest : public UserMediaProcessor {
@@ -409,14 +424,14 @@ class UserMediaProcessorUnderTest : public UserMediaProcessor {
   void GetUserMediaRequestSucceeded(MediaStreamDescriptor* descriptor,
                                     UserMediaRequest* request_info) override {
     last_generated_descriptor_ = descriptor;
-    *state_ = REQUEST_SUCCEEDED;
+    *state_ = kRequestSucceeded;
   }
 
   void GetUserMediaRequestFailed(
       blink::mojom::blink::MediaStreamRequestResult result,
       const String& constraint_name) override {
     last_generated_descriptor_ = nullptr;
-    *state_ = REQUEST_FAILED;
+    *state_ = kRequestFailed;
     result_ = result;
     constraint_name_ = constraint_name;
   }
@@ -459,7 +474,7 @@ class UserMediaClientUnderTest : public UserMediaClient {
         state_(state) {}
 
   void RequestUserMediaForTest(UserMediaRequest* user_media_request) {
-    *state_ = REQUEST_NOT_COMPLETE;
+    *state_ = kRequestNotComplete;
     RequestUserMedia(user_media_request);
     base::RunLoop().RunUntilIdle();
   }
@@ -476,12 +491,16 @@ class UserMediaClientUnderTest : public UserMediaClient {
 
 class UserMediaChromeClient : public EmptyChromeClient {
  public:
-  ScreenInfo GetScreenInfo(LocalFrame&) const override {
-    ScreenInfo info;
-    info.rect = gfx::Rect(blink::kDefaultScreenCastWidth,
-                          blink::kDefaultScreenCastHeight);
-    return info;
+  UserMediaChromeClient() {
+    screen_info_.rect = gfx::Rect(blink::kDefaultScreenCastWidth,
+                                  blink::kDefaultScreenCastHeight);
   }
+  const display::ScreenInfo& GetScreenInfo(LocalFrame&) const override {
+    return screen_info_;
+  }
+
+ private:
+  display::ScreenInfo screen_info_;
 };
 
 }  // namespace
@@ -496,11 +515,9 @@ class UserMediaClientTest : public ::testing::Test {
     // Create our test object.
     auto* msd_observer = new blink::WebMediaStreamDeviceObserver(nullptr);
 
-    ChromeClient* client = MakeGarbageCollected<UserMediaChromeClient>();
-    Page::PageClients page_clients;
-    page_clients.chrome_client = client;
+    ChromeClient* chrome_client = MakeGarbageCollected<UserMediaChromeClient>();
     dummy_page_holder_ =
-        std::make_unique<DummyPageHolder>(IntSize(1, 1), &page_clients);
+        std::make_unique<DummyPageHolder>(gfx::Size(1, 1), chrome_client);
 
     user_media_processor_ = MakeGarbageCollected<UserMediaProcessorUnderTest>(
         &(dummy_page_holder_->GetFrame()), base::WrapUnique(msd_observer),
@@ -531,7 +548,7 @@ class UserMediaClientTest : public ::testing::Test {
     user_media_client_impl_->RequestUserMediaForTest();
     StartMockedVideoSource();
 
-    EXPECT_EQ(REQUEST_SUCCEEDED, request_state());
+    EXPECT_EQ(kRequestSucceeded, request_state());
 
     MediaStreamDescriptor* desc =
         user_media_processor_->last_generated_descriptor();
@@ -549,7 +566,7 @@ class UserMediaClientTest : public ::testing::Test {
         MediaConstraints(), CreateDefaultConstraints());
     user_media_client_impl_->RequestUserMediaForTest(user_media_request);
     StartMockedVideoSource();
-    EXPECT_EQ(REQUEST_SUCCEEDED, request_state());
+    EXPECT_EQ(kRequestSucceeded, request_state());
 
     MediaStreamDescriptor* descriptor =
         user_media_processor_->last_generated_descriptor();
@@ -571,7 +588,7 @@ class UserMediaClientTest : public ::testing::Test {
         constraint_factory.CreateMediaConstraints(), MediaConstraints());
     user_media_client_impl_->RequestUserMediaForTest(user_media_request);
 
-    EXPECT_EQ(REQUEST_SUCCEEDED, request_state());
+    EXPECT_EQ(kRequestSucceeded, request_state());
 
     MediaStreamDescriptor* desc =
         user_media_processor_->last_generated_descriptor();
@@ -611,7 +628,7 @@ class UserMediaClientTest : public ::testing::Test {
     user_media_client_impl_->RequestUserMediaForTest(request);
     StartMockedVideoSource();
 
-    EXPECT_EQ(REQUEST_SUCCEEDED, request_state());
+    EXPECT_EQ(kRequestSucceeded, request_state());
     EXPECT_EQ(1U, mock_dispatcher_host_.audio_devices().size());
     EXPECT_EQ(1U, mock_dispatcher_host_.video_devices().size());
     // MockMojoMediaStreamDispatcherHost appends its internal session ID to its
@@ -628,7 +645,7 @@ class UserMediaClientTest : public ::testing::Test {
       MediaStreamComponent* component,
       int width,
       int height,
-      const base::Optional<double>& frame_rate = base::Optional<double>()) {
+      const absl::optional<double>& frame_rate = absl::optional<double>()) {
     blink::MockConstraintFactory factory;
     factory.basic().width.SetExact(width);
     factory.basic().height.SetExact(height);
@@ -657,7 +674,7 @@ class UserMediaClientTest : public ::testing::Test {
   std::unique_ptr<DummyPageHolder> dummy_page_holder_;
   WeakPersistent<UserMediaProcessorUnderTest> user_media_processor_;
   Persistent<UserMediaClientUnderTest> user_media_client_impl_;
-  RequestState state_ = REQUEST_NOT_STARTED;
+  RequestState state_ = kRequestNotStarted;
 };
 
 TEST_F(UserMediaClientTest, GenerateMediaStream) {
@@ -805,7 +822,7 @@ TEST_F(UserMediaClientTest, MediaVideoSourceFailToStart) {
   user_media_client_impl_->RequestUserMediaForTest();
   FailToStartMockedVideoSource();
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(REQUEST_FAILED, request_state());
+  EXPECT_EQ(kRequestFailed, request_state());
   EXPECT_EQ(
       blink::mojom::blink::MediaStreamRequestResult::TRACK_START_FAILURE_VIDEO,
       user_media_processor_->error_reason());
@@ -821,7 +838,7 @@ TEST_F(UserMediaClientTest, MediaAudioSourceFailToInitialize) {
   user_media_client_impl_->RequestUserMediaForTest();
   StartMockedVideoSource();
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(REQUEST_FAILED, request_state());
+  EXPECT_EQ(kRequestFailed, request_state());
   EXPECT_EQ(
       blink::mojom::blink::MediaStreamRequestResult::TRACK_START_FAILURE_AUDIO,
       user_media_processor_->error_reason());
@@ -836,7 +853,7 @@ TEST_F(UserMediaClientTest, MediaAudioSourceFailToInitialize) {
 TEST_F(UserMediaClientTest, MediaStreamImplShutDown) {
   user_media_client_impl_->RequestUserMediaForTest();
   EXPECT_EQ(1, mock_dispatcher_host_.request_stream_counter());
-  EXPECT_EQ(REQUEST_NOT_COMPLETE, request_state());
+  EXPECT_EQ(kRequestNotComplete, request_state());
   // TearDown() nulls out |user_media_client_impl_| and forces GC to garbage
   // collect it.
 }
@@ -851,7 +868,7 @@ TEST_F(UserMediaClientTest, ReloadFrameWhileGeneratingStream) {
   EXPECT_EQ(1, mock_dispatcher_host_.request_stream_counter());
   EXPECT_EQ(0, mock_dispatcher_host_.stop_audio_device_counter());
   EXPECT_EQ(0, mock_dispatcher_host_.stop_video_device_counter());
-  EXPECT_EQ(REQUEST_NOT_COMPLETE, request_state());
+  EXPECT_EQ(kRequestNotComplete, request_state());
 }
 
 // This test what happens if a newdocument is loaded in the frame while the
@@ -862,7 +879,7 @@ TEST_F(UserMediaClientTest, ReloadFrameWhileGeneratingSources) {
   LoadNewDocumentInFrame();
   EXPECT_EQ(1, mock_dispatcher_host_.stop_audio_device_counter());
   EXPECT_EQ(1, mock_dispatcher_host_.stop_video_device_counter());
-  EXPECT_EQ(REQUEST_NOT_COMPLETE, request_state());
+  EXPECT_EQ(kRequestNotComplete, request_state());
 }
 
 // This test what happens if stop is called on a track after the frame has
@@ -928,8 +945,9 @@ TEST_F(UserMediaClientTest, DefaultConstraintsPropagate) {
             blink::MediaStreamVideoSource::kDefaultWidth);
   EXPECT_EQ(video_capture_settings.Height(),
             blink::MediaStreamVideoSource::kDefaultHeight);
-  EXPECT_EQ(video_capture_settings.FrameRate(),
-            blink::MediaStreamVideoSource::kDefaultFrameRate);
+  EXPECT_EQ(
+      video_capture_settings.FrameRate(),
+      static_cast<float>(blink::MediaStreamVideoSource::kDefaultFrameRate));
   EXPECT_EQ(video_capture_settings.ResolutionChangePolicy(),
             media::ResolutionChangePolicy::FIXED_RESOLUTION);
   EXPECT_FALSE(video_capture_settings.noise_reduction());
@@ -938,10 +956,11 @@ TEST_F(UserMediaClientTest, DefaultConstraintsPropagate) {
   const blink::VideoTrackAdapterSettings& track_settings =
       video_capture_settings.track_adapter_settings();
   EXPECT_FALSE(track_settings.target_size().has_value());
-  EXPECT_EQ(track_settings.min_aspect_ratio(),
-            1.0 / blink::MediaStreamVideoSource::kDefaultHeight);
+  EXPECT_EQ(
+      track_settings.min_aspect_ratio(),
+      1.0 / static_cast<double>(blink::MediaStreamVideoSource::kDefaultHeight));
   EXPECT_EQ(track_settings.max_aspect_ratio(),
-            blink::MediaStreamVideoSource::kDefaultWidth);
+            static_cast<double>(blink::MediaStreamVideoSource::kDefaultWidth));
   // 0.0 is the default max_frame_rate and it indicates no frame-rate adjustment
   EXPECT_EQ(track_settings.max_frame_rate(), 0.0);
 }
@@ -1101,7 +1120,7 @@ TEST_F(UserMediaClientTest, CreateWithMandatoryInvalidAudioDeviceId) {
   UserMediaRequest* request =
       UserMediaRequest::CreateForTesting(audio_constraints, MediaConstraints());
   user_media_client_impl_->RequestUserMediaForTest(request);
-  EXPECT_EQ(REQUEST_FAILED, request_state());
+  EXPECT_EQ(kRequestFailed, request_state());
 }
 
 TEST_F(UserMediaClientTest, CreateWithMandatoryInvalidVideoDeviceId) {
@@ -1110,7 +1129,7 @@ TEST_F(UserMediaClientTest, CreateWithMandatoryInvalidVideoDeviceId) {
   UserMediaRequest* request =
       UserMediaRequest::CreateForTesting(MediaConstraints(), video_constraints);
   user_media_client_impl_->RequestUserMediaForTest(request);
-  EXPECT_EQ(REQUEST_FAILED, request_state());
+  EXPECT_EQ(kRequestFailed, request_state());
 }
 
 TEST_F(UserMediaClientTest, CreateWithMandatoryValidDeviceIds) {
@@ -1182,8 +1201,7 @@ TEST_F(UserMediaClientTest, CreateWithFacingModeEnvironment) {
 TEST_F(UserMediaClientTest, ApplyConstraintsVideoDeviceSingleTrack) {
   EXPECT_CALL(mock_dispatcher_host_, OnStreamStarted(_));
   MediaStreamComponent* component = RequestLocalVideoTrack();
-  MediaStreamVideoTrack* track =
-      MediaStreamVideoTrack::GetVideoTrack(WebMediaStreamTrack(component));
+  MediaStreamVideoTrack* track = MediaStreamVideoTrack::From(component);
   blink::MediaStreamVideoSource* source = track->source();
   CheckVideoSource(source, 0, 0, 0.0);
 

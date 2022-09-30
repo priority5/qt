@@ -29,8 +29,7 @@ namespace {
 // newRenderPipelineStateWithDescriptor:]. The completion handler may be called
 // on another thread, so all members are protected by a lock. Accessed via
 // scoped_refptr to ensure that it exists until its last accessor is gone.
-class API_AVAILABLE(macos(10.11)) AsyncMetalState
-    : public base::RefCountedThreadSafe<AsyncMetalState> {
+class AsyncMetalState : public base::RefCountedThreadSafe<AsyncMetalState> {
  public:
   AsyncMetalState() : condition_variable(&lock) {}
 
@@ -52,12 +51,11 @@ class API_AVAILABLE(macos(10.11)) AsyncMetalState
   ~AsyncMetalState() { DCHECK(has_result); }
 };
 
-id<MTLLibrary> API_AVAILABLE(macos(10.11))
-    NewLibraryWithRetry(id<MTLDevice> device,
-                        NSString* source,
-                        MTLCompileOptions* options,
-                        __autoreleasing NSError** error,
-                        gl::ProgressReporter* progress_reporter) {
+id<MTLLibrary> NewLibraryWithRetry(id<MTLDevice> device,
+                                   NSString* source,
+                                   MTLCompileOptions* options,
+                                   __autoreleasing NSError** error,
+                                   gl::ProgressReporter* progress_reporter) {
   SCOPED_UMA_HISTOGRAM_TIMER("Gpu.MetalProxy.NewLibraryTime");
   const base::TimeTicks start_time = base::TimeTicks::Now();
   auto state = base::MakeRefCounted<AsyncMetalState>();
@@ -65,11 +63,11 @@ id<MTLLibrary> API_AVAILABLE(macos(10.11))
   // The completion handler will signal the condition variable we will wait
   // on. Note that completionHandler will hold a reference to |state|.
   MTLNewLibraryCompletionHandler completionHandler =
-      ^(id<MTLLibrary> library, NSError* error) {
+      ^(id<MTLLibrary> library, NSError* ns_error) {
         base::AutoLock lock(state->lock);
         state->has_result = true;
         state->library = [library retain];
-        state->error = [error retain];
+        state->error = [ns_error retain];
         state->condition_variable.Signal();
       };
 
@@ -84,9 +82,8 @@ id<MTLLibrary> API_AVAILABLE(macos(10.11))
 
   // Suppress the watchdog timer for kTimeout by reporting progress every
   // half-second. After that, allow it to kill the the GPU process.
-  constexpr base::TimeDelta kTimeout = base::TimeDelta::FromSeconds(60);
-  constexpr base::TimeDelta kWaitPeriod =
-      base::TimeDelta::FromMilliseconds(500);
+  constexpr base::TimeDelta kTimeout = base::Seconds(60);
+  constexpr base::TimeDelta kWaitPeriod = base::Milliseconds(500);
   while (true) {
     if (base::TimeTicks::Now() - start_time < kTimeout && progress_reporter)
       progress_reporter->ReportProgress();
@@ -99,31 +96,30 @@ id<MTLLibrary> API_AVAILABLE(macos(10.11))
   }
 }
 
-id<MTLRenderPipelineState> API_AVAILABLE(macos(10.11))
-    NewRenderPipelineStateWithRetry(id<MTLDevice> device,
-                                    MTLRenderPipelineDescriptor* descriptor,
-                                    __autoreleasing NSError** error,
-                                    gl::ProgressReporter* progress_reporter) {
+id<MTLRenderPipelineState> NewRenderPipelineStateWithRetry(
+    id<MTLDevice> device,
+    MTLRenderPipelineDescriptor* descriptor,
+    __autoreleasing NSError** error,
+    gl::ProgressReporter* progress_reporter) {
   // This function is almost-identical to the above NewLibraryWithRetry. See
   // comments in that function.
   SCOPED_UMA_HISTOGRAM_TIMER("Gpu.MetalProxy.NewRenderPipelineStateTime");
   const base::TimeTicks start_time = base::TimeTicks::Now();
   auto state = base::MakeRefCounted<AsyncMetalState>();
   MTLNewRenderPipelineStateCompletionHandler completionHandler =
-      ^(id<MTLRenderPipelineState> render_pipeline_state, NSError* error) {
+      ^(id<MTLRenderPipelineState> render_pipeline_state, NSError* ns_error) {
         base::AutoLock lock(state->lock);
         state->has_result = true;
         state->render_pipeline_state = [render_pipeline_state retain];
-        state->error = [error retain];
+        state->error = [ns_error retain];
         state->condition_variable.Signal();
       };
   if (progress_reporter)
     progress_reporter->ReportProgress();
   [device newRenderPipelineStateWithDescriptor:descriptor
                              completionHandler:completionHandler];
-  constexpr base::TimeDelta kTimeout = base::TimeDelta::FromSeconds(60);
-  constexpr base::TimeDelta kWaitPeriod =
-      base::TimeDelta::FromMilliseconds(500);
+  constexpr base::TimeDelta kTimeout = base::Seconds(60);
+  constexpr base::TimeDelta kWaitPeriod = base::Milliseconds(500);
   while (true) {
     if (base::TimeTicks::Now() - start_time < kTimeout && progress_reporter)
       progress_reporter->ReportProgress();
@@ -147,9 +143,13 @@ constexpr uint32_t kShaderCrashDumpLength = 8128;
 // to hangs. Should this significantly help the situation, a more robust (and
 // not indefinitely-growing) cache will be added either here or in Skia.
 // https://crbug.com/974219
-class API_AVAILABLE(macos(10.11)) MTLLibraryCache {
+class MTLLibraryCache {
  public:
   MTLLibraryCache() = default;
+
+  MTLLibraryCache(const MTLLibraryCache&) = delete;
+  MTLLibraryCache& operator=(const MTLLibraryCache&) = delete;
+
   ~MTLLibraryCache() = default;
 
   id<MTLLibrary> NewLibraryWithSource(id<MTLDevice> device,
@@ -226,7 +226,6 @@ class API_AVAILABLE(macos(10.11)) MTLLibraryCache {
   };
 
   std::map<LibraryKey, LibraryData> libraries_;
-  DISALLOW_COPY_AND_ASSIGN(MTLLibraryCache);
 };
 
 // Disable protocol warnings and property synthesis warnings. Any unimplemented

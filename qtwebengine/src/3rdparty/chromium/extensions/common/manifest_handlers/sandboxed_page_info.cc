@@ -55,16 +55,16 @@ SandboxedPageHandler::SandboxedPageHandler() {
 SandboxedPageHandler::~SandboxedPageHandler() {
 }
 
-bool SandboxedPageHandler::Parse(Extension* extension, base::string16* error) {
+bool SandboxedPageHandler::Parse(Extension* extension, std::u16string* error) {
   std::unique_ptr<SandboxedPageInfo> sandboxed_info(new SandboxedPageInfo);
 
   const base::Value* list_value = nullptr;
   if (!extension->manifest()->GetList(keys::kSandboxedPages, &list_value)) {
-    *error = base::ASCIIToUTF16(errors::kInvalidSandboxedPagesList);
+    *error = errors::kInvalidSandboxedPagesList;
     return false;
   }
 
-  base::Value::ConstListView list_view = list_value->GetList();
+  base::Value::ConstListView list_view = list_value->GetListDeprecated();
   for (size_t i = 0; i < list_view.size(); ++i) {
     if (!list_view[i].is_string()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
@@ -91,11 +91,7 @@ bool SandboxedPageHandler::Parse(Extension* extension, base::string16* error) {
 
 base::span<const char* const> SandboxedPageHandler::Keys() const {
   static constexpr const char* kKeys[] = {keys::kSandboxedPages};
-#if !defined(__GNUC__) || __GNUC__ > 5
   return kKeys;
-#else
-  return base::make_span(kKeys, 1);
-#endif
 }
 
 }  // namespace extensions

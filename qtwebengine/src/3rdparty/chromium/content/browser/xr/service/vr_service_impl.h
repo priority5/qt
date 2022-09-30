@@ -10,11 +10,12 @@
 #include <set>
 #include <vector>
 
-#include "base/macros.h"
-#include "base/util/type_safety/pass_key.h"
+#include "base/memory/raw_ptr.h"
+#include "base/types/pass_key.h"
 #include "build/build_config.h"
 #include "content/browser/xr/metrics/session_metrics_helper.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/permission_type.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "device/vr/public/mojom/isolated_xr_service.mojom-forward.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
@@ -44,7 +45,10 @@ class CONTENT_EXPORT VRServiceImpl : public device::mojom::VRService,
   explicit VRServiceImpl(content::RenderFrameHost* render_frame_host);
 
   // Constructor for tests.
-  explicit VRServiceImpl(util::PassKey<XRRuntimeManagerTest>);
+  explicit VRServiceImpl(base::PassKey<XRRuntimeManagerTest>);
+
+  VRServiceImpl(const VRServiceImpl&) = delete;
+  VRServiceImpl& operator=(const VRServiceImpl&) = delete;
 
   ~VRServiceImpl() override;
 
@@ -88,15 +92,15 @@ class CONTENT_EXPORT VRServiceImpl : public device::mojom::VRService,
 
  private:
   struct SessionRequestData {
-    device::mojom::XRSessionOptionsPtr options;
     device::mojom::VRService::RequestSessionCallback callback;
-    std::set<device::mojom::XRSessionFeature> enabled_features;
+    std::unordered_set<device::mojom::XRSessionFeature> required_features;
+    std::unordered_set<device::mojom::XRSessionFeature> optional_features;
+    device::mojom::XRSessionOptionsPtr options;
     device::mojom::XRDeviceId runtime_id;
 
     SessionRequestData(
         device::mojom::XRSessionOptionsPtr options,
         device::mojom::VRService::RequestSessionCallback callback,
-        std::set<device::mojom::XRSessionFeature> enabled_features,
         device::mojom::XRDeviceId runtime_id);
     ~SessionRequestData();
     SessionRequestData(SessionRequestData&&);
@@ -144,6 +148,7 @@ class CONTENT_EXPORT VRServiceImpl : public device::mojom::VRService,
 
   void OnPermissionResults(
       SessionRequestData request,
+      const std::vector<content::PermissionType>& permissions,
       const std::vector<blink::mojom::PermissionStatus>& permission_statuses);
 
   void EnsureRuntimeInstalled(SessionRequestData request,
@@ -154,10 +159,10 @@ class CONTENT_EXPORT VRServiceImpl : public device::mojom::VRService,
 
   void OnInlineSessionCreated(
       SessionRequestData request,
-      device::mojom::XRSessionPtr session,
-      mojo::PendingRemote<device::mojom::XRSessionController> controller);
-  void OnImmersiveSessionCreated(SessionRequestData request,
-                                 device::mojom::XRSessionPtr session);
+      device::mojom::XRRuntimeSessionResultPtr session_result);
+  void OnImmersiveSessionCreated(
+      SessionRequestData request,
+      device::mojom::XRRuntimeSessionResultPtr session_result);
   void OnSessionCreated(
       SessionRequestData request,
       device::mojom::XRSessionPtr session,
@@ -167,7 +172,7 @@ class CONTENT_EXPORT VRServiceImpl : public device::mojom::VRService,
   scoped_refptr<XRRuntimeManagerImpl> runtime_manager_;
   mojo::RemoteSet<device::mojom::XRSessionClient> session_clients_;
   mojo::Remote<device::mojom::VRServiceClient> service_client_;
-  content::RenderFrameHost* render_frame_host_;
+  raw_ptr<content::RenderFrameHost> render_frame_host_;
   mojo::SelfOwnedReceiverRef<device::mojom::VRService> receiver_;
   mojo::RemoteSet<device::mojom::XRSessionController> magic_window_controllers_;
   device::mojom::XRVisibilityState visibility_state_ =
@@ -183,8 +188,6 @@ class CONTENT_EXPORT VRServiceImpl : public device::mojom::VRService,
   std::vector<XrCompatibleCallback> xr_compatible_callbacks_;
 
   base::WeakPtrFactory<VRServiceImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VRServiceImpl);
 };
 
 }  // namespace content

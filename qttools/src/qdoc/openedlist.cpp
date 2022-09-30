@@ -1,40 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*
-  openedlist.cpp
-*/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "openedlist.h"
 
 #include "atom.h"
 
-#include <QtCore/qregexp.h>
+#include <QtCore/qregularexpression.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -44,13 +15,14 @@ OpenedList::OpenedList(ListStyle style) : sty(style), ini(1), nex(0) {}
 
 OpenedList::OpenedList(const Location &location, const QString &hint) : sty(Bullet), ini(1)
 {
-    QRegExp hintSyntax("(\\W*)([0-9]+|[A-Z]+|[a-z]+)(\\W*)");
+    QRegularExpression hintSyntax("^(\\W*)([0-9]+|[A-Z]+|[a-z]+)(\\W*)$");
 
-    if (hintSyntax.exactMatch(hint)) {
+    auto match = hintSyntax.match(hint);
+    if (match.hasMatch()) {
         bool ok;
         int asNumeric = hint.toInt(&ok);
-        int asRoman = fromRoman(hintSyntax.cap(2));
-        int asAlpha = fromAlpha(hintSyntax.cap(2));
+        int asRoman = fromRoman(match.captured(2));
+        int asAlpha = fromAlpha(match.captured(2));
 
         if (ok) {
             sty = Numeric;
@@ -62,10 +34,10 @@ OpenedList::OpenedList(const Location &location, const QString &hint) : sty(Bull
             sty = (hint == hint.toLower()) ? LowerAlpha : UpperAlpha;
             ini = asAlpha;
         }
-        pref = hintSyntax.cap(1);
-        suff = hintSyntax.cap(3);
+        pref = match.captured(1);
+        suff = match.captured(3);
     } else if (!hint.isEmpty()) {
-        location.warning(tr("Unrecognized list style '%1'").arg(hint));
+        location.warning(QStringLiteral("Unrecognized list style '%1'").arg(hint));
     }
     nex = ini - 1;
 }
@@ -114,25 +86,13 @@ QString OpenedList::numberString() const
     }*/
 }
 
-QString OpenedList::toAlpha(int n)
-{
-    QString str;
-
-    while (n > 0) {
-        n--;
-        str.prepend((n % 26) + 'a');
-        n /= 26;
-    }
-    return str;
-}
-
 int OpenedList::fromAlpha(const QString &str)
 {
     int n = 0;
     int u;
 
-    for (int i = 0; i < str.length(); i++) {
-        u = str[i].toLower().unicode();
+    for (const QChar &character : str) {
+        u = character.toLower().unicode();
         if (u >= 'a' && u <= 'z') {
             n *= 26;
             n += u - 'a' + 1;
@@ -187,10 +147,10 @@ int OpenedList::fromRoman(const QString &str)
     int u;
     int v = 0;
 
-    for (int i = str.length() - 1; i >= 0; i--) {
+    for (const QChar &character : str) {
         j = 0;
         u = 1000;
-        while (roman[j] != 'i' && roman[j] != str[i].toLower()) {
+        while (roman[j] != 'i' && roman[j] != character.toLower()) {
             j += 2;
             u /= roman[j - 1];
         }

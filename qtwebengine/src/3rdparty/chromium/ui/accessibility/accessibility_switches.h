@@ -20,13 +20,6 @@ AX_BASE_EXPORT extern const char
     kEnableExperimentalAccessibilityLanguageDetectionDynamic[];
 AX_BASE_EXPORT extern const char
     kEnableExperimentalAccessibilitySwitchAccessText[];
-AX_BASE_EXPORT extern const char
-    kEnableExperimentalAccessibilityChromeVoxAnnotations[];
-AX_BASE_EXPORT extern const char
-    kEnableExperimentalAccessibilityChromeVoxTutorial[];
-AX_BASE_EXPORT extern const char
-    kEnableExperimentalAccessibilityMagnifierNewFocusFollowing[];
-AX_BASE_EXPORT extern const char kEnableSwitchAccessPointScanning[];
 
 // Returns true if experimental accessibility language detection is enabled.
 AX_BASE_EXPORT bool IsExperimentalAccessibilityLanguageDetectionEnabled();
@@ -39,7 +32,7 @@ IsExperimentalAccessibilityLanguageDetectionDynamicEnabled();
 // Returns true if experimental accessibility Switch Access text is enabled.
 AX_BASE_EXPORT bool IsExperimentalAccessibilitySwitchAccessTextEnabled();
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 AX_BASE_EXPORT extern const char kEnableExperimentalUIAutomation[];
 #endif
 
@@ -47,7 +40,7 @@ AX_BASE_EXPORT extern const char kEnableExperimentalUIAutomation[];
 AX_BASE_EXPORT bool IsExperimentalAccessibilityPlatformUIAEnabled();
 
 // Returns true if Switch Access point scanning is enabled.
-AX_BASE_EXPORT bool IsSwitchAccessPointScanningEnabled();
+AX_BASE_EXPORT bool IsMagnifierDebugDrawRectEnabled();
 
 // Optionally disable AXMenuList, which makes the internal pop-up menu
 // UI for a select element directly accessible.

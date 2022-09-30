@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "ui/accessibility/ax_export.h"
 #include "ui/accessibility/ax_tree.h"
 #include "ui/accessibility/ax_tree_id.h"
 #include "ui/accessibility/ax_tree_manager.h"
@@ -19,7 +20,7 @@ class AXNode;
 //
 // For simplicity, this class supports only a single tree and doesn't perform
 // any walking across multiple trees.
-class TestAXTreeManager : public AXTreeManager {
+class AX_EXPORT TestAXTreeManager : public AXTreeManager {
  public:
   // This constructor does not create an empty AXTree. Call "SetTree" if you
   // need to manage a specific tree. Useful when you need to test for the
@@ -34,6 +35,9 @@ class TestAXTreeManager : public AXTreeManager {
   TestAXTreeManager(const TestAXTreeManager& manager) = delete;
   TestAXTreeManager& operator=(const TestAXTreeManager& manager) = delete;
 
+  TestAXTreeManager(TestAXTreeManager&& manager);
+  TestAXTreeManager& operator=(TestAXTreeManager&& manager);
+
   void DestroyTree();
   AXTree* GetTree() const;
   // Takes ownership of |tree|.
@@ -41,8 +45,10 @@ class TestAXTreeManager : public AXTreeManager {
 
   // AXTreeManager implementation.
   AXNode* GetNodeFromTree(const AXTreeID tree_id,
-                          const AXNode::AXID node_id) const override;
-  AXNode* GetNodeFromTree(const AXNode::AXID node_id) const override;
+                          const AXNodeID node_id) const override;
+  AXNode* GetNodeFromTree(const AXNodeID node_id) const override;
+  void AddObserver(AXTreeObserver* observer) override;
+  void RemoveObserver(AXTreeObserver* observer) override;
   AXTreeID GetTreeID() const override;
   AXTreeID GetParentTreeID() const override;
   AXNode* GetRootAsAXNode() const override;

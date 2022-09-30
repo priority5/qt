@@ -1,47 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2014 Klaralvdalens Datakonsult AB (KDAB).
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt3D module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2014 Klaralvdalens Datakonsult AB (KDAB).
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "graphicshelpergl4_p.h"
 
-#ifndef QT_OPENGL_ES_2
+#if !QT_CONFIG(opengles2)
 #include <QOpenGLFunctions_4_3_Core>
-#include <QtOpenGLExtensions/qopenglextensions.h>
 #include <private/attachmentpack_p.h>
 #include <qgraphicsutils_p.h>
 #include <logging_p.h>
@@ -265,9 +228,9 @@ void GraphicsHelperGL4::useProgram(GLuint programId)
     m_funcs->glUseProgram(programId);
 }
 
-QVector<ShaderUniform> GraphicsHelperGL4::programUniformsAndLocations(GLuint programId)
+std::vector<ShaderUniform> GraphicsHelperGL4::programUniformsAndLocations(GLuint programId)
 {
-    QVector<ShaderUniform> uniforms;
+    std::vector<ShaderUniform> uniforms;
 
     GLint nbrActiveUniforms = 0;
     m_funcs->glGetProgramInterfaceiv(programId, GL_UNIFORM, GL_ACTIVE_RESOURCES, &nbrActiveUniforms);
@@ -291,7 +254,7 @@ QVector<ShaderUniform> GraphicsHelperGL4::programUniformsAndLocations(GLuint pro
         m_funcs->glGetActiveUniformsiv(programId, 1, (GLuint*)&i, GL_UNIFORM_ARRAY_STRIDE, &uniform.m_arrayStride);
         m_funcs->glGetActiveUniformsiv(programId, 1, (GLuint*)&i, GL_UNIFORM_MATRIX_STRIDE, &uniform.m_matrixStride);
         uniform.m_rawByteSize = uniformByteSize(uniform);
-        uniforms.append(uniform);
+        uniforms.push_back(uniform);
         qCDebug(Rendering) << uniform.m_name << "size" << uniform.m_size
                            << " offset" << uniform.m_offset
                            << " rawSize" << uniform.m_rawByteSize;
@@ -300,9 +263,9 @@ QVector<ShaderUniform> GraphicsHelperGL4::programUniformsAndLocations(GLuint pro
     return uniforms;
 }
 
-QVector<ShaderAttribute> GraphicsHelperGL4::programAttributesAndLocations(GLuint programId)
+std::vector<ShaderAttribute> GraphicsHelperGL4::programAttributesAndLocations(GLuint programId)
 {
-    QVector<ShaderAttribute> attributes;
+    std::vector<ShaderAttribute> attributes;
     GLint nbrActiveAttributes = 0;
     m_funcs->glGetProgramiv(programId, GL_ACTIVE_ATTRIBUTES, &nbrActiveAttributes);
     attributes.reserve(nbrActiveAttributes);
@@ -317,14 +280,14 @@ QVector<ShaderAttribute> GraphicsHelperGL4::programAttributesAndLocations(GLuint
         attributeName[sizeof(attributeName) - 1] = '\0';
         attribute.m_location = m_funcs->glGetAttribLocation(programId, attributeName);
         attribute.m_name = QString::fromUtf8(attributeName, attributeNameLength);
-        attributes.append(attribute);
+        attributes.push_back(attribute);
     }
     return attributes;
 }
 
-QVector<ShaderUniformBlock> GraphicsHelperGL4::programUniformBlocks(GLuint programId)
+std::vector<ShaderUniformBlock> GraphicsHelperGL4::programUniformBlocks(GLuint programId)
 {
-    QVector<ShaderUniformBlock> blocks;
+    std::vector<ShaderUniformBlock> blocks;
     GLint nbrActiveUniformsBlocks = 0;
     m_funcs->glGetProgramInterfaceiv(programId, GL_UNIFORM_BLOCK, GL_ACTIVE_RESOURCES, &nbrActiveUniformsBlocks);
     blocks.reserve(nbrActiveUniformsBlocks);
@@ -341,14 +304,14 @@ QVector<ShaderUniformBlock> GraphicsHelperGL4::programUniformBlocks(GLuint progr
         m_funcs->glGetProgramResourceiv(programId, GL_UNIFORM_BLOCK, i, 1, &prop, 4, NULL, &uniformBlock.m_size);
         prop = GL_NUM_ACTIVE_VARIABLES;
         m_funcs->glGetProgramResourceiv(programId, GL_UNIFORM_BLOCK, i, 1, &prop, 4, NULL, &uniformBlock.m_activeUniformsCount);
-        blocks.append(uniformBlock);
+        blocks.push_back(uniformBlock);
     }
     return blocks;
 }
 
-QVector<ShaderStorageBlock> GraphicsHelperGL4::programShaderStorageBlocks(GLuint programId)
+std::vector<ShaderStorageBlock> GraphicsHelperGL4::programShaderStorageBlocks(GLuint programId)
 {
-    QVector<ShaderStorageBlock> blocks;
+    std::vector<ShaderStorageBlock> blocks;
     GLint nbrActiveShaderStorageBlocks = 0;
     m_funcs->glGetProgramInterfaceiv(programId, GL_SHADER_STORAGE_BLOCK, GL_ACTIVE_RESOURCES, &nbrActiveShaderStorageBlocks);
     blocks.reserve(nbrActiveShaderStorageBlocks);

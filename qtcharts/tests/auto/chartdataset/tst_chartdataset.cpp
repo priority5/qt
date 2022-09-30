@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Charts module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QtTest/QtTest>
 #include <QtCharts/qabstractaxis.h>
@@ -33,7 +7,7 @@
 #include <QtCharts/qlogvalueaxis.h>
 #include <QtCharts/qbarcategoryaxis.h>
 #include <QtCharts/qcategoryaxis.h>
-#ifndef QT_QREAL_IS_FLOAT
+#if QT_CONFIG(charts_datetime_axis)
 #include <QtCharts/qdatetimeaxis.h>
 #endif
 #include <QtCharts/qlineseries.h>
@@ -48,7 +22,7 @@
 #include <private/abstractdomain_p.h>
 #include <tst_definitions.h>
 
-QT_CHARTS_USE_NAMESPACE
+QT_USE_NAMESPACE
 
 Q_DECLARE_METATYPE(AbstractDomain *)
 Q_DECLARE_METATYPE(QAbstractAxis *)
@@ -213,7 +187,7 @@ void tst_ChartDataSet::addAxis_data()
     QAbstractAxis* logvalue = new QLogValueAxis(this);
     QAbstractAxis* category = new QCategoryAxis(this);
     QAbstractAxis* barcategory = new QBarCategoryAxis(this);
-#ifndef QT_QREAL_IS_FLOAT
+#if QT_CONFIG(charts_datetime_axis)
     QAbstractAxis* datetime = new QDateTimeAxis(this);
 #endif
 
@@ -221,7 +195,7 @@ void tst_ChartDataSet::addAxis_data()
     QTest::newRow("logvalue") << logvalue;
     QTest::newRow("category") << category;
     QTest::newRow("barcategory") << barcategory;
-#ifndef QT_QREAL_IS_FLOAT
+#if QT_CONFIG(charts_datetime_axis)
     QTest::newRow("datetime") << datetime;
 #endif
 }

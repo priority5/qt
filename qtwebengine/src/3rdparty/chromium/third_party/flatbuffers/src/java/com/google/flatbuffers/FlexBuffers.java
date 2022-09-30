@@ -36,7 +36,7 @@ import java.nio.charset.StandardCharsets;
  * <p>
  * Example of usage:
  * <pre>
- * ByteBuffer bb = ... // load message from file or network
+ * ReadBuf bb = ... // load message from file or network
  * FlexBuffers.Reference r = FlexBuffers.getRoot(bb); // Reads the root element
  * FlexBuffers.Map map = r.asMap(); // We assumed root object is a map
  * System.out.println(map.get("name").asString()); // prints element with key "name"
@@ -77,7 +77,9 @@ public class FlexBuffers {
     /** Represent a vector of keys type */
     public static final int FBT_VECTOR_KEY = 14;
     /** Represent a vector of strings type */
-    public static final int FBT_VECTOR_STRING = 15;
+    // DEPRECATED, use FBT_VECTOR or FBT_VECTOR_KEY instead.
+    // more info on thttps://github.com/google/flatbuffers/issues/5627.
+    public static final int FBT_VECTOR_STRING_DEPRECATED = 15;
 
     /// @cond FLATBUFFERS_INTERNAL
     public static final int FBT_VECTOR_INT2 = 16;  // Typed tuple  = no type table; no size field).
@@ -98,7 +100,7 @@ public class FlexBuffers {
     /** Represent a vector of booleans type */
     public static final int FBT_VECTOR_BOOL = 36;  // To Allow the same type of conversion of type to vector type
 
-    private static final ByteBuffer EMPTY_BB = ByteBuffer.allocate(1).asReadOnlyBuffer();
+    private static final ReadBuf EMPTY_BB = new ArrayReadWriteBuf(new byte[] {0}, 1);
 
     /**
      * Checks where a type is a typed vector
@@ -107,7 +109,7 @@ public class FlexBuffers {
      * @return true if typed vector
      */
     static boolean isTypedVector(int type) {
-        return (type >= FBT_VECTOR_INT && type <= FBT_VECTOR_STRING) || type == FBT_VECTOR_BOOL;
+        return (type >= FBT_VECTOR_INT && type <= FBT_VECTOR_STRING_DEPRECATED) || type == FBT_VECTOR_BOOL;
     }
 
     /**
@@ -145,17 +147,17 @@ public class FlexBuffers {
     }
 
     static boolean isTypedVectorElementType(int type) {
-        return (type >= FBT_INT && type <= FBT_STRING) || type == FBT_BOOL;
+        return (type >= FBT_INT && type <= FBT_KEY) || type == FBT_BOOL;
     }
 
     // return position of the element that the offset is pointing to
-    private static int indirect(ByteBuffer bb, int offset, int byteWidth) {
-        // we assume all offset fits on a int, since ByteBuffer operates with that assumption
+    private static int indirect(ReadBuf bb, int offset, int byteWidth) {
+        // we assume all offset fits on a int, since ReadBuf operates with that assumption
         return (int) (offset - readUInt(bb, offset, byteWidth));
     }
 
     // read unsigned int with size byteWidth and return as a 64-bit integer
-    private static long readUInt(ByteBuffer buff, int end, int byteWidth) {
+    private static long readUInt(ReadBuf buff, int end, int byteWidth) {
         switch (byteWidth) {
             case 1: return byteToUnsignedInt(buff.get(end));
             case 2: return shortToUnsignedInt(buff.getShort(end));
@@ -166,12 +168,12 @@ public class FlexBuffers {
     }
 
     // read signed int of size byteWidth and return as 32-bit int
-    private static int readInt(ByteBuffer buff, int end, int byteWidth) {
+    private static int readInt(ReadBuf buff, int end, int byteWidth) {
         return (int) readLong(buff, end, byteWidth);
     }
 
     // read signed int of size byteWidth and return as 64-bit int
-    private static long readLong(ByteBuffer buff, int end, int byteWidth) {
+    private static long readLong(ReadBuf buff, int end, int byteWidth) {
         switch (byteWidth) {
             case 1: return buff.get(end);
             case 2: return buff.getShort(end);
@@ -181,7 +183,7 @@ public class FlexBuffers {
         }
     }
 
-    private static double readDouble(ByteBuffer buff, int end, int byteWidth) {
+    private static double readDouble(ReadBuf buff, int end, int byteWidth) {
         switch (byteWidth) {
             case 4: return buff.getFloat(end);
             case 8: return buff.getDouble(end);
@@ -190,12 +192,23 @@ public class FlexBuffers {
     }
 
     /**
-     * Reads a FlexBuffer message in ByteBuffer and returns {@link Reference} to
+     * Reads a FlexBuffer message in ReadBuf and returns {@link Reference} to
      * the root element.
-     * @param buffer ByteBuffer containing FlexBuffer message
+     * @param buffer ReadBuf containing FlexBuffer message
      * @return {@link Reference} to the root object
      */
+    @Deprecated
     public static Reference getRoot(ByteBuffer buffer) {
+        return getRoot( buffer.hasArray() ? new ArrayReadWriteBuf(buffer.array(), buffer.limit()) : new ByteBufferReadWriteBuf(buffer));
+    }
+
+        /**
+     * Reads a FlexBuffer message in ReadBuf and returns {@link Reference} to
+     * the root element.
+     * @param buffer ReadBuf containing FlexBuffer message
+     * @return {@link Reference} to the root object
+     */
+    public static Reference getRoot(ReadBuf buffer) {
         // See Finish() below for the serialization counterpart of this.
         // The root ends at the end of the buffer, so we parse backwards from there.
         int end = buffer.limit();
@@ -211,17 +224,17 @@ public class FlexBuffers {
     public static class Reference {
 
         private static final Reference NULL_REFERENCE = new Reference(EMPTY_BB, 0, 1, 0);
-        private ByteBuffer bb;
+        private ReadBuf bb;
         private int end;
         private int parentWidth;
         private int byteWidth;
         private int type;
 
-        Reference(ByteBuffer bb, int end, int parentWidth, int packedType) {
+        Reference(ReadBuf bb, int end, int parentWidth, int packedType) {
             this(bb, end, parentWidth, (1 << (packedType & 3)), packedType >> 2);
         }
 
-        Reference(ByteBuffer bb, int end, int parentWidth, int byteWidth, int type) {
+        Reference(ReadBuf bb, int end, int parentWidth, int byteWidth, int type) {
             this.bb = bb;
             this.end = end;
             this.parentWidth = parentWidth;
@@ -244,7 +257,7 @@ public class FlexBuffers {
         public boolean isNull() {
             return type == FBT_NULL;
         }
-         
+
         /**
          * Checks whether the element is boolean type
          * @return true if boolean type
@@ -322,8 +335,7 @@ public class FlexBuffers {
          * @return true if a typed vector type
          */
         public boolean isTypedVector() {
-            return (type >= FBT_VECTOR_INT && type <= FBT_VECTOR_STRING) ||
-                    type == FBT_VECTOR_BOOL;
+            return FlexBuffers.isTypedVector(type);
         }
 
         /**
@@ -393,7 +405,7 @@ public class FlexBuffers {
                     case FBT_NULL: return 0;
                     case FBT_STRING: return Long.parseLong(asString());
                     case FBT_VECTOR: return asVector().size();
-                    case FBT_BOOL: readInt(bb, end, parentWidth);
+                    case FBT_BOOL: return readInt(bb, end, parentWidth);
                     default:
                         // Convert other things to uint.
                         return 0;
@@ -482,14 +494,14 @@ public class FlexBuffers {
         public String asString() {
             if (isString()) {
                 int start = indirect(bb, end, parentWidth);
-                int size = readInt(bb, start - byteWidth, byteWidth);
-                return Utf8.getDefault().decodeUtf8(bb, start, size);
+                int size = (int) readUInt(bb, start - byteWidth, byteWidth);
+                return bb.getString(start, size);
             }
             else if (isKey()){
                 int start = indirect(bb, end, byteWidth);
                 for (int i = start; ; i++) {
                     if (bb.get(i) == 0) {
-                        return Utf8.getDefault().decodeUtf8(bb, start, i - start);
+                        return bb.getString(start, i - start);
                     }
                 }
             } else {
@@ -516,6 +528,9 @@ public class FlexBuffers {
         public Vector asVector() {
             if (isVector()) {
                 return new Vector(bb, indirect(bb, end, parentWidth), byteWidth);
+            } else if(type == FlexBuffers.FBT_VECTOR_STRING_DEPRECATED) {
+                // deprecated. Should be treated as key vector
+                return new TypedVector(bb, indirect(bb, end, parentWidth), byteWidth, FlexBuffers.FBT_KEY);
             } else if (FlexBuffers.isTypedVector(type)) {
                 return new TypedVector(bb, indirect(bb, end, parentWidth), byteWidth, FlexBuffers.toTypedVectorElementType(type));
             } else {
@@ -590,7 +605,7 @@ public class FlexBuffers {
                 case FBT_VECTOR_UINT:
                 case FBT_VECTOR_FLOAT:
                 case FBT_VECTOR_KEY:
-                case FBT_VECTOR_STRING:
+                case FBT_VECTOR_STRING_DEPRECATED:
                 case FBT_VECTOR_BOOL:
                     return sb.append(asVector());
                 case FBT_VECTOR_INT2:
@@ -615,11 +630,11 @@ public class FlexBuffers {
      * Points into the data buffer and allows access to one type.
      */
     private static abstract class Object {
-        ByteBuffer bb;
+        ReadBuf bb;
         int end;
         int byteWidth;
 
-        Object(ByteBuffer buff, int end, int byteWidth) {
+        Object(ReadBuf buff, int end, int byteWidth) {
             this.bb = buff;
             this.end = end;
             this.byteWidth = byteWidth;
@@ -636,11 +651,11 @@ public class FlexBuffers {
     // Stores size in `byte_width_` bytes before end position.
     private static abstract class Sized extends Object {
 
-        private final int size;
+        protected final int size;
 
-        Sized(ByteBuffer buff, int end, int byteWidth) {
+        Sized(ReadBuf buff, int end, int byteWidth) {
             super(buff, end, byteWidth);
-            size = readInt(bb, end - byteWidth, byteWidth);
+            size = (int) readUInt(bb, end - byteWidth, byteWidth);
         }
 
         public int size() {
@@ -651,14 +666,14 @@ public class FlexBuffers {
     /**
      * Represents a array of bytes element in the buffer
      *
-     * <p>It can be converted to `ByteBuffer` using {@link data()},
+     * <p>It can be converted to `ReadBuf` using {@link data()},
      * copied into a byte[] using {@link getBytes()} or
      * have individual bytes accessed individually using {@link get(int)}</p>
      */
     public static class Blob extends Sized {
         static final Blob EMPTY = new Blob(EMPTY_BB, 1, 1);
 
-        Blob(ByteBuffer buff, int end, int byteWidth) {
+        Blob(ReadBuf buff, int end, int byteWidth) {
             super(buff, end, byteWidth);
         }
 
@@ -668,11 +683,11 @@ public class FlexBuffers {
         }
 
         /**
-         * Return {@link Blob} as `ByteBuffer`
-         * @return blob as `ByteBuffer`
+         * Return {@link Blob} as `ReadBuf`
+         * @return blob as `ReadBuf`
          */
         public ByteBuffer data() {
-            ByteBuffer dup = bb.duplicate();
+            ByteBuffer dup = ByteBuffer.wrap(bb.data());
             dup.position(end);
             dup.limit(end + size());
             return dup.asReadOnlyBuffer().slice();
@@ -705,7 +720,7 @@ public class FlexBuffers {
          */
         @Override
         public String toString() {
-            return Utf8.getDefault().decodeUtf8(bb, end, size());
+            return bb.getString(end, size());
         }
 
         /**
@@ -714,7 +729,7 @@ public class FlexBuffers {
         @Override
         public StringBuilder toString(StringBuilder sb) {
             sb.append('"');
-            sb.append(Utf8.getDefault().decodeUtf8(bb, end, size()));
+            sb.append(bb.getString(end, size()));
             return sb.append('"');
         }
     }
@@ -727,7 +742,7 @@ public class FlexBuffers {
 
         private static final Key EMPTY = new Key(EMPTY_BB, 0, 0);
 
-        Key(ByteBuffer buff, int end, int byteWidth) {
+        Key(ReadBuf buff, int end, int byteWidth) {
             super(buff, end, byteWidth);
         }
 
@@ -756,7 +771,7 @@ public class FlexBuffers {
                     break;
                 }
             }
-            return Utf8.getDefault().decodeUtf8(bb, end, size);
+            return bb.getString(end, size);
         }
 
         int compareTo(byte[] other) {
@@ -773,7 +788,12 @@ public class FlexBuffers {
                 if (io == other.length) {
                     // in our buffer we have an additional \0 byte
                     // but this does not exist in regular Java strings, so we return now
-                    return c1 - c2;
+                    int cmp = c1 - c2;
+                    if (cmp != 0 || bb.get(ia) == '\0') {
+                        return cmp;
+                    } else {
+                        return 1;
+                    }
                 }
             }
             while (c1 == c2);
@@ -792,6 +812,10 @@ public class FlexBuffers {
 
             return ((Key) obj).end == end && ((Key) obj).byteWidth == byteWidth;
         }
+
+        public int hashCode() {
+          return end ^ byteWidth;
+        }
     }
 
     /**
@@ -799,8 +823,11 @@ public class FlexBuffers {
      */
     public static class Map extends Vector {
         private static final Map EMPTY_MAP = new Map(EMPTY_BB, 1, 1);
+        // cache for converting UTF-8 codepoints into
+        // Java chars. Used to speed up String comparison
+        private final byte[] comparisonBuffer = new byte[4];
 
-        Map(ByteBuffer bb, int end, int byteWidth) {
+        Map(ReadBuf bb, int end, int byteWidth) {
             super(bb, end, byteWidth);
         }
 
@@ -817,7 +844,11 @@ public class FlexBuffers {
          * @return reference to value in map
          */
         public Reference get(String key) {
-            return get(key.getBytes(StandardCharsets.UTF_8));
+            int index = binarySearch(key);
+            if (index >= 0 && index < size) {
+                return get(index);
+            }
+            return Reference.NULL_REFERENCE;
         }
 
         /**
@@ -825,9 +856,7 @@ public class FlexBuffers {
          * @return reference to value in map
          */
         public Reference get(byte[] key) {
-            KeyVector keys = keys();
-            int size = keys.size();
-            int index = binarySearch(keys, key);
+            int index = binarySearch(key);
             if (index >= 0 && index < size) {
                 return get(index);
             }
@@ -879,14 +908,17 @@ public class FlexBuffers {
         }
 
         // Performs a binary search on a key vector and return index of the key in key vector
-        private int binarySearch(KeyVector keys, byte[] searchedKey) {
+        private int binarySearch(CharSequence searchedKey) {
             int low = 0;
-            int high = keys.size() - 1;
-
+            int high = size - 1;
+            final int num_prefixed_fields = 3;
+            int keysOffset = end - (byteWidth * num_prefixed_fields);
+            int keysStart = indirect(bb, keysOffset, byteWidth);
+            int keyByteWidth = readInt(bb, keysOffset + byteWidth, byteWidth);
             while (low <= high) {
                 int mid = (low + high) >>> 1;
-                Key k = keys.get(mid);
-                int cmp = k.compareTo(searchedKey);
+                int keyPos = indirect(bb, keysStart + mid * keyByteWidth, keyByteWidth);
+                int cmp = compareCharSequence(keyPos, searchedKey);
                 if (cmp < 0)
                     low = mid + 1;
                 else if (cmp > 0)
@@ -895,6 +927,112 @@ public class FlexBuffers {
                     return mid; // key found
             }
             return -(low + 1);  // key not found
+        }
+
+        private int binarySearch(byte[] searchedKey) {
+            int low = 0;
+            int high = size - 1;
+            final int num_prefixed_fields = 3;
+            int keysOffset = end - (byteWidth * num_prefixed_fields);
+            int keysStart = indirect(bb, keysOffset, byteWidth);
+            int keyByteWidth = readInt(bb, keysOffset + byteWidth, byteWidth);
+
+            while (low <= high) {
+                int mid = (low + high) >>> 1;
+                int keyPos = indirect(bb, keysStart + mid * keyByteWidth, keyByteWidth);
+                int cmp = compareBytes(bb, keyPos, searchedKey);
+                if (cmp < 0)
+                    low = mid + 1;
+                else if (cmp > 0)
+                    high = mid - 1;
+                else
+                    return mid; // key found
+            }
+            return -(low + 1);  // key not found
+        }
+
+        // compares a byte[] against a FBT_KEY
+        private int compareBytes(ReadBuf bb, int start, byte[] other) {
+            int l1 = start;
+            int l2 = 0;
+            byte c1, c2;
+            do {
+                c1 = bb.get(l1);
+                c2 = other[l2];
+                if (c1 == '\0')
+                    return c1 - c2;
+                l1++;
+                l2++;
+                if (l2 == other.length) {
+                    // in our buffer we have an additional \0 byte
+                    // but this does not exist in regular Java strings, so we return now
+                    int cmp = c1 - c2;
+                    if (cmp != 0 || bb.get(l1) == '\0') {
+                        return cmp;
+                    } else {
+                        return 1;
+                    }
+                }
+            }
+            while (c1 == c2);
+            return c1 - c2;
+        }
+
+        // compares a CharSequence against a FBT_KEY
+        private int compareCharSequence(int start, CharSequence other) {
+            int bufferPos = start;
+            int otherPos = 0;
+            int limit = bb.limit();
+            int otherLimit = other.length();
+
+            // special loop for ASCII characters. Most of keys should be ASCII only, so this
+            // loop should be optimized for that.
+            // breaks if a multi-byte character is found
+            while (otherPos < otherLimit) {
+                char c2 = other.charAt(otherPos);
+
+                if (c2 >= 0x80) {
+                    // not a single byte codepoint
+                    break;
+                }
+
+                byte b = bb.get(bufferPos);
+
+                if (b == 0) {
+                    return -c2;
+                } else if (b < 0) {
+                    break;
+                } else if ((char) b != c2) {
+                    return b - c2;
+                }
+                ++bufferPos;
+                ++otherPos;
+            }
+
+            while (bufferPos < limit) {
+
+                int sizeInBuff = Utf8.encodeUtf8CodePoint(other, otherPos, comparisonBuffer);
+
+                if (sizeInBuff == 0) {
+                    // That means we finish with other and there are not more chars to
+                    // compare. String in the buffer is bigger.
+                    return bb.get(bufferPos);
+                }
+
+                for (int i = 0; i < sizeInBuff; i++) {
+                    byte bufferByte = bb.get(bufferPos++);
+                    byte otherByte = comparisonBuffer[i];
+                    if (bufferByte == 0) {
+                        // Our key is finished, so other is bigger
+                        return -otherByte;
+                    } else if (bufferByte != otherByte) {
+                        return bufferByte - otherByte;
+                    }
+                }
+
+                otherPos += sizeInBuff == 4 ? 2 : 1;
+            }
+            return 0;
         }
     }
 
@@ -905,7 +1043,7 @@ public class FlexBuffers {
 
         private static final Vector EMPTY_VECTOR = new Vector(EMPTY_BB, 1, 1);
 
-        Vector(ByteBuffer bb, int end, int byteWidth) {
+        Vector(ReadBuf bb, int end, int byteWidth) {
             super(bb, end, byteWidth);
         }
 
@@ -968,7 +1106,7 @@ public class FlexBuffers {
 
         private final int elemType;
 
-        TypedVector(ByteBuffer bb, int end, int byteWidth, int elemType) {
+        TypedVector(ReadBuf bb, int end, int byteWidth, int elemType) {
             super(bb, end, byteWidth);
             this.elemType = elemType;
         }

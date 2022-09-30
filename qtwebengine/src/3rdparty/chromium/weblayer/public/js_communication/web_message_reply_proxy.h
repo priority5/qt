@@ -9,12 +9,20 @@
 
 namespace weblayer {
 
+class Page;
 struct WebMessage;
 
 // Used to send messages to the page.
 class WebMessageReplyProxy {
  public:
   virtual void PostMessage(std::unique_ptr<WebMessage>) = 0;
+
+  // Returns true if the page is in the back/forward cache.
+  virtual bool IsInBackForwardCache() = 0;
+
+  // Returns the Page this proxy was created for. This always returns the Page
+  // of the main frame.
+  virtual Page& GetPage() = 0;
 
  protected:
   virtual ~WebMessageReplyProxy() = default;

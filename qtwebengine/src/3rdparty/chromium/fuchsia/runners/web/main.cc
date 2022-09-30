@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <lib/sys/cpp/component_context.h>
+#include <lib/sys/inspect/cpp/component.h>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
@@ -15,6 +16,7 @@
 #include "fuchsia/base/fuchsia_dir_scheme.h"
 #include "fuchsia/base/init_logging.h"
 #include "fuchsia/base/inspect.h"
+#include "fuchsia/engine/web_instance_host/web_instance_host.h"
 #include "fuchsia/runners/buildflags.h"
 #include "fuchsia/runners/common/web_content_runner.h"
 
@@ -29,23 +31,22 @@ fuchsia::web::CreateContextParams GetContextParams() {
       fuchsia::web::ContextFeatureFlags::HARDWARE_VIDEO_DECODER |
       fuchsia::web::ContextFeatureFlags::WIDEVINE_CDM);
 
-  create_context_params.set_service_directory(base::fuchsia::OpenDirectory(
-      base::FilePath(base::fuchsia::kServiceDirectoryPath)));
+  create_context_params.set_service_directory(
+      base::OpenDirectoryHandle(base::FilePath(base::kServiceDirectoryPath)));
   CHECK(create_context_params.service_directory());
 
-  create_context_params.set_data_directory(base::fuchsia::OpenDirectory(
-      base::FilePath(base::fuchsia::kPersistedDataDirectoryPath)));
+  create_context_params.set_data_directory(base::OpenDirectoryHandle(
+      base::FilePath(base::kPersistedDataDirectoryPath)));
   CHECK(create_context_params.data_directory());
 
   // DRM services require cdm_data_directory to be populated, so create a
   // directory under /data and use that as the cdm_data_directory.
   base::FilePath cdm_data_path =
-      base::FilePath(base::fuchsia::kPersistedDataDirectoryPath)
-          .Append("cdm_data");
+      base::FilePath(base::kPersistedDataDirectoryPath).Append("cdm_data");
   base::File::Error error;
   CHECK(base::CreateDirectoryAndGetError(cdm_data_path, &error)) << error;
   create_context_params.set_cdm_data_directory(
-      base::fuchsia::OpenDirectory(cdm_data_path));
+      base::OpenDirectoryHandle(cdm_data_path));
   CHECK(create_context_params.cdm_data_directory());
 
 #if BUILDFLAG(WEB_RUNNER_REMOTE_DEBUGGING_PORT) != 0
@@ -66,19 +67,24 @@ int main(int argc, char** argv) {
       *base::CommandLine::ForCurrentProcess()))
       << "Failed to initialize logging.";
 
+  cr_fuchsia::LogComponentStartWithVersion("web_runner");
+
   cr_fuchsia::RegisterFuchsiaDirScheme();
 
   WebContentRunner::GetContextParamsCallback get_context_params_callback =
       base::BindRepeating(&GetContextParams);
 
-  WebContentRunner runner(std::move(get_context_params_callback));
-  base::fuchsia::ScopedServiceBinding<fuchsia::sys::Runner> binding(
+  cr_fuchsia::WebInstanceHost web_instance_host;
+  WebContentRunner runner(&web_instance_host,
+                          std::move(get_context_params_callback));
+  base::ScopedServiceBinding<fuchsia::sys::Runner> binding(
       base::ComponentContextForProcess()->outgoing().get(), &runner);
 
-  base::ComponentContextForProcess()->outgoing()->ServeFromStartupInfo();
-
   // Publish version information for this component to Inspect.
-  cr_fuchsia::PublishVersionInfoToInspect(base::ComponentInspectorForProcess());
+  sys::ComponentInspector inspect(base::ComponentContextForProcess());
+  cr_fuchsia::PublishVersionInfoToInspect(&inspect);
+
+  base::ComponentContextForProcess()->outgoing()->ServeFromStartupInfo();
 
   // Run until there are no Components, or the last service client channel is
   // closed.

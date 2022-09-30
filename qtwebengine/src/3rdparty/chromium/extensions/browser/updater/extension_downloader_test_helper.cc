@@ -54,9 +54,6 @@ void MockExtensionDownloaderDelegate::DelegateTo(
   ON_CALL(*this, GetPingDataForExtension(_, _))
       .WillByDefault(Invoke(
           delegate, &ExtensionDownloaderDelegate::GetPingDataForExtension));
-  ON_CALL(*this, GetUpdateUrlData(_))
-      .WillByDefault(
-          Invoke(delegate, &ExtensionDownloaderDelegate::GetUpdateUrlData));
   ON_CALL(*this, IsExtensionPending(_))
       .WillByDefault(
           Invoke(delegate, &ExtensionDownloaderDelegate::IsExtensionPending));
@@ -75,6 +72,11 @@ ExtensionDownloaderTestHelper::ExtensionDownloaderTestHelper()
                   GetTestVerifierFormat()) {}
 
 ExtensionDownloaderTestHelper::~ExtensionDownloaderTestHelper() = default;
+
+void ExtensionDownloaderTestHelper::StartUpdateCheck(
+    std::unique_ptr<ManifestFetchData> fetch_data) {
+  downloader_.StartUpdateCheck(std::move(fetch_data));
+}
 
 network::TestURLLoaderFactory::PendingRequest*
 ExtensionDownloaderTestHelper::GetPendingRequest(size_t index) {

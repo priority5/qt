@@ -4,21 +4,23 @@
 
 #include "extensions/browser/api/file_handlers/mime_util.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/strings/string_piece.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_context.h"
 #include "net/base/filename_util.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/mime_util.h"
 #include "storage/browser/file_system/file_system_url.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/file_handlers/non_native_file_system_delegate.h"
 #endif
@@ -62,7 +64,7 @@ void SniffMimeType(const base::FilePath& local_path, std::string* result) {
   }
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // Converts a result passed as a scoped pointer to a dereferenced value passed
 // to |callback|.
 void OnGetMimeTypeFromFileForNonNativeLocalPathCompleted(
@@ -77,7 +79,7 @@ void OnGetMimeTypeFromFileForNonNativeLocalPathCompleted(
 void OnGetMimeTypeFromMetadataForNonNativeLocalPathCompleted(
     const base::FilePath& local_path,
     base::OnceCallback<void(const std::string&)> callback,
-    const base::Optional<std::string>& mime_type) {
+    const absl::optional<std::string>& mime_type) {
   if (mime_type) {
     std::move(callback).Run(mime_type.value());
     return;
@@ -142,7 +144,7 @@ void GetMimeTypeForLocalPath(
     content::BrowserContext* context,
     const base::FilePath& local_path,
     base::OnceCallback<void(const std::string&)> callback) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   NonNativeFileSystemDelegate* delegate =
       ExtensionsAPIClient::Get()->GetNonNativeFileSystemDelegate();
   if (delegate && delegate->HasNonNativeMimeTypeProvider(context, local_path)) {
@@ -194,7 +196,7 @@ void MimeTypeCollector::CollectForLocalPaths(
   callback_ = std::move(callback);
 
   DCHECK(!result_.get());
-  result_.reset(new std::vector<std::string>(local_paths.size()));
+  result_ = std::make_unique<std::vector<std::string>>(local_paths.size());
   left_ = local_paths.size();
 
   if (!left_) {

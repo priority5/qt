@@ -1,42 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2014 Klaralvdalens Datakonsult AB (KDAB).
-** Copyright (C) 2016 The Qt Company Ltd and/or its subsidiary(-ies).
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt3D module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2014 Klaralvdalens Datakonsult AB (KDAB).
+// Copyright (C) 2016 The Qt Company Ltd and/or its subsidiary(-ies).
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <Qt3DCore/QEntity>
 #include <Qt3DCore/QTransform>
@@ -244,7 +208,7 @@ Qt3DCore::QEntity* GLTFIO::node(const QString &id)
     // So if the node has only 1 mesh, we only create 1 QEntity
     // Otherwise if there are n meshes, there is 1 QEntity, with n children for each mesh/material combo
     {
-        QVector<QEntity *> entities;
+        QList<QEntity *> entities;
 
         const auto meshes = jsonObj.value(KEY_MESHES).toArray();
         for (const QJsonValue &mesh : meshes) {
@@ -907,7 +871,7 @@ void GLTFIO::processJSONBufferView(const QString &id, const QJsonObject& json)
     quint64 len = json.value(KEY_BYTE_LENGTH).toInt();
 
     QByteArray bytes = bufferData.data->mid(offset, len);
-    if (Q_UNLIKELY(bytes.count() != int(len))) {
+    if (Q_UNLIKELY(bytes.size() != qsizetype(len))) {
         qCWarning(GLTFIOLog, "failed to read sufficient bytes from: %ls for view %ls",
                   qUtf16PrintableImpl(bufferData.path), qUtf16PrintableImpl(id));
     }
@@ -1040,7 +1004,7 @@ void GLTFIO::processJSONTechnique(const QString &id, const QJsonObject &jsonObje
 
     //Process states to enable
     const QJsonArray enableStatesArray = states.value(KEY_ENABLE).toArray();
-    QVector<int> enableStates;
+    QList<int> enableStates;
     for (const QJsonValue &enableValue : enableStatesArray)
         enableStates.append(enableValue.toInt());
 
@@ -1293,8 +1257,8 @@ QVariant GLTFIO::parameterValueFromJSON(int type, const QJsonValue &value) const
         QVector2D vector2D;
         QVector3D vector3D;
         QVector4D vector4D;
-        QVector<float> dataMat2(4, 0.0f);
-        QVector<float> dataMat3(9, 0.0f);
+        QList<float> dataMat2(4, 0.0f);
+        QList<float> dataMat3(9, 0.0f);
 
         switch (type) {
         case GL_BYTE:

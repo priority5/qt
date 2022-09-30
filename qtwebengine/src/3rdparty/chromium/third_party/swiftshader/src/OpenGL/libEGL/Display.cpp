@@ -18,19 +18,19 @@
 
 #include "Display.h"
 
-#include "main.h"
-#include "libEGL/Surface.hpp"
-#include "libEGL/Context.hpp"
+#include "Common/RecursiveLock.hpp"
 #include "common/Image.hpp"
 #include "common/debug.h"
-#include "Common/RecursiveLock.hpp"
+#include "libEGL/Context.hpp"
+#include "libEGL/Surface.hpp"
+#include "main.h"
 
 #if defined(__ANDROID__) && !defined(ANDROID_NDK_BUILD)
-#include <system/window.h>
-#include <sys/ioctl.h>
-#include <linux/fb.h>
 #include <fcntl.h>
-#elif defined(USE_X11)
+#include <linux/fb.h>
+#include <sys/ioctl.h>
+#include <vndk/window.h>
+#elif defined(SWIFTSHADER_USE_X11)
 #include "Main/libX11.hpp"
 #elif defined(__APPLE__)
 #include "OSXUtils.hpp"
@@ -39,8 +39,8 @@
 #endif
 
 #include <algorithm>
-#include <vector>
 #include <map>
+#include <vector>
 
 namespace egl
 {
@@ -66,7 +66,7 @@ Display *Display::get(EGLDisplay dpy)
 
 	static void *nativeDisplay = nullptr;
 
-	#if defined(USE_X11)
+	#if defined(SWIFTSHADER_USE_X11)
 		// Even if the application provides a native display handle, we open (and close) our own connection
 		if(!nativeDisplay && dpy != HEADLESS_DISPLAY && libX11 && libX11->XOpenDisplay)
 		{
@@ -89,7 +89,7 @@ Display::~Display()
 {
 	terminate();
 
-	#if defined(USE_X11)
+	#if defined(SWIFTSHADER_USE_X11)
 		if(nativeDisplay && libX11->XCloseDisplay)
 		{
 			libX11->XCloseDisplay((::Display*)nativeDisplay);
@@ -569,15 +569,8 @@ EGLContext Display::createContext(EGLConfig configHandle, const egl::Context *sh
 	const egl::Config *config = mConfigSet.get(configHandle);
 	egl::Context *context = nullptr;
 
-	if(clientVersion == 1 && config->mRenderableType & EGL_OPENGL_ES_BIT)
-	{
-		if(libGLES_CM)
-		{
-			context = libGLES_CM->es1CreateContext(this, shareContext, config);
-		}
-	}
-	else if((clientVersion == 2 && config->mRenderableType & EGL_OPENGL_ES2_BIT) ||
-	        (clientVersion == 3 && config->mRenderableType & EGL_OPENGL_ES3_BIT))
+	if((clientVersion == 2 && config->mRenderableType & EGL_OPENGL_ES2_BIT) ||
+	   (clientVersion == 3 && config->mRenderableType & EGL_OPENGL_ES3_BIT))
 	{
 		if(libGLESv2)
 		{
@@ -674,15 +667,8 @@ bool Display::isValidWindow(EGLNativeWindowType window)
 			ERR("%s called with window==NULL %s:%d", __FUNCTION__, __FILE__, __LINE__);
 			return false;
 		}
-	#if !defined(ANDROID_NDK_BUILD)
-		if(static_cast<ANativeWindow*>(window)->common.magic != ANDROID_NATIVE_WINDOW_MAGIC)
-		{
-			ERR("%s called with window==%p bad magic %s:%d", __FUNCTION__, window, __FILE__, __LINE__);
-			return false;
-		}
-	#endif // !defined(ANDROID_NDK_BUILD)
 		return true;
-	#elif defined(USE_X11)
+	#elif defined(SWIFTSHADER_USE_X11)
 		if(nativeDisplay)
 		{
 			XWindowAttributes windowAttributes;
@@ -851,7 +837,7 @@ sw::Format Display::getDisplayFormat() const
 
 		// No framebuffer device found, or we're in user space
 		return sw::FORMAT_X8B8G8R8;
-	#elif defined(USE_X11)
+	#elif defined(SWIFTSHADER_USE_X11)
 		if(nativeDisplay)
 		{
 			Screen *screen = libX11->XDefaultScreenOfDisplay((::Display*)nativeDisplay);

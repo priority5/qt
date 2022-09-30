@@ -31,16 +31,11 @@ public class UrlBarController {
     /**
      * Creates a URL bar view based on the options provided.
      * @param options The options provided to tweak the URL bar display.
-     * @since 82
      */
     @NonNull
     public View createUrlBarView(@NonNull UrlBarOptions options) {
         ThreadCheck.ensureOnUiThread();
         try {
-            if (WebLayer.getSupportedMajorVersionInternal() < 86) {
-                return ObjectWrapper.unwrap(
-                        mImpl.deprecatedCreateUrlBarView(options.getBundle()), View.class);
-            }
             return ObjectWrapper.unwrap(
                     mImpl.createUrlBarView(options.getBundle(),
                             ObjectWrapper.wrap(options.getTextClickListener()),
@@ -48,6 +43,25 @@ public class UrlBarController {
                     View.class);
         } catch (RemoteException exception) {
             throw new APICallException(exception);
+        }
+    }
+
+    /**
+     * Shows the page-info dialog.
+     *
+     * @throws IllegalStateException if called and not attached.
+     *
+     * @since 95
+     */
+    public void showPageInfo(@NonNull PageInfoDisplayOptions options) {
+        ThreadCheck.ensureOnUiThread();
+        if (WebLayer.getSupportedMajorVersionInternal() < 95) {
+            throw new UnsupportedOperationException();
+        }
+        try {
+            mImpl.showPageInfo(options.getBundle());
+        } catch (RemoteException e) {
+            throw new APICallException(e);
         }
     }
 }

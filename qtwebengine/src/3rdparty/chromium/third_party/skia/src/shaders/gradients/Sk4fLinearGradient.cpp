@@ -6,6 +6,7 @@
  */
 
 #include "include/core/SkPaint.h"
+#include "include/private/SkTPin.h"
 #include "src/shaders/gradients/Sk4fLinearGradient.h"
 
 #include <cmath>
@@ -95,7 +96,7 @@ LinearGradient4fContext::LinearGradient4fContext(const SkLinearGradient& shader,
     // Our fast path expects interval points to be monotonically increasing in x.
     const bool reverseIntervals = std::signbit(fDstToPos.getScaleX());
     fIntervals.init(shader, rec.fDstColorSpace, shader.fTileMode,
-                    fColorsArePremul, rec.fPaint->getAlpha() * (1.0f / 255), reverseIntervals);
+                    fColorsArePremul, rec.fPaintAlpha * (1.0f / 255), reverseIntervals);
 
     SkASSERT(fIntervals->count() > 0);
     fCachedInterval = fIntervals->begin();
@@ -105,7 +106,7 @@ const Sk4fGradientInterval*
 SkLinearGradient::LinearGradient4fContext::findInterval(SkScalar fx) const {
     SkASSERT(in_range(fx, fIntervals->front().fT0, fIntervals->back().fT1));
 
-    if (1) {
+    if ((true)) {
         // Linear search, using the last scanline interval as a starting point.
         SkASSERT(fCachedInterval >= fIntervals->begin());
         SkASSERT(fCachedInterval < fIntervals->end());
@@ -365,7 +366,7 @@ private:
             advX -= fAdvX;
             fInterval = this->next_interval(fInterval);
             fAdvX = (fInterval->fT1 - fInterval->fT0) / fDx;
-            SkASSERT(fAdvX > 0);
+            SkASSERT(fAdvX >= 0); // fT1 must be bigger than fT0 but fAdvX can underflow.
         } while (advX >= fAdvX);
 
         compute_interval_props(fInterval->fT0);

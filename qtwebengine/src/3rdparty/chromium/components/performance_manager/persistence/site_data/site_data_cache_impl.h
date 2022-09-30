@@ -14,8 +14,8 @@
 #include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/memory/weak_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/sequence_checker.h"
 #include "components/performance_manager/persistence/site_data/site_data_cache.h"
 #include "components/performance_manager/persistence/site_data/site_data_cache_inspector.h"
@@ -35,6 +35,10 @@ class SiteDataCacheImpl : public SiteDataCache,
 
   SiteDataCacheImpl(const std::string& browser_context_id,
                     const base::FilePath& browser_context_path);
+
+  SiteDataCacheImpl(const SiteDataCacheImpl&) = delete;
+  SiteDataCacheImpl& operator=(const SiteDataCacheImpl&) = delete;
+
   ~SiteDataCacheImpl() override;
 
   // SiteDataCache:
@@ -52,6 +56,7 @@ class SiteDataCacheImpl : public SiteDataCache,
   // NOTE: This should be called before creating any SiteDataImpl object (this
   // doesn't update the data store used by these objects).
   void SetDataStoreForTesting(std::unique_ptr<SiteDataStore> data_store) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     data_store_ = std::move(data_store);
   }
 
@@ -91,16 +96,17 @@ class SiteDataCacheImpl : public SiteDataCache,
   void OnSiteDataImplDestroyed(internal::SiteDataImpl* impl) override;
 
   // Map an origin to a SiteDataImpl pointer.
-  SiteDataMap origin_data_map_;
+  SiteDataMap origin_data_map_ GUARDED_BY_CONTEXT(sequence_checker_);
 
-  std::unique_ptr<SiteDataStore> data_store_;
+  std::unique_ptr<SiteDataStore> data_store_
+      GUARDED_BY_CONTEXT(sequence_checker_);
 
   // The ID of the browser context this data store is associated with.
   const std::string browser_context_id_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  DISALLOW_COPY_AND_ASSIGN(SiteDataCacheImpl);
+  base::WeakPtrFactory<SiteDataCacheImpl> weak_factory_{this};
 };
 
 }  // namespace performance_manager

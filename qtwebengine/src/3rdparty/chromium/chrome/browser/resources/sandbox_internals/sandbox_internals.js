@@ -2,19 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * @typedef {{
- *   seccompStatus: number,
- *   pid: string,
- *   uid: string,
- *   secontext: string,
- *   procStatus: string,
- *   androidBuildId: string
- * }}
- */
-let AndroidSandboxStatus;
+import {$} from 'chrome://resources/js/util.m.js';
 
-(function() {
+// <if expr="is_linux">
+import './strings.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+// </if>
+
 /**
  * CSS classes for different statuses.
  * @enum {string}
@@ -72,6 +66,7 @@ function setEvaluation(result) {
   $('evaluation').innerText = message;
 }
 
+// <if expr="is_android">
 /**
  * Main page handler for Android.
  */
@@ -83,7 +78,7 @@ function androidHandler() {
 
     addStatusRow('PID', status.pid, StatusClass.INFO);
     addStatusRow('UID', status.uid, StatusClass.INFO);
-    isIsolated = status.secontext.indexOf(':isolated_app:') != -1;
+    isIsolated = status.secontext.indexOf(':isolated_app:') !== -1;
     addStatusRow(
         'SELinux Context', status.secontext,
         isIsolated ? StatusClass.GOOD : StatusClass.BAD);
@@ -93,11 +88,11 @@ function androidHandler() {
       if (line.startsWith('Seccomp')) {
         let value = line.split(':')[1].trim();
         let cssClass = StatusClass.BAD;
-        if (value == '2') {
+        if (value === '2') {
           value = 'Yes - TSYNC (' + line + ')';
           cssClass = StatusClass.GOOD;
           isTsync = true;
-        } else if (value == '1') {
+        } else if (value === '1') {
           value = 'Yes (' + line + ')';
         } else {
           value = line;
@@ -128,14 +123,16 @@ function androidHandler() {
     }
     addStatusRow(
         'Seccomp-BPF Enabled (Chrome)', seccompStatus,
-        status.seccompStatus == 4 ? StatusClass.GOOD : StatusClass.BAD);
+        status.seccompStatus === 4 ? StatusClass.GOOD : StatusClass.BAD);
 
     addStatusRow('Android Build ID', status.androidBuildId, StatusClass.INFO);
 
     setEvaluation(isIsolated && isTsync && isChromeSeccomp);
   });
 }
+// </if>
 
+// <if expr="is_linux">
 /**
  * Main page handler for desktop Linux.
  */
@@ -178,12 +175,13 @@ function linuxHandler() {
 
   setEvaluation(loadTimeData.getBoolean('sandboxGood'));
 }
+// </if>
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (cr.isAndroid) {
-    androidHandler();
-  } else {
-    linuxHandler();
-  }
+  // <if expr="is_android">
+  androidHandler();
+  // </if>
+  // <if expr="is_linux">
+  linuxHandler();
+  // </if>
 });
-})();

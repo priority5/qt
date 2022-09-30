@@ -1,34 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*
-  qmlcodeparser.cpp
-*/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qmlcodeparser.h"
 
@@ -37,7 +8,6 @@
 
 #ifndef QT_NO_DECLARATIVE
 #    include <private/qqmljsast_p.h>
-#    include <private/qqmljsastvisitor_p.h>
 #endif
 #include <qdebug.h>
 
@@ -48,15 +18,10 @@ QT_BEGIN_NAMESPACE
  */
 QmlCodeParser::QmlCodeParser()
 #ifndef QT_NO_DECLARATIVE
-    : lexer(nullptr), parser(nullptr)
+    : m_lexer(nullptr), m_parser(nullptr)
 #endif
 {
 }
-
-/*!
-  Destroys the QML code parser.
- */
-QmlCodeParser::~QmlCodeParser() {}
 
 /*!
   Initializes the code parser base class.
@@ -67,8 +32,8 @@ void QmlCodeParser::initializeParser()
     CodeParser::initializeParser();
 
 #ifndef QT_NO_DECLARATIVE
-    lexer = new QQmlJS::Lexer(&engine);
-    parser = new QQmlJS::Parser(&engine);
+    m_lexer = new QQmlJS::Lexer(&m_engine);
+    m_parser = new QQmlJS::Parser(&m_engine);
 #endif
 }
 
@@ -79,8 +44,8 @@ void QmlCodeParser::initializeParser()
 void QmlCodeParser::terminateParser()
 {
 #ifndef QT_NO_DECLARATIVE
-    delete lexer;
-    delete parser;
+    delete m_lexer;
+    delete m_parser;
 #endif
 }
 
@@ -111,10 +76,10 @@ QStringList QmlCodeParser::sourceFileNameFilter()
 void QmlCodeParser::parseSourceFile(const Location &location, const QString &filePath)
 {
     QFile in(filePath);
-    currentFile_ = filePath;
+    m_currentFile = filePath;
     if (!in.open(QIODevice::ReadOnly)) {
-        location.error(tr("Cannot open QML file '%1'").arg(filePath));
-        currentFile_.clear();
+        location.error(QStringLiteral("Cannot open QML file '%1'").arg(filePath));
+        m_currentFile.clear();
         return;
     }
 
@@ -126,11 +91,11 @@ void QmlCodeParser::parseSourceFile(const Location &location, const QString &fil
 
     QString newCode = document;
     extractPragmas(newCode);
-    lexer->setCode(newCode, 1);
+    m_lexer->setCode(newCode, 1);
 
-    if (parser->parse()) {
-        QQmlJS::AST::UiProgram *ast = parser->ast();
-        QmlDocVisitor visitor(filePath, newCode, &engine, topicCommands() + commonMetaCommands(),
+    if (m_parser->parse()) {
+        QQmlJS::AST::UiProgram *ast = m_parser->ast();
+        QmlDocVisitor visitor(filePath, newCode, &m_engine, topicCommands() + commonMetaCommands(),
                               topicCommands());
         QQmlJS::AST::Node::accept(ast, &visitor);
         if (visitor.hasError()) {
@@ -138,18 +103,14 @@ void QmlCodeParser::parseSourceFile(const Location &location, const QString &fil
                                << "The output is incomplete.";
         }
     }
-    const auto &messages = parser->diagnosticMessages();
+    const auto &messages = m_parser->diagnosticMessages();
     for (const auto &msg : messages) {
         qDebug().nospace() << qPrintable(filePath) << ':'
-#    if Q_QML_PRIVATE_API_VERSION >= 8
                            << msg.loc.startLine << ": QML syntax error at col "
                            << msg.loc.startColumn
-#    else
-                           << msg.line << ": QML syntax error at col " << msg.column
-#    endif
                            << ": " << qPrintable(msg.message);
     }
-    currentFile_.clear();
+    m_currentFile.clear();
 #else
     location.warning("QtDeclarative not installed; cannot parse QML or JS.");
 #endif
@@ -166,7 +127,8 @@ const QSet<QString> &QmlCodeParser::topicCommands()
                        << COMMAND_QMLPROPERTY << COMMAND_QMLPROPERTYGROUP // mws 13/03/2019
                        << COMMAND_QMLATTACHEDPROPERTY << COMMAND_QMLSIGNAL
                        << COMMAND_QMLATTACHEDSIGNAL << COMMAND_QMLMETHOD
-                       << COMMAND_QMLATTACHEDMETHOD << COMMAND_QMLBASICTYPE << COMMAND_JSTYPE
+                       << COMMAND_QMLATTACHEDMETHOD << COMMAND_QMLVALUETYPE << COMMAND_QMLBASICTYPE
+                       << COMMAND_JSTYPE
                        << COMMAND_JSPROPERTY << COMMAND_JSPROPERTYGROUP // mws 13/03/2019
                        << COMMAND_JSATTACHEDPROPERTY << COMMAND_JSSIGNAL << COMMAND_JSATTACHEDSIGNAL
                        << COMMAND_JSMETHOD << COMMAND_JSATTACHEDMETHOD << COMMAND_JSBASICTYPE;
@@ -198,7 +160,6 @@ static void replaceWithSpace(QString &str, int idx, int n)
 void QmlCodeParser::extractPragmas(QString &script)
 {
     const QString pragma(QLatin1String("pragma"));
-    const QString library(QLatin1String("library"));
 
     QQmlJS::Lexer l(nullptr);
     l.setCode(script, 0);
@@ -235,7 +196,6 @@ void QmlCodeParser::extractPragmas(QString &script)
         else
             return;
     }
-    return;
 }
 #endif
 

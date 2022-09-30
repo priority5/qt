@@ -12,8 +12,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
-#include "base/values.h"
 #include "dbus/object_path.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/dbus/bluez_dbus_client.h"
@@ -42,7 +40,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothProfileManagerClient
     std::unique_ptr<std::string> service;
 
     // Role.
-    enum ProfileRole role;
+    enum ProfileRole role = ProfileRole::SYMMETRIC;
 
     // RFCOMM channel number.
     std::unique_ptr<uint16_t> channel;
@@ -68,6 +66,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothProfileManagerClient
     // Profile features.
     std::unique_ptr<uint16_t> features;
   };
+
+  BluetoothProfileManagerClient(const BluetoothProfileManagerClient&) = delete;
+  BluetoothProfileManagerClient& operator=(
+      const BluetoothProfileManagerClient&) = delete;
 
   ~BluetoothProfileManagerClient() override;
 
@@ -102,9 +104,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothProfileManagerClient
 
  protected:
   BluetoothProfileManagerClient();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(BluetoothProfileManagerClient);
 };
 
 }  // namespace bluez

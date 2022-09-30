@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <private/qqmldatablob_p.h>
 #include <private/qqmlglobal_p.h>
@@ -105,9 +69,8 @@ QQmlDataBlob::QQmlDataBlob(const QUrl &url, Type type, QQmlTypeLoader *manager)
   m_inCallback(false), m_isDone(false)
 {
     //Set here because we need to get the engine from the manager
-    if (m_typeLoader->engine() && m_typeLoader->engine()->urlInterceptor())
-        m_url = m_typeLoader->engine()->urlInterceptor()->intercept(m_url,
-                    (QQmlAbstractUrlInterceptor::DataType)m_type);
+    if (const QQmlEngine *qmlEngine = m_typeLoader->engine())
+        m_url = qmlEngine->interceptUrl(m_url, (QQmlAbstractUrlInterceptor::DataType)m_type);
 }
 
 /*!  \internal */
@@ -290,7 +253,18 @@ void QQmlDataBlob::setError(const QList<QQmlError> &errors)
     Q_ASSERT(status() != Error);
     Q_ASSERT(m_errors.isEmpty());
 
-    m_errors = errors; // Must be set before the m_data fence
+    // m_errors must be set before the m_data fence
+    m_errors.reserve(errors.count());
+    for (const QQmlError &error : errors) {
+        if (error.url().isEmpty()) {
+            QQmlError mutableError = error;
+            mutableError.setUrl(url());
+            m_errors.append(mutableError);
+        } else {
+            m_errors.append(error);
+        }
+    }
+
     m_data.setStatus(Error);
 
     if (dumpErrors()) {
@@ -312,18 +286,6 @@ void QQmlDataBlob::setError(const QQmlJS::DiagnosticMessage &error)
     e.setDescription(error.message);
     e.setUrl(url());
     setError(e);
-}
-
-void QQmlDataBlob::setError(const QVector<QQmlError> &errors)
-{
-    QList<QQmlError> finalErrors;
-    finalErrors.reserve(errors.count());
-    for (const auto &error : errors) {
-        QQmlError e = error;
-        e.setUrl(url());
-        finalErrors << e;
-    }
-    setError(finalErrors);
 }
 
 void QQmlDataBlob::setError(const QString &description)

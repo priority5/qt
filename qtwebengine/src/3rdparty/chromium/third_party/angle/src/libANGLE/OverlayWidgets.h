@@ -57,7 +57,7 @@ class Widget
     // Whether this item should be drawn.
     bool enabled = false;
 
-    // For text items, size of the font.  This is a value in [0, overlay::kFontCount) which
+    // For text items, size of the font.  This is a value in [0, overlay::kFontMipCount) which
     // determines the font size to use.
     int fontSize;
 
@@ -163,9 +163,9 @@ class RunningHistogram : public RunningGraph
     }
 };
 
-// If overlay is disabled, all the above classes would be replaced with Dummy, turning them into
+// If overlay is disabled, all the above classes would be replaced with Mock, turning them into
 // noop.
-class Dummy
+class Mock
 {
   public:
     void reset() const {}

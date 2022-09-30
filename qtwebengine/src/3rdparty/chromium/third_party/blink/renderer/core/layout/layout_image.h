@@ -50,6 +50,7 @@ class CORE_EXPORT LayoutImage : public LayoutReplaced {
  public:
   LayoutImage(Element*);
   ~LayoutImage() override;
+  void Trace(Visitor*) const override;
 
   static LayoutImage* CreateAnonymous(PseudoElement&);
 
@@ -109,6 +110,7 @@ class CORE_EXPORT LayoutImage : public LayoutReplaced {
  protected:
   bool NeedsPreferredWidthsRecalculation() const final;
   SVGImage* EmbeddedSVGImage() const;
+  bool CanApplyObjectViewBox() const override;
   void ComputeIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
 
   void ImageChanged(WrappedImagePtr, CanDeferInvalidation) override;
@@ -117,7 +119,7 @@ class CORE_EXPORT LayoutImage : public LayoutReplaced {
 
   bool IsOfType(LayoutObjectType type) const override {
     NOT_DESTROYED();
-    return type == kLayoutObjectLayoutImage || LayoutReplaced::IsOfType(type);
+    return type == kLayoutObjectImage || LayoutReplaced::IsOfType(type);
   }
 
   void WillBeDestroyed() override;
@@ -150,7 +152,6 @@ class CORE_EXPORT LayoutImage : public LayoutReplaced {
 
   LayoutUnit MinimumReplacedHeight() const override;
 
-  void ImageNotifyFinished(ImageResourceContent*) final;
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
@@ -163,7 +164,7 @@ class CORE_EXPORT LayoutImage : public LayoutReplaced {
   // is disabled and the element has no sizing info.
   bool OverrideIntrinsicSizingInfo(IntrinsicSizingInfo&) const;
   bool HasOverriddenIntrinsicSize() const;
-  FloatSize ImageSizeOverriddenByIntrinsicSize(float multiplier) const;
+  gfx::SizeF ImageSizeOverriddenByIntrinsicSize(float multiplier) const;
 
   // This member wraps the associated decoded image.
   //
@@ -174,7 +175,7 @@ class CORE_EXPORT LayoutImage : public LayoutReplaced {
   // * For generated content, the resource is loaded during style resolution
   // and thus is stored in ComputedStyle (see ContentData::image) that gets
   // propagated to the anonymous LayoutImage in LayoutObject::createObject.
-  Persistent<LayoutImageResource> image_resource_;
+  Member<LayoutImageResource> image_resource_;
   bool did_increment_visually_non_empty_pixel_count_;
 
   // This field stores whether this image is generated with 'content'.
@@ -182,7 +183,12 @@ class CORE_EXPORT LayoutImage : public LayoutReplaced {
   float image_device_pixel_ratio_;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutImage, IsLayoutImage());
+template <>
+struct DowncastTraits<LayoutImage> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsLayoutImage();
+  }
+};
 
 }  // namespace blink
 

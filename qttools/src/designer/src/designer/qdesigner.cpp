@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 // designer
 #include "qdesigner.h"
@@ -44,6 +19,7 @@
 #include <QtCore/qfile.h>
 #include <QtCore/qlibraryinfo.h>
 #include <QtCore/qlocale.h>
+#include <QtCore/qtextstream.h>
 #include <QtCore/qtimer.h>
 #include <QtCore/qtranslator.h>
 #include <QtCore/qfileinfo.h>
@@ -54,6 +30,8 @@
 #include <QtDesigner/QDesignerComponents>
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 static const char *designerApplicationName = "Designer";
 static const char designerDisplayName[] = "Qt Designer";
@@ -160,7 +138,7 @@ static void showHelp(QCommandLineParser &parser, const QString &errorMessage = Q
 struct Options
 {
     QStringList files;
-    QString resourceDir{QLibraryInfo::location(QLibraryInfo::TranslationsPath)};
+    QString resourceDir{QLibraryInfo::path(QLibraryInfo::TranslationsPath)};
     bool server{false};
     quint16 clientPort{0};
     bool enableInternalDynamicProperties{false};
@@ -189,9 +167,6 @@ static inline QDesigner::ParseArgumentsResult
     const QCommandLineOption internalDynamicPropertyOption(QStringLiteral("enableinternaldynamicproperties"),
                                           QStringLiteral("Enable internal dynamic properties"));
     parser.addOption(internalDynamicPropertyOption);
-    const QCommandLineOption noScalingOption(QStringLiteral("no-scaling"),
-                                             QStringLiteral("Disable High DPI scaling"));
-    parser.addOption(noScalingOption);
 
     parser.addPositionalArgument(QStringLiteral("files"),
                                  QStringLiteral("The UI files to open."));
@@ -203,6 +178,10 @@ static inline QDesigner::ParseArgumentsResult
 
     if (parser.isSet(helpOption))
         return QDesigner::ParseArgumentsHelpRequested;
+    // There is no way to retrieve the complete help text from QCommandLineParser,
+    // so, call process() to display it.
+    if (parser.isSet(u"help-all"_s))
+        parser.process(QCoreApplication::arguments()); // exits
     options->server = parser.isSet(serverOption);
     if (parser.isSet(clientOption)) {
         bool ok;
@@ -240,13 +219,12 @@ QDesigner::ParseArgumentsResult QDesigner::parseCommandLineArguments()
     if (options.enableInternalDynamicProperties)
         QDesignerPropertySheet::setInternalDynamicPropertiesEnabled(true);
 
-    const QString localSysName = QLocale::system().name();
-    QScopedPointer<QTranslator> designerTranslator(new QTranslator(this));
-    if (designerTranslator->load(QStringLiteral("designer_") + localSysName, options.resourceDir)) {
-        installTranslator(designerTranslator.take());
-        QScopedPointer<QTranslator> qtTranslator(new QTranslator(this));
-        if (qtTranslator->load(QStringLiteral("qt_") + localSysName, options.resourceDir))
-            installTranslator(qtTranslator.take());
+    std::unique_ptr<QTranslator> designerTranslator(new QTranslator(this));
+    if (designerTranslator->load(QLocale(), QStringLiteral("designer"), QStringLiteral("_"), options.resourceDir)) {
+        installTranslator(designerTranslator.release());
+        std::unique_ptr<QTranslator> qtTranslator(new QTranslator(this));
+        if (qtTranslator->load(QLocale(), QStringLiteral("qt"), QStringLiteral("_"), options.resourceDir))
+            installTranslator(qtTranslator.release());
     }
 
     m_workbench = new QDesignerWorkbench();

@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/strings/string_piece.h"
-#include "fuchsia/base/message_port.h"
+#include "components/cast/message_port/fuchsia/message_port_fuchsia.h"
 
 namespace {
 
@@ -54,6 +54,11 @@ void ApiBindingsClient::AttachToFrame(
   DCHECK(bindings_)
       << "AttachToFrame() was called before bindings were received.";
 
+  if (!bindings_service_) {
+    std::move(on_error_callback).Run();
+    return;
+  }
+
   connector_ = connector;
   frame_ = frame;
 
@@ -89,14 +94,16 @@ bool ApiBindingsClient::HasBindings() const {
   return bindings_.has_value();
 }
 
-bool ApiBindingsClient::OnPortConnected(base::StringPiece port_name,
-                                        blink::WebMessagePort port) {
+bool ApiBindingsClient::OnPortConnected(
+    base::StringPiece port_name,
+    std::unique_ptr<cast_api_bindings::MessagePort> port) {
   if (!bindings_service_)
     return false;
 
   bindings_service_->Connect(
-      port_name.as_string(),
-      cr_fuchsia::FidlMessagePortFromBlink(std::move(port)));
+      std::string(port_name),
+      cast_api_bindings::MessagePortFuchsia::FromMessagePort(port.get())
+          ->TakeClientHandle());
   return true;
 }
 

@@ -6,6 +6,8 @@
 #define COMPONENTS_SIGNIN_PUBLIC_BASE_SIGNIN_SWITCHES_H_
 
 #include "base/feature_list.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/signin/public/base/signin_buildflags.h"
 
 namespace switches {
@@ -16,11 +18,29 @@ namespace switches {
 
 // All switches in alphabetical order. The switches should be documented
 // alongside the definition of their values in the .cc file.
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+extern const base::Feature kAccountIdMigration;
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
+extern const base::Feature kAllowSyncOffForChildAccounts;
+#endif
+
 extern const char kClearTokenService[];
+
 extern const char kDisableSigninScopedDeviceId[];
 
-#if defined(OS_CHROMEOS)
-extern const base::Feature kAccountIdMigration;
+extern const base::Feature kEnableFetchingAccountCapabilities;
+
+extern const base::Feature kForceDisableExtendedSyncPromos;
+
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+extern const base::Feature kForceStartupSigninPromo;
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+extern const base::Feature kLacrosNonSyncingProfiles;
 #endif
 
 }  // namespace switches

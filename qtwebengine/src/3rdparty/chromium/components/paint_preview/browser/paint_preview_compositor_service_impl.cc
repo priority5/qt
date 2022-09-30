@@ -5,26 +5,12 @@
 #include "components/paint_preview/browser/paint_preview_compositor_service_impl.h"
 
 #include "base/callback.h"
+#include "base/task/bind_post_task.h"
 #include "components/paint_preview/browser/compositor_utils.h"
 #include "components/paint_preview/browser/paint_preview_compositor_client_impl.h"
 #include "components/paint_preview/public/paint_preview_compositor_client.h"
 
 namespace paint_preview {
-
-namespace {
-
-base::OnceClosure BindToTaskRunner(
-    scoped_refptr<base::SequencedTaskRunner> task_runner,
-    base::OnceClosure closure) {
-  return base::BindOnce(
-      [](scoped_refptr<base::SequencedTaskRunner> task_runner,
-         base::OnceClosure closure) {
-        task_runner->PostTask(FROM_HERE, std::move(closure));
-      },
-      task_runner, std::move(closure));
-}
-
-}  // namespace
 
 PaintPreviewCompositorServiceImpl::PaintPreviewCompositorServiceImpl(
     mojo::PendingRemote<mojom::PaintPreviewCompositorCollection> pending_remote,
@@ -48,7 +34,7 @@ PaintPreviewCompositorServiceImpl::PaintPreviewCompositorServiceImpl(
             remote->set_disconnect_handler(std::move(disconnect_closure));
           },
           compositor_service_.get(), std::move(pending_remote),
-          BindToTaskRunner(
+          base::BindPostTask(
               default_task_runner_,
               base::BindOnce(
                   &PaintPreviewCompositorServiceImpl::DisconnectHandler,
@@ -75,7 +61,7 @@ PaintPreviewCompositorServiceImpl::CreateCompositor(
       FROM_HERE,
       base::BindOnce(
           [](mojo::Remote<mojom::PaintPreviewCompositorCollection>* remote,
-             PaintPreviewCompositorClientImpl* compositor,
+             mojo::Remote<mojom::PaintPreviewCompositor>* compositor,
              base::OnceCallback<void(const base::UnguessableToken&)>
                  on_connected) {
             // This binds the remote in compositor to the
@@ -84,7 +70,10 @@ PaintPreviewCompositorServiceImpl::CreateCompositor(
                 compositor->BindNewPipeAndPassReceiver(),
                 std::move(on_connected));
           },
-          compositor_service_.get(), compositor.get(),
+          // These are both deleted on `compositor_task_runner_` using
+          // TaskRunnerDeleter and at this point neither can be scheduled for
+          // deletion so passing raw pointers is safe.
+          compositor_service_.get(), compositor->GetCompositor(),
           // This builder ensures the callback it returns is called on the
           // correct sequence.
           compositor->BuildCompositorCreatedCallback(
@@ -94,6 +83,26 @@ PaintPreviewCompositorServiceImpl::CreateCompositor(
                   weak_ptr_factory_.GetWeakPtr()))));
 
   return compositor;
+}
+
+void PaintPreviewCompositorServiceImpl::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  DCHECK(default_task_runner_->RunsTasksInCurrentSequence());
+  compositor_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](mojo::Remote<mojom::PaintPreviewCompositorCollection>* remote,
+             base::MemoryPressureListener::MemoryPressureLevel
+                 memory_pressure_level) {
+            if (!remote->is_bound()) {
+              return;
+            }
+            remote->get()->OnMemoryPressure(memory_pressure_level);
+          },
+          // `compositor_service_` is only deleted on `compositor_task_runner_`
+          // using TaskRunnerDeleter. Since the parent object is alive at this
+          // point passing a pointer is safe.
+          compositor_service_.get(), memory_pressure_level));
 }
 
 bool PaintPreviewCompositorServiceImpl::HasActiveClients() const {
@@ -129,7 +138,9 @@ void PaintPreviewCompositorServiceImpl::DisconnectHandler() {
   DCHECK(default_task_runner_->RunsTasksInCurrentSequence());
   if (user_disconnect_closure_)
     std::move(user_disconnect_closure_).Run();
-  compositor_service_.reset();
+
+  // Don't call `compositor_service_.reset()` so the remote stays bound and ptrs
+  // to it in callbacks remain valid. Disconnect calls will just drop silently.
 }
 
 }  // namespace paint_preview

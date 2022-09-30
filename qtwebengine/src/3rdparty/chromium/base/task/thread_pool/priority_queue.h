@@ -5,13 +5,12 @@
 #ifndef BASE_TASK_THREAD_POOL_PRIORITY_QUEUE_H_
 #define BASE_TASK_THREAD_POOL_PRIORITY_QUEUE_H_
 
+#include <functional>
 #include <memory>
 
 #include "base/base_export.h"
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
+#include "base/containers/intrusive_heap.h"
 #include "base/task/common/checked_lock.h"
-#include "base/task/common/intrusive_heap.h"
 #include "base/task/thread_pool/task_source.h"
 #include "base/task/thread_pool/task_source_sort_key.h"
 
@@ -23,12 +22,15 @@ namespace internal {
 class BASE_EXPORT PriorityQueue {
  public:
   PriorityQueue();
+  PriorityQueue(const PriorityQueue&) = delete;
+  PriorityQueue& operator=(const PriorityQueue&) = delete;
   ~PriorityQueue();
 
   PriorityQueue& operator=(PriorityQueue&& other);
 
   // Inserts |task_source| in the PriorityQueue with |task_source_sort_key|.
-  void Push(TransactionWithRegisteredTaskSource transaction_with_task_source);
+  void Push(RegisteredTaskSource task_source,
+            TaskSourceSortKey task_source_sort_key);
 
   // Returns a reference to the TaskSourceSortKey representing the priority of
   // the highest pending task in this PriorityQueue. The reference becomes
@@ -89,8 +91,6 @@ class BASE_EXPORT PriorityQueue {
 
   // Should only be enabled by EnableFlushTaskSourcesOnDestroyForTesting().
   bool is_flush_task_sources_on_destroy_enabled_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PriorityQueue);
 };
 
 }  // namespace internal

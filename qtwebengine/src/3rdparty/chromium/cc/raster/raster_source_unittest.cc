@@ -223,25 +223,26 @@ TEST(RasterSourceTest, PixelRefIteratorDiscardableRefsOneTile) {
 
   // Tile sized iterators. These should find only one pixel ref.
   {
-    gfx::ColorSpace target_color_space = gfx::ColorSpace::CreateSRGB();
+    TargetColorParams target_color_params;
     std::vector<const DrawImage*> images;
     raster->GetDiscardableImagesInRect(gfx::Rect(0, 0, 256, 256), &images);
     EXPECT_EQ(1u, images.size());
     DrawImage image(*images[0], 1.f, PaintImage::kDefaultFrameIndex,
-                    target_color_space);
+                    target_color_params);
     EXPECT_EQ(discardable_image[0][0], images[0]->paint_image());
-    EXPECT_EQ(target_color_space, image.target_color_space());
+    EXPECT_EQ(target_color_params.color_space, image.target_color_space());
   }
   // Shifted tile sized iterators. These should find only one pixel ref.
   {
-    gfx::ColorSpace target_color_space = gfx::ColorSpace::CreateXYZD50();
+    TargetColorParams target_color_params;
+    target_color_params.color_space = gfx::ColorSpace::CreateXYZD50();
     std::vector<const DrawImage*> images;
     raster->GetDiscardableImagesInRect(gfx::Rect(260, 260, 256, 256), &images);
     EXPECT_EQ(1u, images.size());
     DrawImage image(*images[0], 1.f, PaintImage::kDefaultFrameIndex,
-                    target_color_space);
+                    target_color_params);
     EXPECT_EQ(discardable_image[1][1], images[0]->paint_image());
-    EXPECT_EQ(target_color_space, image.target_color_space());
+    EXPECT_EQ(target_color_params.color_space, image.target_color_space());
   }
   // Ensure there's no discardable pixel refs in the empty cell
   {
@@ -296,11 +297,11 @@ TEST(RasterSourceTest, RasterFullContents) {
       // up to one pixel outside the content rect is guaranteed to be opaque.
       // Outside of that is undefined.
       gfx::Rect canvas_rect(content_rect);
-      canvas_rect.Inset(0, 0, -1, -1);
+      canvas_rect.Inset(gfx::Insets::TLBR(0, 0, -1, -1));
 
       SkBitmap bitmap;
       bitmap.allocN32Pixels(canvas_rect.width(), canvas_rect.height());
-      SkCanvas canvas(bitmap);
+      SkCanvas canvas(bitmap, SkSurfaceProps{});
       canvas.clear(SK_ColorTRANSPARENT);
 
       raster->PlaybackToCanvas(
@@ -361,7 +362,7 @@ TEST(RasterSourceTest, RasterFullContentsWithRasterTranslation) {
 
       SkBitmap bitmap;
       bitmap.allocN32Pixels(canvas_rect.width(), canvas_rect.height());
-      SkCanvas canvas(bitmap);
+      SkCanvas canvas(bitmap, SkSurfaceProps{});
       canvas.clear(SK_ColorTRANSPARENT);
 
       raster->PlaybackToCanvas(
@@ -408,7 +409,7 @@ TEST(RasterSourceTest, RasterPartialContents) {
 
   SkBitmap bitmap;
   bitmap.allocN32Pixels(content_bounds.width(), content_bounds.height());
-  SkCanvas canvas(bitmap);
+  SkCanvas canvas(bitmap, SkSurfaceProps{});
   canvas.clear(SK_ColorTRANSPARENT);
 
   // Playback the full rect which should make everything white.
@@ -436,7 +437,7 @@ TEST(RasterSourceTest, RasterPartialContents) {
 
   // We're going to playback from "everything is black" into a smaller area,
   // that touches the edge pixels of the recording.
-  playback_rect.Inset(1, 2, 0, 1);
+  playback_rect.Inset(gfx::Insets::TLBR(2, 1, 1, 0));
   raster->PlaybackToCanvas(
       &canvas, content_bounds, raster_full_rect, playback_rect,
       gfx::AxisTransform2d(contents_scale, gfx::Vector2dF()),
@@ -482,7 +483,7 @@ TEST(RasterSourceTest, RasterPartialContentsWithRasterTranslation) {
 
   SkBitmap bitmap;
   bitmap.allocN32Pixels(content_bounds.width(), content_bounds.height());
-  SkCanvas canvas(bitmap);
+  SkCanvas canvas(bitmap, SkSurfaceProps{});
   canvas.clear(SK_ColorTRANSPARENT);
 
   // Playback the full rect which should make everything white.
@@ -518,7 +519,7 @@ TEST(RasterSourceTest, RasterPartialContentsWithRasterTranslation) {
 
   // We're going to playback from "everything is black" into a smaller area,
   // that touches the edge pixels of the recording.
-  playback_rect.Inset(1, 2, 0, 1);
+  playback_rect.Inset(gfx::Insets::TLBR(2, 1, 1, 0));
   raster->PlaybackToCanvas(
       &canvas, content_bounds, raster_full_rect, playback_rect,
       gfx::AxisTransform2d(1.0f, gfx::Vector2dF(0.3f, 0.7f)),
@@ -576,7 +577,7 @@ TEST(RasterSourceTest, RasterPartialClear) {
 
   SkBitmap bitmap;
   bitmap.allocN32Pixels(content_bounds.width(), content_bounds.height());
-  SkCanvas canvas(bitmap);
+  SkCanvas canvas(bitmap, SkSurfaceProps{});
   canvas.clear(SK_ColorTRANSPARENT);
 
   // Playback the full rect which should make everything light gray (alpha=10).
@@ -641,11 +642,11 @@ TEST(RasterSourceTest, RasterContentsTransparent) {
       gfx::ScaleToCeiledSize(layer_bounds, contents_scale));
 
   gfx::Rect canvas_rect(content_bounds);
-  canvas_rect.Inset(0, 0, -1, -1);
+  canvas_rect.Inset(gfx::Insets::TLBR(0, 0, -1, -1));
 
   SkBitmap bitmap;
   bitmap.allocN32Pixels(canvas_rect.width(), canvas_rect.height());
-  SkCanvas canvas(bitmap);
+  SkCanvas canvas(bitmap, SkSurfaceProps{});
 
   raster->PlaybackToCanvas(
       &canvas, content_bounds, canvas_rect, canvas_rect,
@@ -656,20 +657,6 @@ TEST(RasterSourceTest, RasterContentsTransparent) {
     for (int j = 0; j < bitmap.height(); j++)
       EXPECT_EQ(0u, SkColorGetA(bitmap.getColor(i, j))) << i << "," << j;
   }
-}
-
-TEST(RasterSourceTest, GetPictureMemoryUsageIncludesClientReportedMemory) {
-  const size_t kReportedMemoryUsageInBytes = 100 * 1024 * 1024;
-  gfx::Size layer_bounds(5, 3);
-  std::unique_ptr<FakeRecordingSource> recording_source =
-      FakeRecordingSource::CreateFilledRecordingSource(layer_bounds);
-  recording_source->set_reported_memory_usage(kReportedMemoryUsageInBytes);
-  recording_source->Rerecord();
-
-  scoped_refptr<RasterSource> raster = recording_source->CreateRasterSource();
-  size_t total_memory_usage = raster->GetMemoryUsage();
-  EXPECT_GE(total_memory_usage, kReportedMemoryUsageInBytes);
-  EXPECT_LT(total_memory_usage, 2 * kReportedMemoryUsageInBytes);
 }
 
 TEST(RasterSourceTest, RasterTransformWithoutRecordingScale) {

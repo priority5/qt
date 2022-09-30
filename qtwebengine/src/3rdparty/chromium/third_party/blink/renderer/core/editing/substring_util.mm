@@ -48,7 +48,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
-#include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
+#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
@@ -106,25 +106,24 @@ NSAttributedString* AttributedSubstringFromRange(const EphemeralRange& range,
                                           .ComputedSize() *
                                       font_scale];
     }
-    [attrs setObject:font forKey:NSFontAttributeName];
+    attrs[NSFontAttributeName] = font;
 
     if (style->VisitedDependentColor(GetCSSPropertyColor()).Alpha())
-      [attrs
-          setObject:NsColor(style->VisitedDependentColor(GetCSSPropertyColor()))
-             forKey:NSForegroundColorAttributeName];
+      attrs[NSForegroundColorAttributeName] =
+          NsColor(style->VisitedDependentColor(GetCSSPropertyColor()));
     else
       [attrs removeObjectForKey:NSForegroundColorAttributeName];
     if (style->VisitedDependentColor(GetCSSPropertyBackgroundColor()).Alpha())
-      [attrs setObject:NsColor(style->VisitedDependentColor(
-                           GetCSSPropertyBackgroundColor()))
-                forKey:NSBackgroundColorAttributeName];
+      attrs[NSBackgroundColorAttributeName] = NsColor(
+          style->VisitedDependentColor(GetCSSPropertyBackgroundColor()));
     else
       [attrs removeObjectForKey:NSBackgroundColorAttributeName];
 
     String characters = it.GetTextState().GetTextForTesting();
     characters.Ensure16Bit();
     NSString* substring =
-        [[[NSString alloc] initWithCharacters:characters.Characters16()
+        [[[NSString alloc] initWithCharacters:reinterpret_cast<const UniChar*>(
+                                                  characters.Characters16())
                                        length:characters.length()] autorelease];
     [string replaceCharactersInRange:NSMakeRange(position, 0)
                           withString:substring];
@@ -137,15 +136,15 @@ NSAttributedString* AttributedSubstringFromRange(const EphemeralRange& range,
 gfx::Point GetBaselinePoint(LocalFrameView* frame_view,
                             const EphemeralRange& range,
                             NSAttributedString* string) {
-  IntRect string_rect = frame_view->FrameToViewport(FirstRectForRange(range));
-  IntPoint string_point = string_rect.MinXMaxYCorner();
+  gfx::Rect string_rect = frame_view->FrameToViewport(FirstRectForRange(range));
+  gfx::Point string_point = string_rect.bottom_left();
 
   // Adjust for the font's descender. AppKit wants the baseline point.
   if ([string length]) {
     NSDictionary* attributes = [string attributesAtIndex:0
                                           effectiveRange:nullptr];
-    if (NSFont* font = [attributes objectForKey:NSFontAttributeName])
-      string_point.Move(0, ceil([font descender]));
+    if (NSFont* font = attributes[NSFontAttributeName])
+      string_point.Offset(0, ceil([font descender]));
   }
   return string_point;
 }
@@ -153,11 +152,10 @@ gfx::Point GetBaselinePoint(LocalFrameView* frame_view,
 }  // namespace
 
 NSAttributedString* SubstringUtil::AttributedWordAtPoint(
-    WebFrameWidgetBase* frame_widget,
+    WebFrameWidgetImpl* frame_widget,
     gfx::Point point,
     gfx::Point& baseline_point) {
-  HitTestResult result =
-      frame_widget->CoreHitTestResultAt(FloatPoint(IntPoint(point)));
+  HitTestResult result = frame_widget->CoreHitTestResultAt(gfx::PointF(point));
 
   if (!result.InnerNode())
     return nil;
@@ -168,10 +166,10 @@ NSAttributedString* SubstringUtil::AttributedWordAtPoint(
     return nil;
 
   // Expand to word under point.
-  const VisibleSelection& selection = CreateVisibleSelectionWithGranularity(
+  const SelectionInDOMTree selection = ExpandWithGranularity(
       SelectionInDOMTree::Builder().SetBaseAndExtent(range).Build(),
       TextGranularity::kWord);
-  const EphemeralRange word_range = selection.ToNormalizedEphemeralRange();
+  const EphemeralRange word_range = NormalizeRange(selection);
 
   // Convert to NSAttributedString.
   NSAttributedString* string = AttributedSubstringFromRange(
@@ -180,20 +178,20 @@ NSAttributedString* SubstringUtil::AttributedWordAtPoint(
   return string;
 }
 
-NSAttributedString* SubstringUtil::AttributedSubstringInRange(LocalFrame* frame,
-                                                              size_t location,
-                                                              size_t length) {
+NSAttributedString* SubstringUtil::AttributedSubstringInRange(
+    LocalFrame* frame,
+    wtf_size_t location,
+    wtf_size_t length) {
   return SubstringUtil::AttributedSubstringInRange(frame, location, length,
                                                    nil);
 }
 
 NSAttributedString* SubstringUtil::AttributedSubstringInRange(
     LocalFrame* frame,
-    size_t location,
-    size_t length,
+    wtf_size_t location,
+    wtf_size_t length,
     gfx::Point* baseline_point) {
-  if (frame->View()->NeedsLayout())
-    frame->View()->UpdateLayout();
+  frame->View()->UpdateStyleAndLayout();
 
   Element* editable = frame->Selection().RootEditableElementOrDocumentElement();
   if (!editable)

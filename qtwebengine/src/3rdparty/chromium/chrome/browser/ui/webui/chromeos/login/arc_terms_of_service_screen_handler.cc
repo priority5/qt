@@ -4,31 +4,31 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/arc_terms_of_service_screen_handler.h"
 
+#include "ash/components/arc/arc_prefs.h"
+#include "ash/constants/ash_switches.h"
 #include "base/command_line.h"
 #include "base/hash/sha1.h"
 #include "base/i18n/timezone.h"
-#include "chrome/browser/chromeos/arc/arc_support_host.h"
-#include "chrome/browser/chromeos/arc/arc_util.h"
-#include "chrome/browser/chromeos/arc/optin/arc_optin_preference_handler.h"
-#include "chrome/browser/chromeos/login/screens/arc_terms_of_service_screen.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host.h"
-#include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/ash/arc/arc_support_host.h"
+#include "chrome/browser/ash/arc/arc_util.h"
+#include "chrome/browser/ash/arc/optin/arc_optin_preference_handler.h"
+#include "chrome/browser/ash/login/screens/arc_terms_of_service_screen.h"
+#include "chrome/browser/ash/login/ui/login_display_host.h"
+#include "chrome/browser/ash/login/wizard_controller.h"
+#include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/consent_auditor/consent_auditor_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
-#include "components/arc/arc_prefs.h"
 #include "components/consent_auditor/consent_auditor.h"
 #include "components/login/localized_values_builder.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/public/identity_manager/consent_level.h"
+#include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_contents.h"
@@ -48,21 +48,25 @@ namespace chromeos {
 
 constexpr StaticOobeScreenId ArcTermsOfServiceScreenView::kScreenId;
 
-ArcTermsOfServiceScreenHandler::ArcTermsOfServiceScreenHandler(
-    JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(kScreenId, js_calls_container),
+ArcTermsOfServiceScreenHandler::ArcTermsOfServiceScreenHandler()
+    : BaseScreenHandler(kScreenId),
       is_child_account_(
           user_manager::UserManager::Get()->IsLoggedInAsChildUser()) {
-  set_user_acted_method_path("login.ArcTermsOfServiceScreen.userActed");
+  set_user_acted_method_path_deprecated(
+      "login.ArcTermsOfServiceScreen.userActed");
 }
 
 ArcTermsOfServiceScreenHandler::~ArcTermsOfServiceScreenHandler() {
   OobeUI* oobe_ui = GetOobeUI();
   if (oobe_ui)
     oobe_ui->RemoveObserver(this);
-  chromeos::NetworkHandler::Get()->network_state_handler()->RemoveObserver(
-      this, FROM_HERE);
-  system::TimezoneSettings::GetInstance()->RemoveObserver(this);
+  if (network_time_zone_observing_) {
+    network_time_zone_observing_ = false;
+    chromeos::NetworkHandler::Get()->network_state_handler()->RemoveObserver(
+        this, FROM_HERE);
+    system::TimezoneSettings::GetInstance()->RemoveObserver(this);
+  }
+
   for (auto& observer : observer_list_)
     observer.OnViewDestroyed(this);
 }
@@ -109,10 +113,15 @@ void ArcTermsOfServiceScreenHandler::DefaultNetworkChanged(
 void ArcTermsOfServiceScreenHandler::DeclareLocalizedValues(
     ::login::LocalizedValuesBuilder* builder) {
   builder->Add("arcTermsOfServiceScreenHeading", IDS_ARC_OOBE_TERMS_HEADING);
+  builder->Add("arcTermsOfServiceScreenHeadingForChild",
+               IDS_ARC_OOBE_TERMS_HEADING_CHILD);
   builder->Add("arcTermsOfServiceScreenDescription",
       IDS_ARC_OOBE_TERMS_DESCRIPTION);
+  builder->Add("arcTermsOfServiceScreenDescriptionForChild",
+               IDS_ARC_OOBE_TERMS_DESCRIPTION_CHILD);
   builder->Add("arcTermsOfServiceLoading", IDS_ARC_OOBE_TERMS_LOADING);
-  builder->Add("arcTermsOfServiceError", IDS_ARC_OOBE_TERMS_LOAD_ERROR);
+  builder->Add("arcTermsOfServiceErrorTitle", IDS_OOBE_GENERIC_FATAL_ERROR_TITLE);
+  builder->Add("arcTermsOfServiceErrorMessage", IDS_ARC_OOBE_TERMS_LOAD_ERROR);
   builder->Add("arcTermsOfServiceRetryButton", IDS_ARC_OOBE_TERMS_BUTTON_RETRY);
   builder->Add("arcTermsOfServiceAcceptButton",
                IDS_ARC_OOBE_TERMS_BUTTON_ACCEPT);
@@ -270,7 +279,7 @@ void ArcTermsOfServiceScreenHandler::RemoveObserver(
 }
 
 void ArcTermsOfServiceScreenHandler::Show() {
-  if (!page_is_ready()) {
+  if (!IsJavascriptAllowed()) {
     show_on_init_ = true;
     return;
   }
@@ -286,12 +295,17 @@ void ArcTermsOfServiceScreenHandler::Show() {
 }
 
 void ArcTermsOfServiceScreenHandler::Hide() {
-  system::TimezoneSettings::GetInstance()->RemoveObserver(this);
+  if (network_time_zone_observing_) {
+    network_time_zone_observing_ = false;
+    chromeos::NetworkHandler::Get()->network_state_handler()->RemoveObserver(
+        this, FROM_HERE);
+    system::TimezoneSettings::GetInstance()->RemoveObserver(this);
+  }
   pref_handler_.reset();
 }
 
 void ArcTermsOfServiceScreenHandler::Bind(ArcTermsOfServiceScreen* screen) {
-  BaseScreenHandler::SetBaseScreen(screen);
+  BaseScreenHandler::SetBaseScreenDeprecated(screen);
 }
 
 void ArcTermsOfServiceScreenHandler::StartNetworkAndTimeZoneObserving() {
@@ -304,7 +318,7 @@ void ArcTermsOfServiceScreenHandler::StartNetworkAndTimeZoneObserving() {
   network_time_zone_observing_ = true;
 }
 
-void ArcTermsOfServiceScreenHandler::Initialize() {
+void ArcTermsOfServiceScreenHandler::InitializeDeprecated() {
   if (!show_on_init_) {
     // Send time zone information as soon as possible to able to pre-load the
     // Play Store ToS.
@@ -330,9 +344,9 @@ void ArcTermsOfServiceScreenHandler::DoShow() {
 
   action_taken_ = false;
 
-  ShowScreen(kScreenId);
-
+  ShowInWebUI();
   arc_managed_ = arc::IsArcPlayStoreEnabledPreferenceManagedForProfile(profile);
+  is_child_account_ = user_manager::UserManager::Get()->IsLoggedInAsChildUser();
   CallJS("login.ArcTermsOfServiceScreen.setArcManaged", arc_managed_,
          is_child_account_);
 
@@ -349,7 +363,7 @@ void ArcTermsOfServiceScreenHandler::DoShowForDemoModeSetup() {
 
   CallJS("login.ArcTermsOfServiceScreen.setupForDemoMode");
   action_taken_ = false;
-  ShowScreen(kScreenId);
+  ShowInWebUI();
   MaybeLoadPlayStoreToS(true);
   StartNetworkAndTimeZoneObserving();
 }
@@ -374,10 +388,9 @@ void ArcTermsOfServiceScreenHandler::RecordConsents(
       ConsentAuditorFactory::GetForProfile(profile);
   auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
   // The account may or may not have consented to browser sync.
-  DCHECK(
-      identity_manager->HasPrimaryAccount(signin::ConsentLevel::kNotRequired));
+  DCHECK(identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin));
   const CoreAccountId account_id =
-      identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kNotRequired);
+      identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kSignin);
 
   ArcPlayTermsOfServiceConsent play_consent;
   play_consent.set_status(tos_accepted ? UserConsentTypes::GIVEN

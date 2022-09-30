@@ -6,6 +6,7 @@
   {
     "namespace": "input.ime",
     "description": "Use the <code>chrome.input.ime</code> API to implement a custom IME for Chrome OS. This allows your extension to handle keystrokes, set the composition, and manage the candidate window.",
+    "platforms": ["chromeos"],
     "types": [
       {
         "id": "KeyboardEventType",
@@ -138,6 +139,23 @@
           "undo",
           "addToDictionary"
         ]
+      },
+      {
+        "id": "MenuParameters",
+        "type": "object",
+        "properties": {
+          "engineID": {
+            "description": "ID of the engine to use.",
+            "type": "string"
+          },
+          "items": {
+            "description": "MenuItems to add or update. They will be added in the order they exist in the array.",
+            "type": "array",
+            "items": {
+              "$ref": "MenuItem"
+            }
+          }
+        }
       }
     ],
     "functions": [
@@ -565,20 +583,7 @@
         "parameters": [
           {
             "name": "parameters",
-            "type": "object",
-            "properties": {
-              "engineID": {
-                "description": "ID of the engine to use",
-                "type": "string"
-              },
-              "items": {
-                "description": "MenuItems to add. They will be added in the order they exist in the array.",
-                "type": "array",
-                "items": {
-                  "$ref": "MenuItem"
-                }
-              }
-            }
+            "$ref": "MenuParameters"
           },
           {
             "type": "function",
@@ -597,20 +602,7 @@
         "parameters": [
           {
             "name": "parameters",
-            "type": "object",
-            "properties": {
-              "engineID": {
-                "description": "ID of the engine to use",
-                "type": "string"
-              },
-              "items": {
-                "description": "Array of MenuItems to update",
-                "type": "array",
-                "items": {
-                  "$ref": "MenuItem"
-                }
-              }
-            }
+            "$ref": "MenuParameters"
           },
           {
             "type": "function",
@@ -728,6 +720,7 @@
           }
         ]
       },
+      // TODO(crbug.com/1148579): Deprecate onInputContextUpdate.
       {
         "name": "onInputContextUpdate",
         "type": "function",

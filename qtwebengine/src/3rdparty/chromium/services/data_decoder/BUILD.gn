@@ -2,12 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 
 source_set("lib") {
   sources = [
     "data_decoder_service.cc",
     "data_decoder_service.h",
+    "gzipper.cc",
+    "gzipper.h",
     "json_parser_impl.cc",
     "json_parser_impl.h",
     "web_bundler.cc",
@@ -16,7 +19,7 @@ source_set("lib") {
     "xml_parser.h",
   ]
 
-  if (is_chromeos) {
+  if (is_chromeos_ash) {
     sources += [
       "ble_scan_parser_impl.cc",
       "ble_scan_parser_impl.h",
@@ -27,11 +30,14 @@ source_set("lib") {
 
   deps = [
     "//base",
+    "//build:chromeos_buildflags",
     "//components/web_package",
     "//mojo/public/cpp/bindings",
     "//net",
     "//skia",
+    "//third_party/libxml:libxml_utils",
     "//third_party/libxml:xml_reader",
+    "//third_party/zlib/google:compression_utils",
     "//ui/gfx",
     "//ui/gfx/geometry",
   ]
@@ -52,6 +58,7 @@ source_set("tests") {
   testonly = true
 
   sources = [
+    "gzipper_unittest.cc",
     "public/cpp/data_decoder_unittest.cc",
     "public/cpp/json_sanitizer_unittest.cc",
     "public/cpp/safe_web_bundle_parser_unittest.cc",
@@ -59,7 +66,7 @@ source_set("tests") {
     "xml_parser_unittest.cc",
   ]
 
-  if (is_chromeos) {
+  if (is_chromeos_ash) {
     sources += [ "ble_scan_parser_impl_unittest.cc" ]
   }
 
@@ -91,19 +98,34 @@ source_set("tests") {
   }
 }
 
-fuzzer_test("xml_parser_fuzzer") {
-  sources = [ "xml_parser_fuzzer.cc" ]
-  deps = [
+# This is a separate target because //third_party/libxml:libxml_utils
+# wants to limit its visibility to a select number of target, but the
+# "fuzzer_test" template expands on iOS to many targets that need to
+# have the "deps" information propagated in order to support "fat"
+# binaries.
+source_set("xml_parser_fuzzer_deps") {
+  visibility = [
+    ":run_xml_parser_fuzzer",
+    ":xml_parser_fuzzer",
+    ":xml_parser_fuzzer_arch_executable",
+    ":xml_parser_fuzzer_arch_executable_sources",
+  ]
+  public_deps = [
     ":lib",
     "//base",
     "//third_party/libxml:libxml_utils",
     "//third_party/libxml:xml_reader",
   ]
+}
+
+fuzzer_test("xml_parser_fuzzer") {
+  sources = [ "xml_parser_fuzzer.cc" ]
+  deps = [ ":xml_parser_fuzzer_deps" ]
   dict = "//third_party/libxml/fuzz/xml.dict"
   seed_corpus = "//third_party/libxml/fuzz/seed_corpus"
 }
 
-if (is_chromeos) {
+if (is_chromeos_ash) {
   fuzzer_test("ble_scan_parser_fuzzer") {
     sources = [ "ble_scan_parser_impl_fuzzer.cc" ]
     deps = [ ":lib" ]

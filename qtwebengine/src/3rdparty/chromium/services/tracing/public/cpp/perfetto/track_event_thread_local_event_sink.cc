@@ -7,7 +7,8 @@
 #include <algorithm>
 #include <atomic>
 
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
+#include "base/hash/hash.h"
 #include "base/strings/pattern.h"
 #include "base/strings/strcat.h"
 #include "base/trace_event/common/trace_event_common.h"
@@ -16,13 +17,17 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_log.h"
 #include "base/trace_event/traced_value.h"
+#include "base/tracing/trace_time.h"
+#include "base/tracing/tracing_tls.h"
 #include "build/build_config.h"
 #include "services/tracing/public/cpp/perfetto/perfetto_traced_process.h"
 #include "services/tracing/public/cpp/perfetto/producer_client.h"
 #include "services/tracing/public/cpp/perfetto/trace_event_data_source.h"
-#include "services/tracing/public/cpp/perfetto/trace_time.h"
+#include "services/tracing/public/cpp/perfetto/trace_string_lookup.h"
 #include "services/tracing/public/cpp/perfetto/traced_value_proto_writer.h"
+#include "third_party/perfetto/include/perfetto/tracing/internal/track_event_interned_fields.h"
 #include "third_party/perfetto/include/perfetto/tracing/track.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_interned_data_index.h"
 #include "third_party/perfetto/protos/perfetto/trace/clock_snapshot.pbzero.h"
 #include "third_party/perfetto/protos/perfetto/trace/trace_packet.pbzero.h"
 #include "third_party/perfetto/protos/perfetto/trace/trace_packet_defaults.pbzero.h"
@@ -38,6 +43,8 @@ using TraceLog = base::trace_event::TraceLog;
 using perfetto::protos::pbzero::ChromeThreadDescriptor;
 using perfetto::protos::pbzero::ClockSnapshot;
 using perfetto::protos::pbzero::CounterDescriptor;
+using perfetto::protos::pbzero::DebugAnnotation;
+using perfetto::protos::pbzero::InternedData;
 using perfetto::protos::pbzero::ThreadDescriptor;
 using perfetto::protos::pbzero::TracePacket;
 using perfetto::protos::pbzero::TracePacketDefaults;
@@ -67,12 +74,6 @@ constexpr uint64_t kAbsoluteThreadTimeTrackUuidBit = static_cast<uint64_t>(1u)
 constexpr uint64_t kThreadInstructionCountTrackUuidBit =
     static_cast<uint64_t>(1u) << 34;
 
-// Names of events that should be converted into a TaskExecution event.
-const char* kTaskExecutionEventCategory = "toplevel";
-const char* kTaskExecutionEventNames[3] = {"ThreadControllerImpl::RunTask",
-                                           "ThreadPool_RunTask",
-                                           "SimpleAlarmTimer::OnTimerFired"};
-
 void AddConvertableToTraceFormat(
     base::trace_event::ConvertableToTraceFormat* value,
     perfetto::protos::pbzero::DebugAnnotation* annotation) {
@@ -86,85 +87,48 @@ void AddConvertableToTraceFormat(
   annotation->set_legacy_json_value(json.c_str());
 }
 
-void WriteDebugAnnotations(
-    base::trace_event::TraceEvent* trace_event,
-    TrackEvent* track_event,
-    InterningIndexEntry* current_packet_interning_entries) {
-  for (size_t i = 0; i < trace_event->arg_size() && trace_event->arg_name(i);
-       ++i) {
-    auto type = trace_event->arg_type(i);
-    auto* annotation = track_event->add_debug_annotations();
+void WriteDebugAnnotationValue(base::trace_event::TraceEvent* trace_event,
+                               size_t arg_index,
+                               DebugAnnotation* annotation) {
+  auto type = trace_event->arg_type(arg_index);
 
-    annotation->set_name_iid(current_packet_interning_entries[i].id);
-
-    if (type == TRACE_VALUE_TYPE_CONVERTABLE) {
-      AddConvertableToTraceFormat(trace_event->arg_convertible_value(i),
-                                  annotation);
-      continue;
-    }
-
-    auto& value = trace_event->arg_value(i);
-    switch (type) {
-      case TRACE_VALUE_TYPE_BOOL:
-        annotation->set_bool_value(value.as_bool);
-        break;
-      case TRACE_VALUE_TYPE_UINT:
-        annotation->set_uint_value(value.as_uint);
-        break;
-      case TRACE_VALUE_TYPE_INT:
-        annotation->set_int_value(value.as_int);
-        break;
-      case TRACE_VALUE_TYPE_DOUBLE:
-        annotation->set_double_value(value.as_double);
-        break;
-      case TRACE_VALUE_TYPE_POINTER:
-        annotation->set_pointer_value(static_cast<uint64_t>(
-            reinterpret_cast<uintptr_t>(value.as_pointer)));
-        break;
-      case TRACE_VALUE_TYPE_STRING:
-      case TRACE_VALUE_TYPE_COPY_STRING:
-        annotation->set_string_value(value.as_string ? value.as_string
-                                                     : "NULL");
-        break;
-      default:
-        NOTREACHED() << "Don't know how to serialize this value";
-        break;
-    }
+  if (type == TRACE_VALUE_TYPE_CONVERTABLE) {
+    AddConvertableToTraceFormat(trace_event->arg_convertible_value(arg_index),
+                                annotation);
+    return;
   }
-}
 
-ChromeThreadDescriptor::ThreadType GetThreadType(
-    const char* const thread_name) {
-  if (base::MatchPattern(thread_name, "Cr*Main")) {
-    return ChromeThreadDescriptor::THREAD_MAIN;
-  } else if (base::MatchPattern(thread_name, "Chrome*IOThread")) {
-    return ChromeThreadDescriptor::THREAD_IO;
-  } else if (base::MatchPattern(thread_name, "ThreadPoolForegroundWorker*")) {
-    return ChromeThreadDescriptor::THREAD_POOL_FG_WORKER;
-  } else if (base::MatchPattern(thread_name, "ThreadPoolBackgroundWorker*")) {
-    return ChromeThreadDescriptor::THREAD_POOL_BG_WORKER;
-  } else if (base::MatchPattern(thread_name,
-                                "ThreadPool*ForegroundBlocking*")) {
-    return ChromeThreadDescriptor::THREAD_POOL_FG_BLOCKING;
-  } else if (base::MatchPattern(thread_name,
-                                "ThreadPool*BackgroundBlocking*")) {
-    return ChromeThreadDescriptor::THREAD_POOL_BG_BLOCKING;
-  } else if (base::MatchPattern(thread_name, "ThreadPoolService*")) {
-    return ChromeThreadDescriptor::THREAD_POOL_SERVICE;
-  } else if (base::MatchPattern(thread_name, "CompositorTileWorker*")) {
-    return ChromeThreadDescriptor::THREAD_COMPOSITOR_WORKER;
-  } else if (base::MatchPattern(thread_name, "Compositor")) {
-    return ChromeThreadDescriptor::THREAD_COMPOSITOR;
-  } else if (base::MatchPattern(thread_name, "VizCompositor*")) {
-    return ChromeThreadDescriptor::THREAD_VIZ_COMPOSITOR;
-  } else if (base::MatchPattern(thread_name, "ServiceWorker*")) {
-    return ChromeThreadDescriptor::THREAD_SERVICE_WORKER;
-  } else if (base::MatchPattern(thread_name, "MemoryInfra")) {
-    return ChromeThreadDescriptor::THREAD_MEMORY_INFRA;
-  } else if (base::MatchPattern(thread_name, "StackSamplingProfiler")) {
-    return ChromeThreadDescriptor::THREAD_SAMPLING_PROFILER;
+  auto& value = trace_event->arg_value(arg_index);
+  switch (type) {
+    case TRACE_VALUE_TYPE_BOOL:
+      annotation->set_bool_value(value.as_bool);
+      break;
+    case TRACE_VALUE_TYPE_UINT:
+      annotation->set_uint_value(value.as_uint);
+      break;
+    case TRACE_VALUE_TYPE_INT:
+      annotation->set_int_value(value.as_int);
+      break;
+    case TRACE_VALUE_TYPE_DOUBLE:
+      annotation->set_double_value(value.as_double);
+      break;
+    case TRACE_VALUE_TYPE_POINTER:
+      annotation->set_pointer_value(
+          static_cast<uint64_t>(reinterpret_cast<uintptr_t>(value.as_pointer)));
+      break;
+    case TRACE_VALUE_TYPE_STRING:
+    case TRACE_VALUE_TYPE_COPY_STRING:
+      annotation->set_string_value(value.as_string ? value.as_string : "NULL");
+      break;
+    case TRACE_VALUE_TYPE_PROTO: {
+      auto data = value.as_proto->SerializeAsArray();
+      annotation->AppendRawProtoBytes(data.data(), data.size());
+    } break;
+
+    default:
+      NOTREACHED() << "Don't know how to serialize this value";
+      break;
   }
-  return ChromeThreadDescriptor::THREAD_UNSPECIFIED;
 }
 
 // Lazily sets |legacy_event| on the |track_event|. Note that you should not set
@@ -173,7 +137,7 @@ ChromeThreadDescriptor::ThreadType GetThreadType(
 // message's fields to be consecutive.
 class LazyLegacyEventInitializer {
  public:
-  LazyLegacyEventInitializer(TrackEvent* track_event)
+  explicit LazyLegacyEventInitializer(TrackEvent* track_event)
       : track_event_(track_event) {}
 
   TrackEvent::LegacyEvent* GetOrCreate() {
@@ -184,6 +148,9 @@ class LazyLegacyEventInitializer {
   }
 
  private:
+  // `track_event_` and `legacy_event_` are not a raw_ptr<...> for performance
+  // reasons (based on analysis of sampling profiler data and
+  // tab_search:top100:2020).
   TrackEvent* track_event_;
   TrackEvent::LegacyEvent* legacy_event_ = nullptr;
 };
@@ -196,13 +163,6 @@ constexpr size_t TrackEventThreadLocalEventSink::kMaxCompleteEventDepth;
 // static
 std::atomic<uint32_t>
     TrackEventThreadLocalEventSink::incremental_state_reset_id_{0};
-
-TrackEventThreadLocalEventSink::IndexData::IndexData(const char* str)
-    : str_piece(str) {}
-
-TrackEventThreadLocalEventSink::IndexData::IndexData(
-    std::tuple<const char*, const char*, int>&& src)
-    : src_loc(std::move(src)) {}
 
 TrackEventThreadLocalEventSink::TrackEventThreadLocalEventSink(
     std::unique_ptr<perfetto::TraceWriter> trace_writer,
@@ -233,33 +193,35 @@ void TrackEventThreadLocalEventSink::ClearIncrementalState() {
   incremental_state_reset_id_.fetch_add(1u, std::memory_order_relaxed);
 }
 
+perfetto::TraceWriter::TracePacketHandle
+TrackEventThreadLocalEventSink::NewTracePacket(PacketType packet_type) {
+  last_packet_was_empty_ = packet_type == PacketType::kEmpty;
+  return trace_writer_->NewTracePacket();
+}
+
 void TrackEventThreadLocalEventSink::AddLegacyTraceEvent(
     base::trace_event::TraceEvent* trace_event,
     base::trace_event::TraceEventHandle* handle) {
   DCHECK(!pending_trace_packet_);
   UpdateIncrementalStateIfNeeded(trace_event);
 
-  auto trace_packet = trace_writer_->NewTracePacket();
+  auto trace_packet = NewTracePacket();
   PrepareTrackEvent(trace_event, handle, &trace_packet);
 
-  if (!pending_interning_updates_.empty()) {
-    EmitStoredInternedData(trace_packet->set_interned_data());
-  }
+  WriteInternedDataIntoTracePacket(trace_packet.get());
 }
 
 base::trace_event::TrackEventHandle
 TrackEventThreadLocalEventSink::AddTypedTraceEvent(
     base::trace_event::TraceEvent* trace_event) {
-  DCHECK(!TraceEventDataSource::GetInstance()
-              ->GetThreadIsInTraceEventTLS()
-              ->Get());
+  DCHECK(!base::tracing::GetThreadIsInTraceEventTLS()->Get());
   // Cleared in OnTrackEventCompleted().
-  TraceEventDataSource::GetInstance()->GetThreadIsInTraceEventTLS()->Set(true);
+  base::tracing::GetThreadIsInTraceEventTLS()->Set(true);
 
   DCHECK(!pending_trace_packet_);
   UpdateIncrementalStateIfNeeded(trace_event);
 
-  pending_trace_packet_ = trace_writer_->NewTracePacket();
+  pending_trace_packet_ = NewTracePacket();
 
   // Note: Since |track_event| is a protozero message under |trace_packet|, we
   // can't modify |trace_packet| further until we're done with |track_event|.
@@ -275,19 +237,9 @@ TrackEventThreadLocalEventSink::AddTypedTraceEvent(
                                              this);
 }
 
-void TrackEventThreadLocalEventSink::OnTrackEventCompleted() {
-  DCHECK(pending_trace_packet_);
-
+void TrackEventThreadLocalEventSink::WriteInternedDataIntoTracePacket(
+    TracePacket* packet) {
   auto& serialized_interned_data = incremental_state_.serialized_interned_data;
-  if (!pending_interning_updates_.empty()) {
-    // TODO(skyostil): Combine |pending_interning_updates_| and
-    // |serialized_interned_data| so we don't need to merge the two here.
-    if (!serialized_interned_data.empty()) {
-      EmitStoredInternedData(serialized_interned_data.get());
-    } else {
-      EmitStoredInternedData(pending_trace_packet_->set_interned_data());
-    }
-  }
 
   // When the track event is finalized (i.e., the context is destroyed), we
   // should flush any newly seen interned data to the trace. The data has
@@ -296,33 +248,34 @@ void TrackEventThreadLocalEventSink::OnTrackEventCompleted() {
   // trace.
   if (!serialized_interned_data.empty()) {
     auto ranges = serialized_interned_data.GetRanges();
-    pending_trace_packet_->AppendScatteredBytes(
+    packet->AppendScatteredBytes(
         perfetto::protos::pbzero::TracePacket::kInternedDataFieldNumber,
         &ranges[0], ranges.size());
 
     // Reset the message but keep one buffer allocated for future use.
     serialized_interned_data.Reset();
   }
+}
 
+void TrackEventThreadLocalEventSink::OnTrackEventCompleted() {
+  DCHECK(pending_trace_packet_);
+
+  WriteInternedDataIntoTracePacket(pending_trace_packet_.get());
   pending_trace_packet_ = perfetto::TraceWriter::TracePacketHandle();
 
-  DCHECK(
-      TraceEventDataSource::GetInstance()->GetThreadIsInTraceEventTLS()->Get());
-  TraceEventDataSource::GetInstance()->GetThreadIsInTraceEventTLS()->Set(false);
+  DCHECK(base::tracing::GetThreadIsInTraceEventTLS()->Get());
+  base::tracing::GetThreadIsInTraceEventTLS()->Set(false);
 }
 
 base::trace_event::TracePacketHandle
 TrackEventThreadLocalEventSink::AddTracePacket() {
-  DCHECK(!TraceEventDataSource::GetInstance()
-              ->GetThreadIsInTraceEventTLS()
-              ->Get());
+  DCHECK(!base::tracing::GetThreadIsInTraceEventTLS()->Get());
   // Cleared in OnTracePacketCompleted().
-  TraceEventDataSource::GetInstance()->GetThreadIsInTraceEventTLS()->Set(true);
+  base::tracing::GetThreadIsInTraceEventTLS()->Set(true);
 
   DCHECK(!pending_trace_packet_);
 
-  perfetto::TraceWriter::TracePacketHandle packet =
-      trace_writer_->NewTracePacket();
+  perfetto::TraceWriter::TracePacketHandle packet = NewTracePacket();
   // base doesn't require accurate timestamps in these packets, so we just emit
   // the packet with the last timestamp we used.
   SetPacketTimestamp(&packet, last_timestamp_);
@@ -330,10 +283,25 @@ TrackEventThreadLocalEventSink::AddTracePacket() {
   return base::trace_event::TracePacketHandle(std::move(packet), this);
 }
 
+void TrackEventThreadLocalEventSink::AddEmptyPacket() {
+  // Only add a new empty packet if there's at least one non-empty packet in the
+  // current chunk. Otherwise, there's nothing to flush, so adding more empty
+  // packets serves no purpose.
+  if (last_packet_was_empty_)
+    return;
+
+  DCHECK(!base::tracing::GetThreadIsInTraceEventTLS()->Get());
+  base::tracing::GetThreadIsInTraceEventTLS()->Set(true);
+
+  DCHECK(!pending_trace_packet_);
+  NewTracePacket(PacketType::kEmpty);
+
+  base::tracing::GetThreadIsInTraceEventTLS()->Set(false);
+}
+
 void TrackEventThreadLocalEventSink::OnTracePacketCompleted() {
-  DCHECK(
-      TraceEventDataSource::GetInstance()->GetThreadIsInTraceEventTLS()->Get());
-  TraceEventDataSource::GetInstance()->GetThreadIsInTraceEventTLS()->Set(false);
+  DCHECK(base::tracing::GetThreadIsInTraceEventTLS()->Get());
+  base::tracing::GetThreadIsInTraceEventTLS()->Set(false);
 }
 
 void TrackEventThreadLocalEventSink::UpdateIncrementalStateIfNeeded(
@@ -373,7 +341,7 @@ void TrackEventThreadLocalEventSink::UpdateIncrementalStateIfNeeded(
         perfetto::ThreadTrack::ForThread(trace_event->thread_id());
     if (!base::Contains(extra_emitted_track_descriptor_uuids_,
                         thread_track.uuid)) {
-      auto packet = trace_writer_->NewTracePacket();
+      auto packet = NewTracePacket();
       SetPacketTimestamp(&packet, last_timestamp_);
       TrackDescriptor* track_descriptor = packet->set_track_descriptor();
       // TODO(eseckler): Call thread_track.Serialize() here instead once the
@@ -398,7 +366,7 @@ void TrackEventThreadLocalEventSink::UpdateIncrementalStateIfNeeded(
           thread_track.uuid ^ kAbsoluteThreadTimeTrackUuidBit;
       if (!base::Contains(extra_emitted_track_descriptor_uuids_,
                           thread_time_track_uuid)) {
-        auto packet = trace_writer_->NewTracePacket();
+        auto packet = NewTracePacket();
         SetPacketTimestamp(&packet, last_timestamp_);
         TrackDescriptor* track_descriptor = packet->set_track_descriptor();
         // TODO(eseckler): Switch to client library support for CounterTrack
@@ -425,7 +393,7 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
     protozero::MessageHandle<TracePacket>* trace_packet) {
   // Each event's updates to InternedData are flushed at the end of
   // AddTraceEvent().
-  DCHECK(pending_interning_updates_.empty());
+  DCHECK(incremental_state_.serialized_interned_data.empty());
 
   char phase = trace_event->phase();
 
@@ -458,107 +426,50 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
                      force_absolute_timestamp);
 
   TrackEvent* track_event = (*trace_packet)->set_track_event();
+  perfetto::EventContext event_context(track_event, &incremental_state_);
 
+  // TODO(eseckler): Split comma-separated category strings.
   const char* category_name =
       TraceLog::GetCategoryGroupName(trace_event->category_group_enabled());
-  InterningIndexEntry interned_category{};
   // No need to write the category for sync end events. Trace processor will
   // match them without, provided event nesting is correct. For async end
   // events, event ID matching includes the category, so we have to emit the
   // category for the time being.
   if (!is_sync_end) {
-    interned_category = interned_event_categories_.LookupOrAdd(category_name);
+    track_event->add_category_iids(
+        perfetto::internal::InternedEventCategory::Get(
+            &event_context, category_name, strlen(category_name)));
   }
-
-  InterningIndexEntry interned_name{};
-  const size_t kMaxSize = base::trace_event::TraceArguments::kMaxSize;
-  InterningIndexEntry interned_annotation_names[kMaxSize] = {
-      InterningIndexEntry{}};
-  InterningIndexEntry interned_source_location{};
-  InterningIndexEntry interned_log_message_body{};
-
-  const char* src_file = nullptr;
-  const char* src_func = nullptr;
-  const char* log_message_body = nullptr;
-  int line_number = 0;
-
   // No need to write the event name for end events (sync or nestable async).
   // Trace processor will match them without, provided event nesting is correct.
   // Legacy async events (TRACE_EVENT_ASYNC*) are only pass-through in trace
   // processor, so we still have to emit names for these.
   const char* trace_event_name = trace_event->name();
   if (!is_sync_end && !is_nestable_async_end) {
+    bool filter_name =
+        copy_strings && !is_java_event && privacy_filtering_enabled_;
+    if (filter_name)
+      trace_event_name = kPrivacyFiltered;
     if (copy_strings) {
-      if (!is_java_event && privacy_filtering_enabled_) {
-        trace_event_name = kPrivacyFiltered;
-        interned_name = interned_event_names_.LookupOrAdd(trace_event_name);
-      } else {
-        interned_name =
-            interned_event_names_.LookupOrAdd(std::string(trace_event_name));
-      }
+      track_event->set_name(trace_event_name);
     } else {
-      interned_name = interned_event_names_.LookupOrAdd(trace_event->name());
+      track_event->set_name_iid(perfetto::internal::InternedEventName::Get(
+          &event_context, trace_event->name()));
     }
   }
 
-  if (copy_strings) {
-    if (is_java_event || !privacy_filtering_enabled_) {
-      for (size_t i = 0;
-           i < trace_event->arg_size() && trace_event->arg_name(i); ++i) {
-        interned_annotation_names[i] = interned_annotation_names_.LookupOrAdd(
-            std::string(trace_event->arg_name(i)));
-      }
-    }
-  } else {
-    // TODO(eseckler): Remove special handling of typed events here once we
-    // support them in TRACE_EVENT macros.
-
-    if (flags & TRACE_EVENT_FLAG_TYPED_PROTO_ARGS) {
-      if (trace_event->arg_size() == 2u) {
-        DCHECK_EQ(strcmp(category_name, kTaskExecutionEventCategory), 0);
-        DCHECK(strcmp(trace_event->name(), kTaskExecutionEventNames[0]) == 0 ||
-               strcmp(trace_event->name(), kTaskExecutionEventNames[1]) == 0 ||
-               strcmp(trace_event->name(), kTaskExecutionEventNames[2]) == 0);
-        // Double argument task execution event (src_file, src_func).
-        DCHECK_EQ(trace_event->arg_type(0), TRACE_VALUE_TYPE_STRING);
-        DCHECK_EQ(trace_event->arg_type(1), TRACE_VALUE_TYPE_STRING);
-        src_file = trace_event->arg_value(0).as_string;
-        src_func = trace_event->arg_value(1).as_string;
+  if (!privacy_filtering_enabled_) {
+    for (size_t i = 0; i < trace_event->arg_size() && trace_event->arg_name(i);
+         ++i) {
+      auto* debug_annotation = track_event->add_debug_annotations();
+      if (copy_strings) {
+        debug_annotation->set_name(trace_event->arg_name(i));
       } else {
-        // arg_size == 1 enforced by the maximum number of parameter == 2.
-        DCHECK_EQ(trace_event->arg_size(), 1u);
-
-        if (trace_event->arg_type(0) == TRACE_VALUE_TYPE_STRING) {
-          // Single argument task execution event (src_file).
-          DCHECK_EQ(strcmp(category_name, kTaskExecutionEventCategory), 0);
-          DCHECK(
-              strcmp(trace_event->name(), kTaskExecutionEventNames[0]) == 0 ||
-              strcmp(trace_event->name(), kTaskExecutionEventNames[1]) == 0 ||
-              strcmp(trace_event->name(), kTaskExecutionEventNames[2]) == 0);
-          src_file = trace_event->arg_value(0).as_string;
-        } else {
-          DCHECK_EQ(trace_event->arg_type(0), TRACE_VALUE_TYPE_CONVERTABLE);
-          DCHECK(strcmp(category_name, "log") == 0);
-          DCHECK(strcmp(trace_event->name(), "LogMessage") == 0);
-          const base::trace_event::LogMessage* value =
-              static_cast<base::trace_event::LogMessage*>(
-                  trace_event->arg_value(0).as_convertable);
-          src_file = value->file();
-          line_number = value->line_number();
-          log_message_body = value->message().c_str();
-
-          interned_log_message_body =
-              interned_log_message_bodies_.LookupOrAdd(value->message());
-        }  // else
-      }    // else
-      interned_source_location = interned_source_locations_.LookupOrAdd(
-          std::make_tuple(src_file, src_func, line_number));
-    } else if (!privacy_filtering_enabled_) {
-      for (size_t i = 0;
-           i < trace_event->arg_size() && trace_event->arg_name(i); ++i) {
-        interned_annotation_names[i] =
-            interned_annotation_names_.LookupOrAdd(trace_event->arg_name(i));
+        debug_annotation->set_name_iid(
+            perfetto::internal::InternedDebugAnnotationName::Get(
+                &event_context, trace_event->arg_name(i)));
       }
+      WriteDebugAnnotationValue(trace_event, i, debug_annotation);
     }
   }
 
@@ -619,26 +530,6 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
             trace_event->thread_instruction_count();
       }
     }
-  }
-
-  // TODO(eseckler): Split comma-separated category strings.
-  if (interned_category.id) {
-    track_event->add_category_iids(interned_category.id);
-  }
-
-  if (interned_log_message_body.id) {
-    auto* log_message = track_event->set_log_message();
-    log_message->set_source_location_iid(interned_source_location.id);
-    log_message->set_body_iid(interned_log_message_body.id);
-  } else if (interned_source_location.id) {
-    track_event->set_task_execution()->set_posted_from_iid(
-        interned_source_location.id);
-  } else if (!privacy_filtering_enabled_) {
-    WriteDebugAnnotations(trace_event, track_event, interned_annotation_names);
-  }
-
-  if (interned_name.id) {
-    track_event->set_name_iid(interned_name.id);
   }
 
   // Only set the |legacy_event| field of the TrackEvent if we need to emit any
@@ -721,7 +612,11 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
       legacy_event.GetOrCreate()->set_pid_override(trace_event->process_id());
       legacy_event.GetOrCreate()->set_tid_override(-1);
     } else if (thread_id_ != trace_event->thread_id()) {
-      legacy_event.GetOrCreate()->set_tid_override(trace_event->thread_id());
+      // Some metadata events set thread_id to 0. We avoid setting tid_override
+      // to 0 to avoid clashes with the swapper thread in system traces
+      // (b/215725684).
+      if (trace_event->thread_id() != 0)
+        legacy_event.GetOrCreate()->set_tid_override(trace_event->thread_id());
     }
   }
 
@@ -731,29 +626,28 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
   uint32_t flow_flags =
       flags & (TRACE_EVENT_FLAG_FLOW_OUT | TRACE_EVENT_FLAG_FLOW_IN);
 
+  uint64_t id = trace_event->id();
+  if (id_flags && trace_event->scope() != trace_event_internal::kGlobalScope) {
+    // The scope string might be privacy filtered, so also hash it with the
+    // id.
+    id = base::HashInts(base::FastHash(trace_event->scope()), id);
+  }
+
   // Legacy flow events use bind_id as their (unscoped) identifier. There's no
   // need to also emit id in that case.
   if (!flow_flags) {
     switch (id_flags) {
       case TRACE_EVENT_FLAG_HAS_ID:
-        legacy_event.GetOrCreate()->set_unscoped_id(trace_event->id());
+        legacy_event.GetOrCreate()->set_unscoped_id(id);
         break;
       case TRACE_EVENT_FLAG_HAS_LOCAL_ID:
-        legacy_event.GetOrCreate()->set_local_id(trace_event->id());
+        legacy_event.GetOrCreate()->set_local_id(id);
         break;
       case TRACE_EVENT_FLAG_HAS_GLOBAL_ID:
-        legacy_event.GetOrCreate()->set_global_id(trace_event->id());
+        legacy_event.GetOrCreate()->set_global_id(id);
         break;
       default:
         break;
-    }
-  }
-
-  // TODO(ssid): Add scope field as enum and do not filter this field.
-  if (!privacy_filtering_enabled_) {
-    if (id_flags &&
-        trace_event->scope() != trace_event_internal::kGlobalScope) {
-      legacy_event.GetOrCreate()->set_id_scope(trace_event->scope());
     }
   }
 
@@ -786,90 +680,11 @@ TrackEvent* TrackEventThreadLocalEventSink::PrepareTrackEvent(
     legacy_event.GetOrCreate()->set_bind_to_enclosing(true);
   }
 
-  if (interned_category.id && !interned_category.was_emitted) {
-    pending_interning_updates_.push_back(
-        std::make_tuple(IndexType::kCategory, IndexData{category_name},
-                        std::move(interned_category)));
-  }
-  if (interned_name.id && !interned_name.was_emitted) {
-    pending_interning_updates_.push_back(
-        std::make_tuple(IndexType::kName, IndexData{trace_event_name},
-                        std::move(interned_name)));
-  }
-  if (interned_log_message_body.id && !interned_log_message_body.was_emitted) {
-    pending_interning_updates_.push_back(
-        std::make_tuple(IndexType::kLogMessage, IndexData{log_message_body},
-                        std::move(interned_log_message_body)));
-  }
-  if (interned_source_location.id) {
-    if (!interned_source_location.was_emitted) {
-      pending_interning_updates_.push_back(std::make_tuple(
-          IndexType::kSourceLocation,
-          IndexData{std::make_tuple(src_file, src_func, line_number)},
-          std::move(interned_source_location)));
-    }
-  } else if (!privacy_filtering_enabled_) {
-    for (size_t i = 0; i < trace_event->arg_size() && trace_event->arg_name(i);
-         ++i) {
-      DCHECK(interned_annotation_names[i].id);
-      if (!interned_annotation_names[i].was_emitted) {
-        pending_interning_updates_.push_back(std::make_tuple(
-            IndexType::kAnnotationName, IndexData{trace_event->arg_name(i)},
-            std::move(interned_annotation_names[i])));
-      }
-    }
-  }
   if (disable_interning_) {
-    interned_event_categories_.Clear();
-    interned_event_names_.Clear();
-    interned_annotation_names_.Clear();
-    interned_source_locations_.Clear();
-    interned_log_message_bodies_.Clear();
+    incremental_state_.interned_data_indices = {};
   }
 
   return track_event;
-}
-
-void TrackEventThreadLocalEventSink::EmitStoredInternedData(
-    perfetto::protos::pbzero::InternedData* interned_data) {
-  DCHECK(interned_data);
-  for (const auto& update : pending_interning_updates_) {
-    IndexType type = std::get<0>(update);
-    IndexData data = std::get<1>(update);
-    InterningIndexEntry entry = std::get<2>(update);
-    if (type == IndexType::kName) {
-      auto* name_entry = interned_data->add_event_names();
-      name_entry->set_iid(entry.id);
-      name_entry->set_name(data.str_piece);
-    } else if (type == IndexType::kCategory) {
-      auto* category_entry = interned_data->add_event_categories();
-      category_entry->set_iid(entry.id);
-      category_entry->set_name(data.str_piece);
-    } else if (type == IndexType::kLogMessage) {
-      auto* log_message_entry = interned_data->add_log_message_body();
-      log_message_entry->set_iid(entry.id);
-      log_message_entry->set_body(data.str_piece);
-    } else if (type == IndexType::kSourceLocation) {
-      auto* source_location_entry = interned_data->add_source_locations();
-      source_location_entry->set_iid(entry.id);
-      source_location_entry->set_file_name(std::get<0>(data.src_loc));
-
-      if (std::get<1>(data.src_loc)) {
-        source_location_entry->set_function_name(std::get<1>(data.src_loc));
-      }
-      if (std::get<2>(data.src_loc)) {
-        source_location_entry->set_line_number(std::get<2>(data.src_loc));
-      }
-    } else if (type == IndexType::kAnnotationName) {
-      DCHECK(!privacy_filtering_enabled_);
-      auto* name_entry = interned_data->add_debug_annotation_names();
-      name_entry->set_iid(entry.id);
-      name_entry->set_name(data.str_piece);
-    } else {
-      DLOG(FATAL) << "Unhandled type: " << static_cast<int>(type);
-    }
-  }
-  pending_interning_updates_.clear();
 }
 
 void TrackEventThreadLocalEventSink::UpdateDuration(
@@ -905,7 +720,7 @@ void TrackEventThreadLocalEventSink::EmitThreadTrackDescriptor(
     base::trace_event::TraceEvent* trace_event,
     base::TimeTicks timestamp,
     const char* maybe_new_name) {
-  auto packet = trace_writer_->NewTracePacket();
+  auto packet = NewTracePacket();
   SetPacketTimestamp(&packet, timestamp);
 
   TrackDescriptor* track_descriptor = packet->set_track_descriptor();
@@ -950,7 +765,7 @@ void TrackEventThreadLocalEventSink::EmitCounterTrackDescriptor(
     uint64_t counter_track_uuid_bit,
     CounterDescriptor::BuiltinCounterType counter_type,
     uint64_t unit_multiplier) {
-  auto packet = trace_writer_->NewTracePacket();
+  auto packet = NewTracePacket();
   SetPacketTimestamp(&packet, timestamp);
 
   TrackDescriptor* track_descriptor = packet->set_track_descriptor();
@@ -963,7 +778,7 @@ void TrackEventThreadLocalEventSink::EmitCounterTrackDescriptor(
 
   CounterDescriptor* counter = track_descriptor->set_counter();
   if (counter_type != CounterDescriptor::COUNTER_UNSPECIFIED) {
-    counter->set_type(CounterDescriptor::COUNTER_THREAD_TIME_NS);
+    counter->set_type(counter_type);
   }
   if (unit_multiplier) {
     counter->set_unit_multiplier(unit_multiplier);
@@ -974,11 +789,6 @@ void TrackEventThreadLocalEventSink::EmitCounterTrackDescriptor(
 void TrackEventThreadLocalEventSink::DoResetIncrementalState(
     base::trace_event::TraceEvent* trace_event,
     bool explicit_timestamp) {
-  interned_event_categories_.ResetEmittedState();
-  interned_event_names_.ResetEmittedState();
-  interned_annotation_names_.ResetEmittedState();
-  interned_source_locations_.ResetEmittedState();
-  interned_log_message_bodies_.ResetEmittedState();
   extra_emitted_track_descriptor_uuids_.clear();
   incremental_state_.interned_data_indices = {};
   incremental_state_.seen_tracks.clear();
@@ -1000,7 +810,7 @@ void TrackEventThreadLocalEventSink::DoResetIncrementalState(
   {
     // Emit a new clock snapshot with this timestamp, and also set the
     // |incremental_state_cleared| flag and defaults.
-    auto packet = trace_writer_->NewTracePacket();
+    auto packet = NewTracePacket();
     packet->set_sequence_flags(TracePacket::SEQ_INCREMENTAL_STATE_CLEARED);
 
     TracePacketDefaults* tp_defaults = packet->set_trace_packet_defaults();
@@ -1020,7 +830,7 @@ void TrackEventThreadLocalEventSink::DoResetIncrementalState(
     ClockSnapshot* clocks = packet->set_clock_snapshot();
     // Reference clock is in nanoseconds.
     ClockSnapshot::Clock* clock_reference = clocks->add_clocks();
-    clock_reference->set_clock_id(kTraceClockId);
+    clock_reference->set_clock_id(base::tracing::kTraceClockId);
     clock_reference->set_timestamp(timestamp.since_origin().InNanoseconds());
     // Absolute clock in micros.
     ClockSnapshot::Clock* clock_absolute = clocks->add_clocks();

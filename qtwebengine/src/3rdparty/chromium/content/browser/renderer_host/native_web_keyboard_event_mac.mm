@@ -29,7 +29,7 @@ int modifiersForEvent(int modifiers) {
   return flags;
 }
 
-size_t WebKeyboardEventTextLength(const base::char16* text) {
+size_t WebKeyboardEventTextLength(const char16_t* text) {
   size_t text_length = 0;
   while (text_length < blink::WebKeyboardEvent::kTextLengthCap &&
          text[text_length]) {
@@ -69,11 +69,12 @@ NativeWebKeyboardEvent::NativeWebKeyboardEvent(
   if (unmod_text_length == 0)
     type = NSFlagsChanged;
 
-  NSString* text =
-      [[[NSString alloc] initWithCharacters:web_event.text length:text_length]
-          autorelease];
+  NSString* text = [[[NSString alloc]
+      initWithCharacters:reinterpret_cast<const UniChar*>(web_event.text)
+                  length:text_length] autorelease];
   NSString* unmodified_text =
-      [[[NSString alloc] initWithCharacters:web_event.unmodified_text
+      [[[NSString alloc] initWithCharacters:reinterpret_cast<const UniChar*>(
+                                                web_event.unmodified_text)
                                      length:unmod_text_length] autorelease];
 
   os_event = [[NSEvent keyEventWithType:type
@@ -96,23 +97,8 @@ NativeWebKeyboardEvent::NativeWebKeyboardEvent(
   [os_event eventRef];
 }
 
-// static
-NativeWebKeyboardEvent NativeWebKeyboardEvent::CreateForRenderer(
-    gfx::NativeEvent native_event) {
-  return NativeWebKeyboardEvent(native_event, true);
-}
-
-NativeWebKeyboardEvent::NativeWebKeyboardEvent(gfx::NativeEvent native_event,
-                                               bool record_debug_uma)
-    : WebKeyboardEvent(
-          WebKeyboardEventBuilder::Build(native_event, record_debug_uma)),
-      os_event([native_event retain]),
-      skip_in_browser(false) {}
-
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(gfx::NativeEvent native_event)
-    : WebKeyboardEvent(
-          WebKeyboardEventBuilder::Build(native_event,
-                                         /*record_debug_uma=*/false)),
+    : WebKeyboardEvent(WebKeyboardEventBuilder::Build(native_event)),
       os_event([native_event retain]),
       skip_in_browser(false) {}
 

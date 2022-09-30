@@ -6,11 +6,10 @@
 #define UI_AURA_TEST_UI_CONTROLS_OZONE_H_
 
 #include "base/bind.h"
-#include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/aura/env.h"
 #include "ui/aura/test/aura_test_utils.h"
 #include "ui/aura/test/env_test_helper.h"
@@ -60,7 +59,7 @@ class UIControlsOzone : public ui_controls::UIControlsAura {
                                      base::OnceClosure closure,
                                      int accelerator_state) override;
   bool SendMouseClick(ui_controls::MouseButton type) override;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   bool SendTouchEvents(int action, int id, int x, int y) override;
   bool SendTouchEventsNotifyWhenDone(int action,
                                      int id,

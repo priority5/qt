@@ -4,23 +4,19 @@
 
 #include "components/signin/core/browser/active_directory_account_reconcilor_delegate.h"
 
-#include "chromeos/tpm/install_attributes.h"
+#include "ash/components/tpm/install_attributes.h"
+#include "base/containers/contains.h"
 #include "google_apis/gaia/core_account_id.h"
 
 namespace signin {
 
 ActiveDirectoryAccountReconcilorDelegate::
     ActiveDirectoryAccountReconcilorDelegate() {
-  DCHECK(chromeos::InstallAttributes::Get()->IsActiveDirectoryManaged());
+  DCHECK(ash::InstallAttributes::Get()->IsActiveDirectoryManaged());
 }
 
 ActiveDirectoryAccountReconcilorDelegate::
     ~ActiveDirectoryAccountReconcilorDelegate() = default;
-
-bool ActiveDirectoryAccountReconcilorDelegate::IsAccountConsistencyEnforced()
-    const {
-  return true;
-}
 
 gaia::GaiaSource ActiveDirectoryAccountReconcilorDelegate::GetGaiaApiSource()
     const {

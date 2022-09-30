@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/strings/string16.h"
+#include "components/permissions/permission_ui_selector.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -51,19 +51,57 @@ class PermissionPrompt {
     // deleted upon navigation and so on.
     virtual const std::vector<PermissionRequest*>& Requests() = 0;
 
+    // Get the single origin for the current set of requests.
+    virtual GURL GetRequestingOrigin() const = 0;
+
     // Get the top-level origin currently displayed in the address bar
     // associated with the requests.
     virtual GURL GetEmbeddingOrigin() const = 0;
 
     virtual void Accept() = 0;
+    virtual void AcceptThisTime() = 0;
     virtual void Deny() = 0;
-    virtual void Closing() = 0;
+    virtual void Dismiss() = 0;
+    virtual void Ignore() = 0;
+
+    // If |ShouldCurrentRequestUseQuietUI| return true, this will provide a
+    // reason as to why the quiet UI needs to be used. Returns `absl::nullopt`
+    // otherwise.
+    virtual absl::optional<PermissionUiSelector::QuietUiReason>
+    ReasonForUsingQuietUi() const = 0;
+
+    // Notification permission requests might use a quiet UI when the
+    // "quiet-notification-prompts" feature is enabled. This is done either
+    // directly by the user in notifications settings, or via automatic logic
+    // that might trigger the current request to use the quiet UI.
+    virtual bool ShouldCurrentRequestUseQuietUI() const = 0;
+
+    // If the LocationBar is not visible, there is no place to display a quiet
+    // permission prompt. Abusive prompts will be ignored.
+    virtual bool ShouldDropCurrentRequestIfCannotShowQuietly() const = 0;
 
     // Whether the current request has been shown to the user at least once.
     virtual bool WasCurrentRequestAlreadyDisplayed() = 0;
+
+    // Set whether the current request should be dismissed if the current tab is
+    // closed.
+    virtual void SetDismissOnTabClose() = 0;
+
+    // Set whether the permission prompt bubble was shown for the current
+    // request.
+    virtual void SetBubbleShown() = 0;
+
+    // Set when the user made any decision for the currentrequest.
+    virtual void SetDecisionTime() = 0;
+
+    // Set when the user made any decision for manage settings.
+    virtual void SetManageClicked() = 0;
+
+    // Set when the user made any decision for clicking on learn more link.
+    virtual void SetLearnMoreClicked() = 0;
   };
 
-  typedef base::Callback<
+  typedef base::RepeatingCallback<
       std::unique_ptr<PermissionPrompt>(content::WebContents*, Delegate*)>
       Factory;
 
@@ -74,7 +112,7 @@ class PermissionPrompt {
   virtual ~PermissionPrompt() {}
 
   // Updates where the prompt should be anchored. ex: fullscreen toggle.
-  virtual void UpdateAnchorPosition() = 0;
+  virtual void UpdateAnchor() = 0;
 
   // Get the behavior of this prompt when the user switches away from the
   // associated tab.

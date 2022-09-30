@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickanimation_p.h"
 #include "qquickanimation_p_p.h"
@@ -165,17 +129,16 @@ void QQuickAbstractAnimationPrivate::commence()
     QQuickStateActions actions;
     QQmlProperties properties;
 
-    QAbstractAnimationJob *oldInstance = animationInstance;
-    animationInstance = q->transition(actions, properties, QQuickAbstractAnimation::Forward);
-    if (oldInstance && oldInstance != animationInstance)
-        delete oldInstance;
+    auto *newInstance = q->transition(actions, properties, QQuickAbstractAnimation::Forward);
+    Q_ASSERT(newInstance != animationInstance);
+    delete animationInstance;
+    animationInstance = newInstance;
 
     if (animationInstance) {
-        if (oldInstance != animationInstance) {
-            if (q->threadingModel() == QQuickAbstractAnimation::RenderThread)
-                animationInstance = new QQuickAnimatorProxyJob(animationInstance, q);
-            animationInstance->addAnimationChangeListener(this, QAbstractAnimationJob::Completion);
-        }
+        if (q->threadingModel() == QQuickAbstractAnimation::RenderThread)
+            animationInstance = new QQuickAnimatorProxyJob(animationInstance, q);
+        animationInstance->addAnimationChangeListener(this,
+            QAbstractAnimationJob::Completion | QAbstractAnimationJob::CurrentLoop);
         emit q->started();
         animationInstance->start();
     }
@@ -253,14 +216,8 @@ void QQuickAbstractAnimation::setRunning(bool r)
         d->running = r;
         if (r == false)
             d->avoidPropertyValueSourceStart = true;
-        else if (!d->registered) {
-            d->registered = true;
-            QQmlEnginePrivate *engPriv = QQmlEnginePrivate::get(qmlEngine(this));
-            static int finalizedIdx = -1;
-            if (finalizedIdx < 0)
-                finalizedIdx = metaObject()->indexOfSlot("componentFinalized()");
-            engPriv->registerFinalizeCallback(this, finalizedIdx);
-        }
+        else if (!d->needsDeferredSetRunning)
+            d->needsDeferredSetRunning = true;
         return;
     }
 
@@ -373,18 +330,15 @@ void QQuickAbstractAnimation::componentComplete()
 {
     Q_D(QQuickAbstractAnimation);
     d->componentComplete = true;
-}
-
-void QQuickAbstractAnimation::componentFinalized()
-{
-    Q_D(QQuickAbstractAnimation);
-    if (d->running) {
-        d->running = false;
-        setRunning(true);
-    }
-    if (d->paused) {
-        d->paused = false;
-        setPaused(true);
+    if (d->needsDeferredSetRunning) {
+        if (d->running) {
+            d->running = false;
+            setRunning(true);
+        }
+        if (d->paused) {
+            d->paused = false;
+            setPaused(true);
+        }
     }
 }
 
@@ -1007,10 +961,10 @@ void QQuickScriptActionPrivate::debugAction(QDebug d, int indentLevel) const
     if (!scriptStr.isEmpty()) {
         QQmlExpression expr(scriptStr);
 
-        QByteArray ind(indentLevel, ' ');
+        QByteArray ind(indentLevel, u' ');
         QString exprStr = expr.expression();
-        int endOfFirstLine = exprStr.indexOf('\n');
-        d << "\n" << ind.constData() << exprStr.leftRef(endOfFirstLine);
+        int endOfFirstLine = exprStr.indexOf(u'\n');
+        d << "\n" << ind.constData() << QStringView{exprStr}.left(endOfFirstLine);
         if (endOfFirstLine != -1 && endOfFirstLine < exprStr.length())
             d << "...";
     }
@@ -1140,8 +1094,8 @@ void QQuickPropertyAction::setProperty(const QString &n)
 }
 
 /*!
-    \qmlproperty Object QtQuick::PropertyAction::target
-    \qmlproperty list<Object> QtQuick::PropertyAction::targets
+    \qmlproperty QtObject QtQuick::PropertyAction::target
+    \qmlproperty list<QtObject> QtQuick::PropertyAction::targets
     \qmlproperty string QtQuick::PropertyAction::property
     \qmlproperty string QtQuick::PropertyAction::properties
 
@@ -1176,7 +1130,7 @@ QQmlListProperty<QObject> QQuickPropertyAction::targets()
 }
 
 /*!
-    \qmlproperty list<Object> QtQuick::PropertyAction::exclude
+    \qmlproperty list<QtObject> QtQuick::PropertyAction::exclude
     This property holds the objects that should not be affected by this action.
 
     \sa targets
@@ -1188,7 +1142,7 @@ QQmlListProperty<QObject> QQuickPropertyAction::exclude()
 }
 
 /*!
-    \qmlproperty any QtQuick::PropertyAction::value
+    \qmlproperty var QtQuick::PropertyAction::value
     This property holds the value to be set on the property.
 
     If the PropertyAction is defined within a \l Transition or \l Behavior,
@@ -1270,7 +1224,7 @@ QAbstractAnimationJob* QQuickPropertyAction::transition(QQuickStateActions &acti
                 myAction.property = d->createProperty(targets.at(j), props.at(i), this);
                 if (myAction.property.isValid()) {
                     myAction.toValue = d->value;
-                    QQuickPropertyAnimationPrivate::convertVariant(myAction.toValue, myAction.property.propertyType());
+                    QQuickPropertyAnimationPrivate::convertVariant(myAction.toValue, myAction.property.propertyMetaType());
                     data->actions << myAction;
                     hasExplicit = true;
                     for (int ii = 0; ii < actions.count(); ++ii) {
@@ -1303,7 +1257,7 @@ QAbstractAnimationJob* QQuickPropertyAction::transition(QQuickStateActions &acti
 
             if (d->value.isValid())
                 myAction.toValue = d->value;
-            QQuickPropertyAnimationPrivate::convertVariant(myAction.toValue, myAction.property.propertyType());
+            QQuickPropertyAnimationPrivate::convertVariant(myAction.toValue, myAction.property.propertyMetaType());
 
             modified << action.property;
             data->actions << myAction;
@@ -1384,7 +1338,7 @@ void QQuickNumberAnimation::init()
             // ...
         ]
 
-        transition: Transition {
+        transitions: Transition {
             NumberAnimation { properties: "x"; from: 100; duration: 200 }
         }
     }
@@ -1614,7 +1568,7 @@ QQuickRotationAnimation::~QQuickRotationAnimation()
             // ...
         ]
 
-        transition: Transition {
+        transitions: Transition {
             RotationAnimation { properties: "angle"; from: 100; duration: 2000 }
         }
     }
@@ -1724,14 +1678,14 @@ void QQuickAnimationGroupPrivate::append_animation(QQmlListProperty<QQuickAbstra
         a->setGroup(q);
 }
 
-QQuickAbstractAnimation *QQuickAnimationGroupPrivate::at_animation(QQmlListProperty<QQuickAbstractAnimation> *list, int index)
+QQuickAbstractAnimation *QQuickAnimationGroupPrivate::at_animation(QQmlListProperty<QQuickAbstractAnimation> *list, qsizetype index)
 {
     if (auto q = qmlobject_cast<QQuickAnimationGroup *>(list->object))
         return q->d_func()->animations.at(index);
     return nullptr;
 }
 
-int QQuickAnimationGroupPrivate::count_animation(QQmlListProperty<QQuickAbstractAnimation> *list)
+qsizetype QQuickAnimationGroupPrivate::count_animation(QQmlListProperty<QQuickAbstractAnimation> *list)
 {
     if (auto q = qmlobject_cast<QQuickAnimationGroup *>(list->object))
         return q->d_func()->animations.count();
@@ -1750,7 +1704,7 @@ void QQuickAnimationGroupPrivate::clear_animation(QQmlListProperty<QQuickAbstrac
 }
 
 void QQuickAnimationGroupPrivate::replace_animation(QQmlListProperty<QQuickAbstractAnimation> *list,
-                                                    int i, QQuickAbstractAnimation *a)
+                                                    qsizetype i, QQuickAbstractAnimation *a)
 {
     if (auto *q = qmlobject_cast<QQuickAnimationGroup *>(list->object)) {
         if (QQuickAbstractAnimation *anim = q->d_func()->animations.at(i))
@@ -1961,15 +1915,44 @@ QAbstractAnimationJob* QQuickParallelAnimation::transition(QQuickStateActions &a
     return initInstance(ag);
 }
 
+void QQuickPropertyAnimationPrivate::animationCurrentLoopChanged(QAbstractAnimationJob *)
+{
+    Q_Q(QQuickPropertyAnimation);
+    // We listen to current loop changes in order to restart the animation if e.g. from, to, etc.
+    // are modified while the animation is running.
+    // Restarting is a bit drastic but there is a lot of stuff that commence() (and therefore
+    // QQuickPropertyAnimation::transition() and QQuickPropertyAnimation::createTransitionActions())
+    // does, so we want to avoid trying to take a shortcut and just restart the whole thing.
+    if (ourPropertiesDirty) {
+        ourPropertiesDirty = false;
+
+        // We use animationInstance everywhere for simplicity - if we defined the job parameter
+        // it would be deleted as soon as we call stop().
+        Q_ASSERT(animationInstance);
+        const int currentLoop = animationInstance->currentLoop();
+
+        QSignalBlocker signalBlocker(q);
+        q->stop();
+        q->start();
+
+        Q_ASSERT(animationInstance);
+        // We multiply it ourselves here instead of just saving currentTime(), because otherwise
+        // it seems to accumulate, and changing our properties while the animation is running
+        // can result in the animation starting mid-way through a loop, which is not we want;
+        // we want it to start from the beginning.
+        animationInstance->setCurrentTime(currentLoop * animationInstance->duration());
+    }
+}
+
 //convert a variant from string type to another animatable type
-void QQuickPropertyAnimationPrivate::convertVariant(QVariant &variant, int type)
+void QQuickPropertyAnimationPrivate::convertVariant(QVariant &variant, QMetaType type)
 {
     if (variant.userType() != QMetaType::QString) {
         variant.convert(type);
         return;
     }
 
-    switch (type) {
+    switch (type.id()) {
     case QMetaType::QRect:
     case QMetaType::QRectF:
     case QMetaType::QPoint:
@@ -1984,12 +1967,8 @@ void QQuickPropertyAnimationPrivate::convertVariant(QVariant &variant, int type)
         }
         break;
     default:
-        if (QQmlValueTypeFactory::isValueType((uint)type)) {
-            variant.convert(type);
-        } else {
-            QQmlMetaType::StringConverter converter = QQmlMetaType::customStringConverter(type);
-            if (converter)
-                variant = converter(variant.toString());
+        if (QQmlMetaType::isValueType(type)) {
+            variant.convert(QMetaType(type));
         }
         break;
     }
@@ -2025,8 +2004,9 @@ void QQuickBulkValueAnimator::updateCurrentTime(int currentTime)
 
 void QQuickBulkValueAnimator::topLevelAnimationLoopChanged()
 {
-    //check for new from every top-level loop (when the top level animation is started and all subsequent loops)
-    if (fromIsSourced)
+    // Check for new "from" value only when animation has one loop.
+    // Otherwise use the initial "from" value for every iteration.
+    if (m_loopCount == 1 && fromIsSourced)
         *fromIsSourced = false;
     QAbstractAnimationJob::topLevelAnimationLoopChanged();
 }
@@ -2104,6 +2084,12 @@ void QQuickBulkValueAnimator::debugAnimation(QDebug d) const
     Note that PropertyAnimation inherits the abstract \l Animation type.
     This includes additional properties and methods for controlling the animation.
 
+    \section1 Modifying Properties Duration Animations
+
+    Since Qt 6.4, it is possible to set the \l from, \l to, \l duration, and
+    \l easing properties on a top-level animation while it is running. The
+    animation will take the changes into account on the next loop.
+
     \sa {Animation and Transitions in Qt Quick}, {Qt Quick Examples - Animation}
 */
 
@@ -2144,6 +2130,8 @@ void QQuickPropertyAnimation::setDuration(int duration)
     if (d->duration == duration)
         return;
     d->duration = duration;
+    if (d->componentComplete && d->running)
+        d->ourPropertiesDirty = true;
     emit durationChanged(duration);
 }
 
@@ -2171,6 +2159,8 @@ void QQuickPropertyAnimation::setFrom(const QVariant &f)
         return;
     d->from = f;
     d->fromIsDefined = f.isValid();
+    if (d->componentComplete && d->running)
+        d->ourPropertiesDirty = true;
     emit fromChanged();
 }
 
@@ -2198,6 +2188,8 @@ void QQuickPropertyAnimation::setTo(const QVariant &t)
         return;
     d->to = t;
     d->toIsDefined = t.isValid();
+    if (d->componentComplete && d->running)
+        d->ourPropertiesDirty = true;
     emit toChanged();
 }
 
@@ -2393,7 +2385,7 @@ void QQuickPropertyAnimation::setTo(const QVariant &t)
         \li Easing curve for a bounce (exponentially decaying parabolic bounce) function easing out/in: deceleration until halfway, then acceleration.
         \li \inlineimage qeasingcurve-outinbounce.png
     \row
-        \li \c Easing.Bezier
+        \li \c Easing.BezierSpline
         \li Custom easing curve defined by the easing.bezierCurve property.
         \li
     \endtable
@@ -2408,7 +2400,7 @@ void QQuickPropertyAnimation::setTo(const QVariant &t)
     \c easing.period is only applicable if easing.type is: \c Easing.InElastic, \c Easing.OutElastic,
     \c Easing.InOutElastic or \c Easing.OutInElastic.
 
-    \c easing.bezierCurve is only applicable if easing.type is: \c Easing.Bezier.  This property is a list<real> containing
+    \c easing.bezierCurve is only applicable if easing.type is: \c Easing.BezierSpline.  This property is a list<real> containing
     groups of three points defining a curve from 0,0 to 1,1 - control1, control2,
     end point: [cx1, cy1, cx2, cy2, endx, endy, ...].  The last point must be 1,1.
 
@@ -2428,6 +2420,8 @@ void QQuickPropertyAnimation::setEasing(const QEasingCurve &e)
         return;
 
     d->easing = e;
+    if (d->componentComplete && d->running)
+        d->ourPropertiesDirty = true;
     emit easingChanged(e);
 }
 
@@ -2479,9 +2473,9 @@ void QQuickPropertyAnimation::setProperties(const QString &prop)
 
 /*!
     \qmlproperty string QtQuick::PropertyAnimation::properties
-    \qmlproperty list<Object> QtQuick::PropertyAnimation::targets
+    \qmlproperty list<QtObject> QtQuick::PropertyAnimation::targets
     \qmlproperty string QtQuick::PropertyAnimation::property
-    \qmlproperty Object QtQuick::PropertyAnimation::target
+    \qmlproperty QtObject QtQuick::PropertyAnimation::target
 
     These properties are used as a set to determine which properties should be animated.
     The singular and plural forms are functionally identical, e.g.
@@ -2532,8 +2526,18 @@ void QQuickPropertyAnimation::setProperties(const QString &prop)
            Item { id: uselessItem }
            states: State {
                name: "state1"
-               PropertyChanges { target: theRect; x: 200; y: 200; z: 4 }
-               PropertyChanges { target: uselessItem; x: 10; y: 10; z: 2 }
+               PropertyChanges {
+                   theRect {
+                       x: 200
+                       y: 200
+                       z: 4
+                   }
+                   uselessItem {
+                       x: 10
+                       y: 10
+                       z: 2
+                   }
+               }
            }
            transitions: Transition {
                //animate both theRect's and uselessItem's x and y to their final values
@@ -2574,7 +2578,7 @@ QQmlListProperty<QObject> QQuickPropertyAnimation::targets()
 }
 
 /*!
-    \qmlproperty list<Object> QtQuick::PropertyAnimation::exclude
+    \qmlproperty list<QtObject> QtQuick::PropertyAnimation::exclude
     This property holds the items not to be affected by this animation.
     \sa PropertyAnimation::targets
 */
@@ -2599,7 +2603,7 @@ void QQuickAnimationPropertyUpdater::setValue(qreal v)
             if (!fromIsSourced && !fromIsDefined) {
                 action.fromValue = action.property.read();
                 if (interpolatorType) {
-                    QQuickPropertyAnimationPrivate::convertVariant(action.fromValue, interpolatorType);
+                    QQuickPropertyAnimationPrivate::convertVariant(action.fromValue, QMetaType(interpolatorType));
                 }
             }
             if (!interpolatorType) {
@@ -2681,10 +2685,10 @@ QQuickStateActions QQuickPropertyAnimation::createTransitionActions(QQuickStateA
 
                     if (d->fromIsDefined) {
                         myAction.fromValue = d->from;
-                        d->convertVariant(myAction.fromValue, d->interpolatorType ? d->interpolatorType : myAction.property.propertyType());
+                        d->convertVariant(myAction.fromValue, d->interpolatorType ? QMetaType(d->interpolatorType) : myAction.property.propertyMetaType());
                     }
                     myAction.toValue = d->to;
-                    d->convertVariant(myAction.toValue, d->interpolatorType ? d->interpolatorType : myAction.property.propertyType());
+                    d->convertVariant(myAction.toValue, d->interpolatorType ? QMetaType(d->interpolatorType) : myAction.property.propertyMetaType());
                     newActions << myAction;
                     hasExplicit = true;
                     for (int ii = 0; ii < actions.count(); ++ii) {
@@ -2730,8 +2734,8 @@ QQuickStateActions QQuickPropertyAnimation::createTransitionActions(QQuickStateA
             if (d->toIsDefined)
                 myAction.toValue = d->to;
 
-            d->convertVariant(myAction.fromValue, d->interpolatorType ? d->interpolatorType : myAction.property.propertyType());
-            d->convertVariant(myAction.toValue, d->interpolatorType ? d->interpolatorType : myAction.property.propertyType());
+            d->convertVariant(myAction.fromValue, d->interpolatorType ? QMetaType(d->interpolatorType) : myAction.property.propertyMetaType());
+            d->convertVariant(myAction.toValue, d->interpolatorType ? QMetaType(d->interpolatorType) : myAction.property.propertyMetaType());
 
             modified << action.property;
 

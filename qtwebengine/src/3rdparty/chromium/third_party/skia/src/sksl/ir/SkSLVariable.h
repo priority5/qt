@@ -8,77 +8,125 @@
 #ifndef SKSL_VARIABLE
 #define SKSL_VARIABLE
 
-#include "src/sksl/SkSLPosition.h"
-#include "src/sksl/ir/SkSLModifiers.h"
-#include "src/sksl/ir/SkSLSymbol.h"
+#include "include/private/SkSLModifiers.h"
+#include "include/private/SkSLSymbol.h"
+#include "src/sksl/ir/SkSLExpression.h"
 #include "src/sksl/ir/SkSLType.h"
+#include "src/sksl/ir/SkSLVariableReference.h"
 
 namespace SkSL {
 
-struct Expression;
+class Expression;
+class VarDeclaration;
+
+namespace dsl {
+class DSLCore;
+class DSLFunction;
+} // namespace dsl
+
+enum class VariableStorage : int8_t {
+    kGlobal,
+    kInterfaceBlock,
+    kLocal,
+    kParameter
+};
 
 /**
  * Represents a variable, whether local, global, or a function parameter. This represents the
  * variable itself (the storage location), which is shared between all VariableReferences which
  * read or write that storage location.
  */
-struct Variable : public Symbol {
-    static constexpr Kind kSymbolKind = Kind::kVariable;
+class Variable final : public Symbol {
+public:
+    using Storage = VariableStorage;
 
-    enum Storage {
-        kGlobal_Storage,
-        kInterfaceBlock_Storage,
-        kLocal_Storage,
-        kParameter_Storage
-    };
+    inline static constexpr Kind kSymbolKind = Kind::kVariable;
 
-    Variable(int offset, Modifiers modifiers, StringFragment name, const Type* type,
-             bool builtin, Storage storage, Expression* initialValue = nullptr)
-    : INHERITED(offset, kSymbolKind, name, type)
+    Variable(Position pos, Position modifiersPosition, const Modifiers* modifiers,
+            std::string_view name, const Type* type, bool builtin, Storage storage)
+    : INHERITED(pos, kSymbolKind, name, type)
+    , fModifiersPosition(modifiersPosition)
     , fModifiers(modifiers)
     , fStorage(storage)
-    , fInitialValue(initialValue)
-    , fBuiltin(builtin)
-    , fReadCount(0)
-    , fWriteCount(initialValue ? 1 : 0) {}
+    , fBuiltin(builtin) {}
 
-    ~Variable() override {
-        // can't destroy a variable while there are remaining references to it
-        if (fInitialValue) {
-            --fWriteCount;
-        }
-        SkASSERT(!fReadCount && !fWriteCount);
+    ~Variable() override;
+
+    static std::unique_ptr<Variable> Convert(const Context& context, Position pos,
+            Position modifiersPos, const Modifiers& modifiers, const Type* baseType,
+            std::string_view name, bool isArray, std::unique_ptr<Expression> arraySize,
+            Variable::Storage storage);
+
+    static std::unique_ptr<Variable> Make(const Context& context, Position pos,
+            Position modifiersPos, const Modifiers& modifiers, const Type* baseType,
+            std::string_view name, bool isArray, std::unique_ptr<Expression> arraySize,
+            Variable::Storage storage);
+
+    /**
+     * Creates a local scratch variable and the associated VarDeclaration statement.
+     * Useful when doing IR rewrites, e.g. inlining a function call.
+     */
+    struct ScratchVariable {
+        const Variable* fVarSymbol;
+        std::unique_ptr<Statement> fVarDecl;
+    };
+    static ScratchVariable MakeScratchVariable(const Context& context,
+                                               std::string_view baseName,
+                                               const Type* type,
+                                               const Modifiers& modifiers,
+                                               SymbolTable* symbolTable,
+                                               std::unique_ptr<Expression> initialValue);
+    const Modifiers& modifiers() const {
+        return *fModifiers;
     }
 
-    String description() const override {
-        return fModifiers.description() + this->type().fName + " " + fName;
+    void setModifiers(const Modifiers* modifiers) {
+        fModifiers = modifiers;
     }
 
-    bool dead() const {
-        if ((fStorage != kLocal_Storage && fReadCount) ||
-            (fModifiers.fFlags & (Modifiers::kIn_Flag | Modifiers::kOut_Flag |
-                                 Modifiers::kUniform_Flag | Modifiers::kVarying_Flag))) {
-            return false;
-        }
-        return !fWriteCount ||
-               (!fReadCount && !(fModifiers.fFlags & (Modifiers::kPLS_Flag |
-                                                      Modifiers::kPLSOut_Flag)));
+    Position modifiersPosition() const {
+        return fModifiersPosition;
     }
 
-    mutable Modifiers fModifiers;
-    const Storage fStorage;
+    bool isBuiltin() const {
+        return fBuiltin;
+    }
 
-    const Expression* fInitialValue = nullptr;
+    Storage storage() const {
+        return (Storage) fStorage;
+    }
+
+    const Expression* initialValue() const;
+
+    void setDeclaration(VarDeclaration* declaration) {
+        SkASSERT(!fDeclaration);
+        fDeclaration = declaration;
+    }
+
+    void detachDeadVarDeclaration() const {
+        // The VarDeclaration is being deleted, so our reference to it has become stale.
+        // This variable is now dead, so it shouldn't matter that we are modifying its symbol.
+        const_cast<Variable*>(this)->fDeclaration = nullptr;
+    }
+
+    std::string description() const override {
+        return this->modifiers().description() + this->type().displayName() + " " +
+               std::string(this->name());
+    }
+
+private:
+    VarDeclaration* fDeclaration = nullptr;
+    // We don't store the position in the Modifiers object itself because they are pooled
+    Position fModifiersPosition;
+    const Modifiers* fModifiers;
+    VariableStorage fStorage;
     bool fBuiltin;
 
-    // Tracks how many sites read from the variable. If this is zero for a non-out variable (or
-    // becomes zero during optimization), the variable is dead and may be eliminated.
-    mutable int fReadCount;
-    // Tracks how many sites write to the variable. If this is zero, the variable is dead and may be
-    // eliminated.
-    mutable int fWriteCount;
-
     using INHERITED = Symbol;
+
+    friend class dsl::DSLCore;
+    friend class dsl::DSLFunction;
+    friend class VariableReference;
 };
 
 } // namespace SkSL

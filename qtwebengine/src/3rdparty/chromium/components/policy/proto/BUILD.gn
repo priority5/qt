@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//third_party/libprotobuf-mutator/fuzzable_proto_library.gni")
+import("//build/config/chromeos/ui_mode.gni")
 import("//third_party/protobuf/proto_library.gni")
 
 # The proto files need to be a component to avoid duplicate symbols the way the
@@ -13,34 +13,12 @@ component("proto") {
   public_deps = [ ":proto_internal" ]
 }
 
-# Record constants for use with the reporting messaging library.
-proto_library("policy_record_constants") {
-  visibility = [
-    "//chrome/browser:browser",
-    ":reporting_record_proto",
-    ":reporting_record_proto_gen",
-  ]
-  sources = [ "record_constants.proto" ]
-
-  proto_out_dir = "components/policy/proto"
-}
-
-# Record definitions for reporting.
-proto_library("reporting_record_proto") {
-  visibility = [ "//chrome/browser:browser" ]
-  sources = [ "record.proto" ]
-
-  deps = [ ":policy_record_constants" ]
-
-  proto_out_dir = "components/policy/proto"
-}
-
 proto_library("policy_common_definitions_compile_proto") {
   visibility = [
-    "//components/policy:cloud_policy_proto_generated_compile_proto",
-    "//components/policy:chrome_settings_proto_generated_compile_proto",
-    "//components/policy:generated",
     ":proto_internal",
+    "//components/policy:chrome_settings_proto_generated_compile_proto",
+    "//components/policy:cloud_policy_proto_generated_compile_proto",
+    "//components/policy:generated",
   ]
 
   sources = [ "policy_common_definitions.proto" ]
@@ -54,9 +32,10 @@ proto_library("proto_internal") {
   sources = [
     "device_management_backend.proto",
     "policy_signing_key.proto",
+    "secure_connect.proto",
   ]
 
-  if (is_chromeos) {
+  if (is_chromeos_ash) {
     sources += [
       "chrome_device_policy.proto",
       "install_attributes.proto",
@@ -85,15 +64,4 @@ proto_library("proto_internal") {
   cc_include = "components/policy/proto/policy_proto_export.h"
   component_build_force_source_set = true
   defines = [ "POLICY_PROTO_COMPILATION" ]
-}
-
-if (use_libfuzzer) {
-  fuzzable_proto_library("chrome_device_policy_full_runtime_proto") {
-    proto_out_dir = "components/policy/proto/fuzzer"
-
-    sources = [
-      "chrome_device_policy.proto",
-      "policy_common_definitions.proto",
-    ]
-  }
 }

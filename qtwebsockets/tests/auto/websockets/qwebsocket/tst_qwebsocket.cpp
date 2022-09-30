@@ -1,35 +1,14 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Kurt Pattyn <pattyn.kurt@gmail.com>.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Kurt Pattyn <pattyn.kurt@gmail.com>.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+#include <QRegularExpression>
 #include <QString>
 #include <QtTest>
 #include <QtWebSockets/QWebSocket>
+#include <QtWebSockets/QWebSocketHandshakeOptions>
 #include <QtWebSockets/QWebSocketServer>
 #include <QtWebSockets/qwebsocketprotocol.h>
+
+#include <QtNetwork/qtcpserver.h>
 
 QT_USE_NAMESPACE
 
@@ -72,6 +51,8 @@ EchoServer::EchoServer(QObject *parent, quint64 maxAllowedIncomingMessageSize, q
     m_maxAllowedIncomingFrameSize(maxAllowedIncomingFrameSize),
     m_clients()
 {
+    m_pWebSocketServer->setSupportedSubprotocols({ QStringLiteral("protocol1"),
+                                                QStringLiteral("protocol2") });
     if (m_pWebSocketServer->listen(QHostAddress(QStringLiteral("127.0.0.1")))) {
         connect(m_pWebSocketServer, SIGNAL(newConnection()),
                 this, SLOT(onNewConnection()));
@@ -146,7 +127,9 @@ private Q_SLOTS:
     void tst_sendTextMessage();
     void tst_sendBinaryMessage();
     void tst_errorString();
+    void tst_openRequest_data();
     void tst_openRequest();
+    void tst_protocolAccessor();
     void tst_moveToThread();
     void tst_moveToThreadNoWarning();
 #ifndef QT_NO_NETWORKPROXY
@@ -156,6 +139,7 @@ private Q_SLOTS:
     void incomingMessageTooLong();
     void incomingFrameTooLong();
     void testingFrameAndMessageSizeApi();
+    void customHeader();
 };
 
 tst_QWebSocket::tst_QWebSocket()
@@ -623,7 +607,7 @@ void tst_QWebSocket::tst_errorString()
 
     socket.open(QUrl(QStringLiteral("ws://someserver.on.mars:9999")));
 
-    QTRY_COMPARE(errorSpy.count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(errorSpy.count(), 1, 10000);
     QList<QVariant> arguments = errorSpy.takeFirst();
     QAbstractSocket::SocketError socketError =
             qvariant_cast<QAbstractSocket::SocketError>(arguments.at(0));
@@ -631,8 +615,35 @@ void tst_QWebSocket::tst_errorString()
     QCOMPARE(socket.errorString(), QStringLiteral("Host not found"));
 }
 
+void tst_QWebSocket::tst_openRequest_data()
+{
+    QTest::addColumn<QStringList>("subprotocols");
+    QTest::addColumn<QString>("subprotocolHeader");
+    QTest::addColumn<QRegularExpression>("warningExpression");
+
+    QTest::addRow("no subprotocols") << QStringList{} << QString{} << QRegularExpression{};
+    QTest::addRow("single subprotocol") << QStringList{"foobar"} << QStringLiteral("foobar")
+                                        << QRegularExpression{};
+    QTest::addRow("multiple subprotocols") << QStringList{"foo", "bar"}
+                                           << QStringLiteral("foo, bar")
+                                           << QRegularExpression{};
+    QTest::addRow("subprotocol with whitespace")
+            << QStringList{"chat", "foo\r\nbar with space"}
+            << QStringLiteral("chat")
+            << QRegularExpression{".*invalid.*bar with space"};
+
+    QTest::addRow("subprotocol with invalid chars")
+            << QStringList{"chat", "foo{}"}
+            << QStringLiteral("chat")
+            << QRegularExpression{".*invalid.*foo"};
+}
+
 void tst_QWebSocket::tst_openRequest()
 {
+    QFETCH(QStringList, subprotocols);
+    QFETCH(QString, subprotocolHeader);
+    QFETCH(QRegularExpression, warningExpression);
+
     EchoServer echoServer;
 
     QWebSocket socket;
@@ -647,7 +658,13 @@ void tst_QWebSocket::tst_openRequest()
     url.setQuery(query);
     QNetworkRequest req(url);
     req.setRawHeader("X-Custom-Header", "A custom header");
-    socket.open(req);
+    QWebSocketHandshakeOptions options;
+    options.setSubprotocols(subprotocols);
+
+    if (!warningExpression.pattern().isEmpty())
+        QTest::ignoreMessage(QtWarningMsg, warningExpression);
+
+    socket.open(req, options);
 
     QTRY_COMPARE(socketConnectedSpy.count(), 1);
     QTRY_COMPARE(serverRequestSpy.count(), 1);
@@ -656,6 +673,34 @@ void tst_QWebSocket::tst_openRequest()
     QNetworkRequest requestConnected = arguments.at(0).value<QNetworkRequest>();
     QCOMPARE(requestConnected.url(), req.url());
     QCOMPARE(requestConnected.rawHeader("X-Custom-Header"), req.rawHeader("X-Custom-Header"));
+
+    if (subprotocols.isEmpty())
+        QVERIFY(!requestConnected.hasRawHeader("Sec-WebSocket-Protocol"));
+    else
+        QCOMPARE(requestConnected.rawHeader("Sec-WebSocket-Protocol"), subprotocolHeader);
+
+
+    socket.close();
+}
+
+void tst_QWebSocket::tst_protocolAccessor()
+{
+    EchoServer echoServer;
+
+    QWebSocket socket;
+
+    QUrl url = QUrl(QStringLiteral("ws://") + echoServer.hostAddress().toString() +
+                    QLatin1Char(':') + QString::number(echoServer.port()));
+
+    QWebSocketHandshakeOptions options;
+    options.setSubprotocols({ "foo", "protocol2" });
+
+    socket.open(url, options);
+
+    QTRY_COMPARE(socket.state(), QAbstractSocket::ConnectedState);
+
+    QCOMPARE(socket.subprotocol(), "protocol2");
+
     socket.close();
 }
 
@@ -779,6 +824,7 @@ void tst_QWebSocket::tst_setProxy()
     socket.setProxy(proxy);
     QCOMPARE(socket.proxy(), proxy);
 }
+#endif // QT_NO_NETWORKPROXY
 
 void tst_QWebSocket::overlongCloseReason()
 {
@@ -804,7 +850,7 @@ void tst_QWebSocket::overlongCloseReason()
     QCOMPARE(socket.closeCode(), QWebSocketProtocol::CloseCodeGoingAway);
     // Max length of a control frame is 125, but 2 bytes are used for the close code:
     QCOMPARE(socket.closeReason().length(), 123);
-    QCOMPARE(socket.closeReason(), reason.leftRef(123));
+    QCOMPARE(socket.closeReason(), reason.left(123));
     QTRY_COMPARE(socketDisconnectedSpy.count(), 1);
 }
 
@@ -881,7 +927,58 @@ void tst_QWebSocket::testingFrameAndMessageSizeApi()
     QTRY_COMPARE(maxAllowedIncomingMessageSize, socket.maxAllowedIncomingMessageSize());
 }
 
-#endif // QT_NO_NETWORKPROXY
+void tst_QWebSocket::customHeader()
+{
+    QTcpServer server;
+    QSignalSpy serverSpy(&server, &QTcpServer::newConnection);
+
+    server.listen();
+    QUrl url = QUrl(QStringLiteral("ws://127.0.0.1"));
+    url.setPort(server.serverPort());
+
+    QNetworkRequest request(url);
+    request.setRawHeader("CustomHeader", "Example");
+    QWebSocket socket;
+    socket.open(request);
+
+    // Custom websocket server below (needed because a QWebSocketServer on
+    // localhost doesn't show the issue):
+    QVERIFY(serverSpy.wait());
+    QTcpSocket *serverSocket = server.nextPendingConnection();
+    QSignalSpy serverSocketSpy(serverSocket, &QTcpSocket::readyRead);
+    QByteArray data;
+    while (!data.contains("\r\n\r\n")) {
+        QVERIFY(serverSocketSpy.wait());
+        data.append(serverSocket->readAll());
+    }
+    QVERIFY(data.contains("CustomHeader: Example"));
+    const auto view = QLatin1String(data);
+    const auto keyHeader = QLatin1String("Sec-WebSocket-Key:");
+    const qsizetype keyStart = view.indexOf(keyHeader, 0, Qt::CaseInsensitive) + keyHeader.length();
+    QVERIFY(keyStart != -1);
+    const qsizetype keyEnd = view.indexOf(QLatin1String("\r\n"), keyStart);
+    QVERIFY(keyEnd != -1);
+    const QLatin1String keyView = view.sliced(keyStart, keyEnd - keyStart).trimmed();
+    const QByteArray accept =
+            QByteArrayView(keyView) % QByteArrayLiteral("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    serverSocket->write(
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Accept: "
+            % QCryptographicHash::hash(accept, QCryptographicHash::Sha1).toBase64()
+        ); // trailing \r\n\r\n intentionally left off to make the client wait for it
+    serverSocket->flush();
+    // This would freeze prior to the fix for QTBUG-102111, because the client would loop forever.
+    // We use qWait to give the OS some time to move the bytes over to the client and push the event
+    // to our eventloop.
+    QTest::qWait(100);
+    serverSocket->write("\r\n\r\n");
+
+    // And check the client properly connects:
+    QSignalSpy connectedSpy(&socket, &QWebSocket::connected);
+    QVERIFY(connectedSpy.wait());
+}
 
 QTEST_MAIN(tst_QWebSocket)
 

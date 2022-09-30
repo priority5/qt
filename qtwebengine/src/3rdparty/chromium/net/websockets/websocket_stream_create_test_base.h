@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/timer/timer.h"
 #include "net/socket/socket_test_util.h"
@@ -18,6 +18,7 @@
 #include "net/test/test_with_task_environment.h"
 #include "net/websockets/websocket_event_interface.h"
 #include "net/websockets/websocket_test_util.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
 
@@ -37,6 +38,11 @@ class WebSocketStreamCreateTestBase : public WithTaskEnvironment {
   using HeaderKeyValuePair = std::pair<std::string, std::string>;
 
   WebSocketStreamCreateTestBase();
+
+  WebSocketStreamCreateTestBase(const WebSocketStreamCreateTestBase&) = delete;
+  WebSocketStreamCreateTestBase& operator=(
+      const WebSocketStreamCreateTestBase&) = delete;
+
   virtual ~WebSocketStreamCreateTestBase();
 
   // A wrapper for CreateAndConnectStreamForTesting that knows about our default
@@ -55,6 +61,7 @@ class WebSocketStreamCreateTestBase : public WithTaskEnvironment {
       const HttpResponseHeaders& headers);
 
   const std::string& failure_message() const { return failure_message_; }
+  int failure_response_code() const { return failure_response_code_; }
   bool has_failed() const { return has_failed_; }
 
   // Runs |connect_run_loop_|. It will stop when the connection establishes or
@@ -75,6 +82,7 @@ class WebSocketStreamCreateTestBase : public WithTaskEnvironment {
   std::unique_ptr<WebSocketStream> stream_;
   // Only set if the connection failed.
   std::string failure_message_;
+  int failure_response_code_ = -1;
   bool has_failed_;
   std::unique_ptr<WebSocketHandshakeRequestInfo> request_info_;
   std::unique_ptr<WebSocketHandshakeResponseInfo> response_info_;
@@ -82,12 +90,12 @@ class WebSocketStreamCreateTestBase : public WithTaskEnvironment {
       ssl_error_callbacks_;
   SSLInfo ssl_info_;
   bool ssl_fatal_;
-  URLRequest* url_request_;
+  raw_ptr<URLRequest> url_request_;
   AuthChallengeInfo auth_challenge_info_;
   base::OnceCallback<void(const AuthCredentials*)> on_auth_required_callback_;
 
   // This value will be copied to |*credentials| on OnAuthRequired.
-  base::Optional<AuthCredentials> auth_credentials_;
+  absl::optional<AuthCredentials> auth_credentials_;
   // OnAuthRequired returns this value.
   int on_auth_required_rv_ = OK;
 
@@ -97,7 +105,6 @@ class WebSocketStreamCreateTestBase : public WithTaskEnvironment {
 
  private:
   class TestConnectDelegate;
-  DISALLOW_COPY_AND_ASSIGN(WebSocketStreamCreateTestBase);
 };
 
 }  // namespace net

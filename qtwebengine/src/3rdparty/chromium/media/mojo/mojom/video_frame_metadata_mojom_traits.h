@@ -6,17 +6,19 @@
 #define MEDIA_MOJO_MOJOM_VIDEO_FRAME_METADATA_MOJOM_TRAITS_H_
 
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "media/base/ipc/media_param_traits_macros.h"
 #include "media/base/video_frame_metadata.h"
+#include "media/base/video_transformation.h"
 #include "media/mojo/mojom/media_types.mojom-shared.h"
 #include "media/mojo/mojom/media_types_enum_mojom_traits.h"
+#include "media/mojo/mojom/video_transformation_mojom_traits.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/mojom/geometry_mojom_traits.h"
 
 namespace mojo {
 
-// Creates a has_foo() and a foo() to serialize a foo base::Optional<>.
+// Creates a has_foo() and a foo() to serialize a foo absl::optional<>.
 #define GENERATE_OPT_SERIALIZATION(type, field, default_value)      \
   static bool has_##field(const media::VideoFrameMetadata& input) { \
     return input.field.has_value();                                 \
@@ -53,6 +55,10 @@ struct StructTraits<media::mojom::VideoFrameMetadataDataView,
     return input.hw_protected;
   }
 
+  static bool is_webgpu_compatible(const media::VideoFrameMetadata& input) {
+    return input.is_webgpu_compatible;
+  }
+
   static bool power_efficient(const media::VideoFrameMetadata& input) {
     return input.power_efficient;
   }
@@ -65,6 +71,15 @@ struct StructTraits<media::mojom::VideoFrameMetadataDataView,
     return input.interactive_content;
   }
 
+  static bool texture_origin_is_top_left(
+      const media::VideoFrameMetadata& input) {
+    return input.texture_origin_is_top_left;
+  }
+
+  static uint32_t crop_version(const media::VideoFrameMetadata& input) {
+    return input.crop_version;
+  }
+
   GENERATE_OPT_SERIALIZATION(int, capture_counter, 0)
 
   GENERATE_OPT_SERIALIZATION(
@@ -72,9 +87,10 @@ struct StructTraits<media::mojom::VideoFrameMetadataDataView,
       copy_mode,
       media::VideoFrameMetadata::CopyMode::kCopyToNewTexture)
 
-  GENERATE_OPT_SERIALIZATION(media::VideoRotation,
-                             rotation,
-                             media::VideoRotation::VIDEO_ROTATION_0)
+  static const absl::optional<media::VideoTransformation>& transformation(
+      const media::VideoFrameMetadata& input) {
+    return input.transformation;
+  }
 
   GENERATE_OPT_SERIALIZATION(double, device_scale_factor, 0.0)
   GENERATE_OPT_SERIALIZATION(double, page_scale_factor, 0.0)
@@ -84,57 +100,62 @@ struct StructTraits<media::mojom::VideoFrameMetadataDataView,
   GENERATE_OPT_SERIALIZATION(double, frame_rate, 0.0)
   GENERATE_OPT_SERIALIZATION(double, rtp_timestamp, 0.0)
 
-  static base::Optional<gfx::Rect> capture_update_rect(
+  static const absl::optional<gfx::Rect>& capture_update_rect(
       const media::VideoFrameMetadata& input) {
     return input.capture_update_rect;
   }
 
-  static base::Optional<base::UnguessableToken> overlay_plane_id(
+  static const absl::optional<gfx::Rect>& region_capture_rect(
+      const media::VideoFrameMetadata& input) {
+    return input.region_capture_rect;
+  }
+
+  static const absl::optional<base::UnguessableToken>& overlay_plane_id(
       const media::VideoFrameMetadata& input) {
     return input.overlay_plane_id;
   }
 
-  static base::Optional<base::TimeTicks> receive_time(
+  static absl::optional<base::TimeTicks> receive_time(
       const media::VideoFrameMetadata& input) {
     return input.receive_time;
   }
 
-  static base::Optional<base::TimeTicks> capture_begin_time(
+  static absl::optional<base::TimeTicks> capture_begin_time(
       const media::VideoFrameMetadata& input) {
     return input.capture_begin_time;
   }
 
-  static base::Optional<base::TimeTicks> capture_end_time(
+  static absl::optional<base::TimeTicks> capture_end_time(
       const media::VideoFrameMetadata& input) {
     return input.capture_end_time;
   }
 
-  static base::Optional<base::TimeTicks> decode_begin_time(
+  static absl::optional<base::TimeTicks> decode_begin_time(
       const media::VideoFrameMetadata& input) {
     return input.decode_begin_time;
   }
 
-  static base::Optional<base::TimeTicks> decode_end_time(
+  static absl::optional<base::TimeTicks> decode_end_time(
       const media::VideoFrameMetadata& input) {
     return input.decode_end_time;
   }
 
-  static base::Optional<base::TimeTicks> reference_time(
+  static absl::optional<base::TimeTicks> reference_time(
       const media::VideoFrameMetadata& input) {
     return input.reference_time;
   }
 
-  static base::Optional<base::TimeDelta> processing_time(
+  static absl::optional<base::TimeDelta> processing_time(
       const media::VideoFrameMetadata& input) {
     return input.processing_time;
   }
 
-  static base::Optional<base::TimeDelta> frame_duration(
+  static absl::optional<base::TimeDelta> frame_duration(
       const media::VideoFrameMetadata& input) {
     return input.frame_duration;
   }
 
-  static base::Optional<base::TimeDelta> wallclock_frame_duration(
+  static absl::optional<base::TimeDelta> wallclock_frame_duration(
       const media::VideoFrameMetadata& input) {
     return input.wallclock_frame_duration;
   }
@@ -142,6 +163,8 @@ struct StructTraits<media::mojom::VideoFrameMetadataDataView,
   static bool Read(media::mojom::VideoFrameMetadataDataView input,
                    media::VideoFrameMetadata* output);
 };
+
+#undef GENERATE_OPT_SERIALIZATION
 
 }  // namespace mojo
 

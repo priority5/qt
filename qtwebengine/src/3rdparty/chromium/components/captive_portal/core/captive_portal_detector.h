@@ -9,17 +9,19 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
+#include "build/chromeos_buildflags.h"
 #include "components/captive_portal/core/captive_portal_export.h"
 #include "components/captive_portal/core/captive_portal_types.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "url/gurl.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "base/memory/weak_ptr.h"
 #endif
 
@@ -48,6 +50,10 @@ class CAPTIVE_PORTAL_EXPORT CaptivePortalDetector {
 
   explicit CaptivePortalDetector(
       network::mojom::URLLoaderFactory* loader_factory);
+
+  CaptivePortalDetector(const CaptivePortalDetector&) = delete;
+  CaptivePortalDetector& operator=(const CaptivePortalDetector&) = delete;
+
   ~CaptivePortalDetector();
 
   // Triggers a check for a captive portal. After completion, runs the
@@ -103,7 +109,7 @@ class CAPTIVE_PORTAL_EXPORT CaptivePortalDetector {
 
   DetectionCallback detection_callback_;
 
-  network::mojom::URLLoaderFactory* loader_factory_ = nullptr;
+  raw_ptr<network::mojom::URLLoaderFactory> loader_factory_ = nullptr;
   std::unique_ptr<network::SimpleURLLoader> simple_loader_;
 
   // Test time used by unit tests.
@@ -114,11 +120,9 @@ class CAPTIVE_PORTAL_EXPORT CaptivePortalDetector {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   base::WeakPtrFactory<CaptivePortalDetector> weak_factory_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(CaptivePortalDetector);
 };
 
 }  // namespace captive_portal

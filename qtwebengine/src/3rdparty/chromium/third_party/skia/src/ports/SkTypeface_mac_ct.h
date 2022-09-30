@@ -50,11 +50,13 @@ struct OpszVariation {
 };
 
 struct CTFontVariation {
-    SkUniqueCFRef<CFDictionaryRef> dict;
+    SkUniqueCFRef<CFDictionaryRef> variation;
+    SkUniqueCFRef<CFDictionaryRef> wrongOpszVariation;
     OpszVariation opsz;
 };
 
-CTFontVariation SkCTVariationFromSkFontArguments(CTFontRef ct, const SkFontArguments& args);
+CTFontVariation SkCTVariationFromSkFontArguments(CTFontRef ct, CFArrayRef ctAxes,
+                                                 const SkFontArguments& args);
 
 SkUniqueCFRef<CTFontRef> SkCTFontCreateExactCopy(CTFontRef baseFont, CGFloat textSize,
                                                  OpszVariation opsz);
@@ -90,9 +92,20 @@ public:
     const OpszVariation fOpszVariation;
     const bool fHasColorGlyphs;
 
+    /**
+     * CTFontCopyVariationAxes provides the localized name of all axes, making it very slow.
+     * This is unfortunate, its result is needed just to see if there are any axes at all.
+     * To avoid calling internal APIs cache the result of CTFontCopyVariationAxes.
+     * https://github.com/WebKit/WebKit/commit/1842365d413ed87868e7d33d4fad1691fa3a8129
+     * https://bugs.webkit.org/show_bug.cgi?id=232690
+     */
+    CFArrayRef getVariationAxes() const;
+
 protected:
     int onGetUPEM() const override;
     std::unique_ptr<SkStreamAsset> onOpenStream(int* ttcIndex) const override;
+    std::unique_ptr<SkStreamAsset> onOpenExistingStream(int* ttcIndex) const override;
+    bool onGlyphMaskNeedsCurrentColor() const override;
     int onGetVariationDesignPosition(SkFontArguments::VariationPosition::Coordinate coordinates[],
                                      int coordinateCount) const override;
     void onGetFamilyName(SkString* familyName) const override;
@@ -101,8 +114,8 @@ protected:
     int onGetTableTags(SkFontTableTag tags[]) const override;
     size_t onGetTableData(SkFontTableTag, size_t offset, size_t length, void* data) const override;
     sk_sp<SkData> onCopyTableData(SkFontTableTag) const override;
-    SkScalerContext* onCreateScalerContext(const SkScalerContextEffects&,
-                                           const SkDescriptor*) const override;
+    std::unique_ptr<SkScalerContext> onCreateScalerContext(const SkScalerContextEffects&,
+                                                           const SkDescriptor*) const override;
     void onFilterRec(SkScalerContextRec*) const override;
     void onGetFontDescriptor(SkFontDescriptor*, bool*) const override;
     void getGlyphToUnicodeMap(SkUnichar*) const override;
@@ -118,8 +131,10 @@ protected:
 
 private:
     mutable std::unique_ptr<SkStreamAsset> fStream;
+    mutable SkUniqueCFRef<CFArrayRef> fVariationAxes;
     bool fIsFromStream;
     mutable SkOnce fInitStream;
+    mutable SkOnce fInitVariationAxes;
 
     using INHERITED = SkTypeface;
 };

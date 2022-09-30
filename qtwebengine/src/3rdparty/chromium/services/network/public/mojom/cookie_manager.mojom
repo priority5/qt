@@ -6,6 +6,7 @@ module network.mojom;
 
 import "components/content_settings/core/common/content_settings.mojom";
 import "mojo/public/mojom/base/time.mojom";
+import "services/network/public/mojom/cookie_partition_key.mojom";
 import "services/network/public/mojom/site_for_cookies.mojom";
 import "url/mojom/url.mojom";
 
@@ -52,6 +53,8 @@ enum CookieAccessDelegateType {
   USE_CONTENT_SETTINGS,
   // Always returns Legacy access semantics.
   ALWAYS_LEGACY,
+  // Always returns Non-Legacy access semantics.
+  ALWAYS_NONLEGACY,
 };
 
 enum CookiePriority {
@@ -94,10 +97,43 @@ enum ContextType {
   SAME_SITE_STRICT
 };
 
+enum CookieSameSiteContextMetadataDowngradeType {
+  kNoDowngrade,
+  kStrictToLax,
+  kStrictToCross,
+  kLaxToCross,
+};
+
+enum ContextRedirectTypeBug1221316 {
+  kUnset,
+  kNoRedirect,
+  kCrossSiteRedirect,
+  kPartialSameSiteRedirect,
+  kAllSameSiteRedirect,
+};
+
+// Keep defaults here in sync with net/cookies/cookie_options.h.
+struct CookieSameSiteContextMetadata {
+  CookieSameSiteContextMetadataDowngradeType cross_site_redirect_downgrade = kNoDowngrade;
+  ContextRedirectTypeBug1221316 redirect_type_bug_1221316 = kUnset;
+};
+
 // Keep defaults here in sync with net/cookies/cookie_options.h.
 struct CookieSameSiteContext {
   ContextType context = CROSS_SITE;
   ContextType schemeful_context = CROSS_SITE;
+  CookieSameSiteContextMetadata metadata;
+  CookieSameSiteContextMetadata schemeful_metadata;
+};
+
+// Computed for every cookie access attempt but is only relevant for SameParty
+// cookies.
+enum SamePartyCookieContextType {
+  // The opposite to kSameParty. Should be the default value.
+  kCrossParty,
+  // If the request URL is in the same First-Party Sets as the top-frame site
+  // and each member of the isolation_info.party_context.
+  kSameParty,
 };
 
 // What rules to apply when determining whether access to a particular cookie is
@@ -115,6 +151,12 @@ struct CookieOptions {
   CookieSameSiteContext same_site_cookie_context;
   bool update_access_time = true;
   bool return_excluded_cookies = false;
+  SamePartyContext same_party_context;
+  // The size of the isolation_info.party_context plus the top-frame site for
+  // logging purposes.
+  uint32 full_party_context_size = 0;
+  // Whether the site is a member of a nontrivial First-Party Set.
+  bool is_in_nontrivial_first_party_set = false;
 };
 
 // See net/cookies/canonical_cookie.{h,cc} for documentation.
@@ -132,14 +174,22 @@ struct CanonicalCookie {
   CookieSameSite site_restrictions = NO_RESTRICTION;
   CookiePriority priority = MEDIUM;
   CookieSourceScheme source_scheme = kUnset;
+  bool same_party = false;
+  CookiePartitionKey? partition_key;
+  // -1 because of url::PORT_UNSPECIFIED
+  // url/third_party/mozilla/url_parse.h
+  int32 source_port = -1;
 };
 
+// Indicates reasons why a cookie may be excluded in a get or set
+// operation and if it should be warned about.
+// TODO(crbug.com/1310444): Improve serialization validation comments.
 struct CookieInclusionStatus {
   // Bitfield. Is defined in
   // net::CookieInclusionStatus::ExclusionReason.
-  // net::CookieInclusionStatus::WarningReason.
   uint32 exclusion_reasons;
   // Bitfield. Is defined in
+  // net::CookieInclusionStatus::WarningReason.
   uint32 warning_reasons;
 };
 
@@ -149,15 +199,34 @@ struct CookieAndLineWithAccessResult {
   CookieAccessResult access_result;
 };
 
+union CookieOrLine {
+  CanonicalCookie cookie;
+  string cookie_string;
+};
+
+struct CookieOrLineWithAccessResult {
+  CookieOrLine cookie_or_line;
+  CookieAccessResult access_result;
+};
+
+// See net/cookies/cookie_access_result.{cc,h} for documentation.
 struct CookieAccessResult {
   CookieEffectiveSameSite effective_same_site;
   CookieAccessSemantics access_semantics;
   CookieInclusionStatus status;
+  bool is_allowed_to_access_secure_cookies;
 };
 
 struct CookieWithAccessResult {
   CanonicalCookie cookie;
   CookieAccessResult access_result;
+};
+
+// Keep defaults in here in sync with net/cookies/same_party_context.cc.
+struct SamePartyContext {
+  SamePartyCookieContextType context_type = kCrossParty;
+  SamePartyCookieContextType ancestors_for_metrics_only = kCrossParty;
+  SamePartyCookieContextType top_resource_for_metrics_only = kCrossParty;
 };
 
 // Keep values here in sync with net::CookieChangeCause.
@@ -251,6 +320,11 @@ struct CookieDeletionFilter {
 
   // Delete session/persistent cookies.
   CookieDeletionSessionControl session_control = IGNORE_CONTROL;
+
+  // Only delete partitioned cookies contained in this
+  // CookiePartitionKeyCollection.
+  // See net/cookies/cookie_partition_key_collection.h for documentation.
+  CookiePartitionKeyCollection cookie_partition_key_collection;
 };
 
 interface CookieChangeListener {
@@ -289,12 +363,16 @@ interface CookieManager {
           array<CookieAccessSemantics> access_semantics_list);
 
   // Get all cookies for the specified URL and cookie options.
+  // Will also return any partitioned cookies whose partition key are in
+  // |cookie_partition_key_collection|.
   // Returned cookie list is sorted first by path length (longest first)
   // and second by creation time. If the |return_excluded_cookies| option is set
   // in the options, |excluded_cookies| with be a list of cookies that were
   // blocked from being sent along with the reason each cookie was blocked. By
   // default, that option is not set and |excluded_cookies| is an empty list.
-  GetCookieList(url.mojom.Url url, CookieOptions cookie_options)
+  GetCookieList(url.mojom.Url url,
+                CookieOptions cookie_options,
+                CookiePartitionKeyCollection cookie_partition_key_collection)
       => (array<CookieWithAccessResult> cookies,
           array<CookieWithAccessResult> excluded_cookies);
 
@@ -315,6 +393,10 @@ interface CookieManager {
   // Delete a set of cookies matching the passed filter.
   // Returns the number of cookies deleted.
   DeleteCookies(CookieDeletionFilter filter) => (uint32 num_deleted);
+
+  // Delete cookies marked as session-only in cookie settings.
+  // Returns the number of cookies deleted.
+  DeleteSessionOnlyCookies() => (uint32 num_deleted);
 
   // Subscribes the given listener to changes to a cookie.
   //
@@ -383,4 +465,8 @@ interface CookieManager {
   // the caller with a callback when settings have been updated.
   SetStorageAccessGrantSettings(
       array<content_settings.mojom.ContentSettingPatternSource> settings) => ();
+
+  // TODO(crbug.com/1296161): Delete this method when the partitioned cookies
+  // Origin Trial is over.
+  ConvertPartitionedCookiesToUnpartitioned(url.mojom.Url url);
 };

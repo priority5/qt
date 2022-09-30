@@ -4,7 +4,7 @@
 
 #include "content/renderer/media/android/stream_texture_wrapper_impl.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -17,11 +17,12 @@ class StreamTextureWrapperImplTest : public testing::Test {
  public:
   StreamTextureWrapperImplTest() {}
 
+  StreamTextureWrapperImplTest(const StreamTextureWrapperImplTest&) = delete;
+  StreamTextureWrapperImplTest& operator=(const StreamTextureWrapperImplTest&) =
+      delete;
+
   // Necessary, or else GetSingleThreadTaskRunnerForTesting() fails.
   base::test::SingleThreadTaskEnvironment task_environment_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StreamTextureWrapperImplTest);
 };
 
 // This test's purpose is to make sure the StreamTextureWrapperImpl can properly

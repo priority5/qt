@@ -5,15 +5,13 @@
 #include "components/services/print_compositor/print_compositor_impl.h"
 
 #include <algorithm>
-#include <cstring>
 #include <tuple>
 #include <utility>
 
-#include "base/debug/alias.h"
+#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/memory/discardable_memory.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/crash/core/common/crash_key.h"
@@ -31,47 +29,29 @@
 #include "third_party/skia/src/utils/SkMultiPictureDocument.h"
 #include "ui/accessibility/ax_tree_update.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "content/public/child/dwrite_font_proxy_init_win.h"
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/skia/include/core/SkFontMgr.h"
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
+#elif BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
 #include "third_party/blink/public/platform/platform.h"
 #endif
 
 namespace printing {
-
-namespace {
-
-// TODO(https://crbug.com/1078170): Remove this. It's a sentinel value to
-// check for stack corruption before the stack unwinds at the end of the
-// constructor below.
-const char kStackPadding[] =
-    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!";
-
-}  // namespace
 
 PrintCompositorImpl::PrintCompositorImpl(
     mojo::PendingReceiver<mojom::PrintCompositor> receiver,
     bool initialize_environment,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
     : io_task_runner_(std::move(io_task_runner)) {
-  // TODO(https://crbug.com/1078170): Remove this.
-  char stack_padding[64];
-  strcpy(stack_padding, kStackPadding);
-  base::debug::Alias(stack_padding);
-
   if (receiver)
     receiver_.Bind(std::move(receiver));
 
-  if (!initialize_environment) {
-    // TODO(https://crbug.com/1078170): Remove this.
-    CHECK_EQ(stack_padding, std::string(kStackPadding));
+  if (!initialize_environment)
     return;
-  }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Initialize direct write font proxy so skia can use it.
   content::InitializeDWriteFontProxy();
 #endif
@@ -80,7 +60,7 @@ PrintCompositorImpl::PrintCompositorImpl(
   SkGraphics::SetImageGeneratorFromEncodedDataFactory(
       blink::WebImageGenerator::CreateAsSkImageGenerator);
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
   content::UtilityThread::Get()->EnsureBlinkInitializedWithSandboxSupport();
   // Check that we have sandbox support on this platform.
   DCHECK(blink::Platform::Current()->GetSandboxSupport());
@@ -88,20 +68,17 @@ PrintCompositorImpl::PrintCompositorImpl(
   content::UtilityThread::Get()->EnsureBlinkInitialized();
 #endif
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   // Check that font access is granted.
   // This doesn't do comprehensive tests to make sure fonts can work properly.
   // It is just a quick and simple check to catch things like improper sandbox
   // policy setup.
   DCHECK(SkFontMgr::RefDefault()->countFamilies());
 #endif
-
-  // TODO(https://crbug.com/1078170): Remove this.
-  CHECK_EQ(stack_padding, std::string(kStackPadding));
 }
 
 PrintCompositorImpl::~PrintCompositorImpl() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   content::UninitializeDWriteFontProxy();
 #endif
 }
@@ -112,7 +89,7 @@ void PrintCompositorImpl::SetDiscardableSharedMemoryManager(
   // Set up discardable memory manager.
   mojo::PendingRemote<discardable_memory::mojom::DiscardableSharedMemoryManager>
       manager_remote(std::move(manager));
-  discardable_shared_memory_manager_ = std::make_unique<
+  discardable_shared_memory_manager_ = base::MakeRefCounted<
       discardable_memory::ClientDiscardableSharedMemoryManager>(
       std::move(manager_remote), io_task_runner_);
   base::DiscardableMemoryAllocator::SetInstance(

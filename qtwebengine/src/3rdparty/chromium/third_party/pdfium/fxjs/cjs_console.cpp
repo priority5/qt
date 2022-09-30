@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "fxjs/cjs_event_context.h"
-#include "fxjs/cjs_eventrecorder.h"
 #include "fxjs/cjs_object.h"
 #include "fxjs/js_define.h"
 
@@ -18,11 +17,11 @@ const JSMethodSpec CJS_Console::MethodSpecs[] = {{"clear", clear_static},
                                                  {"println", println_static},
                                                  {"show", show_static}};
 
-int CJS_Console::ObjDefnID = -1;
+uint32_t CJS_Console::ObjDefnID = 0;
 const char CJS_Console::kName[] = "console";
 
 // static
-int CJS_Console::GetObjDefnID() {
+uint32_t CJS_Console::GetObjDefnID() {
   return ObjDefnID;
 }
 

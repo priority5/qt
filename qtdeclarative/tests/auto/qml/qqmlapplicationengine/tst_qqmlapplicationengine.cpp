@@ -1,32 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Research In Motion.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Research In Motion.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
-#include "../../shared/util.h"
 #include <QQmlApplicationEngine>
 #include <QScopedPointer>
 #include <QSignalSpy>
@@ -35,16 +9,17 @@
 #include <QProcess>
 #endif
 #include <QDebug>
+#include <QtQuickTestUtils/private/qmlutils_p.h>
 
 class tst_qqmlapplicationengine : public QQmlDataTest
 {
     Q_OBJECT
 public:
-    tst_qqmlapplicationengine() {}
+    tst_qqmlapplicationengine() : QQmlDataTest(QT_QMLTEST_DATADIR) {}
 
 
 private slots:
-    void initTestCase();
+    void initTestCase() override;
     void basicLoading();
     void testNonResolvedPath();
     void application_data();
@@ -101,6 +76,10 @@ void tst_qqmlapplicationengine::basicLoading()
 // will break.
 void tst_qqmlapplicationengine::testNonResolvedPath()
 {
+#if defined(Q_OS_INTEGRITY)
+    QSKIP("INTEGRITY stores QML files in resources, and the path to a resource cannot be relative in this case");
+#endif
+
 #ifdef Q_OS_ANDROID
     QSKIP("Android stores QML files in resources, and the path to a resource cannot be relative in this case");
 #endif
@@ -162,6 +141,11 @@ void tst_qqmlapplicationengine::application()
 #if QT_CONFIG(process)
     QDir::setCurrent(buildDir);
     QProcess *testProcess = new QProcess(this);
+#ifdef Q_OS_QNX
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("QT_FORCE_STDERR_LOGGING", "1"); // QTBUG-76546
+    testProcess->setProcessEnvironment(env);
+#endif
     QStringList args;
     args << qmlFile; // QML file passed as an argument is going to be run by testapp.
     testProcess->start(QLatin1String("testapp/testapp"), args);
@@ -339,6 +323,7 @@ void tst_qqmlapplicationengine::errorWhileCreating()
     auto url = testFileUrl("requiredViolation.qml");
     QQmlApplicationEngine test;
     QSignalSpy observer(&test, &QQmlApplicationEngine::objectCreated);
+    QSignalSpy failureObserver(&test, &QQmlApplicationEngine::objectCreationFailed);
 
     QTest::ignoreMessage(QtMsgType::QtWarningMsg, "QQmlApplicationEngine failed to create component");
     QTest::ignoreMessage(QtMsgType::QtWarningMsg, qPrintable(QStringLiteral("%1:5:5: Required property foo was not initialized").arg(testFileUrl("Required.qml").toString())));
@@ -346,6 +331,8 @@ void tst_qqmlapplicationengine::errorWhileCreating()
     test.load(url);
 
     QTRY_COMPARE(observer.count(), 1);
+    QCOMPARE(failureObserver.count(), 1);
+    QCOMPARE(failureObserver.first().first(), url);
     QList<QVariant> args = observer.takeFirst();
     QVERIFY(args.at(0).isNull());
     QCOMPARE(args.at(1).toUrl(), url);

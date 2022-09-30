@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Linguist of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef MESSAGEMODEL_H
 #define MESSAGEMODEL_H
@@ -42,6 +17,7 @@ QT_BEGIN_NAMESPACE
 
 class DataModel;
 class MultiDataModel;
+struct StatisticalData;
 
 class MessageItem
 {
@@ -73,6 +49,7 @@ public:
     void setType(TranslatorMessage::Type type) { m_message.setType(type); }
 
     bool isFinished() const { return type() == TranslatorMessage::Finished; }
+    bool isUnfinished() const { return type() == TranslatorMessage::Unfinished; }
     bool isObsolete() const
         { return type() == TranslatorMessage::Obsolete || type() == TranslatorMessage::Vanished; }
     const TranslatorMessage &message() const { return m_message; }
@@ -217,7 +194,7 @@ public:
     int getSrcCharsSpc() const { return m_srcCharsSpc; }
 
 signals:
-    void statsChanged(int words, int characters, int cs, int words2, int characters2, int cs2);
+    void statsChanged(const StatisticalData &newStats);
     void progressChanged(int finishedCount, int oldFinishedCount);
     void languageChanged();
     void modifiedChanged();
@@ -444,7 +421,7 @@ signals:
     void modelDeleted(int model);
     void allModelsDeleted();
     void languageChanged(int model);
-    void statsChanged(int words, int characters, int cs, int words2, int characters2, int cs2);
+    void statsChanged(const StatisticalData &newStats);
     void modifiedChanged(bool);
     void multiContextDataChanged(const MultiDataIndex &index);
     void contextDataChanged(const MultiDataIndex &index);
@@ -494,11 +471,11 @@ public:
     MessageModel(QObject *parent, MultiDataModel *data);
 
     // QAbstractItemModel
-    QModelIndex index(int row, int column, const QModelIndex &parent = QModelIndex()) const;
-    QModelIndex parent(const QModelIndex& index) const;
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
+    QModelIndex index(int row, int column, const QModelIndex &parent = QModelIndex()) const override;
+    QModelIndex parent(const QModelIndex& index) const override;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
 
     // Convenience
     MultiDataIndex dataIndex(const QModelIndex &index, int model) const;

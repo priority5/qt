@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the lottie-qt module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #ifndef BMPROPERTY_P_H
 #define BMPROPERTY_P_H
@@ -64,6 +38,9 @@ struct EasingSegment {
     T startValue;
     T endValue;
     BezierEasing easing;
+    qreal valueForProgress(qreal progress) const {
+        return complete ? easing.valueForProgress(progress) : 1;
+    }
 };
 
 template<typename T>
@@ -117,7 +94,7 @@ public:
             else
                 progress = ((adjustedFrame - easing->startFrame) * 1.0) /
                         (easing->endFrame - easing->startFrame);
-            qreal easedValue = easing->easing.valueForProgress(progress);
+            qreal easedValue = easing->valueForProgress(progress);
             m_value = easing->startValue + easedValue *
                     ((easing->endValue - easing->startValue));
             return true;
@@ -363,7 +340,7 @@ public:
         if (const EasingSegment<T> *easing = BMProperty<T>::getEasingSegment(adjustedFrame)) {
             qreal progress = ((adjustedFrame - this->m_startFrame) * 1.0) /
                     (this->m_endFrame - this->m_startFrame);
-            qreal easedValue = easing->easing.valueForProgress(progress);
+            qreal easedValue = easing->valueForProgress(progress);
             // For the time being, 4D vectors are used only for colors, and
             // the value must be restricted to between [0, 1]
             easedValue = qBound(qreal(0.0), easedValue, qreal(1.0));

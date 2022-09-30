@@ -12,10 +12,10 @@
 #include "base/callback_helpers.h"
 #include "base/callback_list.h"
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/types/pass_key.h"
 #include "mojo/public/cpp/system/core.h"
 #include "mojo/public/cpp/system/wait_set.h"
 
@@ -44,7 +44,7 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) SyncHandleRegistry
 
    private:
     base::ScopedClosureRunner remove_runner_;
-    std::unique_ptr<EventCallbackList::Subscription> subscription_;
+    base::CallbackListSubscription subscription_;
   };
   using EventCallbackSubscription = std::unique_ptr<Subscription>;
 
@@ -52,6 +52,12 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) SyncHandleRegistry
 
   // Returns a sequence-local object.
   static scoped_refptr<SyncHandleRegistry> current();
+
+  // Exposed for base::MakeRefCounted.
+  explicit SyncHandleRegistry(base::PassKey<SyncHandleRegistry>);
+
+  SyncHandleRegistry(const SyncHandleRegistry&) = delete;
+  SyncHandleRegistry& operator=(const SyncHandleRegistry&) = delete;
 
   // Registers a |Handle| to be watched for |handle_signals|. If any such
   // signals are satisfied during a Wait(), the Wait() is woken up and
@@ -79,7 +85,6 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) SyncHandleRegistry
  private:
   friend class base::RefCounted<SyncHandleRegistry>;
 
-  SyncHandleRegistry();
   ~SyncHandleRegistry();
 
   WaitSet wait_set_;
@@ -92,8 +97,6 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) SyncHandleRegistry
   bool in_nested_wait_ = false;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(SyncHandleRegistry);
 };
 
 }  // namespace mojo

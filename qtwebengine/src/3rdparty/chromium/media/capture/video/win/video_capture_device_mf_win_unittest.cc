@@ -11,13 +11,16 @@
 #include <cmath>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/task/thread_pool.h"
 #include "base/test/task_environment.h"
+#include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
+#include "media/base/win/mf_helpers.h"
+#include "media/capture/video/win/d3d_capture_test_utils.h"
 #include "media/capture/video/win/sink_filter_win.h"
 #include "media/capture/video/win/video_capture_device_factory_win.h"
 #include "media/capture/video/win/video_capture_device_mf_win.h"
-#include "media/capture/video/win/video_capture_dxgi_device_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -44,6 +47,15 @@ constexpr long kVideoProcAmpMinBase = -50;
 constexpr long kVideoProcAmpMaxBase = 50;
 constexpr long kVideoProcAmpStep = 1;
 
+constexpr uint32_t kMFSampleBufferLength = 1;
+
+// Arbitrary random guid for test metadata.
+constexpr GUID GUID_MEDIA_TYPE_INDEX = {
+    0x12345678,
+    0xaaaa,
+    0xbbbb,
+    {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7}};
+
 class MockClient : public VideoCaptureDevice::Client {
  public:
   void OnIncomingCapturedData(const uint8_t* data,
@@ -64,10 +76,8 @@ class MockClient : public VideoCaptureDevice::Client {
                                    int frame_feedback_id = 0) override {}
 
   void OnIncomingCapturedExternalBuffer(
-      gfx::GpuMemoryBufferHandle handle,
-      std::unique_ptr<Buffer::ScopedAccessPermission> read_access_permission,
-      const VideoCaptureFormat& format,
-      const gfx::ColorSpace& color_space,
+      CapturedExternalVideoBuffer buffer,
+      std::vector<CapturedExternalVideoBuffer> scaled_buffers,
       base::TimeTicks reference_time,
       base::TimeDelta timestamp) override {}
 
@@ -79,14 +89,14 @@ class MockClient : public VideoCaptureDevice::Client {
                                 base::TimeTicks reference_,
                                 base::TimeDelta timestamp) override {}
 
-  void OnIncomingCapturedBufferExt(
-      Buffer buffer,
-      const VideoCaptureFormat& format,
-      const gfx::ColorSpace& color_space,
-      base::TimeTicks reference_time,
-      base::TimeDelta timestamp,
-      gfx::Rect visible_rect,
-      const VideoFrameMetadata& additional_metadata) override {}
+  MOCK_METHOD7(OnIncomingCapturedBufferExt,
+               void(Buffer,
+                    const VideoCaptureFormat&,
+                    const gfx::ColorSpace&,
+                    base::TimeTicks,
+                    base::TimeDelta,
+                    gfx::Rect,
+                    const VideoFrameMetadata&));
 
   MOCK_METHOD3(OnError,
                void(VideoCaptureError,
@@ -268,7 +278,7 @@ class MockAMVideoProcAmp final : public MockInterface<IAMVideoProcAmp> {
   ~MockAMVideoProcAmp() override = default;
 };
 
-class MockMFMediaSource : public MockInterface<IMFMediaSource> {
+class MockMFMediaSource : public MockInterface<IMFMediaSourceEx> {
  public:
   // IUnknown
   IFACEMETHODIMP QueryInterface(REFIID riid, void** object) override {
@@ -278,6 +288,10 @@ class MockMFMediaSource : public MockInterface<IMFMediaSource> {
     }
     if (riid == __uuidof(IAMVideoProcAmp)) {
       *object = AddReference(new MockAMVideoProcAmp);
+      return S_OK;
+    }
+    if (riid == __uuidof(IMFMediaSource)) {
+      *object = AddReference(static_cast<IMFMediaSource*>(this));
       return S_OK;
     }
     return MockInterface::QueryInterface(riid, object);
@@ -316,6 +330,15 @@ class MockMFMediaSource : public MockInterface<IMFMediaSource> {
   IFACEMETHODIMP Stop(void) override { return E_NOTIMPL; }
   IFACEMETHODIMP Pause(void) override { return E_NOTIMPL; }
   IFACEMETHODIMP Shutdown(void) override { return E_NOTIMPL; }
+  // IMFMediaSourceEx
+  IFACEMETHODIMP GetSourceAttributes(IMFAttributes** attributes) {
+    return E_NOTIMPL;
+  }
+  IFACEMETHODIMP GetStreamAttributes(DWORD stream_id,
+                                     IMFAttributes** attributes) {
+    return E_NOTIMPL;
+  }
+  IFACEMETHODIMP SetD3DManager(IUnknown* manager) { return S_OK; }
 
  private:
   ~MockMFMediaSource() override = default;
@@ -528,7 +551,7 @@ class MockMFCaptureEngine : public MockInterface<IMFCaptureEngine> {
         .WillByDefault(Return(MF_CAPTURE_ENGINE_INITIALIZED));
     // HW Cameras usually add about 500ms latency on init
     ON_CALL(*this, InitEventDelay)
-        .WillByDefault(Return(base::TimeDelta::FromMilliseconds(500)));
+        .WillByDefault(Return(base::Milliseconds(500)));
 
     base::TimeDelta event_delay = InitEventDelay();
 
@@ -538,8 +561,8 @@ class MockMFCaptureEngine : public MockInterface<IMFCaptureEngine> {
                        OnInitEventGuid(), OnInitStatus()),
         event_delay);
     // if zero is passed ensure event fires before wait starts
-    if (event_delay == base::TimeDelta::FromMilliseconds(0)) {
-      base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
+    if (event_delay == base::Milliseconds(0)) {
+      base::PlatformThread::Sleep(base::Milliseconds(200));
     }
 
     return S_OK;
@@ -609,11 +632,13 @@ class StubMFMediaType : public MockInterface<IMFMediaType> {
  public:
   StubMFMediaType(GUID major_type,
                   GUID sub_type,
+                  int media_type_index,
                   int frame_width,
                   int frame_height,
                   int frame_rate)
       : major_type_(major_type),
         sub_type_(sub_type),
+        media_type_index_(media_type_index),
         frame_width_(frame_width),
         frame_height_(frame_height),
         frame_rate_(frame_rate) {}
@@ -658,6 +683,10 @@ class StubMFMediaType : public MockInterface<IMFMediaType> {
   IFACEMETHODIMP GetUINT32(REFGUID key, UINT32* value) override {
     if (key == MF_MT_INTERLACE_MODE) {
       *value = MFVideoInterlace_Progressive;
+      return S_OK;
+    }
+    if (key == GUID_MEDIA_TYPE_INDEX) {
+      *value = media_type_index_;
       return S_OK;
     }
     return E_NOTIMPL;
@@ -786,6 +815,7 @@ class StubMFMediaType : public MockInterface<IMFMediaType> {
 
   const GUID major_type_;
   const GUID sub_type_;
+  const uint32_t media_type_index_;
   const int frame_width_;
   const int frame_height_;
   const int frame_rate_;
@@ -955,6 +985,40 @@ struct DepthDeviceParams {
   // Depth device sometimes provides multiple video streams.
   bool additional_i420_video_stream;
 };
+
+class MockCaptureHandleProvider
+    : public VideoCaptureDevice::Client::Buffer::HandleProvider {
+ public:
+  // Duplicate as an writable (unsafe) shared memory region.
+  base::UnsafeSharedMemoryRegion DuplicateAsUnsafeRegion() override {
+    return base::UnsafeSharedMemoryRegion();
+  }
+
+  // Duplicate as a writable (unsafe) mojo buffer.
+  mojo::ScopedSharedBufferHandle DuplicateAsMojoBuffer() override {
+    return mojo::ScopedSharedBufferHandle();
+  }
+
+  // Access a |VideoCaptureBufferHandle| for local, writable memory.
+  std::unique_ptr<VideoCaptureBufferHandle> GetHandleForInProcessAccess()
+      override {
+    return nullptr;
+  }
+
+  // Clone a |GpuMemoryBufferHandle| for IPC.
+  gfx::GpuMemoryBufferHandle GetGpuMemoryBufferHandle() override {
+    // Create a fake DXGI buffer handle
+    // (ensure that the fake is still a valid NT handle by using an event
+    // handle)
+    base::win::ScopedHandle fake_dxgi_handle(
+        CreateEvent(nullptr, FALSE, FALSE, nullptr));
+    gfx::GpuMemoryBufferHandle handle;
+    handle.type = gfx::GpuMemoryBufferType::DXGI_SHARED_HANDLE;
+    handle.dxgi_handle = std::move(fake_dxgi_handle);
+    return handle;
+  }
+};
+
 }  // namespace
 
 const int kArbitraryValidVideoWidth = 1920;
@@ -1037,7 +1101,7 @@ class VideoCaptureDeviceMFWinTest : public ::testing::Test {
             return MF_E_NO_MORE_TYPES;
 
           *media_type = new StubMFMediaType(MFMediaType_Video, mf_video_subtype,
-                                            kArbitraryValidVideoWidth,
+                                            0, kArbitraryValidVideoWidth,
                                             kArbitraryValidVideoHeight, 30);
           (*media_type)->AddRef();
 
@@ -1057,11 +1121,60 @@ class VideoCaptureDeviceMFWinTest : public ::testing::Test {
         .WillRepeatedly(Invoke([mf_video_subtype](DWORD stream_index,
                                                   IMFMediaType** media_type) {
           *media_type = new StubMFMediaType(MFMediaType_Video, mf_video_subtype,
-                                            kArbitraryValidVideoWidth,
+                                            0, kArbitraryValidVideoWidth,
                                             kArbitraryValidVideoHeight, 30);
           (*media_type)->AddRef();
           return S_OK;
         }));
+  }
+
+  void PrepareMFDeviceWithVideoStreams(std::vector<GUID> mf_video_subtypes) {
+    EXPECT_CALL(*capture_source_, DoGetDeviceStreamCount(_))
+        .WillRepeatedly(Invoke([](DWORD* stream_count) {
+          *stream_count = 1;
+          return S_OK;
+        }));
+    EXPECT_CALL(*capture_source_, DoGetDeviceStreamCategory(0, _))
+        .WillRepeatedly(Invoke([](DWORD stream_index,
+                                  MF_CAPTURE_ENGINE_STREAM_CATEGORY* category) {
+          *category = MF_CAPTURE_ENGINE_STREAM_CATEGORY_VIDEO_PREVIEW;
+          return S_OK;
+        }));
+
+    EXPECT_CALL(*capture_source_, DoGetAvailableDeviceMediaType(0, _, _))
+        .WillRepeatedly(Invoke([mf_video_subtypes](DWORD stream_index,
+                                                   DWORD media_type_index,
+                                                   IMFMediaType** media_type) {
+          if (media_type_index >= mf_video_subtypes.size())
+            return MF_E_NO_MORE_TYPES;
+
+          *media_type = new StubMFMediaType(
+              MFMediaType_Video, mf_video_subtypes[media_type_index],
+              media_type_index, kArbitraryValidVideoWidth,
+              kArbitraryValidVideoHeight, 30);
+          (*media_type)->AddRef();
+
+          return S_OK;
+        }));
+
+    EXPECT_CALL(*(engine_.Get()),
+                DoGetSink(MF_CAPTURE_ENGINE_SINK_TYPE_PREVIEW, _))
+        .WillRepeatedly(Invoke([this](MF_CAPTURE_ENGINE_SINK_TYPE sink_type,
+                                      IMFCaptureSink** sink) {
+          *sink = this->capture_preview_sink_.get();
+          this->capture_preview_sink_->AddRef();
+          return S_OK;
+        }));
+
+    EXPECT_CALL(*capture_source_, DoGetCurrentDeviceMediaType(_, _))
+        .WillRepeatedly(Invoke(
+            [mf_video_subtypes](DWORD stream_index, IMFMediaType** media_type) {
+              *media_type = new StubMFMediaType(
+                  MFMediaType_Video, mf_video_subtypes[0], 0,
+                  kArbitraryValidVideoWidth, kArbitraryValidVideoHeight, 30);
+              (*media_type)->AddRef();
+              return S_OK;
+            }));
   }
 
   void PrepareMFDeviceWithOneVideoStreamAndOnePhotoStream(
@@ -1088,13 +1201,13 @@ class VideoCaptureDeviceMFWinTest : public ::testing::Test {
                                                     IMFMediaType** media_type) {
       if (stream_index == 0) {
         *media_type = new StubMFMediaType(MFMediaType_Video, mf_video_subtype,
-                                          kArbitraryValidVideoWidth,
+                                          0, kArbitraryValidVideoWidth,
                                           kArbitraryValidVideoHeight, 30);
         (*media_type)->AddRef();
         return S_OK;
       } else if (stream_index == 1) {
         *media_type = new StubMFMediaType(
-            MFMediaType_Image, GUID_ContainerFormatJpeg,
+            MFMediaType_Image, GUID_ContainerFormatJpeg, 0,
             kArbitraryValidPhotoWidth, kArbitraryValidPhotoHeight, 0);
         (*media_type)->AddRef();
         return S_OK;
@@ -1151,13 +1264,13 @@ class VideoCaptureDeviceMFWinTest : public ::testing::Test {
                                           IMFMediaType** media_type) {
       if (stream_index == 0) {
         *media_type = new StubMFMediaType(
-            MFMediaType_Video, params.depth_video_stream_subtype,
+            MFMediaType_Video, params.depth_video_stream_subtype, 0,
             kArbitraryValidVideoWidth, kArbitraryValidVideoHeight, 30);
         (*media_type)->AddRef();
         return S_OK;
       } else if (stream_index == 1 && params.additional_i420_video_stream) {
         *media_type = new StubMFMediaType(MFMediaType_Video, MFVideoFormat_I420,
-                                          kArbitraryValidVideoWidth,
+                                          0, kArbitraryValidVideoWidth,
                                           kArbitraryValidVideoHeight, 30);
         (*media_type)->AddRef();
         return S_OK;
@@ -1173,7 +1286,7 @@ class VideoCaptureDeviceMFWinTest : public ::testing::Test {
               params.additional_i420_formats_in_depth_stream &&
               media_type_index == 1) {
             *media_type = new StubMFMediaType(
-                MFMediaType_Video, MFVideoFormat_I420,
+                MFMediaType_Video, MFVideoFormat_I420, 0,
                 kArbitraryValidVideoWidth, kArbitraryValidVideoHeight, 30);
             (*media_type)->AddRef();
             return S_OK;
@@ -1207,7 +1320,7 @@ class VideoCaptureDeviceMFWinTest : public ::testing::Test {
   scoped_refptr<MockMFCaptureSource> capture_source_;
   scoped_refptr<MockCapturePreviewSink> capture_preview_sink_;
   base::test::TaskEnvironment task_environment_;
-  scoped_refptr<VideoCaptureDXGIDeviceManager> dxgi_device_manager_;
+  scoped_refptr<DXGIDeviceManager> dxgi_device_manager_;
 
  private:
   const bool media_foundation_supported_;
@@ -1227,6 +1340,24 @@ TEST_F(VideoCaptureDeviceMFWinTest, StartPreviewOnAllocateAndStart) {
   device_->AllocateAndStart(VideoCaptureParams(), std::move(client_));
   capture_preview_sink_->sample_callback->OnSample(nullptr);
   device_->StopAndDeAllocate();
+}
+
+// Expects device's |camera_rotation_| to be populated after first OnSample().
+TEST_F(VideoCaptureDeviceMFWinTest, PopulateCameraRotationOnSample) {
+  if (ShouldSkipTest())
+    return;
+
+  PrepareMFDeviceWithOneVideoStream(MFVideoFormat_MJPG);
+
+  EXPECT_CALL(*(engine_.Get()), OnStartPreview());
+  EXPECT_CALL(*client_, OnStarted());
+
+  device_->AllocateAndStart(VideoCaptureParams(), std::move(client_));
+  // Create a valid IMFSample to use with the callback.
+  Microsoft::WRL::ComPtr<IMFSample> test_sample =
+      CreateEmptySampleWithBuffer(kMFSampleBufferLength, 0);
+  capture_preview_sink_->sample_callback->OnSample(test_sample.Get());
+  EXPECT_TRUE(device_->camera_rotation().has_value());
 }
 
 // Expects OnError() to be called on an errored IMFMediaEvent
@@ -1295,7 +1426,7 @@ TEST_F(VideoCaptureDeviceMFWinTest, CallClientOnFireCaptureEngineInitEarly) {
     return MF_CAPTURE_ENGINE_INITIALIZED;
   });
   EXPECT_CALL(*(engine.Get()), InitEventDelay).WillOnce([]() {
-    return base::TimeDelta::FromMilliseconds(0);
+    return base::Milliseconds(0);
   });
 
   EXPECT_CALL(*(engine.Get()), OnCorrectInitializeQueued());
@@ -1366,7 +1497,7 @@ TEST_F(VideoCaptureDeviceMFWinTest, AllocateAndStartWithFlakyInvalidRequest) {
           return MF_E_NO_MORE_TYPES;
 
         *media_type = new StubMFMediaType(MFMediaType_Video, MFVideoFormat_MJPG,
-                                          kArbitraryValidVideoWidth,
+                                          0, kArbitraryValidVideoWidth,
                                           kArbitraryValidVideoHeight, 30);
         (*media_type)->AddRef();
 
@@ -1698,7 +1829,7 @@ class VideoCaptureDeviceMFWinTestWithDXGI : public VideoCaptureDeviceMFWinTest {
     if (ShouldSkipD3D11Test())
       GTEST_SKIP();
 
-    dxgi_device_manager_ = VideoCaptureDXGIDeviceManager::Create();
+    dxgi_device_manager_ = DXGIDeviceManager::Create();
     VideoCaptureDeviceMFWinTest::SetUp();
   }
 };
@@ -1710,6 +1841,165 @@ TEST_F(VideoCaptureDeviceMFWinTestWithDXGI, SimpleInit) {
   // The purpose of this test is to ensure that the capture engine is correctly
   // initialized with a MF DXGI device manager.
   // All required logic for this test is in SetUp().
+}
+
+TEST_F(VideoCaptureDeviceMFWinTestWithDXGI, EnsureNV12SinkSubtype) {
+  if (ShouldSkipTest())
+    return;
+
+  // Ensures that the stream which is added to the preview sink has a media type
+  // with a subtype of NV12
+  const GUID expected_subtype = MFVideoFormat_NV12;
+  PrepareMFDeviceWithOneVideoStream(expected_subtype);
+
+  EXPECT_CALL(*(engine_.Get()), OnStartPreview());
+  EXPECT_CALL(*client_, OnStarted());
+
+  EXPECT_CALL(*(capture_source_.get()), DoSetCurrentDeviceMediaType(0, _))
+      .WillOnce(Invoke(
+          [expected_subtype](DWORD stream_index, IMFMediaType* media_type) {
+            GUID source_video_media_subtype;
+            media_type->GetGUID(MF_MT_SUBTYPE, &source_video_media_subtype);
+            EXPECT_EQ(source_video_media_subtype, expected_subtype);
+            return S_OK;
+          }));
+
+  EXPECT_CALL(*(capture_preview_sink_.get()), DoAddStream(0, _, _, _))
+      .WillOnce(Invoke([expected_subtype](DWORD stream_index,
+                                          IMFMediaType* media_type,
+                                          IMFAttributes* attributes,
+                                          DWORD* sink_stream_index) {
+        GUID sink_video_media_subtype;
+        media_type->GetGUID(MF_MT_SUBTYPE, &sink_video_media_subtype);
+        EXPECT_EQ(sink_video_media_subtype, expected_subtype);
+        return S_OK;
+      }));
+
+  VideoCaptureFormat format(gfx::Size(640, 480), 30, media::PIXEL_FORMAT_NV12);
+  VideoCaptureParams video_capture_params;
+  video_capture_params.requested_format = format;
+  device_->AllocateAndStart(video_capture_params, std::move(client_));
+  capture_preview_sink_->sample_callback->OnSample(nullptr);
+}
+
+TEST_F(VideoCaptureDeviceMFWinTestWithDXGI, EnsureNoFakeNV12MediaType) {
+  if (ShouldSkipTest())
+    return;
+
+  PrepareMFDeviceWithVideoStreams(
+      {MFVideoFormat_NV12, MFVideoFormat_MJPG, MFVideoFormat_NV12});
+  // First NV12 format should be ignored as fake (MJPG backed).
+  uint32_t kExpectedMediaTypeIndex = 2;
+  EXPECT_CALL(*(engine_.Get()), OnStartPreview());
+  EXPECT_CALL(*client_, OnStarted());
+
+  EXPECT_CALL(*(capture_source_.get()), DoSetCurrentDeviceMediaType(0, _))
+      .WillOnce(Invoke([kExpectedMediaTypeIndex](DWORD stream_index,
+                                                 IMFMediaType* media_type) {
+        GUID source_video_media_subtype;
+        media_type->GetGUID(MF_MT_SUBTYPE, &source_video_media_subtype);
+        uint32_t media_type_index;
+        media_type->GetUINT32(GUID_MEDIA_TYPE_INDEX, &media_type_index);
+        EXPECT_EQ(media_type_index, kExpectedMediaTypeIndex);
+        return S_OK;
+      }));
+
+  VideoCaptureFormat format(gfx::Size(640, 480), 30, media::PIXEL_FORMAT_NV12);
+  VideoCaptureParams video_capture_params;
+  video_capture_params.requested_format = format;
+  device_->AllocateAndStart(video_capture_params, std::move(client_));
+  capture_preview_sink_->sample_callback->OnSample(nullptr);
+}
+
+TEST_F(VideoCaptureDeviceMFWinTestWithDXGI, DeliverGMBCaptureBuffers) {
+  if (ShouldSkipTest())
+    return;
+
+  const GUID expected_subtype = MFVideoFormat_NV12;
+  PrepareMFDeviceWithOneVideoStream(expected_subtype);
+
+  const gfx::Size expected_size(640, 480);
+
+  // Verify that an output capture buffer is reserved from the client
+  EXPECT_CALL(*client_, ReserveOutputBuffer)
+      .WillOnce(Invoke(
+          [expected_size](const gfx::Size& size, VideoPixelFormat format,
+                          int feedback_id,
+                          VideoCaptureDevice::Client::Buffer* capture_buffer) {
+            EXPECT_EQ(size.width(), expected_size.width());
+            EXPECT_EQ(size.height(), expected_size.height());
+            EXPECT_EQ(format, PIXEL_FORMAT_NV12);
+            capture_buffer->handle_provider =
+                std::make_unique<MockCaptureHandleProvider>();
+            return VideoCaptureDevice::Client::ReserveResult::kSucceeded;
+          }));
+
+  Microsoft::WRL::ComPtr<MockD3D11Device> mock_device(new MockD3D11Device());
+
+  // Create mock source texture (to be provided to capture device from MF
+  // capture API)
+  D3D11_TEXTURE2D_DESC mock_desc = {};
+  mock_desc.Format = DXGI_FORMAT_NV12;
+  mock_desc.Width = expected_size.width();
+  mock_desc.Height = expected_size.height();
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> mock_source_texture_2d;
+  Microsoft::WRL::ComPtr<MockD3D11Texture2D> mock_source_texture(
+      new MockD3D11Texture2D(mock_desc, mock_device.Get()));
+  EXPECT_TRUE(SUCCEEDED(
+      mock_source_texture.CopyTo(IID_PPV_ARGS(&mock_source_texture_2d))));
+
+  // Create mock target texture with matching dimensions/format
+  // (to be provided from the capture device to the capture client)
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> mock_target_texture_2d;
+  Microsoft::WRL::ComPtr<MockD3D11Texture2D> mock_target_texture(
+      new MockD3D11Texture2D(mock_desc, mock_device.Get()));
+  EXPECT_TRUE(SUCCEEDED(
+      mock_target_texture.CopyTo(IID_PPV_ARGS(&mock_target_texture_2d))));
+  // Mock OpenSharedResource call on mock D3D device to return target texture
+  EXPECT_CALL(*mock_device.Get(), DoOpenSharedResource1)
+      .WillOnce(Invoke([&mock_target_texture_2d](HANDLE resource,
+                                                 REFIID returned_interface,
+                                                 void** resource_out) {
+        return mock_target_texture_2d.CopyTo(returned_interface, resource_out);
+      }));
+  // Expect call to copy source texture to target on immediate context
+  ID3D11Resource* expected_source =
+      static_cast<ID3D11Resource*>(mock_source_texture_2d.Get());
+  ID3D11Resource* expected_target =
+      static_cast<ID3D11Resource*>(mock_target_texture_2d.Get());
+  EXPECT_CALL(*mock_device->mock_immediate_context_.Get(),
+              OnCopySubresourceRegion(expected_target, _, _, _, _,
+                                      expected_source, _, _))
+      .Times(1);
+  // Expect the client to receive a buffer containing a GMB containing the
+  // expected fake DXGI handle
+  EXPECT_CALL(*client_, OnIncomingCapturedBufferExt)
+      .WillOnce(Invoke([](VideoCaptureDevice::Client::Buffer buffer,
+                          const VideoCaptureFormat&, const gfx::ColorSpace&,
+                          base::TimeTicks, base::TimeDelta, gfx::Rect,
+                          const VideoFrameMetadata&) {
+        gfx::GpuMemoryBufferHandle gmb_handle =
+            buffer.handle_provider->GetGpuMemoryBufferHandle();
+        EXPECT_EQ(gmb_handle.type,
+                  gfx::GpuMemoryBufferType::DXGI_SHARED_HANDLE);
+      }));
+
+  // Init capture
+  VideoCaptureFormat format(expected_size, 30, media::PIXEL_FORMAT_NV12);
+  VideoCaptureParams video_capture_params;
+  video_capture_params.requested_format = format;
+  device_->AllocateAndStart(video_capture_params, std::move(client_));
+
+  // Create MF sample and provide to sample callback on capture device
+  Microsoft::WRL::ComPtr<IMFSample> sample;
+  EXPECT_TRUE(SUCCEEDED(MFCreateSample(&sample)));
+  Microsoft::WRL::ComPtr<IMFMediaBuffer> dxgi_buffer;
+  EXPECT_TRUE(SUCCEEDED(MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D),
+                                                  mock_source_texture_2d.Get(),
+                                                  0, FALSE, &dxgi_buffer)));
+  EXPECT_TRUE(SUCCEEDED(sample->AddBuffer(dxgi_buffer.Get())));
+
+  capture_preview_sink_->sample_callback->OnSample(sample.Get());
 }
 
 }  // namespace media

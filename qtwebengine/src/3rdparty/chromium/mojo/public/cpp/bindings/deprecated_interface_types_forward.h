@@ -9,26 +9,7 @@
 namespace mojo {
 
 template <typename Interface>
-class InterfacePtr;
-template <typename Interface>
-class InterfacePtrInfo;
-template <typename Interface>
-class InterfaceRequest;
-template <typename Interface>
-class AssociatedInterfacePtr;
-template <typename Interface>
 class AssociatedInterfacePtrInfo;
-template <typename Interface>
-class AssociatedInterfaceRequest;
-
-template <typename InterfacePtrType>
-class ThreadSafeInterfacePtrBase;
-template <typename Interface>
-using ThreadSafeAssociatedInterfacePtr =
-    ThreadSafeInterfacePtrBase<AssociatedInterfacePtr<Interface>>;
-template <typename Interface>
-using ThreadSafeInterfacePtr =
-    ThreadSafeInterfacePtrBase<InterfacePtr<Interface>>;
 
 }  // namespace mojo
 

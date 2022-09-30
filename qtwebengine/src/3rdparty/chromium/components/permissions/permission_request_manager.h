@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_PERMISSIONS_PERMISSION_REQUEST_MANAGER_H_
 #define COMPONENTS_PERMISSIONS_PERMISSION_REQUEST_MANAGER_H_
 
+#include <algorithm>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -13,10 +14,14 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "components/permissions/notification_permission_ui_selector.h"
+#include "base/time/time.h"
 #include "components/permissions/permission_prompt.h"
+#include "components/permissions/permission_ui_selector.h"
+#include "components/permissions/permission_uma_util.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+
+class GURL;
 
 namespace content {
 class RenderFrameHost;
@@ -30,6 +35,7 @@ namespace permissions {
 class PermissionRequest;
 enum class PermissionAction;
 enum class PermissionPromptDisposition;
+enum class PermissionPromptDispositionReason;
 
 // The message to be printed in the Developer Tools console when the quiet
 // notification permission prompt UI is shown on sites with abusive permission
@@ -68,16 +74,23 @@ class PermissionRequestManager
    public:
     virtual void OnBubbleAdded() {}
     virtual void OnBubbleRemoved() {}
+    // Called when the current batch of requests have been handled and the
+    // bubble is no longer visible. Note that there might be some queued
+    // permission requests that will get shown after this. This differs from
+    // OnBubbleRemoved() in that the bubble may disappear while there are still
+    // in-flight requests (e.g. when switching tabs while the bubble is still
+    // visible).
+    virtual void OnRequestsFinalized() {}
 
    protected:
     virtual ~Observer() = default;
   };
 
-  enum AutoResponseType { NONE, ACCEPT_ALL, DENY_ALL, DISMISS };
+  enum AutoResponseType { NONE, ACCEPT_ONCE, ACCEPT_ALL, DENY_ALL, DISMISS };
 
-  using UiDecision = NotificationPermissionUiSelector::Decision;
-  using QuietUiReason = NotificationPermissionUiSelector::QuietUiReason;
-  using WarningReason = NotificationPermissionUiSelector::WarningReason;
+  using UiDecision = PermissionUiSelector::Decision;
+  using QuietUiReason = PermissionUiSelector::QuietUiReason;
+  using WarningReason = PermissionUiSelector::WarningReason;
 
   ~PermissionRequestManager() override;
 
@@ -92,21 +105,11 @@ class PermissionRequestManager
                   PermissionRequest* request);
 
   // Will reposition the bubble (may change parent if necessary).
-  void UpdateAnchorPosition();
+  void UpdateAnchor();
 
   // For observing the status of the permission bubble manager.
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
-
-  // Notification permission requests might use a quiet UI when the
-  // "quiet-notification-prompts" feature is enabled. This is done either
-  // directly by the user in notifications settings, or via automatic logic that
-  // might trigger the current request to use the quiet UI.
-  bool ShouldCurrentRequestUseQuietUI() const;
-
-  // If |ShouldCurrentRequestUseQuietUI| return true, this will provide a reason
-  // as to why the quiet UI needs to be used.
-  QuietUiReason ReasonForUsingQuietUi() const;
 
   bool IsRequestInProgress() const;
 
@@ -123,18 +126,33 @@ class PermissionRequestManager
       content::NavigationHandle* navigation_handle) override;
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
-  void DocumentOnLoadCompletedInMainFrame() override;
+  void DocumentOnLoadCompletedInPrimaryMainFrame() override;
   void DOMContentLoaded(content::RenderFrameHost* render_frame_host) override;
   void WebContentsDestroyed() override;
   void OnVisibilityChanged(content::Visibility visibility) override;
 
   // PermissionPrompt::Delegate:
   const std::vector<PermissionRequest*>& Requests() override;
+  GURL GetRequestingOrigin() const override;
   GURL GetEmbeddingOrigin() const override;
   void Accept() override;
+  void AcceptThisTime() override;
   void Deny() override;
-  void Closing() override;
+  void Dismiss() override;
+  void Ignore() override;
   bool WasCurrentRequestAlreadyDisplayed() override;
+  bool ShouldDropCurrentRequestIfCannotShowQuietly() const override;
+  bool ShouldCurrentRequestUseQuietUI() const override;
+  absl::optional<PermissionUiSelector::QuietUiReason> ReasonForUsingQuietUi()
+      const override;
+  void SetDismissOnTabClose() override;
+  void SetBubbleShown() override;
+  void SetDecisionTime() override;
+  void SetManageClicked() override;
+  void SetLearnMoreClicked() override;
+
+  void set_manage_clicked() { did_click_manage_ = true; }
+  void set_learn_more_clicked() { did_click_learn_more_ = true; }
 
   void set_web_contents_supports_permission_requests(
       bool web_contents_supports_permission_requests) {
@@ -142,14 +160,52 @@ class PermissionRequestManager
         web_contents_supports_permission_requests;
   }
 
-  // For testing only, used to override the default UI selector.
-  void set_notification_permission_ui_selector_for_testing(
-      std::unique_ptr<NotificationPermissionUiSelector> selector) {
-    notification_permission_ui_selector_ = std::move(selector);
+  // For testing only, used to override the default UI selectors and instead use
+  // a new one.
+  void set_permission_ui_selector_for_testing(
+      std::unique_ptr<PermissionUiSelector> selector) {
+    clear_permission_ui_selector_for_testing();
+    add_permission_ui_selector_for_testing(std::move(selector));
+  }
+
+  // For testing only, used to add a new selector without overriding the
+  // existing ones.
+  void add_permission_ui_selector_for_testing(
+      std::unique_ptr<PermissionUiSelector> selector) {
+    permission_ui_selectors_.emplace_back(std::move(selector));
+  }
+
+  // For testing only, clear the existing ui selectors.
+  void clear_permission_ui_selector_for_testing() {
+    permission_ui_selectors_.clear();
   }
 
   void set_view_factory_for_testing(PermissionPrompt::Factory view_factory) {
     view_factory_ = std::move(view_factory);
+  }
+
+  PermissionPrompt* view_for_testing() { return view_.get(); }
+
+  void set_current_request_first_display_time_for_testing(base::Time time) {
+    current_request_first_display_time_ = time;
+  }
+
+  absl::optional<PermissionUmaUtil::PredictionGrantLikelihood>
+  prediction_grant_likelihood_for_testing() {
+    return prediction_grant_likelihood_;
+  }
+
+  absl::optional<permissions::PermissionPromptDisposition>
+  current_request_prompt_disposition_for_testing() {
+    return current_request_prompt_disposition_;
+  }
+
+  void set_time_to_decision_for_test(base::TimeDelta time_to_decision) {
+    time_to_decision_for_test_ = time_to_decision;
+  }
+
+  void set_enabled_app_level_notification_permission_for_testing(bool enabled) {
+    enabled_app_level_notification_permission_for_testing_ = enabled;
   }
 
  private:
@@ -157,6 +213,23 @@ class PermissionRequestManager
   friend class content::WebContentsUserData<PermissionRequestManager>;
 
   explicit PermissionRequestManager(content::WebContents* web_contents);
+
+  enum class CurrentRequestFate { KeepCurrent, Preempt, Finalize };
+
+  // Returns `CurrentRequestFate` based on what type of UI has been shown for
+  // `requests_`.
+  CurrentRequestFate GetCurrentRequestFateInFaceOfNewRequest(
+      PermissionRequest* request);
+
+  // Adds `request` into `queued_requests_`, and request's `source_frame` into
+  // `request_sources_map_`.
+  void QueueRequest(content::RenderFrameHost* source_frame,
+                    PermissionRequest* request);
+
+  // Because the requests are shown in a different order for Normal and Quiet
+  // Chip, pending requests are returned back to queued_requests_ to process
+  // them after the new requests.
+  void PreemptAndRequeueCurrentRequest();
 
   // Posts a task which will allow the bubble to become visible.
   void ScheduleShowBubble();
@@ -179,9 +252,12 @@ class PermissionRequestManager
   // Delete the view object
   void DeleteBubble();
 
+  // Finalize request.
+  void ResetViewStateForCurrentRequest();
+
   // Delete the view object, finalize requests, asynchronously show a queued
   // request if present.
-  void FinalizeBubble(PermissionAction permission_action);
+  void FinalizeCurrentRequests(PermissionAction permission_action);
 
   // Cancel all pending or active requests and destroy the PermissionPrompt if
   // one exists. This is called if the WebContents is destroyed or navigates its
@@ -195,7 +271,8 @@ class PermissionRequestManager
   PermissionRequest* GetExistingRequest(PermissionRequest* request);
 
   // Calls PermissionGranted on a request and all its duplicates.
-  void PermissionGrantedIncludingDuplicates(PermissionRequest* request);
+  void PermissionGrantedIncludingDuplicates(PermissionRequest* request,
+                                            bool is_one_time);
   // Calls PermissionDenied on a request and all its duplicates.
   void PermissionDeniedIncludingDuplicates(PermissionRequest* request);
   // Calls Cancelled on a request and all its duplicates.
@@ -206,15 +283,16 @@ class PermissionRequestManager
   void NotifyBubbleAdded();
   void NotifyBubbleRemoved();
 
-  void OnSelectedUiToUseForNotifications(const UiDecision& decision);
+  void OnPermissionUiSelectorDone(size_t selector_index,
+                                  const UiDecision& decision);
 
-  PermissionPromptDisposition DetermineCurrentRequestUIDispositionForUMA();
+  PermissionPromptDisposition DetermineCurrentRequestUIDisposition();
+  PermissionPromptDispositionReason
+  DetermineCurrentRequestUIDispositionReasonForUMA();
 
   void LogWarningToConsole(const char* message);
 
   void DoAutoResponseForTesting();
-
-  int CountQueuedPermissionRequests(PermissionRequest* request);
 
   // Factory to be used to create views when needed.
   PermissionPrompt::Factory view_factory_;
@@ -224,6 +302,13 @@ class PermissionRequestManager
   // the object alive. The infobar system hides the actual infobar UI and modals
   // prevent tab switching.
   std::unique_ptr<PermissionPrompt> view_;
+
+  // The disposition for the currently active permission prompt, if any.
+  // Recorded separately because the `view_` might not be available at prompt
+  // resolution in order to determine the disposition.
+  absl::optional<permissions::PermissionPromptDisposition>
+      current_request_prompt_disposition_;
+
   // We only show new prompts when |tab_is_hidden_| is false.
   bool tab_is_hidden_;
 
@@ -232,19 +317,36 @@ class PermissionRequestManager
   // tab is visible.
   std::vector<PermissionRequest*> requests_;
 
-  struct RequestAndSource {
+  struct PermissionRequestSource {
     int render_process_id;
     int render_frame_id;
-    PermissionRequest* request;
 
-    bool IsSourceFrameInactiveAndDisallowReactivation() const;
+    bool IsSourceFrameInactiveAndDisallowActivation() const;
   };
 
-  base::circular_deque<RequestAndSource> queued_requests_;
+  PermissionRequest* PeekNextQueuedRequest();
+
+  PermissionRequest* PopNextQueuedRequest();
+
+  // Encapsulate enqueuing `request` into `queued_requests_`. Based on the chip
+  // / quiet chip experiments, the `request` is added into the back or front of
+  // the queue.
+  void PushQueuedRequest(PermissionRequest* request);
+
+  // TODO(crbug.com/1221150): Create a separate entity to handle Enqueue /
+  // Dequeue with all edge cases. Expose to `PermissionRequestManager` only a
+  // clear API like `Peek()` and `Pop()`, etc.
+  base::circular_deque<PermissionRequest*> queued_requests_;
+
   // Maps from the first request of a kind to subsequent requests that were
   // duped against it.
   std::unordered_multimap<PermissionRequest*, PermissionRequest*>
       duplicate_requests_;
+
+  // Maps each PermissionRequest currently in |requests_| or |queued_requests_|
+  // to which RenderFrameHost it originated from. Note that no date is stored
+  // for |duplicate_requests_|.
+  std::map<PermissionRequest*, PermissionRequestSource> request_sources_map_;
 
   base::ObserverList<Observer>::Unchecked observer_list_;
   AutoResponseType auto_response_for_test_;
@@ -253,28 +355,66 @@ class PermissionRequestManager
   // origin requesting the permission.
   bool is_notification_prompt_cooldown_active_ = false;
 
-  // Decides if the quiet prompt UI should be used to display notification
-  // permission requests.
-  std::unique_ptr<NotificationPermissionUiSelector>
-      notification_permission_ui_selector_;
+  // A vector of selectors which decide if the quiet prompt UI should be used
+  // to display permission requests. Sorted from the highest priority to the
+  // lowest priority selector.
+  std::vector<std::unique_ptr<PermissionUiSelector>> permission_ui_selectors_;
+
+  // Holds the decisions returned by selectors. Needed in case a lower priority
+  // selector returns a decision first and we need to wait for the decisions of
+  // higher priority selectors before making use of it.
+  std::vector<absl::optional<PermissionUiSelector::Decision>>
+      selector_decisions_;
 
   // Whether the view for the current |requests_| has been shown to the user at
   // least once.
   bool current_request_already_displayed_ = false;
 
+  // When the view for the current |requests_| has been first shown to the user,
+  // or zero if not at all.
+  base::Time current_request_first_display_time_;
+
   // Whether to use the normal or quiet UI to display the current permission
   // |requests_|, and whether to show warnings. This will be nullopt if we are
-  // still waiting on the result from |notification_permission_ui_selector_|.
-  base::Optional<UiDecision> current_request_ui_to_use_;
+  // still waiting on the result from |permission_ui_selectors_|.
+  absl::optional<UiDecision> current_request_ui_to_use_;
 
-  // Whether the bubble is being destroyed by this class, rather than in
-  // response to a UI event. In this case, callbacks from the bubble itself
-  // should be ignored.
-  bool deleting_bubble_ = false;
+  // The likelihood value returned by the Web Permission Predictions Service,
+  // to be recoreded in UKM.
+  absl::optional<PermissionUmaUtil::PredictionGrantLikelihood>
+      prediction_grant_likelihood_;
+
+  // Status of the decision made by the Web Permission Prediction Service, if
+  // it was held back or not.
+  absl::optional<bool> was_decision_held_back_;
+
+  // True when the prompt is being temporary destroyed to be recreated for the
+  // correct browser or when the tab is hidden. In those cases, callbacks from
+  // the bubble itself should be ignored.
+  bool ignore_callbacks_from_prompt_ = false;
 
   // Whether the web contents associated with this request manager supports
   // permission prompts.
   bool web_contents_supports_permission_requests_ = true;
+
+  // Whether the current request should be dismissed if the current tab is
+  // closed.
+  bool should_dismiss_current_request_ = false;
+
+  // Whether the permission prompt bubble was shown for the current request.
+  bool did_show_bubble_ = false;
+
+  // When the user made any decision for the current |requests_|, or zero if not
+  // at all.
+  base::Time current_request_decision_time_;
+
+  bool did_click_manage_ = false;
+
+  bool did_click_learn_more_ = false;
+
+  absl::optional<base::TimeDelta> time_to_decision_for_test_;
+
+  absl::optional<bool> enabled_app_level_notification_permission_for_testing_;
 
   base::WeakPtrFactory<PermissionRequestManager> weak_factory_{this};
   WEB_CONTENTS_USER_DATA_KEY_DECL();

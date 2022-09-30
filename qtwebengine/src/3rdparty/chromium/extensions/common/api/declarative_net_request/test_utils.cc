@@ -7,7 +7,6 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "extensions/common/api/declarative_net_request.h"
-#include "extensions/common/api/declarative_net_request/constants.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/value_builder.h"
@@ -54,11 +53,11 @@ std::unique_ptr<base::ListValue> ToValue(const std::vector<T>& vec) {
 template <typename T>
 void SetValue(base::DictionaryValue* dict,
               const char* key,
-              const base::Optional<T>& value) {
+              const absl::optional<T>& value) {
   if (!value)
     return;
 
-  dict->Set(key, ToValue(*value));
+  dict->SetKey(key, base::Value::FromUniquePtrValue(ToValue(*value)));
 }
 
 }  // namespace
@@ -77,9 +76,19 @@ std::unique_ptr<base::DictionaryValue> TestRuleCondition::ToValue() const {
            is_url_filter_case_sensitive);
   SetValue(dict.get(), kDomainsKey, domains);
   SetValue(dict.get(), kExcludedDomainsKey, excluded_domains);
+  SetValue(dict.get(), kInitiatorDomainsKey, initiator_domains);
+  SetValue(dict.get(), kExcludedInitiatorDomainsKey,
+           excluded_initiator_domains);
+  SetValue(dict.get(), kRequestDomainsKey, request_domains);
+  SetValue(dict.get(), kExcludedRequestDomainsKey, excluded_request_domains);
+  SetValue(dict.get(), kRequestMethodsKey, request_methods);
+  SetValue(dict.get(), kExcludedRequestMethodsKey, excluded_request_methods);
   SetValue(dict.get(), kResourceTypesKey, resource_types);
   SetValue(dict.get(), kExcludedResourceTypesKey, excluded_resource_types);
+  SetValue(dict.get(), kTabIdsKey, tab_ids);
+  SetValue(dict.get(), kExcludedTabIdsKey, excluded_tab_ids);
   SetValue(dict.get(), kDomainTypeKey, domain_type);
+
   return dict;
 }
 
@@ -94,6 +103,7 @@ std::unique_ptr<base::DictionaryValue> TestRuleQueryKeyValue::ToValue() const {
   auto dict = std::make_unique<base::DictionaryValue>();
   SetValue(dict.get(), kQueryKeyKey, key);
   SetValue(dict.get(), kQueryValueKey, value);
+  SetValue(dict.get(), kQueryReplaceOnlyKey, replace_only);
   return dict;
 }
 
@@ -149,7 +159,7 @@ std::unique_ptr<base::DictionaryValue> TestRuleRedirect::ToValue() const {
 
 TestHeaderInfo::TestHeaderInfo(std::string header,
                                std::string operation,
-                               base::Optional<std::string> value)
+                               absl::optional<std::string> value)
     : header(std::move(header)),
       operation(std::move(operation)),
       value(std::move(value)) {}
@@ -193,16 +203,23 @@ std::unique_ptr<base::DictionaryValue> TestRule::ToValue() const {
   return dict;
 }
 
-TestRule CreateGenericRule() {
+TestRule CreateGenericRule(int id) {
   TestRuleCondition condition;
   condition.url_filter = std::string("filter");
   TestRuleAction action;
   action.type = std::string("block");
   TestRule rule;
-  rule.id = kMinValidID;
+  rule.id = id;
   rule.priority = kMinValidPriority;
   rule.action = action;
   rule.condition = condition;
+  return rule;
+}
+
+TestRule CreateRegexRule(int id) {
+  TestRule rule = CreateGenericRule(id);
+  rule.condition->url_filter.reset();
+  rule.condition->regex_filter = std::string("filter");
   return rule;
 }
 
@@ -241,9 +258,12 @@ std::unique_ptr<base::DictionaryValue> TestRulesetInfo::GetManifestValue()
 std::unique_ptr<base::DictionaryValue> CreateManifest(
     const std::vector<TestRulesetInfo>& ruleset_info,
     const std::vector<std::string>& hosts,
-    unsigned flags) {
+    unsigned flags,
+    const std::string& extension_name) {
   std::vector<std::string> permissions = hosts;
-  permissions.push_back(kAPIPermission);
+
+  if (!(flags & kConfig_OmitDeclarativeNetRequestPermission))
+    permissions.push_back(kDeclarativeNetRequestPermission);
 
   // These permissions are needed for some tests. TODO(karandeepb): Add a
   // ConfigFlag for these.
@@ -255,6 +275,9 @@ std::unique_ptr<base::DictionaryValue> CreateManifest(
 
   if (flags & kConfig_HasActiveTab)
     permissions.push_back("activeTab");
+
+  if (flags & kConfig_HasDelarativeNetRequestWithHostAccessPermission)
+    permissions.push_back("declarativeNetRequestWithHostAccess");
 
   std::vector<std::string> background_scripts;
   if (flags & kConfig_HasBackgroundScript)
@@ -272,7 +295,7 @@ std::unique_ptr<base::DictionaryValue> CreateManifest(
             .Build());
   }
 
-  return manifest_builder.Set(keys::kName, "Test extension")
+  return manifest_builder.Set(keys::kName, extension_name)
       .Set(keys::kPermissions, ToValue(permissions))
       .Set(keys::kVersion, "1.0")
       .Set(keys::kManifestVersion, 2)
@@ -296,7 +319,8 @@ std::unique_ptr<base::ListValue> ToListValue(
 void WriteManifestAndRulesets(const base::FilePath& extension_dir,
                               const std::vector<TestRulesetInfo>& ruleset_info,
                               const std::vector<std::string>& hosts,
-                              unsigned flags) {
+                              unsigned flags,
+                              const std::string& extension_name) {
   // Persist JSON rules files.
   for (const TestRulesetInfo& info : ruleset_info) {
     JSONFileValueSerializer(extension_dir.AppendASCII(info.relative_file_path))
@@ -313,14 +337,15 @@ void WriteManifestAndRulesets(const base::FilePath& extension_dir,
 
   // Persist manifest file.
   JSONFileValueSerializer(extension_dir.Append(kManifestFilename))
-      .Serialize(*CreateManifest(ruleset_info, hosts, flags));
+      .Serialize(*CreateManifest(ruleset_info, hosts, flags, extension_name));
 }
 
 void WriteManifestAndRuleset(const base::FilePath& extension_dir,
                              const TestRulesetInfo& info,
                              const std::vector<std::string>& hosts,
-                             unsigned flags) {
-  WriteManifestAndRulesets(extension_dir, {info}, hosts, flags);
+                             unsigned flags,
+                             const std::string& extension_name) {
+  WriteManifestAndRulesets(extension_dir, {info}, hosts, flags, extension_name);
 }
 
 }  // namespace declarative_net_request

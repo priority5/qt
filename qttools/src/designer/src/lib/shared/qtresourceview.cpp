@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qtresourceview_p.h"
 #include "qtresourcemodel_p.h"
@@ -35,28 +10,30 @@
 #include <QtDesigner/abstractsettings.h>
 
 #include <QtWidgets/qtoolbar.h>
-#include <QtWidgets/qaction.h>
 #include <QtWidgets/qsplitter.h>
 #include <QtWidgets/qtreewidget.h>
 #include <QtWidgets/qlistwidget.h>
 #include <QtWidgets/qheaderview.h>
 #include <QtWidgets/qboxlayout.h>
-#include <QtGui/qpainter.h>
-#include <QtCore/qfileinfo.h>
-#include <QtCore/qdir.h>
-#include <QtCore/qqueue.h>
-#include <QtGui/qpainter.h>
 #include <QtWidgets/qdialogbuttonbox.h>
 #include <QtWidgets/qpushbutton.h>
 #include <QtWidgets/qmessagebox.h>
 #include <QtWidgets/qapplication.h>
-#if QT_CONFIG(clipboard)
-#include <QtGui/qclipboard.h>
-#endif
 #include <QtWidgets/qmenu.h>
 #include <QtWidgets/qlineedit.h>
+
+#include <QtGui/qaction.h>
+#if QT_CONFIG(clipboard)
+#  include <QtGui/qclipboard.h>
+#endif
 #include <QtGui/qdrag.h>
+#include <QtGui/qpainter.h>
+
 #include <QtCore/qmimedata.h>
+#include <QtCore/qfileinfo.h>
+#include <QtCore/qdir.h>
+#include <QtCore/qqueue.h>
+
 #include <QtXml/qdom.h>
 
 #include <algorithm>
@@ -845,7 +822,7 @@ QtResourceViewDialog::QtResourceViewDialog(QDesignerFormEditorInterface *core, Q
     settings->beginGroup(QLatin1String(ResourceViewDialogC));
 
     const QVariant geometry = settings->value(QLatin1String(Geometry));
-    if (geometry.type() == QVariant::ByteArray) // Used to be a QRect up until 5.4.0, QTBUG-43374.
+    if (geometry.metaType().id() == QMetaType::QByteArray) // Used to be a QRect up until 5.4.0, QTBUG-43374.
         restoreGeometry(geometry.toByteArray());
 
     settings->endGroup();

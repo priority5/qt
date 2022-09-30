@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/core/testing/sequence_test.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_double_doublesequence.h"
+
 namespace blink {
 
 SequenceTest::SequenceTest() = default;
@@ -25,18 +27,13 @@ Vector<V8FoodEnum> SequenceTest::identityFoodEnumSequence(
   return arg;
 }
 
-Vector<String> SequenceTest::identityFoodEnumSequence(
-    const Vector<String>& arg) const {
-  return arg;
-}
-
 Vector<int32_t> SequenceTest::identityLongSequence(
     const Vector<int32_t>& arg) const {
   return arg;
 }
 
-base::Optional<Vector<uint8_t>> SequenceTest::identityOctetSequenceOrNull(
-    const base::Optional<Vector<uint8_t>>& arg) const {
+absl::optional<Vector<uint8_t>> SequenceTest::identityOctetSequenceOrNull(
+    const absl::optional<Vector<uint8_t>>& arg) const {
   return arg;
 }
 
@@ -48,8 +45,9 @@ void SequenceTest::setElementSequence(const HeapVector<Member<Element>>& arg) {
   element_sequence_ = arg;
 }
 
-bool SequenceTest::unionReceivedSequence(const DoubleOrDoubleSequence& arg) {
-  return arg.IsDoubleSequence();
+bool SequenceTest::unionReceivedSequence(
+    const V8UnionDoubleOrDoubleSequence* arg) {
+  return arg->IsDoubleSequence();
 }
 
 void SequenceTest::Trace(Visitor* visitor) const {

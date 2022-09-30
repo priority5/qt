@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Assistant of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qhelpcollectionhandler_p.h"
 #include "qhelp_global.h"
@@ -47,8 +11,9 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QList>
+#include <QtCore/QMultiMap>
 #include <QtCore/QTimer>
-#include <QtCore/QVector>
 #include <QtCore/QVersionNumber>
 
 #include <QtHelp/QHelpLink>
@@ -237,7 +202,7 @@ bool QHelpCollectionHandler::openCollectionFile()
         timeStamps.append(timeStamp);
     }
 
-    QVector<TimeStamp> toRemove;
+    QList<TimeStamp> toRemove;
     for (const TimeStamp &timeStamp : timeStamps) {
         if (!isTimeStampCorrect(timeStamp))
             toRemove.append(timeStamp);
@@ -1180,7 +1145,7 @@ QString QHelpCollectionHandler::namespaceForFile(const QUrl &url,
     if (!m_query->exec())
         return QString();
 
-    QVector<QString> namespaceList;
+    QList<QString> namespaceList;
     while (m_query->next())
         namespaceList.append(m_query->value(0).toString());
 
@@ -1235,7 +1200,7 @@ QString QHelpCollectionHandler::namespaceForFile(const QUrl &url,
     if (!m_query->exec())
         return QString();
 
-    QVector<QString> namespaceList;
+    QList<QString> namespaceList;
     while (m_query->next())
         namespaceList.append(m_query->value(0).toString());
 
@@ -2309,45 +2274,51 @@ static QUrl buildQUrl(const QString &ns, const QString &folder,
     return url;
 }
 
-QMap<QString, QUrl> QHelpCollectionHandler::linksForIdentifier(const QString &id,
-                    const QStringList &filterAttributes) const
+QMultiMap<QString, QUrl> QHelpCollectionHandler::linksForIdentifier(
+        const QString &id,
+        const QStringList &filterAttributes) const
 {
     return linksForField(QLatin1String("Identifier"), id, filterAttributes);
 }
 
-QMap<QString, QUrl> QHelpCollectionHandler::linksForKeyword(const QString &keyword,
-                    const QStringList &filterAttributes) const
+QMultiMap<QString, QUrl> QHelpCollectionHandler::linksForKeyword(
+        const QString &keyword,
+        const QStringList &filterAttributes) const
 {
     return linksForField(QLatin1String("Name"), keyword, filterAttributes);
 }
 
-QList<QHelpLink> QHelpCollectionHandler::documentsForIdentifier(const QString &id,
-                         const QStringList &filterAttributes) const
+QList<QHelpLink> QHelpCollectionHandler::documentsForIdentifier(
+        const QString &id,
+        const QStringList &filterAttributes) const
 {
     return documentsForField(QLatin1String("Identifier"), id, filterAttributes);
 }
 
-QList<QHelpLink> QHelpCollectionHandler::documentsForKeyword(const QString &keyword,
-                         const QStringList &filterAttributes) const
+QList<QHelpLink> QHelpCollectionHandler::documentsForKeyword(
+        const QString &keyword,
+        const QStringList &filterAttributes) const
 {
     return documentsForField(QLatin1String("Name"), keyword, filterAttributes);
 }
 
-QMap<QString, QUrl> QHelpCollectionHandler::linksForField(const QString &fieldName,
-                    const QString &fieldValue,
-                    const QStringList &filterAttributes) const
+QMultiMap<QString, QUrl> QHelpCollectionHandler::linksForField(
+        const QString &fieldName,
+        const QString &fieldValue,
+        const QStringList &filterAttributes) const
 {
-    QMap<QString, QUrl> linkMap;
+    QMultiMap<QString, QUrl> linkMap;
     const auto documents = documentsForField(fieldName, fieldValue, filterAttributes);
     for (const auto &document : documents)
-        static_cast<QMultiMap<QString, QUrl> &>(linkMap).insert(document.title, document.url);
+        linkMap.insert(document.title, document.url);
 
     return linkMap;
 }
 
-QList<QHelpLink> QHelpCollectionHandler::documentsForField(const QString &fieldName,
-                    const QString &fieldValue,
-                    const QStringList &filterAttributes) const
+QList<QHelpLink> QHelpCollectionHandler::documentsForField(
+        const QString &fieldName,
+        const QString &fieldValue,
+        const QStringList &filterAttributes) const
 {
     QList<QHelpLink> docList;
 
@@ -2398,45 +2369,51 @@ QList<QHelpLink> QHelpCollectionHandler::documentsForField(const QString &fieldN
     return docList;
 }
 
-QMap<QString, QUrl> QHelpCollectionHandler::linksForIdentifier(const QString &id,
-                    const QString &filterName) const
+QMultiMap<QString, QUrl> QHelpCollectionHandler::linksForIdentifier(
+        const QString &id,
+        const QString &filterName) const
 {
     return linksForField(QLatin1String("Identifier"), id, filterName);
 }
 
-QMap<QString, QUrl> QHelpCollectionHandler::linksForKeyword(const QString &keyword,
-                    const QString &filterName) const
+QMultiMap<QString, QUrl> QHelpCollectionHandler::linksForKeyword(
+        const QString &keyword,
+        const QString &filterName) const
 {
     return linksForField(QLatin1String("Name"), keyword, filterName);
 }
 
-QList<QHelpLink> QHelpCollectionHandler::documentsForIdentifier(const QString &id,
-                         const QString &filterName) const
+QList<QHelpLink> QHelpCollectionHandler::documentsForIdentifier(
+        const QString &id,
+        const QString &filterName) const
 {
     return documentsForField(QLatin1String("Identifier"), id, filterName);
 }
 
-QList<QHelpLink> QHelpCollectionHandler::documentsForKeyword(const QString &keyword,
-                         const QString &filterName) const
+QList<QHelpLink> QHelpCollectionHandler::documentsForKeyword(
+        const QString &keyword,
+        const QString &filterName) const
 {
     return documentsForField(QLatin1String("Name"), keyword, filterName);
 }
 
-QMap<QString, QUrl> QHelpCollectionHandler::linksForField(const QString &fieldName,
-                    const QString &fieldValue,
-                    const QString &filterName) const
+QMultiMap<QString, QUrl> QHelpCollectionHandler::linksForField(
+        const QString &fieldName,
+        const QString &fieldValue,
+        const QString &filterName) const
 {
-    QMap<QString, QUrl> linkMap;
+    QMultiMap<QString, QUrl> linkMap;
     const auto documents = documentsForField(fieldName, fieldValue, filterName);
     for (const auto &document : documents)
-        static_cast<QMultiMap<QString, QUrl> &>(linkMap).insert(document.title, document.url);
+        linkMap.insert(document.title, document.url);
 
     return linkMap;
 }
 
-QList<QHelpLink> QHelpCollectionHandler::documentsForField(const QString &fieldName,
-                                           const QString &fieldValue,
-                                           const QString &filterName) const
+QList<QHelpLink> QHelpCollectionHandler::documentsForField(
+        const QString &fieldName,
+        const QString &fieldValue,
+        const QString &filterName) const
 {
     QList<QHelpLink> docList;
 

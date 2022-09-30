@@ -5,13 +5,18 @@
  * found in the LICENSE file.
  */
 
+#include "src/shaders/gradients/SkTwoPointConicalGradient.h"
+
 #include "include/private/SkFloatingPoint.h"
 #include "src/core/SkRasterPipeline.h"
 #include "src/core/SkReadBuffer.h"
 #include "src/core/SkWriteBuffer.h"
-#include "src/shaders/gradients/SkTwoPointConicalGradient.h"
 
 #include <utility>
+
+#ifdef SK_ENABLE_SKSL
+#include "src/core/SkKeyHelpers.h"
+#endif
 
 // Please see https://skia.org/dev/design/conical for how our shader works.
 
@@ -211,6 +216,8 @@ void SkTwoPointConicalGradient::appendGradientStages(SkArenaAlloc* alloc, SkRast
 
 skvm::F32 SkTwoPointConicalGradient::transformT(skvm::Builder* p, skvm::Uniforms* uniforms,
                                                 skvm::Coord coord, skvm::I32* mask) const {
+    auto mag = [](skvm::F32 x, skvm::F32 y) { return sqrt(x*x + y*y); };
+
     // See https://skia.org/dev/design/conical, and onAppendStages() above.
     // There's a lot going on here, and I'm not really sure what's independent
     // or disjoint, what can be reordered, simplified, etc.  Tweak carefully.
@@ -221,13 +228,13 @@ skvm::F32 SkTwoPointConicalGradient::transformT(skvm::Builder* p, skvm::Uniforms
         float denom = 1.0f / (fRadius2 - fRadius1),
               scale = std::max(fRadius1, fRadius2) * denom,
                bias =                  -fRadius1 * denom;
-        return norm(x,y) * p->uniformF(uniforms->pushF(scale))
-                         + p->uniformF(uniforms->pushF(bias ));
+        return mag(x,y) * p->uniformF(uniforms->pushF(scale))
+                        + p->uniformF(uniforms->pushF(bias ));
     }
 
     if (fType == Type::kStrip) {
         float r = fRadius1 / this->getCenterX1();
-        skvm::F32 t = x + sqrt(p->splat(r*r) - y*y);
+        skvm::F32 t = x + sqrt(p->uniformF(uniforms->pushF(r*r)) - y*y);
 
         *mask = (t == t);   // t != NaN
         return t;
@@ -239,7 +246,7 @@ skvm::F32 SkTwoPointConicalGradient::transformT(skvm::Builder* p, skvm::Uniforms
     if (fFocalData.isFocalOnCircle()) {
         t = (y/x) * y + x;       // (x^2 + y^2) / x  ~~>  x + y^2/x  ~~>  y/x * y + x
     } else if (fFocalData.isWellBehaved()) {
-        t = norm(x,y) - x*invR1;
+        t = mag(x,y) - x*invR1;
     } else {
         skvm::F32 k = sqrt(x*x - y*y);
         if (fFocalData.isSwapped() || 1 - fFocalData.fFocalX < 0) {
@@ -264,11 +271,27 @@ skvm::F32 SkTwoPointConicalGradient::transformT(skvm::Builder* p, skvm::Uniforms
 
 #if SK_SUPPORT_GPU
 
-#include "src/gpu/gradients/GrGradientShader.h"
+#include "src/gpu/ganesh/gradients/GrGradientShader.h"
 
 std::unique_ptr<GrFragmentProcessor> SkTwoPointConicalGradient::asFragmentProcessor(
         const GrFPArgs& args) const {
     return GrGradientShader::MakeConical(*this, args);
 }
 
+#endif
+
+#ifdef SK_ENABLE_SKSL
+void SkTwoPointConicalGradient::addToKey(const SkKeyContext& keyContext,
+                                         SkPaintParamsKeyBuilder* builder,
+                                         SkPipelineDataGatherer* gatherer) const {
+    GradientShaderBlocks::GradientData data(kConical_GradientType,
+                                            fCenter1, fCenter2,
+                                            fRadius1, fRadius2,
+                                            fTileMode,
+                                            fColorCount,
+                                            fOrigColors4f,
+                                            fOrigPos);
+
+    GradientShaderBlocks::AddToKey(keyContext, builder, gatherer, data);
+}
 #endif

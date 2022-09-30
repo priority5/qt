@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "media/filters/decrypting_audio_decoder.h"
+
 #include <stdint.h>
 
 #include <string>
@@ -10,8 +12,8 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/test/gmock_callback_support.h"
+#include "base/test/gmock_move_support.h"
 #include "base/test/task_environment.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/decoder_buffer.h"
@@ -20,15 +22,12 @@
 #include "media/base/mock_filters.h"
 #include "media/base/test_helpers.h"
 #include "media/base/timestamp_constants.h"
-#include "media/filters/decrypting_audio_decoder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
-using ::base::test::RunCallback;
 using ::base::test::RunOnceCallback;
 using ::testing::_;
 using ::testing::AtMost;
 using ::testing::Return;
-using ::testing::SaveArg;
 using ::testing::StrictMock;
 
 namespace media {
@@ -48,8 +47,8 @@ static scoped_refptr<DecoderBuffer> CreateFakeEncryptedBuffer() {
   scoped_refptr<DecoderBuffer> buffer(new DecoderBuffer(buffer_size));
   buffer->set_decrypt_config(DecryptConfig::CreateCencConfig(
       std::string(reinterpret_cast<const char*>(kFakeKeyId),
-                  base::size(kFakeKeyId)),
-      std::string(reinterpret_cast<const char*>(kFakeIv), base::size(kFakeIv)),
+                  std::size(kFakeKeyId)),
+      std::string(reinterpret_cast<const char*>(kFakeIv), std::size(kFakeIv)),
       std::vector<SubsampleEntry>()));
   return buffer;
 }
@@ -68,6 +67,10 @@ class DecryptingAudioDecoderTest : public testing::Test {
         decoded_frame_(nullptr),
         decoded_frame_list_() {}
 
+  DecryptingAudioDecoderTest(const DecryptingAudioDecoderTest&) = delete;
+  DecryptingAudioDecoderTest& operator=(const DecryptingAudioDecoderTest&) =
+      delete;
+
   ~DecryptingAudioDecoderTest() override { Destroy(); }
 
   void InitializeAndExpectResult(const AudioDecoderConfig& config,
@@ -83,16 +86,17 @@ class DecryptingAudioDecoderTest : public testing::Test {
         kNoTimestamp);
     decoded_frame_list_.push_back(decoded_frame_);
 
-    decoder_->Initialize(config, cdm_context_.get(),
-                         base::BindOnce(
-                             [](bool success, Status status) {
-                               EXPECT_EQ(status.is_ok(), success);
-                             },
-                             success),
-                         base::Bind(&DecryptingAudioDecoderTest::FrameReady,
-                                    base::Unretained(this)),
-                         base::Bind(&DecryptingAudioDecoderTest::OnWaiting,
-                                    base::Unretained(this)));
+    decoder_->Initialize(
+        config, cdm_context_.get(),
+        base::BindOnce(
+            [](bool success, DecoderStatus status) {
+              EXPECT_EQ(status.is_ok(), success);
+            },
+            success),
+        base::BindRepeating(&DecryptingAudioDecoderTest::FrameReady,
+                            base::Unretained(this)),
+        base::BindRepeating(&DecryptingAudioDecoderTest::OnWaiting,
+                            base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -114,7 +118,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
       return std::make_unique<CallbackRegistration>();
     });
 
-    config_.Initialize(kCodecVorbis, kSampleFormatPlanarF32,
+    config_.Initialize(AudioCodec::kVorbis, kSampleFormatPlanarF32,
                        CHANNEL_LAYOUT_STEREO, kSampleRate, EmptyExtraData(),
                        EncryptionScheme::kCenc, base::TimeDelta(), 0);
     InitializeAndExpectResult(config_, true);
@@ -128,38 +132,42 @@ class DecryptingAudioDecoderTest : public testing::Test {
         .WillOnce(RunOnceCallback<1>(true));
     decoder_->Initialize(
         new_config, cdm_context_.get(),
-        base::BindOnce([](Status status) { EXPECT_TRUE(status.is_ok()); }),
-        base::Bind(&DecryptingAudioDecoderTest::FrameReady,
-                   base::Unretained(this)),
-        base::Bind(&DecryptingAudioDecoderTest::OnWaiting,
-                   base::Unretained(this)));
+        base::BindOnce(
+            [](DecoderStatus status) { EXPECT_TRUE(status.is_ok()); }),
+        base::BindRepeating(&DecryptingAudioDecoderTest::FrameReady,
+                            base::Unretained(this)),
+        base::BindRepeating(&DecryptingAudioDecoderTest::OnWaiting,
+                            base::Unretained(this)));
   }
 
   // Decode |buffer| and expect DecodeDone to get called with |status|.
-  void DecodeAndExpect(scoped_refptr<DecoderBuffer> buffer, StatusCode status) {
+  void DecodeAndExpect(scoped_refptr<DecoderBuffer> buffer,
+                       DecoderStatus status) {
     EXPECT_CALL(*this, DecodeDone(HasStatusCode(status)));
-    decoder_->Decode(buffer, base::Bind(&DecryptingAudioDecoderTest::DecodeDone,
-                                        base::Unretained(this)));
+    decoder_->Decode(buffer,
+                     base::BindOnce(&DecryptingAudioDecoderTest::DecodeDone,
+                                    base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
   }
 
   // Helper function to simulate the decrypting and decoding process in the
   // |decryptor_| with a decoding delay of kDecodingDelay buffers.
   void DecryptAndDecodeAudio(scoped_refptr<DecoderBuffer> encrypted,
-                             const Decryptor::AudioDecodeCB& audio_decode_cb) {
+                             Decryptor::AudioDecodeCB audio_decode_cb) {
     num_decrypt_and_decode_calls_++;
     if (!encrypted->end_of_stream())
       num_frames_in_decryptor_++;
 
     if (num_decrypt_and_decode_calls_ <= kDecodingDelay ||
         num_frames_in_decryptor_ == 0) {
-      audio_decode_cb.Run(Decryptor::kNeedMoreData, Decryptor::AudioFrames());
+      std::move(audio_decode_cb)
+          .Run(Decryptor::kNeedMoreData, Decryptor::AudioFrames());
       return;
     }
 
     num_frames_in_decryptor_--;
-    audio_decode_cb.Run(Decryptor::kSuccess,
-                        Decryptor::AudioFrames(1, decoded_frame_));
+    std::move(audio_decode_cb)
+        .Run(Decryptor::kSuccess, Decryptor::AudioFrames(1, decoded_frame_));
   }
 
   // Sets up expectations and actions to put DecryptingAudioDecoder in an
@@ -170,7 +178,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
             Invoke(this, &DecryptingAudioDecoderTest::DecryptAndDecodeAudio));
     EXPECT_CALL(*this, FrameReady(decoded_frame_));
     for (int i = 0; i < kDecodingDelay + 1; ++i)
-      DecodeAndExpect(encrypted_buffer_, DecodeStatus::OK);
+      DecodeAndExpect(encrypted_buffer_, DecoderStatus::Codes::kOk);
   }
 
   // Sets up expectations and actions to put DecryptingAudioDecoder in an end
@@ -179,7 +187,8 @@ class DecryptingAudioDecoderTest : public testing::Test {
   void EnterEndOfStreamState() {
     // The codec in the |decryptor_| will be flushed.
     EXPECT_CALL(*this, FrameReady(decoded_frame_)).Times(kDecodingDelay);
-    DecodeAndExpect(DecoderBuffer::CreateEOSBuffer(), DecodeStatus::OK);
+    DecodeAndExpect(DecoderBuffer::CreateEOSBuffer(),
+                    DecoderStatus::Codes::kOk);
     EXPECT_EQ(0, num_frames_in_decryptor_);
   }
 
@@ -187,11 +196,11 @@ class DecryptingAudioDecoderTest : public testing::Test {
   void EnterPendingDecodeState() {
     EXPECT_TRUE(!pending_audio_decode_cb_);
     EXPECT_CALL(*decryptor_, DecryptAndDecodeAudio(encrypted_buffer_, _))
-        .WillOnce(SaveArg<1>(&pending_audio_decode_cb_));
+        .WillOnce(MoveArg<1>(&pending_audio_decode_cb_));
 
     decoder_->Decode(encrypted_buffer_,
-                     base::Bind(&DecryptingAudioDecoderTest::DecodeDone,
-                                base::Unretained(this)));
+                     base::BindOnce(&DecryptingAudioDecoderTest::DecodeDone,
+                                    base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
     // Make sure the Decode() on the decoder triggers a DecryptAndDecode() on
     // the decryptor.
@@ -201,11 +210,11 @@ class DecryptingAudioDecoderTest : public testing::Test {
   void EnterWaitingForKeyState() {
     EXPECT_CALL(*decryptor_, DecryptAndDecodeAudio(encrypted_buffer_, _))
         .WillRepeatedly(
-            RunCallback<1>(Decryptor::kNoKey, Decryptor::AudioFrames()));
+            RunOnceCallback<1>(Decryptor::kNoKey, Decryptor::AudioFrames()));
     EXPECT_CALL(*this, OnWaiting(WaitingReason::kNoDecryptionKey));
     decoder_->Decode(encrypted_buffer_,
-                     base::Bind(&DecryptingAudioDecoderTest::DecodeDone,
-                                base::Unretained(this)));
+                     base::BindOnce(&DecryptingAudioDecoderTest::DecodeDone,
+                                    base::Unretained(this)));
 
     base::RunLoop().RunUntilIdle();
   }
@@ -246,7 +255,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
   }
 
   MOCK_METHOD1(FrameReady, void(scoped_refptr<AudioBuffer>));
-  MOCK_METHOD1(DecodeDone, void(Status));
+  MOCK_METHOD1(DecodeDone, void(DecoderStatus));
 
   MOCK_METHOD1(OnWaiting, void(WaitingReason));
 
@@ -269,9 +278,6 @@ class DecryptingAudioDecoderTest : public testing::Test {
   scoped_refptr<DecoderBuffer> encrypted_buffer_;
   scoped_refptr<AudioBuffer> decoded_frame_;
   Decryptor::AudioFrames decoded_frame_list_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DecryptingAudioDecoderTest);
 };
 
 TEST_F(DecryptingAudioDecoderTest, Initialize_Normal) {
@@ -280,7 +286,7 @@ TEST_F(DecryptingAudioDecoderTest, Initialize_Normal) {
 
 // Ensure decoder handles invalid audio configs without crashing.
 TEST_F(DecryptingAudioDecoderTest, Initialize_InvalidAudioConfig) {
-  AudioDecoderConfig config(kUnknownAudioCodec, kUnknownSampleFormat,
+  AudioDecoderConfig config(AudioCodec::kUnknown, kUnknownSampleFormat,
                             CHANNEL_LAYOUT_STEREO, 0, EmptyExtraData(),
                             EncryptionScheme::kCenc);
 
@@ -297,7 +303,7 @@ TEST_F(DecryptingAudioDecoderTest, Initialize_UnsupportedAudioConfig) {
   EXPECT_CALL(*decryptor_, InitializeAudioDecoder(_, _))
       .WillOnce(RunOnceCallback<1>(false));
 
-  AudioDecoderConfig config(kCodecVorbis, kSampleFormatPlanarF32,
+  AudioDecoderConfig config(AudioCodec::kVorbis, kSampleFormatPlanarF32,
                             CHANNEL_LAYOUT_STEREO, kSampleRate,
                             EmptyExtraData(), EncryptionScheme::kCenc);
   InitializeAndExpectResult(config, false);
@@ -305,7 +311,7 @@ TEST_F(DecryptingAudioDecoderTest, Initialize_UnsupportedAudioConfig) {
 
 TEST_F(DecryptingAudioDecoderTest, Initialize_CdmWithoutDecryptor) {
   SetCdmType(CDM_WITHOUT_DECRYPTOR);
-  AudioDecoderConfig config(kCodecVorbis, kSampleFormatPlanarF32,
+  AudioDecoderConfig config(AudioCodec::kVorbis, kSampleFormatPlanarF32,
                             CHANNEL_LAYOUT_STEREO, kSampleRate,
                             EmptyExtraData(), EncryptionScheme::kCenc);
   InitializeAndExpectResult(config, false);
@@ -324,9 +330,9 @@ TEST_F(DecryptingAudioDecoderTest, DecryptAndDecode_DecodeError) {
 
   EXPECT_CALL(*decryptor_, DecryptAndDecodeAudio(_, _))
       .WillRepeatedly(
-          RunCallback<1>(Decryptor::kError, Decryptor::AudioFrames()));
+          RunOnceCallback<1>(Decryptor::kError, Decryptor::AudioFrames()));
 
-  DecodeAndExpect(encrypted_buffer_, DecodeStatus::DECODE_ERROR);
+  DecodeAndExpect(encrypted_buffer_, DecoderStatus::Codes::kFailed);
 }
 
 // Test the case where the decryptor returns multiple decoded frames.
@@ -345,12 +351,12 @@ TEST_F(DecryptingAudioDecoderTest, DecryptAndDecode_MultipleFrames) {
   decoded_frame_list_.push_back(frame_b);
 
   EXPECT_CALL(*decryptor_, DecryptAndDecodeAudio(_, _))
-      .WillOnce(RunCallback<1>(Decryptor::kSuccess, decoded_frame_list_));
+      .WillOnce(RunOnceCallback<1>(Decryptor::kSuccess, decoded_frame_list_));
 
   EXPECT_CALL(*this, FrameReady(decoded_frame_));
   EXPECT_CALL(*this, FrameReady(frame_a));
   EXPECT_CALL(*this, FrameReady(frame_b));
-  DecodeAndExpect(encrypted_buffer_, DecodeStatus::OK);
+  DecodeAndExpect(encrypted_buffer_, DecoderStatus::Codes::kOk);
 }
 
 // Test the case where the decryptor receives end-of-stream buffer.
@@ -370,7 +376,7 @@ TEST_F(DecryptingAudioDecoderTest, Reinitialize_EncryptedToEncrypted) {
 
   // The new config is different from the initial config in bits-per-channel,
   // channel layout and samples_per_second.
-  AudioDecoderConfig new_config(kCodecVorbis, kSampleFormatPlanarS16,
+  AudioDecoderConfig new_config(AudioCodec::kVorbis, kSampleFormatPlanarS16,
                                 CHANNEL_LAYOUT_5_1, 88200, EmptyExtraData(),
                                 EncryptionScheme::kCenc);
   EXPECT_NE(new_config.bits_per_channel(), config_.bits_per_channel());
@@ -392,7 +398,7 @@ TEST_F(DecryptingAudioDecoderTest, Reinitialize_EncryptedToClear) {
 
   // The new config is different from the initial config in bits-per-channel,
   // channel layout and samples_per_second.
-  AudioDecoderConfig new_config(kCodecVorbis, kSampleFormatPlanarS16,
+  AudioDecoderConfig new_config(AudioCodec::kVorbis, kSampleFormatPlanarS16,
                                 CHANNEL_LAYOUT_5_1, 88200, EmptyExtraData(),
                                 EncryptionScheme::kUnencrypted);
   EXPECT_NE(new_config.bits_per_channel(), config_.bits_per_channel());
@@ -411,7 +417,8 @@ TEST_F(DecryptingAudioDecoderTest, KeyAdded_DuringWaitingForKey) {
   EnterWaitingForKeyState();
 
   EXPECT_CALL(*decryptor_, DecryptAndDecodeAudio(_, _))
-      .WillRepeatedly(RunCallback<1>(Decryptor::kSuccess, decoded_frame_list_));
+      .WillRepeatedly(
+          RunOnceCallback<1>(Decryptor::kSuccess, decoded_frame_list_));
   EXPECT_CALL(*this, FrameReady(decoded_frame_));
   EXPECT_CALL(*this, DecodeDone(IsOkStatus()));
   event_cb_.Run(CdmContext::Event::kHasAdditionalUsableKey);
@@ -425,7 +432,8 @@ TEST_F(DecryptingAudioDecoderTest, KeyAdded_DruingPendingDecode) {
   EnterPendingDecodeState();
 
   EXPECT_CALL(*decryptor_, DecryptAndDecodeAudio(_, _))
-      .WillRepeatedly(RunCallback<1>(Decryptor::kSuccess, decoded_frame_list_));
+      .WillRepeatedly(
+          RunOnceCallback<1>(Decryptor::kSuccess, decoded_frame_list_));
   EXPECT_CALL(*this, FrameReady(decoded_frame_));
   EXPECT_CALL(*this, DecodeDone(IsOkStatus()));
   // The audio decode callback is returned after the correct decryption key is
@@ -456,7 +464,7 @@ TEST_F(DecryptingAudioDecoderTest, Reset_DuringPendingDecode) {
   Initialize();
   EnterPendingDecodeState();
 
-  EXPECT_CALL(*this, DecodeDone(HasStatusCode(StatusCode::kAborted)));
+  EXPECT_CALL(*this, DecodeDone(HasStatusCode(DecoderStatus::Codes::kAborted)));
 
   Reset();
 }
@@ -466,7 +474,7 @@ TEST_F(DecryptingAudioDecoderTest, Reset_DuringWaitingForKey) {
   Initialize();
   EnterWaitingForKeyState();
 
-  EXPECT_CALL(*this, DecodeDone(HasStatusCode(StatusCode::kAborted)));
+  EXPECT_CALL(*this, DecodeDone(HasStatusCode(DecoderStatus::Codes::kAborted)));
 
   Reset();
 }

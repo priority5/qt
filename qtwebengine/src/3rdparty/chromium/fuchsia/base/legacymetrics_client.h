@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "fuchsia/base/legacymetrics_user_event_recorder.h"
 
@@ -29,6 +30,11 @@ class LegacyMetricsClient {
   // the 64KB FIDL maximum message size.
   static constexpr size_t kMaxBatchSize = 50;
 
+  // Constants for FIDL reconnection with exponential backoff.
+  static constexpr base::TimeDelta kInitialReconnectDelay = base::Seconds(1);
+  static constexpr base::TimeDelta kMaxReconnectDelay = base::Hours(1);
+  static constexpr size_t kReconnectBackoffFactor = 2;
+
   using ReportAdditionalMetricsCallback = base::RepeatingCallback<void(
       base::OnceCallback<void(std::vector<fuchsia::legacymetrics::Event>)>)>;
   using NotifyFlushCallback =
@@ -39,6 +45,17 @@ class LegacyMetricsClient {
 
   explicit LegacyMetricsClient(const LegacyMetricsClient&) = delete;
   LegacyMetricsClient& operator=(const LegacyMetricsClient&) = delete;
+
+  // Disables automatic MetricsRecorder connection. Caller will have to supply
+  // MetricsRecorder by calling SetMetricsRecorder(). Must be called before
+  // Start().
+  void DisableAutoConnect();
+
+  // Sets |metrics_recorder| to use. Should be called only after
+  // DisableAutoConnect().
+  void SetMetricsRecorder(
+      fidl::InterfaceHandle<fuchsia::legacymetrics::MetricsRecorder>
+          metrics_recorder);
 
   // Starts buffering data and schedules metric reporting after every
   // |report_interval|.
@@ -57,16 +74,29 @@ class LegacyMetricsClient {
   // |callback| should be invoked to signal flush completion.
   void SetNotifyFlushCallback(NotifyFlushCallback callback);
 
+  // Use when caller needs an explicit flush and then disconnect, such as before
+  // termination. Caller will be notified when all events in the buffer are
+  // sent.
+  void FlushAndDisconnect(base::OnceClosure on_flush_complete);
+
  private:
+  void ConnectFromComponentContext();
+  void SetMetricsRecorderInternal(
+      fidl::InterfaceHandle<fuchsia::legacymetrics::MetricsRecorder>
+          metrics_recorder);
   void ScheduleNextReport();
   void StartReport();
   void Report(std::vector<fuchsia::legacymetrics::Event> additional_metrics);
   void OnMetricsRecorderDisconnected(zx_status_t status);
+  void ReconnectMetricsRecorder();
   void OnCloseSoon();
+  void CompleteFlush();
+  void ResetMetricsRecorderState();
 
   // Incrementally sends the contents of |to_send_| to |metrics_recorder_|.
   void DrainBuffer();
 
+  base::TimeDelta reconnect_delay_ = kInitialReconnectDelay;
   base::TimeDelta report_interval_;
   ReportAdditionalMetricsCallback report_additional_callback_;
   NotifyFlushCallback notify_flush_callback_;
@@ -75,9 +105,14 @@ class LegacyMetricsClient {
   std::vector<fuchsia::legacymetrics::Event> to_send_;
   std::unique_ptr<LegacyMetricsUserActionRecorder> user_events_recorder_;
 
+  bool auto_connect_ = true;
+  base::RetainingOneShotTimer reconnect_timer_;
+
   fuchsia::legacymetrics::MetricsRecorderPtr metrics_recorder_;
-  base::RetainingOneShotTimer timer_;
+  base::RetainingOneShotTimer report_timer_;
   SEQUENCE_CHECKER(sequence_checker_);
+
+  std::vector<base::OnceClosure> on_flush_complete_closures_;
 
   // Prevents use-after-free if |report_additional_callback_| is invoked after
   // |this| is destroyed.

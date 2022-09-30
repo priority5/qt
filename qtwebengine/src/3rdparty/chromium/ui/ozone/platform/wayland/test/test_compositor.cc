@@ -14,8 +14,6 @@ namespace wl {
 
 namespace {
 
-constexpr uint32_t kCompositorVersion = 4;
-
 void CreateSurface(wl_client* client,
                    wl_resource* compositor_resource,
                    uint32_t id) {
@@ -41,12 +39,13 @@ const struct wl_compositor_interface kTestCompositorImpl = {
     CreateRegion,   // create_region
 };
 
-TestCompositor::TestCompositor()
+TestCompositor::TestCompositor(uint32_t intended_version)
     : GlobalObject(&wl_compositor_interface,
                    &kTestCompositorImpl,
-                   kCompositorVersion) {}
+                   intended_version),
+      version_(intended_version) {}
 
-TestCompositor::~TestCompositor() {}
+TestCompositor::~TestCompositor() = default;
 
 void TestCompositor::AddSurface(MockSurface* surface) {
   surfaces_.push_back(surface);

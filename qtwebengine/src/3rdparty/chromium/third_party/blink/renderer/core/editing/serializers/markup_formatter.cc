@@ -27,7 +27,6 @@
 
 #include "third_party/blink/renderer/core/editing/serializers/markup_formatter.h"
 
-#include "base/stl_util.h"
 #include "third_party/blink/renderer/core/dom/cdata_section.h"
 #include "third_party/blink/renderer/core/dom/comment.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -36,6 +35,7 @@
 #include "third_party/blink/renderer/core/dom/processing_instruction.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_template_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -75,7 +75,8 @@ static inline void AppendCharactersReplacingEntitiesInternal(
           result.Append(text + position_after_last_entity,
                         i - position_after_last_entity);
           const std::string& replacement = entity_maps[entity_index].reference;
-          result.Append(replacement.c_str(), replacement.length());
+          result.Append(replacement.c_str(),
+                        base::checked_cast<unsigned>(replacement.length()));
           position_after_last_entity = i + 1;
           break;
         }
@@ -106,7 +107,7 @@ void MarkupFormatter::AppendCharactersReplacingEntities(
   DEFINE_STATIC_LOCAL(const std::string, line_feed_reference, ("&#10;"));
   DEFINE_STATIC_LOCAL(const std::string, carriage_return_reference, ("&#13;"));
 
-  const EntityDescription kEntityMaps[] = {
+  static const EntityDescription kEntityMaps[] = {
       {'&', amp_reference, kEntityAmp},
       {'<', lt_reference, kEntityLt},
       {'>', gt_reference, kEntityGt},
@@ -120,7 +121,7 @@ void MarkupFormatter::AppendCharactersReplacingEntities(
   WTF::VisitCharacters(source, [&](const auto* chars, unsigned) {
     AppendCharactersReplacingEntitiesInternal(
         result, source, chars, source.length(), kEntityMaps,
-        base::size(kEntityMaps), entity_mask);
+        std::size(kEntityMaps), entity_mask);
   });
 }
 
@@ -385,18 +386,28 @@ EntityMask MarkupFormatter::EntityMaskForText(const Text& text) const {
   if (text.parentElement())
     parent_name = &(text.parentElement())->TagQName();
 
-  if (parent_name && (*parent_name == html_names::kScriptTag ||
-                      *parent_name == html_names::kStyleTag ||
-                      *parent_name == html_names::kXmpTag ||
-                      *parent_name == html_names::kIFrameTag ||
-                      *parent_name == html_names::kPlaintextTag ||
-                      *parent_name == html_names::kNoembedTag ||
-                      *parent_name == html_names::kNoframesTag ||
-                      (*parent_name == html_names::kNoscriptTag &&
-                       text.GetExecutionContext() &&
-                       text.GetExecutionContext()->CanExecuteScripts(
-                           kNotAboutToExecuteScript))))
-    return kEntityMaskInCDATA;
+  if (parent_name) {
+    // For a NOSCRIPT tag, escape the string unless there's an execution context
+    // and scripting is enabled. Note that some documents (e.g. the one created
+    // by DOMParser) are created with a script-enabled execution context, but no
+    // DOMWindow. But per spec [1], they should behave as if they have no
+    // execution context. So check for a DOMWindow here.
+    // [1] https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html
+    bool is_noscript_tag_with_script_enabled =
+        *parent_name == html_names::kNoscriptTag &&
+        text.GetExecutionContext() && text.GetDocument().domWindow() &&
+        text.GetExecutionContext()->CanExecuteScripts(kNotAboutToExecuteScript);
+    if (*parent_name == html_names::kScriptTag ||
+        *parent_name == html_names::kStyleTag ||
+        *parent_name == html_names::kXmpTag ||
+        *parent_name == html_names::kIFrameTag ||
+        *parent_name == html_names::kPlaintextTag ||
+        *parent_name == html_names::kNoembedTag ||
+        *parent_name == html_names::kNoframesTag ||
+        is_noscript_tag_with_script_enabled) {
+      return kEntityMaskInCDATA;
+    }
+  }
   return kEntityMaskInHTMLPCDATA;
 }
 

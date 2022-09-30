@@ -15,10 +15,18 @@ CSSAtRuleID CssAtRuleID(StringView name) {
     return kCSSAtRuleCharset;
   if (EqualIgnoringASCIICase(name, "font-face"))
     return kCSSAtRuleFontFace;
+  if (EqualIgnoringASCIICase(name, "font-palette-values")) {
+    if (RuntimeEnabledFeatures::FontPaletteEnabled())
+      return kCSSAtRuleFontPaletteValues;
+    return kCSSAtRuleInvalid;
+  }
   if (EqualIgnoringASCIICase(name, "import"))
     return kCSSAtRuleImport;
   if (EqualIgnoringASCIICase(name, "keyframes"))
     return kCSSAtRuleKeyframes;
+  if (EqualIgnoringASCIICase(name, "layer")) {
+    return kCSSAtRuleLayer;
+  }
   if (EqualIgnoringASCIICase(name, "media"))
     return kCSSAtRuleMedia;
   if (EqualIgnoringASCIICase(name, "namespace"))
@@ -27,8 +35,18 @@ CSSAtRuleID CssAtRuleID(StringView name) {
     return kCSSAtRulePage;
   if (EqualIgnoringASCIICase(name, "property"))
     return kCSSAtRuleProperty;
-  if (EqualIgnoringASCIICase(name, "scroll-timeline"))
-    return kCSSAtRuleScrollTimeline;
+  if (EqualIgnoringASCIICase(name, "container")) {
+    if (RuntimeEnabledFeatures::CSSContainerQueriesEnabled())
+      return kCSSAtRuleContainer;
+    return kCSSAtRuleInvalid;
+  }
+  if (EqualIgnoringASCIICase(name, "counter-style"))
+    return kCSSAtRuleCounterStyle;
+  if (EqualIgnoringASCIICase(name, "scroll-timeline")) {
+    if (RuntimeEnabledFeatures::CSSScrollTimelineEnabled())
+      return kCSSAtRuleScrollTimeline;
+    return kCSSAtRuleInvalid;
+  }
   if (EqualIgnoringASCIICase(name, "supports"))
     return kCSSAtRuleSupports;
   if (EqualIgnoringASCIICase(name, "viewport"))
@@ -48,11 +66,17 @@ void CountAtRule(const CSSParserContext* context, CSSAtRuleID rule_id) {
     case kCSSAtRuleFontFace:
       feature = WebFeature::kCSSAtRuleFontFace;
       break;
+    case kCSSAtRuleFontPaletteValues:
+      feature = WebFeature::kCSSAtRuleFontPaletteValues;
+      break;
     case kCSSAtRuleImport:
       feature = WebFeature::kCSSAtRuleImport;
       break;
     case kCSSAtRuleKeyframes:
       feature = WebFeature::kCSSAtRuleKeyframes;
+      break;
+    case kCSSAtRuleLayer:
+      feature = WebFeature::kCSSCascadeLayers;
       break;
     case kCSSAtRuleMedia:
       feature = WebFeature::kCSSAtRuleMedia;
@@ -65,6 +89,12 @@ void CountAtRule(const CSSParserContext* context, CSSAtRuleID rule_id) {
       break;
     case kCSSAtRuleProperty:
       feature = WebFeature::kCSSAtRuleProperty;
+      break;
+    case kCSSAtRuleContainer:
+      feature = WebFeature::kCSSAtRuleContainer;
+      return;
+    case kCSSAtRuleCounterStyle:
+      feature = WebFeature::kCSSAtRuleCounterStyle;
       break;
     case kCSSAtRuleScrollTimeline:
       feature = WebFeature::kCSSAtRuleScrollTimeline;

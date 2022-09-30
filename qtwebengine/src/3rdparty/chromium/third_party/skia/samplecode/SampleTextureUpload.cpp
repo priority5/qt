@@ -17,9 +17,9 @@
  * This sample exercises heavy texture updates and uploads.
  */
 class TextureUploadSample : public Sample {
-    static constexpr int kMinTileSize = 128;
-    static constexpr int kMaxTileSize = 2048;
-    static constexpr float kGridScale = 0.25f;
+    inline static constexpr int kMinTileSize = 128;
+    inline static constexpr int kMaxTileSize = 2048;
+    inline static constexpr float kGridScale = 0.25f;
 
     bool fDrawTexturesToScreen = true;
     int fTileSize = 256;
@@ -32,7 +32,7 @@ class TextureUploadSample : public Sample {
     class RenderTargetTexture : public SkRefCnt {
     public:
         RenderTargetTexture(GrDirectContext* direct, int size) {
-            SkSurfaceProps surfaceProps(SkSurfaceProps::kLegacyFontHost_InitType);
+            SkSurfaceProps surfaceProps(0, kRGB_H_SkPixelGeometry);
             SkImageInfo imageInfo = SkImageInfo::Make(size, size, kRGBA_8888_SkColorType,
                                                       kPremul_SkAlphaType);
             fSurface = SkSurface::MakeRenderTarget(direct, SkBudgeted::kNo, imageInfo, 0,
@@ -107,8 +107,6 @@ class TextureUploadSample : public Sample {
 
     void onDrawContent(SkCanvas* canvas) override {
 #if SK_SUPPORT_GPU
-        SkPaint paint;
-
         auto direct = GrAsDirectContext(canvas->recordingContext());
         if (direct) {
             // One-time context-specific setup.
@@ -133,7 +131,7 @@ class TextureUploadSample : public Sample {
                     for (int x = 0; x < fTileCols; x++) {
                         int currentIndex = y * fTileCols + x;
                         canvas->drawImage(fTextures[currentIndex]->getImage(),
-                                          x * fTileSize, y * fTileSize, &paint);
+                                          x * fTileSize, y * fTileSize);
                     }
                 }
             }

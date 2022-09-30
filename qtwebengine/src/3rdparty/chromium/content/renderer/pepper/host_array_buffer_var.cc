@@ -16,7 +16,6 @@
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/plugin_module.h"
 #include "content/renderer/pepper/renderer_ppapi_host_impl.h"
-#include "content/renderer/render_thread_impl.h"
 #include "ppapi/c/pp_instance.h"
 
 using ppapi::ArrayBufferVar;
@@ -55,7 +54,7 @@ void HostArrayBufferVar::Unmap() {
 }
 
 uint32_t HostArrayBufferVar::ByteLength() {
-  return base::checked_cast<uint32_t>(buffer_.ByteLengthAsSizeT());
+  return base::checked_cast<uint32_t>(buffer_.ByteLength());
 }
 
 bool HostArrayBufferVar::CopyToNewShmem(

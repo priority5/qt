@@ -13,14 +13,11 @@
 
 #include <utility>
 
-#if !defined(OS_OPENBSD)
-#include <linux/version.h>
-#endif
-
 #include "base/bind.h"
 #include "base/posix/eintr_wrapper.h"
 #include "build/build_config.h"
 #include "media/base/bind_to_current_loop.h"
+#include "media/base/video_frame.h"
 #include "media/base/video_types.h"
 #include "media/capture/mojom/image_capture_types.h"
 #include "media/capture/video/blob_utils.h"
@@ -70,6 +67,7 @@ struct {
   size_t num_planes;
 } constexpr kSupportedFormatsAndPlanarity[] = {
     {V4L2_PIX_FMT_YUV420, PIXEL_FORMAT_I420, 1},
+    {V4L2_PIX_FMT_NV12, PIXEL_FORMAT_NV12, 1},
     {V4L2_PIX_FMT_Y16, PIXEL_FORMAT_Y16, 1},
     {V4L2_PIX_FMT_Z16, PIXEL_FORMAT_Y16, 1},
     {V4L2_PIX_FMT_INVZ, PIXEL_FORMAT_Y16, 1},
@@ -221,7 +219,7 @@ VideoPixelFormat V4L2CaptureDelegate::V4l2FourCcToChromiumPixelFormat(
 std::vector<uint32_t> V4L2CaptureDelegate::GetListOfUsableFourCcs(
     bool prefer_mjpeg) {
   std::vector<uint32_t> supported_formats;
-  supported_formats.reserve(base::size(kSupportedFormatsAndPlanarity));
+  supported_formats.reserve(std::size(kSupportedFormatsAndPlanarity));
 
   // Duplicate MJPEG on top of the list depending on |prefer_mjpeg|.
   if (prefer_mjpeg)
@@ -268,10 +266,18 @@ void V4L2CaptureDelegate::AllocateAndStart(
 
   ResetUserAndCameraControlsToDefault();
 
+  // In theory, checking for CAPTURE/OUTPUT in caps.capabilities should only
+  // be done if V4L2_CAP_DEVICE_CAPS is not set. However, this was not done
+  // in the past and it is unclear if it breaks with existing devices. And if
+  // a device is accepted incorrectly then it will not have any usable
+  // formats and is skipped anyways.
   v4l2_capability cap = {};
   if (!(DoIoctl(VIDIOC_QUERYCAP, &cap) == 0 &&
-        ((cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
-         !(cap.capabilities & V4L2_CAP_VIDEO_OUTPUT)))) {
+        (((cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
+          !(cap.capabilities & V4L2_CAP_VIDEO_OUTPUT)) ||
+         ((cap.capabilities & V4L2_CAP_DEVICE_CAPS) &&
+          (cap.device_caps & V4L2_CAP_VIDEO_CAPTURE) &&
+          !(cap.device_caps & V4L2_CAP_VIDEO_OUTPUT))))) {
     device_fd_.reset();
     SetErrorState(VideoCaptureError::kV4L2ThisIsNotAV4L2VideoCaptureDevice,
                   FROM_HERE, "This is not a V4L2 video capture device");
@@ -339,12 +345,9 @@ void V4L2CaptureDelegate::AllocateAndStart(
 
   // Set anti-banding/anti-flicker to 50/60Hz. May fail due to not supported
   // operation (|errno| == EINVAL in this case) or plain failure.
-  if ((power_line_frequency_ == V4L2_CID_POWER_LINE_FREQUENCY_50HZ)
-      || (power_line_frequency_ == V4L2_CID_POWER_LINE_FREQUENCY_60HZ)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0)
-      || (power_line_frequency_ == V4L2_CID_POWER_LINE_FREQUENCY_AUTO)
-#endif
-    ) {
+  if ((power_line_frequency_ == V4L2_CID_POWER_LINE_FREQUENCY_50HZ) ||
+      (power_line_frequency_ == V4L2_CID_POWER_LINE_FREQUENCY_60HZ) ||
+      (power_line_frequency_ == V4L2_CID_POWER_LINE_FREQUENCY_AUTO)) {
     struct v4l2_control control = {};
     control.id = V4L2_CID_POWER_LINE_FREQUENCY;
     control.value = power_line_frequency_;
@@ -925,7 +928,9 @@ void V4L2CaptureDelegate::DoCapture() {
       client_->OnFrameDropped(
           VideoCaptureFrameDropReason::kV4L2BufferErrorFlagWasSet);
 #endif
-    } else if (buffer.bytesused < capture_format_.ImageAllocationSize()) {
+    } else if (buffer.bytesused <
+               media::VideoFrame::AllocationSize(capture_format_.pixel_format,
+                                                 capture_format_.frame_size)) {
       LOG(ERROR) << "Dequeued v4l2 buffer contains invalid length ("
                  << buffer.bytesused << " bytes).";
       buffer.bytesused = 0;
@@ -969,7 +974,9 @@ void V4L2CaptureDelegate::DoCapture() {
 
 bool V4L2CaptureDelegate::StopStream() {
   DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
-  DCHECK(is_capturing_);
+  if (!is_capturing_)
+    return false;
+
   is_capturing_ = false;
 
   // The order is important: stop streaming, clear |buffer_pool_|,
@@ -998,7 +1005,6 @@ void V4L2CaptureDelegate::SetErrorState(VideoCaptureError error,
                                         const base::Location& from_here,
                                         const std::string& reason) {
   DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
-  is_capturing_ = false;
   client_->OnError(error, from_here, reason);
 }
 

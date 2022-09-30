@@ -3,9 +3,11 @@
 // found in the LICENSE file.
 
 #include "components/signin/public/identity_manager/account_info.h"
+
+#include "build/build_config.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_string.h"
 #include "components/signin/public/android/jni_headers/AccountInfo_jni.h"
 #include "components/signin/public/android/jni_headers/CoreAccountId_jni.h"
@@ -36,6 +38,16 @@ bool UpdateField(std::string* field,
 // changed.
 bool UpdateField(bool* field, bool new_value) {
   if (*field == new_value || !new_value)
+    return false;
+
+  *field = new_value;
+  return true;
+}
+
+// Updates |field| with |new_value| if true. Returns whether |field| was
+// changed.
+bool UpdateField(signin::Tribool* field, signin::Tribool new_value) {
+  if (*field == new_value || new_value == signin::Tribool::kUnknown)
     return false;
 
   *field = new_value;
@@ -110,9 +122,20 @@ bool AccountInfo::UpdateWith(const AccountInfo& other) {
   modified |= UpdateField(&is_child_account, other.is_child_account);
   modified |= UpdateField(&is_under_advanced_protection,
                           other.is_under_advanced_protection);
+  modified |= capabilities.UpdateWith(other.capabilities);
 
   return modified;
 }
+
+// static
+bool AccountInfo::IsManaged(const std::string& hosted_domain) {
+  return !hosted_domain.empty() && hosted_domain != kNoHostedDomainFound;
+}
+
+bool AccountInfo::IsManaged() const {
+  return IsManaged(hosted_domain);
+}
+
 bool operator==(const CoreAccountInfo& l, const CoreAccountInfo& r) {
   return l.account_id == r.account_id && l.gaia == r.gaia &&
          gaia::AreEmailsSame(l.email, r.email) &&
@@ -129,7 +152,7 @@ std::ostream& operator<<(std::ostream& os, const CoreAccountInfo& account) {
   return os;
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 base::android::ScopedJavaLocalRef<jobject> ConvertToJavaCoreAccountInfo(
     JNIEnv* env,
     const CoreAccountInfo& account_info) {
@@ -147,9 +170,12 @@ base::android::ScopedJavaLocalRef<jobject> ConvertToJavaAccountInfo(
       env, ConvertToJavaCoreAccountId(env, account_info.account_id),
       base::android::ConvertUTF8ToJavaString(env, account_info.email),
       base::android::ConvertUTF8ToJavaString(env, account_info.gaia),
+      base::android::ConvertUTF8ToJavaString(env, account_info.full_name),
+      base::android::ConvertUTF8ToJavaString(env, account_info.given_name),
       avatar_image.IsEmpty()
           ? nullptr
-          : gfx::ConvertToJavaBitmap(avatar_image.AsImageSkia().bitmap()));
+          : gfx::ConvertToJavaBitmap(*avatar_image.AsImageSkia().bitmap()),
+      account_info.capabilities.ConvertToJavaAccountCapabilities(env));
 }
 
 base::android::ScopedJavaLocalRef<jobject> ConvertToJavaCoreAccountId(

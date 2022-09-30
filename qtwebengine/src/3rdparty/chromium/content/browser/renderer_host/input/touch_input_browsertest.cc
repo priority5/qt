@@ -5,9 +5,8 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/gpu/compositor_util.h"
@@ -15,7 +14,6 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/input_messages.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -36,7 +34,7 @@ namespace {
 
 const char kTouchEventDataURL[] =
     "data:text/html;charset=utf-8,"
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     "<head>"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "</head>"
@@ -91,8 +89,11 @@ class TouchInputBrowserTest : public ContentBrowserTest {
   ~TouchInputBrowserTest() override {}
 
   RenderWidgetHostImpl* GetWidgetHost() {
-    return RenderWidgetHostImpl::From(
-        shell()->web_contents()->GetRenderViewHost()->GetWidget());
+    return RenderWidgetHostImpl::From(shell()
+                                          ->web_contents()
+                                          ->GetMainFrame()
+                                          ->GetRenderViewHost()
+                                          ->GetWidget());
   }
 
   std::unique_ptr<InputMsgWatcher> AddFilter(blink::WebInputEvent::Type type) {
@@ -118,7 +119,7 @@ class TouchInputBrowserTest : public ContentBrowserTest {
         host->render_frame_metadata_provider());
     frame_observer.WaitForMetadataChange();
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
     // On non-Android, set a size for the view, and wait for a new frame to be
     // generated at that size. On Android the size is specified in
     // kTouchEventDataURL.

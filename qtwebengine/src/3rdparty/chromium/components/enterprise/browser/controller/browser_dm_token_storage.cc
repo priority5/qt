@@ -3,40 +3,32 @@
 // found in the LICENSE file.
 
 #include "components/enterprise/browser/controller/browser_dm_token_storage.h"
+#include <stddef.h>
 
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
-#include "base/run_loop.h"
-#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/system/sys_info.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/syslog_logging.h"
+#include "base/task/task_runner_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "components/enterprise/browser/controller/chrome_browser_cloud_management_controller.h"
 
 namespace policy {
 
 namespace {
 
 constexpr char kInvalidTokenValue[] = "INVALID_DM_TOKEN";
-
-void OnHardwarePlatformInfo(base::OnceClosure quit_closure,
-                            std::string* out,
-                            base::SysInfo::HardwareInfo info) {
-  *out = info.serial_number;
-  std::move(quit_closure).Run();
-}
 
 DMToken CreateValidToken(const std::string& dm_token) {
   DCHECK_NE(dm_token, kInvalidTokenValue);
@@ -94,17 +86,6 @@ std::string BrowserDMTokenStorage::RetrieveClientId() {
 
   InitIfNeeded();
   return client_id_;
-}
-
-std::string BrowserDMTokenStorage::RetrieveSerialNumber() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  if (!serial_number_) {
-    serial_number_ = InitSerialNumber();
-    DVLOG(1) << "Serial number= " << serial_number_.value();
-  }
-
-  return serial_number_.value();
 }
 
 std::string BrowserDMTokenStorage::RetrieveEnrollmentToken() {
@@ -175,11 +156,37 @@ void BrowserDMTokenStorage::InitIfNeeded() {
 
   is_initialized_ = true;
 
+  // When CBCM is not enabled, set the DM token to empty directly withtout
+  // actually read it.
+  if (!ChromeBrowserCloudManagementController::IsEnabled()) {
+    dm_token_ = CreateEmptyToken();
+    return;
+  }
+
   // Only supported in official builds.
   client_id_ = delegate_->InitClientId();
   DVLOG(1) << "Client ID = " << client_id_;
   if (client_id_.empty())
     return;
+
+  // checks if client ID is greater than 64 characters
+  if (client_id_.length() > 64) {
+    SYSLOG(ERROR) << "Chrome browser cloud management client ID should"
+                     "not be greater than 64 characters long.";
+    client_id_.clear();
+    return;
+  }
+
+  // checks if client ID includes an illegal character
+  if (std::find_if(client_id_.begin(), client_id_.end(), [](char ch) {
+    return ch == ' ' || !base::IsAsciiPrintable(ch);
+  }) != client_id_.end()) {
+    SYSLOG(ERROR)
+        << "Chrome browser cloud management client ID should not"
+           " contain a space, new line, or any nonprintable character.";
+    client_id_.clear();
+    return;
+  }
 
   enrollment_token_ = delegate_->InitEnrollmentToken();
   DVLOG(1) << "Enrollment token = " << enrollment_token_;
@@ -207,22 +214,6 @@ void BrowserDMTokenStorage::SaveDMToken(const std::string& token) {
   base::PostTaskAndReplyWithResult(delegate_->SaveDMTokenTaskRunner().get(),
                                    FROM_HERE, std::move(task),
                                    std::move(reply));
-}
-
-std::string BrowserDMTokenStorage::InitSerialNumber() {
-  // GetHardwareInfo is asynchronous, but we need this synchronously. This call
-  // will only happens once, as we cache the value. This will eventually be
-  // moved earlier in Chrome's startup as it will be needed by the registration
-  // as well.
-  // TODO(crbug.com/907518): Move this earlier and make it async.
-  base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
-  std::string serial_number;
-  base::SysInfo::GetHardwareInfo(base::BindOnce(
-      &OnHardwarePlatformInfo, run_loop.QuitClosure(), &serial_number));
-
-  run_loop.Run();
-
-  return serial_number;
 }
 
 }  // namespace policy

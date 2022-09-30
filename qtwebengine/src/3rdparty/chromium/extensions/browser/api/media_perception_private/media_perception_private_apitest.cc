@@ -6,14 +6,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chromeos/ash/components/dbus/upstart/upstart_client.h"
 #include "chromeos/dbus/media_analytics/fake_media_analytics_client.h"
 #include "chromeos/dbus/media_analytics/media_analytics_client.h"
 #include "chromeos/dbus/media_perception/media_perception.pb.h"
-#include "chromeos/dbus/upstart/upstart_client.h"
 #include "extensions/browser/api/media_perception_private/media_perception_api_delegate.h"
 #include "extensions/browser/api/media_perception_private/media_perception_private_api.h"
 #include "extensions/common/api/media_perception_private.h"
 #include "extensions/common/features/feature_session_type.h"
+#include "extensions/common/mojom/feature_session_type.mojom.h"
 #include "extensions/common/switches.h"
 #include "extensions/shell/browser/shell_extensions_api_client.h"
 #include "extensions/shell/test/shell_apitest.h"
@@ -91,6 +92,11 @@ class TestExtensionsAPIClient : public ShellExtensionsAPIClient {
 class MediaPerceptionPrivateApiTest : public ShellApiTest {
  public:
   MediaPerceptionPrivateApiTest() {}
+
+  MediaPerceptionPrivateApiTest(const MediaPerceptionPrivateApiTest&) = delete;
+  MediaPerceptionPrivateApiTest& operator=(
+      const MediaPerceptionPrivateApiTest&) = delete;
+
   ~MediaPerceptionPrivateApiTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -105,25 +111,23 @@ class MediaPerceptionPrivateApiTest : public ShellApiTest {
     // MediaAnalyticsClient and UpstartClient are required by
     // MediaPerceptionAPIManager.
     chromeos::MediaAnalyticsClient::InitializeFake();
-    chromeos::UpstartClient::InitializeFake();
+    ash::UpstartClient::InitializeFake();
   }
 
   void TearDownInProcessBrowserTestFixture() override {
-    chromeos::UpstartClient::Shutdown();
+    ash::UpstartClient::Shutdown();
     chromeos::MediaAnalyticsClient::Shutdown();
   }
 
   void SetUpOnMainThread() override {
     session_feature_type_ = extensions::ScopedCurrentFeatureSessionType(
-        extensions::FeatureSessionType::KIOSK);
+        extensions::mojom::FeatureSessionType::kKiosk);
     ShellApiTest::SetUpOnMainThread();
   }
 
  private:
-  std::unique_ptr<base::AutoReset<extensions::FeatureSessionType>>
+  std::unique_ptr<base::AutoReset<extensions::mojom::FeatureSessionType>>
       session_feature_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaPerceptionPrivateApiTest);
 };
 
 // Verify that we can execute the setAnalyticsComponent API and deal with

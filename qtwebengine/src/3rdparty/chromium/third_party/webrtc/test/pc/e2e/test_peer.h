@@ -15,10 +15,15 @@
 #include <vector>
 
 #include "absl/memory/memory.h"
-#include "absl/types/variant.h"
+#include "api/function_view.h"
+#include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
+#include "api/set_remote_description_observer_interface.h"
 #include "api/test/frame_generator_interface.h"
 #include "api/test/peerconnection_quality_test_fixture.h"
 #include "pc/peer_connection_wrapper.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/ref_counted_object.h"
 #include "test/pc/e2e/peer_configurer.h"
 #include "test/pc/e2e/peer_connection_quality_test_params.h"
 
@@ -30,71 +35,104 @@ class TestPeer final {
  public:
   Params* params() const { return params_.get(); }
   PeerConfigurerImpl::VideoSource ReleaseVideoSource(size_t i) {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return std::move(video_sources_[i]);
   }
 
   PeerConnectionFactoryInterface* pc_factory() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->pc_factory();
   }
-  PeerConnectionInterface* pc() { return wrapper_->pc(); }
-  MockPeerConnectionObserver* observer() { return wrapper_->observer(); }
+  PeerConnectionInterface* pc() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
+    return wrapper_->pc();
+  }
+  MockPeerConnectionObserver* observer() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
+    return wrapper_->observer();
+  }
 
+  // Tell underlying `PeerConnection` to create an Offer.
+  // `observer` will be invoked on the signaling thread when offer is created.
+  void CreateOffer(
+      rtc::scoped_refptr<CreateSessionDescriptionObserver> observer) {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
+    pc()->CreateOffer(observer.release(), params_->rtc_offer_answer_options);
+  }
   std::unique_ptr<SessionDescriptionInterface> CreateOffer() {
-    return wrapper_->CreateOffer();
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
+    return wrapper_->CreateOffer(params_->rtc_offer_answer_options);
   }
 
   std::unique_ptr<SessionDescriptionInterface> CreateAnswer() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->CreateAnswer();
   }
 
   bool SetLocalDescription(std::unique_ptr<SessionDescriptionInterface> desc,
                            std::string* error_out = nullptr) {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->SetLocalDescription(std::move(desc), error_out);
   }
 
+  // `error_out` will be set only if returned value is false.
   bool SetRemoteDescription(std::unique_ptr<SessionDescriptionInterface> desc,
-                            std::string* error_out = nullptr) {
-    return wrapper_->SetRemoteDescription(std::move(desc), error_out);
-  }
+                            std::string* error_out = nullptr);
 
   rtc::scoped_refptr<RtpTransceiverInterface> AddTransceiver(
       cricket::MediaType media_type,
       const RtpTransceiverInit& init) {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->AddTransceiver(media_type, init);
   }
 
   rtc::scoped_refptr<RtpSenderInterface> AddTrack(
       rtc::scoped_refptr<MediaStreamTrackInterface> track,
       const std::vector<std::string>& stream_ids = {}) {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->AddTrack(track, stream_ids);
   }
 
   rtc::scoped_refptr<DataChannelInterface> CreateDataChannel(
       const std::string& label) {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->CreateDataChannel(label);
   }
 
   PeerConnectionInterface::SignalingState signaling_state() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->signaling_state();
   }
 
-  bool IsIceGatheringDone() { return wrapper_->IsIceGatheringDone(); }
+  bool IsIceGatheringDone() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
+    return wrapper_->IsIceGatheringDone();
+  }
 
-  bool IsIceConnected() { return wrapper_->IsIceConnected(); }
+  bool IsIceConnected() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
+    return wrapper_->IsIceConnected();
+  }
 
   rtc::scoped_refptr<const RTCStatsReport> GetStats() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     return wrapper_->GetStats();
   }
 
   void DetachAecDump() {
+    RTC_CHECK(wrapper_) << "TestPeer is already closed";
     if (audio_processing_) {
       audio_processing_->DetachAecDump();
     }
   }
 
-  // Adds provided |candidates| to the owned peer connection.
+  // Adds provided `candidates` to the owned peer connection.
   bool AddIceCandidates(
       std::vector<std::unique_ptr<IceCandidateInterface>> candidates);
+
+  // Closes underlying peer connection and destroys all related objects freeing
+  // up related resources.
+  void Close();
 
  protected:
   friend class TestPeerFactory;
@@ -107,7 +145,7 @@ class TestPeer final {
            std::unique_ptr<rtc::Thread> worker_thread);
 
  private:
-  // Keeps ownership of worker thread. It has to be destroyed after |wrapper_|.
+  // Keeps ownership of worker thread. It has to be destroyed after `wrapper_`.
   std::unique_ptr<rtc::Thread> worker_thread_;
   std::unique_ptr<PeerConnectionWrapper> wrapper_;
   std::unique_ptr<Params> params_;

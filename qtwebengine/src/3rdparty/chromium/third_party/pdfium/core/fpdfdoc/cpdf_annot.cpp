@@ -21,11 +21,12 @@
 #include "core/fpdfapi/render/cpdf_pagerendercache.h"
 #include "core/fpdfapi/render/cpdf_rendercontext.h"
 #include "core/fpdfapi/render/cpdf_renderoptions.h"
-#include "core/fpdfdoc/cpvt_generateap.h"
+#include "core/fpdfdoc/cpdf_generateap.h"
 #include "core/fxge/cfx_fillrenderoptions.h"
 #include "core/fxge/cfx_graphstatedata.h"
-#include "core/fxge/cfx_pathdata.h"
+#include "core/fxge/cfx_path.h"
 #include "core/fxge/cfx_renderdevice.h"
+#include "third_party/base/check.h"
 
 namespace {
 
@@ -41,7 +42,7 @@ bool IsTextMarkupAnnotation(CPDF_Annot::Subtype type) {
 CPDF_Form* AnnotGetMatrix(const CPDF_Page* pPage,
                           CPDF_Annot* pAnnot,
                           CPDF_Annot::AppearanceMode mode,
-                          const CFX_Matrix* pUser2Device,
+                          const CFX_Matrix& mtUser2Device,
                           CFX_Matrix* matrix) {
   CPDF_Form* pForm = pAnnot->GetAPForm(pPage, mode);
   if (!pForm)
@@ -51,7 +52,7 @@ CPDF_Form* AnnotGetMatrix(const CPDF_Page* pPage,
   CFX_FloatRect form_bbox =
       form_matrix.TransformRect(pForm->GetDict()->GetRectFor("BBox"));
   matrix->MatchRect(pAnnot->GetRect(), form_bbox);
-  matrix->Concat(*pUser2Device);
+  matrix->Concat(mtUser2Device);
   return pForm;
 }
 
@@ -63,9 +64,9 @@ CPDF_Stream* GetAnnotAPInternal(CPDF_Dictionary* pAnnotDict,
     return nullptr;
 
   const char* ap_entry = "N";
-  if (eMode == CPDF_Annot::Down)
+  if (eMode == CPDF_Annot::AppearanceMode::kDown)
     ap_entry = "D";
-  else if (eMode == CPDF_Annot::Rollover)
+  else if (eMode == CPDF_Annot::AppearanceMode::kRollover)
     ap_entry = "R";
   if (bFallbackToNormal && !pAP->KeyExist(ap_entry))
     ap_entry = "N";
@@ -94,34 +95,25 @@ CPDF_Stream* GetAnnotAPInternal(CPDF_Dictionary* pAnnotDict,
 
 }  // namespace
 
-CPDF_Annot::CPDF_Annot(RetainPtr<CPDF_Dictionary> pDict,
-                       CPDF_Document* pDocument)
-    : m_pAnnotDict(std::move(pDict)), m_pDocument(pDocument) {
-  Init();
-}
-
 CPDF_Annot::CPDF_Annot(CPDF_Dictionary* pDict, CPDF_Document* pDocument)
-    : m_pAnnotDict(pDict), m_pDocument(pDocument) {
-  Init();
+    : m_pAnnotDict(pDict),
+      m_pDocument(pDocument),
+      m_nSubtype(StringToAnnotSubtype(
+          m_pAnnotDict->GetStringFor(pdfium::annotation::kSubtype))),
+      m_bIsTextMarkupAnnotation(IsTextMarkupAnnotation(m_nSubtype)),
+      m_bHasGeneratedAP(
+          m_pAnnotDict->GetBooleanFor(kPDFiumKey_HasGeneratedAP, false)) {
+  GenerateAPIfNeeded();
 }
 
 CPDF_Annot::~CPDF_Annot() {
   ClearCachedAP();
 }
 
-void CPDF_Annot::Init() {
-  m_nSubtype = StringToAnnotSubtype(
-      m_pAnnotDict->GetStringFor(pdfium::annotation::kSubtype));
-  m_bIsTextMarkupAnnotation = IsTextMarkupAnnotation(m_nSubtype);
-  m_bHasGeneratedAP =
-      m_pAnnotDict->GetBooleanFor(kPDFiumKey_HasGeneratedAP, false);
-  GenerateAPIfNeeded();
-}
-
 void CPDF_Annot::GenerateAPIfNeeded() {
   if (!ShouldGenerateAP())
     return;
-  if (!CPVT_GenerateAP::GenerateAnnotAP(m_pDocument.Get(), m_pAnnotDict.Get(),
+  if (!CPDF_GenerateAP::GenerateAnnotAP(m_pDocument.Get(), m_pAnnotDict.Get(),
                                         m_nSubtype)) {
     return;
   }
@@ -179,13 +171,13 @@ bool CPDF_Annot::IsHidden() const {
 
 CPDF_Stream* GetAnnotAP(CPDF_Dictionary* pAnnotDict,
                         CPDF_Annot::AppearanceMode eMode) {
-  ASSERT(pAnnotDict);
+  DCHECK(pAnnotDict);
   return GetAnnotAPInternal(pAnnotDict, eMode, true);
 }
 
 CPDF_Stream* GetAnnotAPNoFallback(CPDF_Dictionary* pAnnotDict,
                                   CPDF_Annot::AppearanceMode eMode) {
-  ASSERT(pAnnotDict);
+  DCHECK(pAnnotDict);
   return GetAnnotAPInternal(pAnnotDict, eMode, false);
 }
 
@@ -198,8 +190,8 @@ CPDF_Form* CPDF_Annot::GetAPForm(const CPDF_Page* pPage, AppearanceMode mode) {
   if (it != m_APMap.end())
     return it->second.get();
 
-  auto pNewForm = std::make_unique<CPDF_Form>(
-      m_pDocument.Get(), pPage->m_pResources.Get(), pStream);
+  auto pNewForm = std::make_unique<CPDF_Form>(m_pDocument.Get(),
+                                              pPage->GetResources(), pStream);
   pNewForm->ParseContent();
 
   CPDF_Form* pResult = pNewForm.get();
@@ -210,8 +202,8 @@ CPDF_Form* CPDF_Annot::GetAPForm(const CPDF_Page* pPage, AppearanceMode mode) {
 // static
 CFX_FloatRect CPDF_Annot::RectFromQuadPointsArray(const CPDF_Array* pArray,
                                                   size_t nIndex) {
-  ASSERT(pArray);
-  ASSERT(nIndex < pArray->size() / 8);
+  DCHECK(pArray);
+  DCHECK(nIndex < pArray->size() / 8);
 
   // QuadPoints are defined with 4 pairs of numbers
   // ([ pair0, pair1, pair2, pair3 ]), where
@@ -313,6 +305,8 @@ CPDF_Annot::Subtype CPDF_Annot::StringToAnnotSubtype(
     return CPDF_Annot::Subtype::RICHMEDIA;
   if (sSubtype == "XFAWidget")
     return CPDF_Annot::Subtype::XFAWIDGET;
+  if (sSubtype == "Redact")
+    return CPDF_Annot::Subtype::REDACT;
   return CPDF_Annot::Subtype::UNKNOWN;
 }
 
@@ -372,6 +366,8 @@ ByteString CPDF_Annot::AnnotSubtypeToString(CPDF_Annot::Subtype nSubtype) {
     return "RichMedia";
   if (nSubtype == CPDF_Annot::Subtype::XFAWIDGET)
     return "XFAWidget";
+  if (nSubtype == CPDF_Annot::Subtype::REDACT)
+    return "Redact";
   return ByteString();
 }
 
@@ -383,57 +379,55 @@ size_t CPDF_Annot::QuadPointCount(const CPDF_Array* pArray) {
 bool CPDF_Annot::DrawAppearance(CPDF_Page* pPage,
                                 CFX_RenderDevice* pDevice,
                                 const CFX_Matrix& mtUser2Device,
-                                AppearanceMode mode,
-                                const CPDF_RenderOptions* pOptions) {
+                                AppearanceMode mode) {
   if (!ShouldDrawAnnotation())
     return false;
 
   // It might happen that by the time this annotation instance was created,
-  // it was flagged as "hidden" (e.g. /F 2), and hence CPVT_GenerateAP decided
+  // it was flagged as "hidden" (e.g. /F 2), and hence CPDF_GenerateAP decided
   // to not "generate" its AP.
   // If for a reason the object is no longer hidden, but still does not have
   // its "AP" generated, generate it now.
   GenerateAPIfNeeded();
 
   CFX_Matrix matrix;
-  CPDF_Form* pForm = AnnotGetMatrix(pPage, this, mode, &mtUser2Device, &matrix);
+  CPDF_Form* pForm = AnnotGetMatrix(pPage, this, mode, mtUser2Device, &matrix);
   if (!pForm)
     return false;
 
   CPDF_RenderContext context(
-      pPage->GetDocument(), pPage->m_pPageResources.Get(),
+      pPage->GetDocument(), pPage->GetPageResources(),
       static_cast<CPDF_PageRenderCache*>(pPage->GetRenderCache()));
-  context.AppendLayer(pForm, &matrix);
-  context.Render(pDevice, pOptions, nullptr);
+  context.AppendLayer(pForm, matrix);
+  context.Render(pDevice, nullptr, nullptr, nullptr);
   return true;
 }
 
 bool CPDF_Annot::DrawInContext(const CPDF_Page* pPage,
                                CPDF_RenderContext* pContext,
-                               const CFX_Matrix* pUser2Device,
+                               const CFX_Matrix& mtUser2Device,
                                AppearanceMode mode) {
   if (!ShouldDrawAnnotation())
     return false;
 
   // It might happen that by the time this annotation instance was created,
-  // it was flagged as "hidden" (e.g. /F 2), and hence CPVT_GenerateAP decided
+  // it was flagged as "hidden" (e.g. /F 2), and hence CPDF_GenerateAP decided
   // to not "generate" its AP.
   // If for a reason the object is no longer hidden, but still does not have
   // its "AP" generated, generate it now.
   GenerateAPIfNeeded();
 
   CFX_Matrix matrix;
-  CPDF_Form* pForm = AnnotGetMatrix(pPage, this, mode, pUser2Device, &matrix);
+  CPDF_Form* pForm = AnnotGetMatrix(pPage, this, mode, mtUser2Device, &matrix);
   if (!pForm)
     return false;
 
-  pContext->AppendLayer(pForm, &matrix);
+  pContext->AppendLayer(pForm, matrix);
   return true;
 }
 
 void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
-                            const CFX_Matrix* pUser2Device,
-                            const CPDF_RenderOptions* pOptions) {
+                            const CFX_Matrix* pUser2Device) {
   if (GetSubtype() == CPDF_Annot::Subtype::POPUP)
     return;
 
@@ -491,9 +485,9 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
   CPDF_Array* pColor = m_pAnnotDict->GetArrayFor(pdfium::annotation::kC);
   uint32_t argb = 0xff000000;
   if (pColor) {
-    int R = (int32_t)(pColor->GetNumberAt(0) * 255);
-    int G = (int32_t)(pColor->GetNumberAt(1) * 255);
-    int B = (int32_t)(pColor->GetNumberAt(2) * 255);
+    int R = static_cast<int32_t>(pColor->GetNumberAt(0) * 255);
+    int G = static_cast<int32_t>(pColor->GetNumberAt(1) * 255);
+    int B = static_cast<int32_t>(pColor->GetNumberAt(2) * 255);
     argb = ArgbEncode(0xff, R, G, B);
   }
   CFX_GraphStateData graph_state;
@@ -517,13 +511,9 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
 
   CFX_FloatRect rect = GetRect();
   rect.Deflate(width / 2, width / 2);
-  CFX_PathData path;
+
+  CFX_Path path;
   path.AppendFloatRect(rect);
-
-  CFX_FillRenderOptions fill_options;
-  if (pOptions && pOptions->GetOptions().bNoPathSmooth)
-    fill_options.aliased_path = true;
-
-  pDevice->DrawPath(&path, pUser2Device, &graph_state, argb, argb,
-                    fill_options);
+  pDevice->DrawPath(path, pUser2Device, &graph_state, argb, argb,
+                    CFX_FillRenderOptions());
 }

@@ -9,20 +9,25 @@
 #import <CoreVideo/CoreVideo.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sstream>
 
+#include "base/debug/dump_without_crashing.h"
 #include "base/location.h"
 #include "base/mac/foundation_util.h"
-#include "base/mac/mac_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
+#include "components/crash/core/common/crash_key.h"
+#include "media/base/mac/color_space_util_mac.h"
 #include "media/base/media_switches.h"
 #include "media/base/timestamp_constants.h"
 #include "media/base/video_types.h"
 #import "media/capture/video/mac/video_capture_device_avfoundation_utils_mac.h"
 #include "media/capture/video/mac/video_capture_device_factory_mac.h"
 #include "media/capture/video/mac/video_capture_device_mac.h"
+#import "media/capture/video/mac/video_capture_metrics_mac.h"
 #include "media/capture/video_capture_types.h"
 #include "services/video_capture/public/uma/video_capture_service_event.h"
 #include "ui/gfx/geometry/size.h"
@@ -33,42 +38,41 @@ namespace {
 constexpr NSString* kModelIdLogitech4KPro =
     @"UVC Camera VendorID_1133 ProductID_2175";
 
+constexpr gfx::ColorSpace kColorSpaceRec709Apple(
+    gfx::ColorSpace::PrimaryID::BT709,
+    gfx::ColorSpace::TransferID::BT709_APPLE,
+    gfx::ColorSpace::MatrixID::SMPTE170M,
+    gfx::ColorSpace::RangeID::LIMITED);
+
 constexpr int kTimeToWaitBeforeStoppingStillImageCaptureInSeconds = 60;
 constexpr FourCharCode kDefaultFourCCPixelFormat =
     kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;  // NV12 (a.k.a. 420v)
+
+// Allowable epsilon when comparing the requested framerate against the
+// captures' min/max framerates, to handle float inaccuracies.
+// Framerates will be in the range of 1-100 or so, meaning under- or
+// overshooting by 0.001 fps will be negligable, but still handling float loss
+// of precision during manipulation.
+constexpr float kFrameRateEpsilon = 0.001;
 
 base::TimeDelta GetCMSampleBufferTimestamp(CMSampleBufferRef sampleBuffer) {
   const CMTime cm_timestamp =
       CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
   const base::TimeDelta timestamp =
       CMTIME_IS_VALID(cm_timestamp)
-          ? base::TimeDelta::FromSecondsD(CMTimeGetSeconds(cm_timestamp))
+          ? base::Seconds(CMTimeGetSeconds(cm_timestamp))
           : media::kNoTimestamp;
   return timestamp;
 }
 
-std::string MacFourCCToString(OSType fourcc) {
-  char arr[] = {fourcc >> 24, (fourcc >> 16) & 255, (fourcc >> 8) & 255,
-                fourcc & 255, 0};
-  return arr;
-}
-
-class CMSampleBufferScopedAccessPermission
-    : public media::VideoCaptureDevice::Client::Buffer::ScopedAccessPermission {
- public:
-  CMSampleBufferScopedAccessPermission(CMSampleBufferRef buffer)
-      : buffer_(buffer, base::scoped_policy::RETAIN) {
-    buffer_.reset();
-  }
-  ~CMSampleBufferScopedAccessPermission() override {}
-
- private:
-  base::ScopedCFTypeRef<CMSampleBufferRef> buffer_;
-};
+constexpr size_t kPixelBufferPoolSize = 10;
 
 }  // anonymous namespace
 
 namespace media {
+
+const base::Feature kInCapturerScaling{"InCapturerScaling",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
 AVCaptureDeviceFormat* FindBestCaptureFormat(
     NSArray<AVCaptureDeviceFormat*>* formats,
@@ -92,8 +96,9 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
     for (AVFrameRateRange* frameRateRange in
          [captureFormat videoSupportedFrameRateRanges]) {
       maxFrameRate = std::max(maxFrameRate, [frameRateRange maxFrameRate]);
-      matchesFrameRate |= [frameRateRange minFrameRate] <= frame_rate &&
-                          frame_rate <= [frameRateRange maxFrameRate];
+      matchesFrameRate |=
+          [frameRateRange minFrameRate] <= frame_rate + kFrameRateEpsilon &&
+          frame_rate - kFrameRateEpsilon <= [frameRateRange maxFrameRate];
     }
 
     // If the pixel format is unsupported by our code, then it is not useful.
@@ -165,25 +170,48 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
 
 #pragma mark Public methods
 
-- (id)initWithFrameReceiver:
+- (instancetype)initWithFrameReceiver:
     (media::VideoCaptureDeviceAVFoundationFrameReceiver*)frameReceiver {
   if ((self = [super init])) {
     _mainThreadTaskRunner = base::ThreadTaskRunnerHandle::Get();
+    _sampleQueue.reset(
+        dispatch_queue_create("org.chromium.VideoCaptureDeviceAVFoundation."
+                              "SampleDeliveryDispatchQueue",
+                              DISPATCH_QUEUE_SERIAL),
+        base::scoped_policy::ASSUME);
     DCHECK(frameReceiver);
+    _capturedFirstFrame = false;
     _weakPtrFactoryForTakePhoto =
         std::make_unique<base::WeakPtrFactory<VideoCaptureDeviceAVFoundation>>(
             self);
     [self setFrameReceiver:frameReceiver];
     _captureSession.reset([[AVCaptureSession alloc] init]);
+    _sampleBufferTransformer = media::SampleBufferTransformer::Create();
   }
   return self;
 }
 
 - (void)dealloc {
-  [self stopStillImageOutput];
-  [self stopCapture];
-  _weakPtrFactoryForTakePhoto = nullptr;
-  _mainThreadTaskRunner = nullptr;
+  {
+    // To avoid races with concurrent callbacks, grab the lock before stopping
+    // capture and clearing all the variables.
+    base::AutoLock lock(_lock);
+    [self stopStillImageOutput];
+    [self stopCapture];
+    _frameReceiver = nullptr;
+    _sampleBufferTransformer.reset();
+    _weakPtrFactoryForTakePhoto = nullptr;
+    _mainThreadTaskRunner = nullptr;
+    _sampleQueue.reset();
+  }
+  {
+    // Ensures -captureOutput has finished before we continue the destruction
+    // steps. If -captureOutput grabbed the destruction lock before us this
+    // prevents UAF. If -captureOutput grabbed the destruction lock after us
+    // it will exit early because |_frameReceiver| is already null at this
+    // point.
+    base::AutoLock destructionLock(_destructionLock);
+  }
   [super dealloc];
 }
 
@@ -218,8 +246,7 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
   _captureDevice.reset([AVCaptureDevice deviceWithUniqueID:deviceId],
                        base::scoped_policy::RETAIN);
   if (!_captureDevice) {
-    *outMessage =
-        [NSString stringWithUTF8String:"Could not open video capture device."];
+    *outMessage = @"Could not open video capture device.";
     return NO;
   }
 
@@ -243,16 +270,12 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
   _captureVideoDataOutput.reset([[AVCaptureVideoDataOutput alloc] init]);
   if (!_captureVideoDataOutput) {
     [_captureSession removeInput:_captureDeviceInput];
-    *outMessage =
-        [NSString stringWithUTF8String:"Could not create video data output."];
+    *outMessage = @"Could not create video data output.";
     return NO;
   }
   [_captureVideoDataOutput setAlwaysDiscardsLateVideoFrames:true];
 
-  [_captureVideoDataOutput
-      setSampleBufferDelegate:self
-                        queue:dispatch_get_global_queue(
-                                  DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)];
+  [_captureVideoDataOutput setSampleBufferDelegate:self queue:_sampleQueue];
   [_captureSession addOutput:_captureVideoDataOutput];
 
   return YES;
@@ -271,7 +294,6 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
       media::FindBestCaptureFormat([_captureDevice formats], width, height,
                                    frameRate),
       base::scoped_policy::RETAIN);
-  // Default to NV12, a pixel format commonly supported by web cameras.
   FourCharCode best_fourcc = kDefaultFourCCPixelFormat;
   if (_bestCaptureFormat) {
     best_fourcc = CMFormatDescriptionGetMediaSubType(
@@ -289,8 +311,9 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
     }
   }
 
-  VLOG(2) << __func__ << ": configuring '" << MacFourCCToString(best_fourcc)
-          << "' " << width << "x" << height << "@" << frameRate;
+  VLOG(2) << __func__ << ": configuring '"
+          << media::MacFourCCToString(best_fourcc) << "' " << width << "x"
+          << height << "@" << frameRate;
 
   // The capture output has to be configured, despite Mac documentation
   // detailing that setting the sessionPreset would be enough. The reason for
@@ -330,6 +353,56 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
   return YES;
 }
 
+- (void)setScaledResolutions:(std::vector<gfx::Size>)resolutions {
+  if (!base::FeatureList::IsEnabled(media::kInCapturerScaling)) {
+    return;
+  }
+  // The lock is needed for |_scaledFrameTransformers|.
+  base::AutoLock lock(_lock);
+  bool reconfigureScaledFrameTransformers = false;
+  if (resolutions.size() != _scaledFrameTransformers.size()) {
+    reconfigureScaledFrameTransformers = true;
+  } else {
+    for (const auto& resolution : resolutions) {
+      bool resolutionHasTransformer = false;
+      for (const auto& scaledFrameTransformer : _scaledFrameTransformers) {
+        if (resolution == scaledFrameTransformer->destination_size()) {
+          resolutionHasTransformer = true;
+          break;
+        }
+      }
+      if (!resolutionHasTransformer) {
+        reconfigureScaledFrameTransformers = true;
+        break;
+      }
+    }
+  }
+  if (!reconfigureScaledFrameTransformers)
+    return;
+  std::stringstream str;
+  str << "[";
+  for (size_t i = 0; i < resolutions.size(); ++i) {
+    if (i != 0)
+      str << ", ";
+    str << resolutions[i].ToString();
+  }
+  str << "]";
+  VLOG(1) << "Configuring scaled resolutions: " << str.str();
+  _scaledFrameTransformers.clear();
+  for (size_t i = 0; i < resolutions.size(); ++i) {
+    DCHECK(i == 0 || resolutions[i - 1].height() >= resolutions[i].height());
+    // Configure the transformer to and from NV12 pixel buffers - we only want
+    // to pay scaling costs, not conversion costs.
+    auto scaledFrameTransformer = media::SampleBufferTransformer::Create();
+    scaledFrameTransformer->Reconfigure(
+        media::SampleBufferTransformer::
+            kBestTransformerForPixelBufferToNv12Output,
+        kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, resolutions[i],
+        kPixelBufferPoolSize);
+    _scaledFrameTransformers.push_back(std::move(scaledFrameTransformer));
+  }
+}
+
 - (BOOL)startCapture {
   DCHECK(_mainThreadTaskRunner->BelongsToCurrentThread());
   if (!_captureSession) {
@@ -353,11 +426,18 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
     }
   }
 
+  {
+    base::AutoLock lock(_lock);
+    _capturedFirstFrame = false;
+    _capturedFrameSinceLastStallCheck = NO;
+  }
+  [self doStallCheck:0];
   return YES;
 }
 
 - (void)stopCapture {
   DCHECK(_mainThreadTaskRunner->BelongsToCurrentThread());
+  _weakPtrFactoryForStallCheck.reset();
   [self stopStillImageOutput];
   if ([_captureSession isRunning])
     [_captureSession stopRunning];  // Synchronous.
@@ -417,7 +497,7 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
               [weakSelf.get() takePhotoInternal];
             },
             _weakPtrFactoryForTakePhoto->GetWeakPtr()),
-        base::TimeDelta::FromSeconds(3));
+        base::Seconds(3));
   }
 }
 
@@ -464,10 +544,15 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
 
             char* baseAddress = 0;
             size_t length = 0;
-            media::ExtractBaseAddressAndLength(&baseAddress, &length,
-                                               sampleBuffer);
-            _frameReceiver->OnPhotoTaken(
-                reinterpret_cast<uint8_t*>(baseAddress), length, "image/jpeg");
+            const bool sample_buffer_addressable =
+                media::ExtractBaseAddressAndLength(&baseAddress, &length,
+                                                   sampleBuffer);
+            DCHECK(sample_buffer_addressable);
+            if (sample_buffer_addressable) {
+              _frameReceiver->OnPhotoTaken(
+                  reinterpret_cast<uint8_t*>(baseAddress), length,
+                  "image/jpeg");
+            }
           }
         }
       }
@@ -508,8 +593,7 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
             [strongSelf stopStillImageOutput];
           },
           _weakPtrFactoryForTakePhoto->GetWeakPtr(), _takePhotoStartedCount),
-      base::TimeDelta::FromSeconds(
-          kTimeToWaitBeforeStoppingStillImageCaptureInSeconds));
+      base::Seconds(kTimeToWaitBeforeStoppingStillImageCaptureInSeconds));
 }
 
 - (void)stopStillImageOutput {
@@ -552,17 +636,28 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
   // Trust |_frameReceiver| to do decompression.
   char* baseAddress = 0;
   size_t frameSize = 0;
-  media::ExtractBaseAddressAndLength(&baseAddress, &frameSize, sampleBuffer);
   _lock.AssertAcquired();
-  _frameReceiver->ReceiveFrame(reinterpret_cast<const uint8_t*>(baseAddress),
-                               frameSize, captureFormat, colorSpace, 0, 0,
-                               timestamp);
+  const bool sample_buffer_addressable = media::ExtractBaseAddressAndLength(
+      &baseAddress, &frameSize, sampleBuffer);
+  DCHECK(sample_buffer_addressable);
+  if (sample_buffer_addressable) {
+    const bool safe_to_forward =
+        captureFormat.pixel_format == media::PIXEL_FORMAT_MJPEG ||
+        media::VideoFrame::AllocationSize(
+            captureFormat.pixel_format, captureFormat.frame_size) <= frameSize;
+    DCHECK(safe_to_forward);
+    if (safe_to_forward) {
+      _frameReceiver->ReceiveFrame(
+          reinterpret_cast<const uint8_t*>(baseAddress), frameSize,
+          captureFormat, colorSpace, 0, 0, timestamp);
+    }
+  }
 }
 
-- (BOOL)processPixelBuffer:(CVImageBufferRef)pixelBuffer
-             captureFormat:(const media::VideoCaptureFormat&)captureFormat
-                colorSpace:(const gfx::ColorSpace&)colorSpace
-                 timestamp:(const base::TimeDelta)timestamp {
+- (BOOL)processPixelBufferPlanes:(CVImageBufferRef)pixelBuffer
+                   captureFormat:(const media::VideoCaptureFormat&)captureFormat
+                      colorSpace:(const gfx::ColorSpace&)colorSpace
+                       timestamp:(const base::TimeDelta)timestamp {
   VLOG(3) << __func__;
   if (CVPixelBufferLockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly) !=
       kCVReturnSuccess) {
@@ -622,20 +717,40 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
     packedBufferSize += bytesPerRow * height;
   }
 
+  // If media::VideoFrame::PlaneSize differs from the CVPixelBuffer's size then
+  // generate a crash report to show the difference.
+  // https://crbug.com/1168112
+  CHECK_EQ(pixelBufferHeights.size(), packedHeights.size());
+  for (size_t plane = 0; plane < pixelBufferHeights.size(); ++plane) {
+    if (pixelBufferHeights[plane] != packedHeights[plane] &&
+        !_hasDumpedForFrameSizeMismatch) {
+      static crash_reporter::CrashKeyString<64> planeInfoKey(
+          "core-video-plane-info");
+      planeInfoKey.Set(
+          base::StringPrintf("plane:%zu cv_height:%zu packed_height:%zu", plane,
+                             pixelBufferHeights[plane], packedHeights[plane]));
+      base::debug::DumpWithoutCrashing();
+      _hasDumpedForFrameSizeMismatch = true;
+    }
+  }
+
   // If |pixelBuffer| is not tightly packed, then copy it to |packedBufferCopy|,
   // because ReceiveFrame() below assumes tight packing.
   // https://crbug.com/1151936
   bool needsCopyToPackedBuffer = pixelBufferBytesPerRows != packedBytesPerRows;
-  CHECK(pixelBufferHeights == packedHeights);
   std::vector<uint8_t> packedBufferCopy;
   if (needsCopyToPackedBuffer) {
-    CHECK(pixelBufferHeights == packedHeights);
-    packedBufferCopy.resize(packedBufferSize);
+    packedBufferCopy.resize(packedBufferSize, 0);
     uint8_t* dstAddr = packedBufferCopy.data();
     for (size_t plane = 0; plane < numPlanes; ++plane) {
       uint8_t* srcAddr = pixelBufferAddresses[plane];
-      for (size_t row = 0; row < packedHeights[plane]; ++row) {
-        memcpy(dstAddr, srcAddr, packedBytesPerRows[plane]);
+      size_t row = 0;
+      for (row = 0;
+           row < std::min(packedHeights[plane], pixelBufferHeights[plane]);
+           ++row) {
+        memcpy(dstAddr, srcAddr,
+               std::min(packedBytesPerRows[plane],
+                        pixelBufferBytesPerRows[plane]));
         dstAddr += packedBytesPerRows[plane];
         srcAddr += pixelBufferBytesPerRows[plane];
       }
@@ -651,25 +766,151 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
   return YES;
 }
 
-- (BOOL)processNV12IOSurface:(IOSurfaceRef)ioSurface
-                sampleBuffer:(CMSampleBufferRef)sampleBuffer
-               captureFormat:(const media::VideoCaptureFormat&)captureFormat
-                  colorSpace:(const gfx::ColorSpace&)colorSpace
-                   timestamp:(const base::TimeDelta)timestamp {
+- (void)processPixelBufferNV12IOSurface:(CVPixelBufferRef)pixelBuffer
+                          captureFormat:
+                              (const media::VideoCaptureFormat&)captureFormat
+                             colorSpace:(const gfx::ColorSpace&)colorSpace
+                              timestamp:(const base::TimeDelta)timestamp {
   VLOG(3) << __func__;
   DCHECK_EQ(captureFormat.pixel_format, media::PIXEL_FORMAT_NV12);
-  gfx::GpuMemoryBufferHandle handle;
-  handle.id.id = -1;
-  handle.type = gfx::GpuMemoryBufferType::IO_SURFACE_BUFFER;
-  handle.mach_port.reset(IOSurfaceCreateMachPort(ioSurface));
-  if (!handle.mach_port)
-    return NO;
+
+  IOSurfaceRef ioSurface = CVPixelBufferGetIOSurface(pixelBuffer);
+  DCHECK(ioSurface);
+  media::CapturedExternalVideoBuffer externalBuffer =
+      [self capturedExternalVideoBufferFromNV12IOSurface:ioSurface
+                                           captureFormat:captureFormat
+                                              colorSpace:colorSpace];
+
+  // The lock is needed for |_scaledFrameTransformers| and |_frameReceiver|.
   _lock.AssertAcquired();
+  // References to any scaled pixel buffers need to be retained until after
+  // ReceiveExternalGpuMemoryBufferFrame().
+  std::vector<base::ScopedCFTypeRef<CVPixelBufferRef>> scaledPixelBuffers;
+  std::vector<media::CapturedExternalVideoBuffer> scaledExternalBuffers;
+  scaledPixelBuffers.reserve(_scaledFrameTransformers.size());
+  scaledExternalBuffers.reserve(_scaledFrameTransformers.size());
+  for (auto& scaledFrameTransformer : _scaledFrameTransformers) {
+    gfx::Size scaledFrameSize = scaledFrameTransformer->destination_size();
+    // Only proceed if this results in downscaling in one or both dimensions.
+    //
+    // It is not clear that we want to continue to allow changing the aspect
+    // ratio like this since this causes visible stretching in the image if the
+    // stretch is significantly large.
+    // TODO(https://crbug.com/1157072): When we know what to do about aspect
+    // ratios, consider adding a DCHECK here or otherwise ignore wrong aspect
+    // ratios (within some fault tolerance).
+    if (scaledFrameSize.width() > captureFormat.frame_size.width() ||
+        scaledFrameSize.height() > captureFormat.frame_size.height() ||
+        scaledFrameSize == captureFormat.frame_size) {
+      continue;
+    }
+    CVPixelBufferRef bufferToScale =
+        !scaledPixelBuffers.empty() ? scaledPixelBuffers.back() : pixelBuffer;
+    base::ScopedCFTypeRef<CVPixelBufferRef> scaledPixelBuffer =
+        scaledFrameTransformer->Transform(bufferToScale);
+    if (!scaledPixelBuffer) {
+      LOG(ERROR) << "Failed to downscale frame, skipping resolution "
+                 << scaledFrameSize.ToString();
+      continue;
+    }
+    scaledPixelBuffers.push_back(scaledPixelBuffer);
+    IOSurfaceRef scaledIoSurface = CVPixelBufferGetIOSurface(scaledPixelBuffer);
+    media::VideoCaptureFormat scaledCaptureFormat = captureFormat;
+    scaledCaptureFormat.frame_size = scaledFrameSize;
+    scaledExternalBuffers.push_back([self
+        capturedExternalVideoBufferFromNV12IOSurface:scaledIoSurface
+                                       captureFormat:scaledCaptureFormat
+                                          colorSpace:colorSpace]);
+  }
+
   _frameReceiver->ReceiveExternalGpuMemoryBufferFrame(
-      std::move(handle),
-      std::make_unique<CMSampleBufferScopedAccessPermission>(sampleBuffer),
-      captureFormat, colorSpace, timestamp);
-  return YES;
+      std::move(externalBuffer), std::move(scaledExternalBuffers), timestamp);
+}
+
+- (media::CapturedExternalVideoBuffer)
+    capturedExternalVideoBufferFromNV12IOSurface:(IOSurfaceRef)ioSurface
+                                   captureFormat:
+                                       (const media::VideoCaptureFormat&)
+                                           captureFormat
+                                      colorSpace:
+                                          (const gfx::ColorSpace&)colorSpace {
+  DCHECK(ioSurface);
+  gfx::GpuMemoryBufferHandle handle;
+  handle.id = gfx::GpuMemoryBufferHandle::kInvalidId;
+  handle.type = gfx::GpuMemoryBufferType::IO_SURFACE_BUFFER;
+  handle.io_surface.reset(ioSurface, base::scoped_policy::RETAIN);
+
+  // The BT709_APPLE color space is stored as an ICC profile, which is parsed
+  // every frame in the GPU process. For this particularly common case, go back
+  // to ignoring the color profile, because doing so avoids doing an ICC profile
+  // parse.
+  // https://crbug.com/1143477 (CPU usage parsing ICC profile)
+  // https://crbug.com/959962 (ignoring color space)
+  gfx::ColorSpace overriddenColorSpace = colorSpace;
+  if (colorSpace == kColorSpaceRec709Apple) {
+    overriddenColorSpace = gfx::ColorSpace(
+        gfx::ColorSpace::PrimaryID::BT709, gfx::ColorSpace::TransferID::SRGB,
+        gfx::ColorSpace::MatrixID::BT709, gfx::ColorSpace::RangeID::LIMITED);
+    IOSurfaceSetValue(ioSurface, CFSTR("IOSurfaceColorSpace"),
+                      kCGColorSpaceSRGB);
+  }
+
+  return media::CapturedExternalVideoBuffer(std::move(handle), captureFormat,
+                                            overriddenColorSpace);
+}
+
+// Sometimes (especially when the camera is accessed by another process, e.g,
+// Photo Booth), the AVCaptureSession will stop producing new frames. This check
+// happens with no errors or notifications being produced. To recover from this,
+// check to see if a new frame has been captured second. If 5 of these checks
+// fail consecutively, restart the capture session.
+// https://crbug.com/1176568
+- (void)doStallCheck:(int)failedCheckCount {
+  DCHECK(_mainThreadTaskRunner->BelongsToCurrentThread());
+
+  int nextFailedCheckCount = failedCheckCount + 1;
+  {
+    base::AutoLock lock(_lock);
+    // This is to detect a capture was working, but stopped submitting new
+    // frames. If we haven't received any frames yet, don't do anything.
+    if (!_capturedFirstFrame)
+      nextFailedCheckCount = 0;
+
+    // If we captured a frame since last check, then we aren't stalled.
+    if (_capturedFrameSinceLastStallCheck)
+      nextFailedCheckCount = 0;
+    _capturedFrameSinceLastStallCheck = NO;
+  }
+
+  constexpr int kMaxFailedCheckCount = 5;
+  if (nextFailedCheckCount < kMaxFailedCheckCount) {
+    // Post a task to check for progress in 1 second. Create the weak factory
+    // for the posted task, if needed.
+    if (!_weakPtrFactoryForStallCheck) {
+      _weakPtrFactoryForStallCheck = std::make_unique<
+          base::WeakPtrFactory<VideoCaptureDeviceAVFoundation>>(self);
+    }
+    constexpr base::TimeDelta kStallCheckInterval = base::Seconds(1);
+    auto callback_lambda =
+        [](base::WeakPtr<VideoCaptureDeviceAVFoundation> weakSelf,
+           int failedCheckCount) {
+          VideoCaptureDeviceAVFoundation* strongSelf = weakSelf.get();
+          if (!strongSelf)
+            return;
+          [strongSelf doStallCheck:failedCheckCount];
+        };
+    _mainThreadTaskRunner->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(callback_lambda,
+                       _weakPtrFactoryForStallCheck->GetWeakPtr(),
+                       nextFailedCheckCount),
+        kStallCheckInterval);
+  } else {
+    // Capture appears to be stalled. Restart it.
+    LOG(ERROR) << "Capture appears to have stalled, restarting.";
+    [self stopCapture];
+    [self startCapture];
+  }
 }
 
 // |captureOutput| is called by the capture device to deliver a new frame.
@@ -681,10 +922,73 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
   VLOG(3) << __func__;
 
   // Concurrent calls into |_frameReceiver| are not supported, so take |_lock|
-  // before any of the subsequent paths.
+  // before any of the subsequent paths. The |_destructionLock| must be grabbed
+  // first to avoid races with -dealloc.
+  base::AutoLock destructionLock(_destructionLock);
   base::AutoLock lock(_lock);
+  _capturedFrameSinceLastStallCheck = YES;
   if (!_frameReceiver)
     return;
+
+  const base::TimeDelta pres_timestamp =
+      GetCMSampleBufferTimestamp(sampleBuffer);
+  if (start_timestamp_.is_zero()) {
+    start_timestamp_ = pres_timestamp;
+  }
+  const base::TimeDelta timestamp = pres_timestamp - start_timestamp_;
+
+  bool logUma = !std::exchange(_capturedFirstFrame, true);
+  if (logUma) {
+    media::LogFirstCapturedVideoFrame(_bestCaptureFormat, sampleBuffer);
+  }
+
+  // The SampleBufferTransformer CHECK-crashes if the sample buffer is not MJPEG
+  // and does not have a pixel buffer (https://crbug.com/1160647) so we fall
+  // back on the M87 code path if this is the case.
+  // TODO(https://crbug.com/1160315): When the SampleBufferTransformer is
+  // patched to support non-MJPEG-and-non-pixel-buffer sample buffers, remove
+  // this workaround and the fallback other code path.
+  bool sampleHasPixelBufferOrIsMjpeg =
+      CMSampleBufferGetImageBuffer(sampleBuffer) ||
+      CMFormatDescriptionGetMediaSubType(CMSampleBufferGetFormatDescription(
+          sampleBuffer)) == kCMVideoCodecType_JPEG_OpenDML;
+
+  // If the SampleBufferTransformer is enabled, convert all possible capture
+  // formats to an IOSurface-backed NV12 pixel buffer.
+  // TODO(https://crbug.com/1175142): Refactor to not hijack the code paths
+  // below the transformer code.
+  if (sampleHasPixelBufferOrIsMjpeg) {
+    _sampleBufferTransformer->Reconfigure(
+        media::SampleBufferTransformer::GetBestTransformerForNv12Output(
+            sampleBuffer),
+        kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+        media::GetSampleBufferSize(sampleBuffer), kPixelBufferPoolSize);
+    base::ScopedCFTypeRef<CVPixelBufferRef> pixelBuffer =
+        _sampleBufferTransformer->Transform(sampleBuffer);
+    if (!pixelBuffer) {
+      LOG(ERROR) << "Failed to transform captured frame. Dropping frame.";
+      return;
+    }
+    const media::VideoCaptureFormat captureFormat(
+        gfx::Size(CVPixelBufferGetWidth(pixelBuffer),
+                  CVPixelBufferGetHeight(pixelBuffer)),
+        _frameRate, media::PIXEL_FORMAT_NV12);
+    // When the |pixelBuffer| is the result of a conversion (not camera
+    // pass-through) then it originates from a CVPixelBufferPool and the color
+    // space is not recognized by media::GetImageBufferColorSpace(). This
+    // results in log spam and a default color space format is returned. To
+    // avoid this, we pretend the color space is kColorSpaceRec709Apple which
+    // triggers a path that avoids color space parsing inside of
+    // processPixelBufferNV12IOSurface.
+    // TODO(hbos): Investigate how to successfully parse and/or configure the
+    // color space correctly. The implications of this hack is not fully
+    // understood.
+    [self processPixelBufferNV12IOSurface:pixelBuffer
+                            captureFormat:captureFormat
+                               colorSpace:kColorSpaceRec709Apple
+                                timestamp:timestamp];
+    return;
+  }
 
   // We have certain format expectation for capture output:
   // For MJPEG, |sampleBuffer| is expected to always be a CVBlockBuffer.
@@ -702,47 +1006,40 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
   media::VideoPixelFormat videoPixelFormat = [VideoCaptureDeviceAVFoundation
       FourCCToChromiumPixelFormat:sampleBufferPixelFormat];
 
-  // TODO(julien.isorce): move GetImageBufferColorSpace(CVImageBufferRef)
-  // from media::VTVideoDecodeAccelerator to media/base/mac and call it
-  // here to get the color space. See https://crbug.com/959962.
-  // colorSpace = media::GetImageBufferColorSpace(videoFrame);
-  gfx::ColorSpace colorSpace;
   const media::VideoCaptureFormat captureFormat(
       gfx::Size(dimensions.width, dimensions.height), _frameRate,
       videoPixelFormat);
-  const base::TimeDelta timestamp = GetCMSampleBufferTimestamp(sampleBuffer);
 
   if (CVPixelBufferRef pixelBuffer =
           CMSampleBufferGetImageBuffer(sampleBuffer)) {
+    const gfx::ColorSpace colorSpace =
+        media::GetImageBufferColorSpace(pixelBuffer);
     OSType pixelBufferPixelFormat =
         CVPixelBufferGetPixelFormatType(pixelBuffer);
     DCHECK_EQ(pixelBufferPixelFormat, sampleBufferPixelFormat);
 
     // First preference is to use an NV12 IOSurface as a GpuMemoryBuffer.
-    static const bool kEnableGpuMemoryBuffers =
-        base::FeatureList::IsEnabled(media::kAVFoundationCaptureV2ZeroCopy);
-    if (kEnableGpuMemoryBuffers) {
-      IOSurfaceRef ioSurface = CVPixelBufferGetIOSurface(pixelBuffer);
-      if (ioSurface && videoPixelFormat == media::PIXEL_FORMAT_NV12) {
-        if ([self processNV12IOSurface:ioSurface
-                          sampleBuffer:sampleBuffer
+    if (CVPixelBufferGetIOSurface(pixelBuffer) &&
+        videoPixelFormat == media::PIXEL_FORMAT_NV12) {
+      [self processPixelBufferNV12IOSurface:pixelBuffer
+                              captureFormat:captureFormat
+                                 colorSpace:colorSpace
+                                  timestamp:timestamp];
+      return;
+    }
+
+    // Second preference is to read the CVPixelBuffer's planes.
+    if ([self processPixelBufferPlanes:pixelBuffer
                          captureFormat:captureFormat
                             colorSpace:colorSpace
                              timestamp:timestamp]) {
-          return;
-        }
-      }
-    }
-
-    // Second preference is to read the CVPixelBuffer.
-    if ([self processPixelBuffer:pixelBuffer
-                   captureFormat:captureFormat
-                      colorSpace:colorSpace
-                       timestamp:timestamp]) {
       return;
     }
   }
+
   // Last preference is to read the CMSampleBuffer.
+  gfx::ColorSpace colorSpace =
+      media::GetFormatDescriptionColorSpace(formatDescription);
   [self processSample:sampleBuffer
         captureFormat:captureFormat
            colorSpace:colorSpace
@@ -751,7 +1048,7 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
 
 - (void)onVideoError:(NSNotification*)errorNotification {
   NSError* error = base::mac::ObjCCast<NSError>(
-      [[errorNotification userInfo] objectForKey:AVCaptureSessionErrorKey]);
+      [errorNotification userInfo][AVCaptureSessionErrorKey]);
   [self sendErrorString:[NSString
                             stringWithFormat:@"%@: %@",
                                              [error localizedDescription],
@@ -766,6 +1063,11 @@ AVCaptureDeviceFormat* FindBestCaptureFormat(
         media::VideoCaptureError::
             kMacAvFoundationReceivedAVCaptureSessionRuntimeErrorNotification,
         FROM_HERE, base::SysNSStringToUTF8(error));
+}
+
+- (void)callLocked:(base::OnceClosure)lambda {
+  base::AutoLock lock(_lock);
+  std::move(lambda).Run();
 }
 
 @end

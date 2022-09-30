@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
 import collections
 import contextlib
 import copy
@@ -16,7 +17,10 @@ import sys
 import tempfile
 import time
 
+from six.moves import range  # pylint: disable=redefined-builtin
+from six.moves import zip  # pylint: disable=redefined-builtin
 from devil import base_error
+from devil.android import apk_helper
 from devil.android import crash_handler
 from devil.android import device_errors
 from devil.android import device_temp_file
@@ -63,14 +67,22 @@ _WPR_GO_LINUX_X86_64_PATH = os.path.join(host_paths.DIR_SOURCE_ROOT,
 _TAG = 'test_runner_py'
 
 TIMEOUT_ANNOTATIONS = [
-  ('Manual', 10 * 60 * 60),
-  ('IntegrationTest', 30 * 60),
-  ('External', 10 * 60),
-  ('EnormousTest', 10 * 60),
-  ('LargeTest', 5 * 60),
-  ('MediumTest', 3 * 60),
-  ('SmallTest', 1 * 60),
+    ('Manual', 10 * 60 * 60),
+    ('IntegrationTest', 10 * 60),
+    ('External', 10 * 60),
+    ('EnormousTest', 5 * 60),
+    ('LargeTest', 2 * 60),
+    ('MediumTest', 30),
+    ('SmallTest', 10),
 ]
+
+# Account for Instrumentation and process init overhead.
+FIXED_TEST_TIMEOUT_OVERHEAD = 60
+
+# 30 minute max timeout for an instrumentation invocation to avoid shard
+# timeouts when tests never finish. The shard timeout is currently 60 minutes,
+# so this needs to be less than that.
+MAX_BATCH_TEST_TIMEOUT = 30 * 60
 
 LOGCAT_FILTERS = ['*:e', 'chromium:v', 'cr_*:v', 'DEBUG:I',
                   'StrictMode:D', '%s:I' % _TAG]
@@ -92,14 +104,21 @@ _EXTRA_PACKAGE_UNDER_TEST = ('org.chromium.chrome.test.pagecontroller.rules.'
 FEATURE_ANNOTATION = 'Feature'
 RENDER_TEST_FEATURE_ANNOTATION = 'RenderTest'
 WPR_ARCHIVE_FILE_PATH_ANNOTATION = 'WPRArchiveDirectory'
+WPR_ARCHIVE_NAME_ANNOTATION = 'WPRArchiveDirectory$ArchiveName'
 WPR_RECORD_REPLAY_TEST_FEATURE_ANNOTATION = 'WPRRecordReplayTest'
 
 _DEVICE_GOLD_DIR = 'skia_gold'
 # A map of Android product models to SDK ints.
 RENDER_TEST_MODEL_SDK_CONFIGS = {
-    'Nexus 5X': [23],
+    # Android x86 emulator.
+    'Android SDK built for x86': [23],
+    # We would like this to be supported, but it is currently too prone to
+    # introducing flakiness due to a combination of Gold and Chromium issues.
+    # See crbug.com/1233700 and skbug.com/12149 for more information.
+    # 'Pixel 2': [28],
 }
 
+_BATCH_SUFFIX = '_batch'
 _TEST_BATCH_MAX_GROUP_SIZE = 256
 
 
@@ -115,22 +134,20 @@ def _LogTestEndpoints(device, test_name):
         ['log', '-p', 'i', '-t', _TAG, 'END %s' % test_name],
         check_return=True)
 
-# TODO(jbudorick): Make this private once the instrumentation test_runner
-# is deprecated.
-def DidPackageCrashOnDevice(package_name, device):
+
+def DismissCrashDialogs(device):
   # Dismiss any error dialogs. Limit the number in case we have an error
   # loop or we are failing to dismiss.
+  packages = set()
   try:
-    for _ in xrange(10):
+    for _ in range(10):
       package = device.DismissCrashDialogIfNeeded(timeout=10, retries=1)
       if not package:
-        return False
-      # Assume test package convention of ".test" suffix
-      if package in package_name:
-        return True
+        break
+      packages.add(package)
   except device_errors.CommandFailedError:
     logging.exception('Error while attempting to dismiss crash dialog.')
-  return False
+  return packages
 
 
 _CURRENT_FOCUS_CRASH_RE = re.compile(
@@ -146,8 +163,7 @@ def _GetTargetPackageName(test_apk):
 class LocalDeviceInstrumentationTestRun(
     local_device_test_run.LocalDeviceTestRun):
   def __init__(self, env, test_instance):
-    super(LocalDeviceInstrumentationTestRun, self).__init__(
-        env, test_instance)
+    super().__init__(env, test_instance)
     self._chrome_proxy = None
     self._context_managers = collections.defaultdict(list)
     self._flag_changers = {}
@@ -182,8 +198,7 @@ class LocalDeviceInstrumentationTestRun(
           # manually invoke its __enter__ and __exit__ methods in setup and
           # teardown.
           system_app_context = system_app.ReplaceSystemApp(
-              dev, self._test_instance.replace_system_package.package,
-              self._test_instance.replace_system_package.replacement_apk)
+              dev, replacement_apk=self._test_instance.replace_system_package)
           # Pylint is not smart enough to realize that this field has
           # an __enter__ method, and will complain loudly.
           # pylint: disable=no-member
@@ -271,10 +286,18 @@ class LocalDeviceInstrumentationTestRun(
       steps.extend(
           install_helper(apk) for apk in self._test_instance.additional_apks)
 
+      # We'll potentially need the package names later for setting app
+      # compatibility workarounds.
+      for apk in (self._test_instance.additional_apks +
+                  [self._test_instance.test_apk]):
+        self._installed_packages.append(apk_helper.GetPackageName(apk))
+
       # The apk under test needs to be installed last since installing other
       # apks after will unintentionally clear the fake module directory.
       # TODO(wnwen): Make this more robust, fix crbug.com/1010954.
       if self._test_instance.apk_under_test:
+        self._installed_packages.append(
+            apk_helper.GetPackageName(self._test_instance.apk_under_test))
         permissions = self._test_instance.apk_under_test.GetPermissions()
         if self._test_instance.apk_under_test_incremental_install_json:
           steps.append(
@@ -355,7 +378,7 @@ class LocalDeviceInstrumentationTestRun(
 
       steps += [
           set_debug_app, edit_shared_prefs, push_test_data, create_flag_changer,
-          set_vega_permissions
+          set_vega_permissions, DismissCrashDialogs
       ]
 
       def bind_crash_handler(step, dev):
@@ -480,26 +503,58 @@ class LocalDeviceInstrumentationTestRun(
     batched_tests = dict()
     other_tests = []
     for test in tests:
-      if 'Batch' in test['annotations'] and 'RequiresRestart' not in test[
-          'annotations']:
-        batch_name = test['annotations']['Batch']['value']
+      annotations = test['annotations']
+      if 'Batch' in annotations and 'RequiresRestart' not in annotations:
+        batch_name = annotations['Batch']['value']
         if not batch_name:
           batch_name = test['class']
+
+        # Feature flags won't work in instrumentation tests unless the activity
+        # is restarted.
+        # Tests with identical features are grouped to minimize restarts.
+        # UnitTests that specify flags always use Features.JUnitProcessor, so
+        # they don't need to be split.
+        if batch_name != 'UnitTests':
+          if 'Features$EnableFeatures' in annotations:
+            batch_name += '|enabled:' + ','.join(
+                sorted(annotations['Features$EnableFeatures']['value']))
+          if 'Features$DisableFeatures' in annotations:
+            batch_name += '|disabled:' + ','.join(
+                sorted(annotations['Features$DisableFeatures']['value']))
+          if 'CommandLineFlags$Add' in annotations:
+            batch_name += '|cmd_line_add:' + ','.join(
+                sorted(annotations['CommandLineFlags$Add']['value']))
+          if 'CommandLineFlags$Remove' in annotations:
+            batch_name += '|cmd_line_remove:' + ','.join(
+                sorted(annotations['CommandLineFlags$Remove']['value']))
+
         if not batch_name in batched_tests:
           batched_tests[batch_name] = []
         batched_tests[batch_name].append(test)
       else:
         other_tests.append(test)
 
+    def dict2list(d):
+      if isinstance(d, dict):
+        return sorted([(k, dict2list(v)) for k, v in d.items()])
+      if isinstance(d, list):
+        return [dict2list(v) for v in d]
+      if isinstance(d, tuple):
+        return tuple(dict2list(v) for v in d)
+      return d
+
     all_tests = []
-    for _, tests in batched_tests.items():
-      tests.sort()  # Ensure a consistent ordering across external shards.
+    for _, btests in list(batched_tests.items()):
+      # Ensure a consistent ordering across external shards.
+      btests.sort(key=dict2list)
       all_tests.extend([
-          tests[i:i + _TEST_BATCH_MAX_GROUP_SIZE]
-          for i in range(0, len(tests), _TEST_BATCH_MAX_GROUP_SIZE)
+          btests[i:i + _TEST_BATCH_MAX_GROUP_SIZE]
+          for i in range(0, len(btests), _TEST_BATCH_MAX_GROUP_SIZE)
       ])
     all_tests.extend(other_tests)
-    return all_tests
+    # Sort all tests by hash.
+    # TODO(crbug.com/1257820): Add sorting logic back to _PartitionTests.
+    return self._SortTests(all_tests)
 
   #override
   def _GetUniqueTestName(self, test):
@@ -517,18 +572,29 @@ class LocalDeviceInstrumentationTestRun(
     flags_to_add = []
     test_timeout_scale = None
     if self._test_instance.coverage_directory:
-      coverage_basename = '%s.exec' % (
-          '%s_%s_group' % (test[0]['class'], test[0]['method']) if isinstance(
-              test, list) else '%s_%s' % (test['class'], test['method']))
+      coverage_basename = '%s' % ('%s_%s_group' %
+                                  (test[0]['class'], test[0]['method'])
+                                  if isinstance(test, list) else '%s_%s' %
+                                  (test['class'], test['method']))
       extras['coverage'] = 'true'
       coverage_directory = os.path.join(
           device.GetExternalStoragePath(), 'chrome', 'test', 'coverage')
       if not device.PathExists(coverage_directory):
         device.RunShellCommand(['mkdir', '-p', coverage_directory],
                                check_return=True)
-      coverage_device_file = os.path.join(
-          coverage_directory, coverage_basename)
+      coverage_device_file = os.path.join(coverage_directory, coverage_basename)
+      coverage_device_file += '.exec'
       extras['coverageFile'] = coverage_device_file
+
+    if self._test_instance.enable_breakpad_dump:
+      # Use external storage directory so that the breakpad dump can be accessed
+      # by the test APK in addition to the apk_under_test.
+      breakpad_dump_directory = os.path.join(device.GetExternalStoragePath(),
+                                             'chromium_dumps')
+      if device.PathExists(breakpad_dump_directory):
+        device.RemovePath(breakpad_dump_directory, recursive=True)
+      flags_to_add.append('--breakpad-dump-location=' + breakpad_dump_directory)
+
     # Save screenshot if screenshot dir is specified (save locally) or if
     # a GS bucket is passed (save in cloud).
     screenshot_device_file = device_temp_file.DeviceTempFile(
@@ -558,12 +624,14 @@ class LocalDeviceInstrumentationTestRun(
         i = self._GetTimeoutFromAnnotations(t['annotations'], n)
         return (n, i)
 
-      test_names, timeouts = zip(*(name_and_timeout(t) for t in test))
+      test_names, timeouts = list(zip(*(name_and_timeout(t) for t in test)))
 
-      test_name = instrumentation_test_instance.GetTestName(test[0]) + '_batch'
+      test_name = instrumentation_test_instance.GetTestName(
+          test[0]) + _BATCH_SUFFIX
       extras['class'] = ','.join(test_names)
       test_display_name = test_name
-      timeout = sum(timeouts)
+      timeout = min(MAX_BATCH_TEST_TIMEOUT,
+                    FIXED_TEST_TIMEOUT_OVERHEAD + sum(timeouts))
     else:
       assert test['is_junit4']
       test_name = instrumentation_test_instance.GetTestName(test)
@@ -572,8 +640,8 @@ class LocalDeviceInstrumentationTestRun(
       extras['class'] = test_name
       if 'flags' in test and test['flags']:
         flags_to_add.extend(test['flags'])
-      timeout = self._GetTimeoutFromAnnotations(
-        test['annotations'], test_display_name)
+      timeout = FIXED_TEST_TIMEOUT_OVERHEAD + self._GetTimeoutFromAnnotations(
+          test['annotations'], test_display_name)
 
       test_timeout_scale = self._GetTimeoutScaleFromAnnotations(
           test['annotations'])
@@ -606,10 +674,12 @@ class LocalDeviceInstrumentationTestRun(
                                wpr_archive_path,
                                os.path.exists(wpr_archive_path)))
 
+      file_name = _GetWPRArchiveFileName(
+          test) or self._GetUniqueTestName(test) + '.wprgo'
+
       # Some linux version does not like # in the name. Replaces it with __.
-      archive_path = os.path.join(
-          wpr_archive_path,
-          _ReplaceUncommonChars(self._GetUniqueTestName(test)) + '.wprgo')
+      archive_path = os.path.join(wpr_archive_path,
+                                  _ReplaceUncommonChars(file_name))
 
       if not os.path.exists(_WPR_GO_LINUX_X86_64_PATH):
         # If we got to this stage, then we should have
@@ -668,9 +738,14 @@ class LocalDeviceInstrumentationTestRun(
           try:
             if not os.path.exists(self._test_instance.coverage_directory):
               os.makedirs(self._test_instance.coverage_directory)
-            device.PullFile(coverage_device_file,
-                            self._test_instance.coverage_directory)
-            device.RemovePath(coverage_device_file, True)
+            # Retries add time to test execution.
+            if device.PathExists(coverage_device_file, retries=0):
+              device.PullFile(coverage_device_file,
+                              self._test_instance.coverage_directory)
+              device.RemovePath(coverage_device_file, True)
+            else:
+              logging.warning('Coverage file does not exist: %s',
+                              coverage_device_file)
           except (OSError, base_error.BaseError) as e:
             logging.warning('Failed to handle coverage data after tests: %s', e)
 
@@ -700,7 +775,8 @@ class LocalDeviceInstrumentationTestRun(
               json_archive_name, 'ui_capture', output_manager.Datatype.JSON
               ) as json_archive:
             json.dump(screenshots, json_archive)
-          _SetLinkOnResults(results, 'ui screenshot', json_archive.Link())
+          _SetLinkOnResults(results, test_name, 'ui screenshot',
+                            json_archive.Link())
 
       def pull_ui_screenshot(filename):
         source_dir = ui_capture_dir.name
@@ -739,7 +815,7 @@ class LocalDeviceInstrumentationTestRun(
           step()
 
     if logcat_file:
-      _SetLinkOnResults(results, 'logcat', logcat_file.Link())
+      _SetLinkOnResults(results, test_name, 'logcat', logcat_file.Link())
 
     # Update the result name if the test used flags.
     if flags_to_add:
@@ -757,10 +833,24 @@ class LocalDeviceInstrumentationTestRun(
 
     # Update the result type if we detect a crash.
     try:
-      if DidPackageCrashOnDevice(self._test_instance.test_package, device):
+      crashed_packages = DismissCrashDialogs(device)
+      # Assume test package convention of ".test" suffix
+      if any(p in self._test_instance.test_package for p in crashed_packages):
         for r in results:
           if r.GetType() == base_test_result.ResultType.UNKNOWN:
             r.SetType(base_test_result.ResultType.CRASH)
+      elif (crashed_packages and len(results) == 1
+            and results[0].GetType() != base_test_result.ResultType.PASS):
+        # Add log message and set failure reason if:
+        #   1) The app crash was likely not caused by the test.
+        #   AND
+        #   2) The app crash possibly caused the test to fail.
+        # Crashes of the package under test are assumed to be the test's fault.
+        _AppendToLogForResult(
+            results[0], 'OS displayed error dialogs for {}'.format(
+                ', '.join(crashed_packages)))
+        results[0].SetFailureReason('{} Crashed'.format(
+            ','.join(crashed_packages)))
     except device_errors.CommandTimeoutError:
       logging.warning('timed out when detecting/dismissing error dialogs')
       # Attach screenshot to the test to help with debugging the dialog boxes.
@@ -789,14 +879,14 @@ class LocalDeviceInstrumentationTestRun(
       logging.info('detected failure in %s. raw output:', test_display_name)
       for l in output:
         logging.info('  %s', l)
-      if (not self._env.skip_clear_data
-          and self._test_instance.package_info):
-        permissions = (
-            self._test_instance.apk_under_test.GetPermissions()
-            if self._test_instance.apk_under_test
-            else None)
-        device.ClearApplicationState(self._test_instance.package_info.package,
-                                     permissions=permissions)
+      if not self._env.skip_clear_data:
+        if self._test_instance.package_info:
+          permissions = (self._test_instance.apk_under_test.GetPermissions()
+                         if self._test_instance.apk_under_test else None)
+          device.ClearApplicationState(self._test_instance.package_info.package,
+                                       permissions=permissions)
+        if self._test_instance.enable_breakpad_dump:
+          device.RemovePath(breakpad_dump_directory, recursive=True)
     else:
       logging.debug('raw output from %s:', test_display_name)
       for l in output:
@@ -825,7 +915,53 @@ class LocalDeviceInstrumentationTestRun(
           # We don't always detect crashes correctly. In this case,
           # associate with the first test.
           results[0].SetLink('tombstones', tombstone_file.Link())
-    return results, None
+
+    unknown_tests = set(r.GetName() for r in results
+                        if r.GetType() == base_test_result.ResultType.UNKNOWN)
+
+    # If a test that is batched crashes, the rest of the tests in that batch
+    # won't be ran and will have their status left as unknown in results,
+    # so rerun the tests. (see crbug/1127935)
+    # Need to "unbatch" the tests, so that on subsequent tries, the tests can
+    # get ran individually. This prevents an unrecognized crash from preventing
+    # the tests in the batch from being ran. Running the test as unbatched does
+    # not happen until a retry happens at the local_device_test_run/environment
+    # level.
+    tests_to_rerun = []
+    for t in iterable_test:
+      if self._GetUniqueTestName(t) in unknown_tests:
+        prior_attempts = t.get('run_attempts', 0)
+        t['run_attempts'] = prior_attempts + 1
+        # It's possible every test in the batch could crash, so need to
+        # try up to as many times as tests that there are.
+        if prior_attempts < len(results):
+          if t['annotations']:
+            t['annotations'].pop('Batch', None)
+          tests_to_rerun.append(t)
+
+    # If we have a crash that isn't recognized as a crash in a batch, the tests
+    # will be marked as unknown. Sometimes a test failure causes a crash, but
+    # the crash isn't recorded because the failure was detected first.
+    # When the UNKNOWN tests are reran while unbatched and pass,
+    # they'll have an UNKNOWN, PASS status, so will be improperly marked as
+    # flaky, so change status to NOTRUN and don't try rerunning. They will
+    # get rerun individually at the local_device_test_run/environment level.
+    # as the "Batch" annotation was removed.
+    found_crash_or_fail = False
+    for r in results:
+      if (r.GetType() == base_test_result.ResultType.CRASH
+          or r.GetType() == base_test_result.ResultType.FAIL):
+        found_crash_or_fail = True
+        break
+    if not found_crash_or_fail:
+      # Don't bother rerunning since the unrecognized crashes in
+      # the batch will keep failing.
+      tests_to_rerun = None
+      for r in results:
+        if r.GetType() == base_test_result.ResultType.UNKNOWN:
+          r.SetType(base_test_result.ResultType.NOTRUN)
+
+    return results, tests_to_rerun if tests_to_rerun else None
 
   def _GetTestsFromRunner(self):
     test_apk_path = self._test_instance.test_apk.path
@@ -850,9 +986,12 @@ class LocalDeviceInstrumentationTestRun(
                  self._test_instance.junit4_runner_class)
     def list_tests(d):
       def _run(dev):
+        # We need to use GetAppWritablePath instead of GetExternalStoragePath
+        # here because we will not have applied legacy storage workarounds on R+
+        # yet.
         with device_temp_file.DeviceTempFile(
             dev.adb, suffix='.json',
-            dir=dev.GetExternalStoragePath()) as dev_test_list_json:
+            dir=dev.GetAppWritablePath()) as dev_test_list_json:
           junit4_runner_class = self._test_instance.junit4_runner_class
           test_package = self._test_instance.test_package
           extras = {
@@ -896,10 +1035,9 @@ class LocalDeviceInstrumentationTestRun(
 
   @contextlib.contextmanager
   def _ArchiveLogcat(self, device, test_name):
-    stream_name = 'logcat_%s_%s_%s' % (
-        test_name.replace('#', '.'),
-        time.strftime('%Y%m%dT%H%M%S-UTC', time.gmtime()),
-        device.serial)
+    stream_name = 'logcat_%s_shard%s_%s_%s' % (
+        test_name.replace('#', '.'), self._test_instance.external_shard_index,
+        time.strftime('%Y%m%dT%H%M%S-UTC', time.gmtime()), device.serial)
 
     logcat_file = None
     logmon = None
@@ -929,8 +1067,8 @@ class LocalDeviceInstrumentationTestRun(
     if device.FileExists(trace_device_file.name):
       try:
         java_trace_json = device.ReadFile(trace_device_file.name)
-      except IOError:
-        raise Exception('error pulling trace file from device')
+      except IOError as e:
+        raise Exception('error pulling trace file from device') from e
       finally:
         trace_device_file.close()
 
@@ -995,12 +1133,34 @@ class LocalDeviceInstrumentationTestRun(
                           screenshot_host_file.name)
         finally:
           screenshot_device_file.close()
-      _SetLinkOnResults(results, link_name, screenshot_host_file.Link())
+      _SetLinkOnResults(results, test_name, link_name,
+                        screenshot_host_file.Link())
 
   def _ProcessRenderTestResults(self, device, results):
     if not self._render_tests_device_output_dir:
       return
     self._ProcessSkiaGoldRenderTestResults(device, results)
+
+  def _IsRetryWithoutPatch(self):
+    """Checks whether this test run is a retry without a patch/CL.
+
+    Returns:
+      True iff this is being run on a trybot and the current step is a retry
+      without the patch applied, otherwise False.
+    """
+    is_tryjob = self._test_instance.skia_gold_properties.IsTryjobRun()
+    # Builders automatically pass in --gtest_repeat,
+    # --test-launcher-retry-limit, --test-launcher-batch-limit, and
+    # --gtest_filter when running a step without a CL applied, but not for
+    # steps with the CL applied.
+    # TODO(skbug.com/12100): Check this in a less hacky way if a way can be
+    # found to check the actual step name. Ideally, this would not be necessary
+    # at all, but will be until Chromium stops doing step retries on trybots
+    # (extremely unlikely) or Gold is updated to not clobber earlier results
+    # (more likely, but a ways off).
+    has_filter = bool(self._test_instance.test_filter)
+    has_batch_limit = self._test_instance.test_launcher_batch_limit is not None
+    return is_tryjob and has_filter and has_batch_limit
 
   def _ProcessSkiaGoldRenderTestResults(self, device, results):
     gold_dir = posixpath.join(self._render_tests_device_output_dir,
@@ -1026,10 +1186,12 @@ class LocalDeviceInstrumentationTestRun(
         json_name = render_name + '.json'
         json_path = os.path.join(host_dir, json_name)
         image_path = os.path.join(host_dir, image_name)
+        full_test_name = None
         if not os.path.exists(json_path):
-          _FailTestIfNecessary(results)
+          _FailTestIfNecessary(results, full_test_name)
           _AppendToLog(
-              results, 'Unable to find corresponding JSON file for image %s '
+              results, full_test_name,
+              'Unable to find corresponding JSON file for image %s '
               'when doing Skia Gold comparison.' % image_name)
           continue
 
@@ -1037,18 +1199,40 @@ class LocalDeviceInstrumentationTestRun(
         # that implies that we aren't actively maintaining baselines for the
         # test. This helps prevent unrelated CLs from getting comments posted to
         # them.
+        should_rewrite = False
         with open(json_path) as infile:
           # All the key/value pairs in the JSON file are strings, so convert
           # to a bool.
           json_dict = json.load(infile)
-          fail_on_unsupported = json_dict.get('fail_on_unsupported_configs',
-                                              'false')
+          optional_dict = json_dict.get('optional_keys', {})
+          if 'optional_keys' in json_dict:
+            should_rewrite = True
+            del json_dict['optional_keys']
+          fail_on_unsupported = optional_dict.get('fail_on_unsupported_configs',
+                                                  'false')
           fail_on_unsupported = fail_on_unsupported.lower() == 'true'
-        should_hide_failure = (
+          # Grab the full test name so we can associate the comparison with a
+          # particular test, which is necessary if tests are batched together.
+          # Remove the key/value pair from the JSON since we don't need/want to
+          # upload it to Gold.
+          full_test_name = json_dict.get('full_test_name')
+          if 'full_test_name' in json_dict:
+            should_rewrite = True
+            del json_dict['full_test_name']
+
+        running_on_unsupported = (
             device.build_version_sdk not in RENDER_TEST_MODEL_SDK_CONFIGS.get(
                 device.product_model, []) and not fail_on_unsupported)
-        if should_hide_failure:
+        should_ignore_in_gold = running_on_unsupported
+        # We still want to fail the test even if we're ignoring the image in
+        # Gold if we're running on a supported configuration, so
+        # should_ignore_in_gold != should_hide_failure.
+        should_hide_failure = running_on_unsupported
+        if should_ignore_in_gold:
+          # This is put in the regular keys dict instead of the optional one
+          # because ignore rules do not apply to optional keys.
           json_dict['ignore'] = '1'
+        if should_rewrite:
           with open(json_path, 'w') as outfile:
             json.dump(json_dict, outfile)
 
@@ -1060,10 +1244,13 @@ class LocalDeviceInstrumentationTestRun(
               name=render_name,
               png_file=image_path,
               output_manager=self._env.output_manager,
-              use_luci=use_luci)
+              use_luci=use_luci,
+              optional_keys=optional_dict,
+              force_dryrun=self._IsRetryWithoutPatch())
         except Exception as e:  # pylint: disable=broad-except
-          _FailTestIfNecessary(results)
-          _AppendToLog(results, 'Skia Gold comparison raised exception: %s' % e)
+          _FailTestIfNecessary(results, full_test_name)
+          _AppendToLog(results, full_test_name,
+                       'Skia Gold comparison raised exception: %s' % e)
           continue
 
         if not status:
@@ -1075,56 +1262,61 @@ class LocalDeviceInstrumentationTestRun(
         if should_hide_failure:
           if self._test_instance.skia_gold_properties.local_pixel_tests:
             _AppendToLog(
-                results, 'Gold comparison for %s failed, but model %s with SDK '
+                results, full_test_name,
+                'Gold comparison for %s failed, but model %s with SDK '
                 '%d is not a supported configuration. This failure would be '
                 'ignored on the bots, but failing since tests are being run '
-                'locally.' % (render_name, device.product_model,
-                              device.build_version_sdk))
+                'locally.' %
+                (render_name, device.product_model, device.build_version_sdk))
           else:
             _AppendToLog(
-                results, 'Gold comparison for %s failed, but model %s with SDK '
+                results, full_test_name,
+                'Gold comparison for %s failed, but model %s with SDK '
                 '%d is not a supported configuration, so ignoring failure.' %
                 (render_name, device.product_model, device.build_version_sdk))
             continue
 
-        _FailTestIfNecessary(results)
+        _FailTestIfNecessary(results, full_test_name)
         failure_log = (
             'Skia Gold reported failure for RenderTest %s. See '
             'RENDER_TESTS.md for how to fix this failure.' % render_name)
         status_codes =\
             self._skia_gold_session_manager.GetSessionClass().StatusCodes
         if status == status_codes.AUTH_FAILURE:
-          _AppendToLog(results,
+          _AppendToLog(results, full_test_name,
                        'Gold authentication failed with output %s' % error)
         elif status == status_codes.INIT_FAILURE:
-          _AppendToLog(results,
+          _AppendToLog(results, full_test_name,
                        'Gold initialization failed with output %s' % error)
         elif status == status_codes.COMPARISON_FAILURE_REMOTE:
           public_triage_link, internal_triage_link =\
               gold_session.GetTriageLinks(render_name)
           if not public_triage_link:
             _AppendToLog(
-                results, 'Failed to get triage link for %s, raw output: %s' %
+                results, full_test_name,
+                'Failed to get triage link for %s, raw output: %s' %
                 (render_name, error))
             _AppendToLog(
-                results, 'Reason for no triage link: %s' %
+                results, full_test_name, 'Reason for no triage link: %s' %
                 gold_session.GetTriageLinkOmissionReason(render_name))
             continue
           if gold_properties.IsTryjobRun():
-            _SetLinkOnResults(results,
+            _SetLinkOnResults(results, full_test_name,
                               'Public Skia Gold triage link for entire CL',
                               public_triage_link)
-            _SetLinkOnResults(results,
+            _SetLinkOnResults(results, full_test_name,
                               'Internal Skia Gold triage link for entire CL',
                               internal_triage_link)
           else:
             _SetLinkOnResults(
-                results, 'Public Skia Gold triage link for %s' % render_name,
+                results, full_test_name,
+                'Public Skia Gold triage link for %s' % render_name,
                 public_triage_link)
             _SetLinkOnResults(
-                results, 'Internal Skia Gold triage link for %s' % render_name,
+                results, full_test_name,
+                'Internal Skia Gold triage link for %s' % render_name,
                 internal_triage_link)
-          _AppendToLog(results, failure_log)
+          _AppendToLog(results, full_test_name, failure_log)
 
         elif status == status_codes.COMPARISON_FAILURE_LOCAL:
           given_link = gold_session.GetGivenImageLink(render_name)
@@ -1137,12 +1329,13 @@ class LocalDeviceInstrumentationTestRun(
               '%s.html' % render_name, 'gold_local_diffs',
               output_manager.Datatype.HTML) as html_results:
             html_results.write(processed_template_output)
-          _SetLinkOnResults(results, render_name, html_results.Link())
+          _SetLinkOnResults(results, full_test_name, render_name,
+                            html_results.Link())
           _AppendToLog(
-              results,
+              results, full_test_name,
               'See %s link for diff image with closest positive.' % render_name)
         elif status == status_codes.LOCAL_DIFF_FAILURE:
-          _AppendToLog(results,
+          _AppendToLog(results, full_test_name,
                        'Failed to generate diffs from Gold: %s' % error)
         else:
           logging.error(
@@ -1154,6 +1347,9 @@ class LocalDeviceInstrumentationTestRun(
     # We've tried to disable retries in the past with mixed results.
     # See crbug.com/619055 for historical context and crbug.com/797002
     # for ongoing efforts.
+    if 'Batch' in test['annotations'] and test['annotations']['Batch'][
+        'value'] == 'UnitTests':
+      return False
     del test, result
     return True
 
@@ -1188,16 +1384,21 @@ def _IsWPRRecordReplayTest(test):
   """Determines whether a test or a list of tests is a WPR RecordReplay Test."""
   if not isinstance(test, list):
     test = [test]
-  return any([
-      WPR_RECORD_REPLAY_TEST_FEATURE_ANNOTATION in t['annotations'].get(
-          FEATURE_ANNOTATION, {}).get('value', ()) for t in test
-  ])
+  return any(WPR_RECORD_REPLAY_TEST_FEATURE_ANNOTATION in t['annotations'].get(
+      FEATURE_ANNOTATION, {}).get('value', ()) for t in test)
 
 
 def _GetWPRArchivePath(test):
   """Retrieves the archive path from the WPRArchiveDirectory annotation."""
   return test['annotations'].get(WPR_ARCHIVE_FILE_PATH_ANNOTATION,
                                  {}).get('value', ())
+
+
+def _GetWPRArchiveFileName(test):
+  """Retrieves the WPRArchiveDirectory.ArchiveName annotation."""
+  value = test['annotations'].get(WPR_ARCHIVE_NAME_ANNOTATION,
+                                  {}).get('value', None)
+  return value[0] if value else None
 
 
 def _ReplaceUncommonChars(original):
@@ -1215,8 +1416,8 @@ def _IsRenderTest(test):
   """Determines if a test or list of tests has a RenderTest amongst them."""
   if not isinstance(test, list):
     test = [test]
-  return any([RENDER_TEST_FEATURE_ANNOTATION in t['annotations'].get(
-              FEATURE_ANNOTATION, {}).get('value', ()) for t in test])
+  return any(RENDER_TEST_FEATURE_ANNOTATION in t['annotations'].get(
+      FEATURE_ANNOTATION, {}).get('value', ()) for t in test)
 
 
 def _GenerateRenderTestHtml(image_name, failure_link, golden_link, diff_link):
@@ -1245,7 +1446,7 @@ def _GenerateRenderTestHtml(image_name, failure_link, golden_link, diff_link):
       diff_link=diff_link)
 
 
-def _FailTestIfNecessary(results):
+def _FailTestIfNecessary(results, full_test_name):
   """Marks the given results as failed if it wasn't already.
 
   Marks the result types as ResultType.FAIL unless they were already some sort
@@ -1253,8 +1454,17 @@ def _FailTestIfNecessary(results):
 
   Args:
     results: A list of base_test_result.BaseTestResult objects.
+    full_test_name: A string containing the full name of the test, e.g.
+        org.chromium.chrome.SomeTestClass#someTestMethod.
   """
+  found_matching_test = _MatchingTestInResults(results, full_test_name)
+  if not found_matching_test and _ShouldReportNoMatchingResult(full_test_name):
+    logging.error(
+        'Could not find result specific to %s, failing all tests in the batch.',
+        full_test_name)
   for result in results:
+    if found_matching_test and result.GetName() != full_test_name:
+      continue
     if result.GetType() not in [
         base_test_result.ResultType.FAIL, base_test_result.ResultType.CRASH,
         base_test_result.ResultType.TIMEOUT, base_test_result.ResultType.UNKNOWN
@@ -1262,24 +1472,79 @@ def _FailTestIfNecessary(results):
       result.SetType(base_test_result.ResultType.FAIL)
 
 
-def _AppendToLog(results, line):
+def _AppendToLog(results, full_test_name, line):
   """Appends the given line to the end of the logs of the given results.
 
   Args:
     results: A list of base_test_result.BaseTestResult objects.
+    full_test_name: A string containing the full name of the test, e.g.
+        org.chromium.chrome.SomeTestClass#someTestMethod.
     line: A string to be appended as a neww line to the log of |result|.
   """
+  found_matching_test = _MatchingTestInResults(results, full_test_name)
+  if not found_matching_test and _ShouldReportNoMatchingResult(full_test_name):
+    logging.error(
+        'Could not find result specific to %s, appending to log of all tests '
+        'in the batch.', full_test_name)
   for result in results:
-    result.SetLog(result.GetLog() + '\n' + line)
+    if found_matching_test and result.GetName() != full_test_name:
+      continue
+    _AppendToLogForResult(result, line)
 
 
-def _SetLinkOnResults(results, link_name, link):
+def _AppendToLogForResult(result, line):
+  result.SetLog(result.GetLog() + '\n' + line)
+
+
+def _SetLinkOnResults(results, full_test_name, link_name, link):
   """Sets the given link on the given results.
 
   Args:
     results: A list of base_test_result.BaseTestResult objects.
+    full_test_name: A string containing the full name of the test, e.g.
+        org.chromium.chrome.SomeTestClass#someTestMethod.
     link_name: A string containing the name of the link being set.
     link: A string containing the lkink being set.
   """
+  found_matching_test = _MatchingTestInResults(results, full_test_name)
+  if not found_matching_test and _ShouldReportNoMatchingResult(full_test_name):
+    logging.error(
+        'Could not find result specific to %s, adding link to results of all '
+        'tests in the batch.', full_test_name)
   for result in results:
+    if found_matching_test and result.GetName() != full_test_name:
+      continue
     result.SetLink(link_name, link)
+
+
+def _MatchingTestInResults(results, full_test_name):
+  """Checks if any tests named |full_test_name| are in |results|.
+
+  Args:
+    results: A list of base_test_result.BaseTestResult objects.
+    full_test_name: A string containing the full name of the test, e.g.
+        org.chromium.chrome.Some
+
+  Returns:
+    True if one of the results in |results| has the same name as
+    |full_test_name|, otherwise False.
+  """
+  return any(r for r in results if r.GetName() == full_test_name)
+
+
+def _ShouldReportNoMatchingResult(full_test_name):
+  """Determines whether a failure to find a matching result is actually bad.
+
+  Args:
+    full_test_name: A string containing the full name of the test, e.g.
+        org.chromium.chrome.Some
+
+  Returns:
+    False if the failure to find a matching result is expected and should not
+    be reported, otherwise True.
+  """
+  if full_test_name is not None and full_test_name.endswith(_BATCH_SUFFIX):
+    # Handle batched tests, whose reported name is the first test's name +
+    # "_batch".
+    return False
+  return True

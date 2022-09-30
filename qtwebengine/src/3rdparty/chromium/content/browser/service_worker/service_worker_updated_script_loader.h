@@ -5,7 +5,7 @@
 #ifndef CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_UPDATED_SCRIPT_LOADER_H_
 #define CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_UPDATED_SCRIPT_LOADER_H_
 
-#include "base/macros.h"
+#include "base/time/time.h"
 #include "content/browser/service_worker/service_worker_cache_writer.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
@@ -27,7 +27,6 @@ class ThrottlingURLLoader;
 
 namespace content {
 
-class BrowserContext;
 class ServiceWorkerVersion;
 
 // Used only for ServiceWorkerImportedScriptUpdateCheck.
@@ -72,62 +71,6 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
 
   enum class WriterState { kNotStarted, kWriting, kCompleted };
 
-  using BrowserContextGetter = base::RepeatingCallback<BrowserContext*(void)>;
-
-  // A wrapper to use ThrottlingURLLoader on the core thread.
-  // TODO(crbug.com/824858): Remove this once core is moved to UI thread.
-  class ThrottlingURLLoaderCoreWrapper {
-   public:
-    // Creates a ThrottlingURLLoader and starts the request.
-    // Called on the core thread.
-    static std::unique_ptr<ThrottlingURLLoaderCoreWrapper> CreateLoaderAndStart(
-        std::unique_ptr<network::PendingSharedURLLoaderFactory>
-            pending_loader_factory,
-        BrowserContextGetter browser_context_getter,
-        int32_t routing_id,
-        int32_t request_id,
-        uint32_t options,
-        const network::ResourceRequest& resource_request,
-        mojo::PendingRemote<network::mojom::URLLoaderClient> client,
-        const net::NetworkTrafficAnnotationTag& traffic_annotation);
-
-    // Called on the core thread.
-    void SetPriority(net::RequestPriority priority,
-                     int32_t intra_priority_value);
-    void PauseReadingBodyFromNet();
-    void ResumeReadingBodyFromNet();
-
-    ~ThrottlingURLLoaderCoreWrapper();
-
-   private:
-    ThrottlingURLLoaderCoreWrapper();
-
-    // The real loader to be used in ThrottlingURLLoaderCoreWrapper.
-    // Created and deleted on the UI thread via BrowserThread::DeleteOnUIThread
-    // to ensure the order of posted tasks and destruction of this instance.
-    struct LoaderOnUI {
-      LoaderOnUI();
-      ~LoaderOnUI();
-
-      std::unique_ptr<blink::ThrottlingURLLoader> loader;
-      mojo::Remote<network::mojom::URLLoaderClient> client;
-    };
-
-    static void StartInternalOnUI(
-        std::unique_ptr<network::PendingSharedURLLoaderFactory>
-            pending_loader_factory,
-        BrowserContextGetter browser_context_getter,
-        int32_t routing_id,
-        int32_t request_id,
-        uint32_t options,
-        network::ResourceRequest resource_request,
-        mojo::PendingRemote<network::mojom::URLLoaderClient> client,
-        net::NetworkTrafficAnnotationTag traffic_annotation,
-        LoaderOnUI* loader_on_ui);
-
-    std::unique_ptr<LoaderOnUI, BrowserThread::DeleteOnUIThread> loader_on_ui_;
-  };
-
   // Creates a loader to continue downloading of a script paused during update
   // check.
   static std::unique_ptr<ServiceWorkerUpdatedScriptLoader> CreateAndStart(
@@ -136,6 +79,11 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
       mojo::PendingRemote<network::mojom::URLLoaderClient> client,
       scoped_refptr<ServiceWorkerVersion> version);
 
+  ServiceWorkerUpdatedScriptLoader(const ServiceWorkerUpdatedScriptLoader&) =
+      delete;
+  ServiceWorkerUpdatedScriptLoader& operator=(
+      const ServiceWorkerUpdatedScriptLoader&) = delete;
+
   ~ServiceWorkerUpdatedScriptLoader() override;
 
   // network::mojom::URLLoader:
@@ -143,15 +91,16 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const base::Optional<GURL>& new_url) override;
+      const absl::optional<GURL>& new_url) override;
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override;
   void PauseReadingBodyFromNet() override;
   void ResumeReadingBodyFromNet() override;
 
   // network::mojom::URLLoaderClient for the network load:
-  void OnReceiveResponse(
-      network::mojom::URLResponseHeadPtr response_head) override;
+  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr response_head,
+                         mojo::ScopedDataPipeConsumerHandle body) override;
   void OnReceiveRedirect(
       const net::RedirectInfo& redirect_info,
       network::mojom::URLResponseHeadPtr response_head) override;
@@ -216,10 +165,7 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
 
   const GURL request_url_;
 
-  // This is network::mojom::RequestDestination::kServiceWorker for the main
-  // script or network::mojom::RequestDestination::kScript for an imported
-  // script.
-  const network::mojom::RequestDestination request_destination_;
+  const bool is_main_script_;
 
   // Loader options to pass to the network loader.
   const uint32_t options_;
@@ -230,8 +176,11 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
 
   // Used for fetching the script from network (or other loaders like extensions
   // sometimes).
-  std::unique_ptr<ThrottlingURLLoaderCoreWrapper> network_loader_;
-
+  std::unique_ptr<blink::ThrottlingURLLoader> network_loader_;
+  // The endpoint called by `network_loader_` connected to
+  // `network_client_receiver_`. That needs to be alive while `network_loader_`
+  // is alive.
+  mojo::Remote<network::mojom::URLLoaderClient> network_client_remote_;
   mojo::Receiver<network::mojom::URLLoaderClient> network_client_receiver_{
       this};
   mojo::ScopedDataPipeConsumerHandle network_consumer_;
@@ -284,8 +233,6 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
   base::OnceCallback<void(net::Error)> write_observer_complete_callback_;
 
   base::WeakPtrFactory<ServiceWorkerUpdatedScriptLoader> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerUpdatedScriptLoader);
 };
 
 }  // namespace content

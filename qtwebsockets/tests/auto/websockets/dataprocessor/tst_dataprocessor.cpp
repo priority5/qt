@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Kurt Pattyn <pattyn.kurt@gmail.com>.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Kurt Pattyn <pattyn.kurt@gmail.com>.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <QtTest/QtTest>
 #include <QtTest/qtestcase.h>
 #include <QtTest/QSignalSpy>
@@ -410,7 +385,7 @@ void tst_DataProcessor::goodControlFrame()
     QSignalSpy pongReceivedSpy(&dataProcessor, SIGNAL(pongReceived(QByteArray)));
 
     data.append(char(FIN | QWebSocketProtocol::OpCodePing));
-    data.append(QChar::fromLatin1(0));
+    data.append('\0');
     buffer.setData(data);
     buffer.open(QIODevice::ReadOnly);
     dataProcessor.process(&buffer);
@@ -428,7 +403,7 @@ void tst_DataProcessor::goodControlFrame()
     pingReceivedSpy.clear();
     pongReceivedSpy.clear();
     data.append(char(FIN | QWebSocketProtocol::OpCodePong));
-    data.append(QChar::fromLatin1(0));
+    data.append('\0');
     buffer.setData(data);
     buffer.open(QIODevice::ReadOnly);
     dataProcessor.process(&buffer);
@@ -589,11 +564,11 @@ void tst_DataProcessor::goodCloseFrame()
     data.append(char(FIN | QWebSocketProtocol::OpCodeClose));
     if (swapped != 0)
     {
-        data.append(char(payload.length() + 2)).append(wireRepresentation, 2).append(payload);
+        data.append(char(payload.length() + 2)).append(wireRepresentation, 2).append(payload.toUtf8());
     }
     else
     {
-        data.append(QChar::fromLatin1(0));  //payload length 0;
+        data.append('\0');  //payload length 0;
         //dataprocessor emits a CloseCodeNormal close code when none is present
         closeCode = QWebSocketProtocol::CloseCodeNormal;
     }
@@ -1359,7 +1334,7 @@ void tst_DataProcessor::invalidPayloadInCloseFrame()
     QFETCH(bool, isContinuationFrame);
     QFETCH(QWebSocketProtocol::CloseCode, expectedCloseCode);
 
-    Q_UNUSED(isContinuationFrame)
+    Q_UNUSED(isContinuationFrame);
 
     QByteArray data;
     QBuffer buffer;
@@ -1507,7 +1482,7 @@ void tst_DataProcessor::doCloseFrameTest()
     QFETCH(bool, isContinuationFrame);
     QFETCH(QWebSocketProtocol::CloseCode, expectedCloseCode);
 
-    Q_UNUSED(isContinuationFrame)
+    Q_UNUSED(isContinuationFrame);
 
     QByteArray data;
     QBuffer buffer;

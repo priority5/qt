@@ -25,20 +25,20 @@ config("WSI_metal_weak_framework") {
 
 swiftshader_source_set("WSI") {
   sources = [
+    "HeadlessSurfaceKHR.cpp",
+    "HeadlessSurfaceKHR.hpp",
     "VkSurfaceKHR.cpp",
     "VkSurfaceKHR.hpp",
     "VkSwapchainKHR.cpp",
     "VkSwapchainKHR.hpp",
   ]
 
-  if (is_linux || is_chromeos) {
+  if (is_linux) {
     sources += [
       "XcbSurfaceKHR.cpp",
       "XcbSurfaceKHR.hpp",
-      "XlibSurfaceKHR.cpp",
-      "XlibSurfaceKHR.hpp",
-      "libX11.cpp",
-      "libX11.hpp",
+      "libXCB.cpp",
+      "libXCB.hpp",
     ]
   }
 
@@ -68,6 +68,7 @@ swiftshader_source_set("WSI") {
   ]
 
   deps = [
+    "../../third_party/SPIRV-Tools:spvtools_headers",
     "../../third_party/marl:Marl_headers",
     "../System",
     "../Vulkan:swiftshader_libvulkan_headers",

@@ -12,6 +12,7 @@
 
 #include "base/time/time.h"
 #include "base/values.h"
+#include "components/content_settings/core/common/content_settings_constraints.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 
@@ -72,17 +73,28 @@ struct RendererContentSettingRules {
   // Any new type added below must also update this method.
   static bool IsRendererContentSetting(ContentSettingsType content_type);
 
+  // Filters all the rules by matching the primary pattern with
+  // |outermost_main_frame_url|. Any new type added below that needs to match
+  // the primary pattern with the outermost main frame's url should also update
+  // this method.
+  void FilterRulesByOutermostMainFrameURL(const GURL& outermost_main_frame_url);
+
   RendererContentSettingRules();
   ~RendererContentSettingRules();
+  RendererContentSettingRules(const RendererContentSettingRules& rules);
+  RendererContentSettingRules(RendererContentSettingRules&& rules);
+  RendererContentSettingRules& operator=(
+      const RendererContentSettingRules& rules);
+  RendererContentSettingRules& operator=(RendererContentSettingRules&& rules);
+
   ContentSettingsForOneType image_rules;
   ContentSettingsForOneType script_rules;
   ContentSettingsForOneType popup_redirect_rules;
   ContentSettingsForOneType mixed_content_rules;
+  ContentSettingsForOneType auto_dark_content_rules;
 };
 
 namespace content_settings {
-
-typedef std::string ResourceIdentifier;
 
 // Enum containing the various source for content settings. Settings can be
 // set by policy, extension, the user or by the custodian of a supervised user.
@@ -105,6 +117,7 @@ struct SettingInfo {
   SettingSource source;
   ContentSettingsPattern primary_pattern;
   ContentSettingsPattern secondary_pattern;
+  SessionModel session_model;
 };
 
 }  // namespace content_settings

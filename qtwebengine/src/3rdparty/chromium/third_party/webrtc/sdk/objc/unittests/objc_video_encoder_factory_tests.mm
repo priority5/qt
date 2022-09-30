@@ -19,7 +19,6 @@
 #import "base/RTCVideoEncoderFactory.h"
 #import "base/RTCVideoFrameBuffer.h"
 #import "components/video_frame_buffer/RTCCVPixelBuffer.h"
-#include "modules/include/module_common_types.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/gunit.h"
@@ -84,7 +83,7 @@ TEST(ObjCVideoEncoderFactoryTest, EncodeReturnsOKOnSuccess) {
   CVPixelBufferRef pixel_buffer;
   CVPixelBufferCreate(kCFAllocatorDefault, 640, 480, kCVPixelFormatType_32ARGB, nil, &pixel_buffer);
   rtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer =
-      new rtc::RefCountedObject<webrtc::ObjCFrameBuffer>(
+      rtc::make_ref_counted<webrtc::ObjCFrameBuffer>(
           [[RTC_OBJC_TYPE(RTCCVPixelBuffer) alloc] initWithPixelBuffer:pixel_buffer]);
   webrtc::VideoFrame frame = webrtc::VideoFrame::Builder()
                                  .set_video_frame_buffer(buffer)
@@ -102,7 +101,7 @@ TEST(ObjCVideoEncoderFactoryTest, EncodeReturnsErrorOnFail) {
   CVPixelBufferRef pixel_buffer;
   CVPixelBufferCreate(kCFAllocatorDefault, 640, 480, kCVPixelFormatType_32ARGB, nil, &pixel_buffer);
   rtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer =
-      new rtc::RefCountedObject<webrtc::ObjCFrameBuffer>(
+      rtc::make_ref_counted<webrtc::ObjCFrameBuffer>(
           [[RTC_OBJC_TYPE(RTCCVPixelBuffer) alloc] initWithPixelBuffer:pixel_buffer]);
   webrtc::VideoFrame frame = webrtc::VideoFrame::Builder()
                                  .set_video_frame_buffer(buffer)

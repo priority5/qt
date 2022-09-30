@@ -26,7 +26,6 @@ namespace cc {
 
 RasterSource::RasterSource(const RecordingSource* other)
     : display_list_(other->display_list_),
-      painter_reported_memory_usage_(other->painter_reported_memory_usage_),
       background_color_(other->background_color_),
       requires_clear_(other->requires_clear_),
       is_solid_color_(other->is_solid_color_),
@@ -47,11 +46,11 @@ void RasterSource::ClearForOpaqueRaster(
     const gfx::Rect& canvas_playback_rect) const {
   gfx::Rect outer_rect;
   gfx::Rect inner_rect;
-  float scale = raster_transform.scale() / recording_scale_factor_;
+  gfx::Vector2dF scale = raster_transform.scale();
+  scale.Scale(1.f / recording_scale_factor_);
   if (!CalculateClearForOpaqueRasterRects(
-          raster_transform.translation(), gfx::SizeF(scale, scale),
-          content_size, canvas_bitmap_rect, canvas_playback_rect, outer_rect,
-          inner_rect))
+          raster_transform.translation(), scale, content_size,
+          canvas_bitmap_rect, canvas_playback_rect, outer_rect, inner_rect))
     return;
 
   raster_canvas->save();
@@ -104,8 +103,8 @@ void RasterSource::PlaybackToCanvas(
   raster_canvas->clipRect(SkRect::Make(raster_bounds));
   raster_canvas->translate(raster_transform.translation().x(),
                            raster_transform.translation().y());
-  raster_canvas->scale(raster_transform.scale() / recording_scale_factor_,
-                       raster_transform.scale() / recording_scale_factor_);
+  raster_canvas->scale(raster_transform.scale().x() / recording_scale_factor_,
+                       raster_transform.scale().y() / recording_scale_factor_);
 
   if (is_partial_raster && requires_clear_) {
     // Because Skia treats painted regions as transparent by default, we don't
@@ -126,12 +125,6 @@ void RasterSource::PlaybackDisplayListToCanvas(
   int repeat_count = std::max(1, slow_down_raster_scale_factor_for_debug_);
   for (int i = 0; i < repeat_count; ++i)
     display_list_->Raster(raster_canvas, image_provider);
-}
-
-size_t RasterSource::GetMemoryUsage() const {
-  if (!display_list_)
-    return 0;
-  return display_list_->BytesUsed() + painter_reported_memory_usage_;
 }
 
 bool RasterSource::PerformSolidColorAnalysis(gfx::Rect layer_rect,
@@ -156,8 +149,9 @@ RasterSource::TakeDecodingModeMap() {
   return display_list_->TakeDecodingModeMap();
 }
 
-bool RasterSource::CoversRect(const gfx::Rect& layer_rect,
-                              const PictureLayerTilingClient& client) const {
+bool RasterSource::IntersectsRect(
+    const gfx::Rect& layer_rect,
+    const PictureLayerTilingClient& client) const {
   if (size_.IsEmpty())
     return false;
 
@@ -170,15 +164,17 @@ bool RasterSource::CoversRect(const gfx::Rect& layer_rect,
 
   gfx::Rect bounded_rect = layer_rect;
   bounded_rect.Intersect(gfx::Rect(size_));
-  return recorded_viewport_.Contains(bounded_rect);
+  return recorded_viewport_.Intersects(bounded_rect);
 }
 
 gfx::Size RasterSource::GetSize() const {
   return size_;
 }
 
-gfx::Size RasterSource::GetContentSize(float content_scale) const {
-  return gfx::ScaleToCeiledSize(GetSize(), content_scale);
+gfx::Size RasterSource::GetContentSize(
+    const gfx::Vector2dF& content_scale) const {
+  return gfx::ScaleToCeiledSize(GetSize(), content_scale.x(),
+                                content_scale.y());
 }
 
 bool RasterSource::IsSolidColor() const {

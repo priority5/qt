@@ -13,21 +13,6 @@
 namespace mojo {
 
 template <>
-class StructTraits<media::mojom::ScalingSettingsDataView,
-                   media::ScalingSettings> {
- public:
-  static int32_t min_qp(const media::ScalingSettings& scaling_settings) {
-    return scaling_settings.min_qp;
-  }
-  static int32_t max_qp(const media::ScalingSettings& scaling_settings) {
-    return scaling_settings.max_qp;
-  }
-
-  static bool Read(media::mojom::ScalingSettingsDataView data,
-                   media::ScalingSettings* out);
-};
-
-template <>
 class StructTraits<media::mojom::ResolutionBitrateLimitDataView,
                    media::ResolutionBitrateLimit> {
  public:
@@ -75,15 +60,14 @@ class StructTraits<media::mojom::VideoEncoderInfoDataView,
       const media::VideoEncoderInfo& video_encoder_info) {
     return video_encoder_info.supports_simulcast;
   }
-  static const base::Optional<media::ScalingSettings>& scaling_settings(
+  static bool reports_average_qp(
       const media::VideoEncoderInfo& video_encoder_info) {
-    return video_encoder_info.scaling_settings;
+    return video_encoder_info.reports_average_qp;
   }
   static base::span<const std::vector<uint8_t>,
                     media::VideoEncoderInfo::kMaxSpatialLayers>
   fps_allocation(const media::VideoEncoderInfo& video_encoder_info) {
-    return base::span<const std::vector<uint8_t>,
-            media::VideoEncoderInfo::kMaxSpatialLayers>(video_encoder_info.fps_allocation);
+    return video_encoder_info.fps_allocation;
   }
   static const std::vector<media::ResolutionBitrateLimit>&
   resolution_bitrate_limits(const media::VideoEncoderInfo& video_encoder_info) {

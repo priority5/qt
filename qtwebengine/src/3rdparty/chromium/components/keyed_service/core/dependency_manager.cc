@@ -4,8 +4,10 @@
 
 #include "components/keyed_service/core/dependency_manager.h"
 
+#include <ostream>
+
 #include "base/bind.h"
-#include "base/check_op.h"
+#include "base/check.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/notreached.h"
 #include "base/supports_user_data.h"
@@ -23,6 +25,19 @@ DependencyManager::~DependencyManager() {
 }
 
 void DependencyManager::AddComponent(KeyedServiceBaseFactory* component) {
+#if DCHECK_IS_ON()
+  // TODO(crbug.com/1150733): Tighten this check to ensure that no factories are
+  // registered after CreateContextServices() is called.
+  DCHECK(!context_services_created_ ||
+         !(component->ServiceIsCreatedWithContext() ||
+           component->ServiceIsNULLWhileTesting()))
+      << "Tried to construct " << component->name()
+      << " after context.\n"
+         "Keyed Service Factories must be constructed before the context is "
+         "created. Typically this is done by calling FooFactory::GetInstance() "
+         "for all factories in a method called "
+         "Ensure.*KeyedServiceFactoriesBuilt().";
+#endif  // DCHECK_IS_ON()
   dependency_graph_.AddNode(component);
 }
 
@@ -51,6 +66,9 @@ void DependencyManager::RegisterPrefsForServices(
 
 void DependencyManager::CreateContextServices(void* context,
                                               bool is_testing_context) {
+#if DCHECK_IS_ON()
+  context_services_created_ = true;
+#endif
   MarkContextLive(context);
 
   std::vector<DependencyNode*> construction_order;
@@ -141,15 +159,11 @@ void DependencyManager::DestroyFactoriesInOrder(
 
 void DependencyManager::AssertContextWasntDestroyed(void* context) const {
   if (dead_context_pointers_.find(context) != dead_context_pointers_.end()) {
-#if DCHECK_IS_ON()
-    NOTREACHED() << "Attempted to access a context that was ShutDown(). "
+    // We want to see all possible use-after-destroy in production environment.
+    CHECK(false) << "Attempted to access a context that was ShutDown(). "
                  << "This is most likely a heap smasher in progress. After "
                  << "KeyedService::Shutdown() completes, your service MUST "
                  << "NOT refer to depended services again.";
-#else   // DCHECK_IS_ON()
-    // We want to see all possible use-after-destroy in production environment.
-    base::debug::DumpWithoutCrashing();
-#endif  // DCHECK_IS_ON()
   }
 }
 

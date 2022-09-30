@@ -5,11 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_INPUT_MAIN_THREAD_EVENT_QUEUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_INPUT_MAIN_THREAD_EVENT_QUEUE_H_
 
+#include <memory>
+
 #include "base/feature_list.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "cc/input/touch_action.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
 #include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
@@ -19,23 +23,36 @@
 #include "third_party/blink/renderer/platform/widget/input/main_thread_event_queue_task_list.h"
 #include "ui/latency/latency_info.h"
 
+namespace cc {
+class EventMetrics;
+}
+
 namespace blink {
 
 using HandledEventCallback =
     base::OnceCallback<void(mojom::blink::InputEventResultState ack_state,
                             const ui::LatencyInfo& latency_info,
                             mojom::blink::DidOverscrollParamsPtr,
-                            base::Optional<cc::TouchAction>)>;
+                            absl::optional<cc::TouchAction>)>;
 
 // All interaction with the MainThreadEventQueueClient will occur
 // on the main thread.
 class PLATFORM_EXPORT MainThreadEventQueueClient {
  public:
-  // Handle an |event| that was previously queued (possibly coalesced with
-  // another event). Returns false if the event will not be handled, and the
-  // |handled_callback| will not be run.
+  // Handle an `event` that was previously queued (possibly coalesced with
+  // another event). `metrics` contains information that would be useful in
+  // reporting latency metrics in case the event causes an update. Returns false
+  // if the event will not be handled in which case the `handled_callback` will
+  // not be run.
   virtual bool HandleInputEvent(const WebCoalescedInputEvent& event,
+                                std::unique_ptr<cc::EventMetrics> metrics,
                                 HandledEventCallback handled_callback) = 0;
+
+  // Notify clients that the queued events have been dispatched. `raf_aligned`
+  // determines whether the events were rAF-aligned events or non-rAF-aligned
+  // ones.
+  virtual void InputEventsDispatched(bool raf_aligned) = 0;
+
   // Requests a BeginMainFrame callback from the compositor.
   virtual void SetNeedsMainFrame() = 0;
 };
@@ -84,6 +101,8 @@ class PLATFORM_EXPORT MainThreadEventQueue
       const scoped_refptr<base::SingleThreadTaskRunner>& main_task_runner,
       scheduler::WebThreadScheduler* main_thread_scheduler,
       bool allow_raf_aligned_input);
+  MainThreadEventQueue(const MainThreadEventQueue&) = delete;
+  MainThreadEventQueue& operator=(const MainThreadEventQueue&) = delete;
 
   // Type of dispatching of the event.
   enum class DispatchType { kBlocking, kNonBlocking };
@@ -94,6 +113,7 @@ class PLATFORM_EXPORT MainThreadEventQueue
                    DispatchType dispatch_type,
                    mojom::blink::InputEventResultState ack_result,
                    const WebInputEventAttribution& attribution,
+                   std::unique_ptr<cc::EventMetrics> metrics,
                    HandledEventCallback handled_callback);
   void DispatchRafAlignedInput(base::TimeTicks frame_time);
   void QueueClosure(base::OnceClosure closure);
@@ -119,6 +139,10 @@ class PLATFORM_EXPORT MainThreadEventQueue
                mojom::blink::InputEventResultState::kSetNonBlockingDueToFling;
   }
 
+  base::SingleThreadTaskRunner* main_task_runner_for_testing() const {
+    return main_task_runner_.get();
+  }
+
  protected:
   friend class base::RefCountedThreadSafe<MainThreadEventQueue>;
   virtual ~MainThreadEventQueue();
@@ -131,6 +155,7 @@ class PLATFORM_EXPORT MainThreadEventQueue
   // will not be run.
   bool HandleEventOnMainThread(const WebCoalescedInputEvent& event,
                                const WebInputEventAttribution& attribution,
+                               std::unique_ptr<cc::EventMetrics> metrics,
                                HandledEventCallback handled_callback);
 
   bool IsRawUpdateEvent(
@@ -179,8 +204,6 @@ class PLATFORM_EXPORT MainThreadEventQueue
   std::unique_ptr<base::OneShotTimer> raf_fallback_timer_;
 
   std::unique_ptr<InputEventPrediction> event_predictor_;
-
-  DISALLOW_COPY_AND_ASSIGN(MainThreadEventQueue);
 };
 
 }  // namespace blink

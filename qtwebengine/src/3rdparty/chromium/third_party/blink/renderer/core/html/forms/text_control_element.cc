@@ -55,16 +55,37 @@
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_fragment_items.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_offset_mapping.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
+
+namespace {
+
+Position GetNextSoftBreak(const NGOffsetMapping& mapping,
+                          NGInlineCursor& cursor) {
+  while (cursor) {
+    DCHECK(cursor.Current().IsLineBox()) << cursor;
+    const auto* break_token = cursor.Current().InlineBreakToken();
+    cursor.MoveToNextLine();
+    // We don't need to emit a LF for the last line.
+    if (!cursor)
+      return Position();
+    if (break_token && !break_token->IsForcedBreak())
+      return mapping.GetFirstPosition(break_token->TextOffset());
+  }
+  return Position();
+}
+
+}  // namespace
 
 TextControlElement::TextControlElement(const QualifiedName& tag_name,
                                        Document& doc)
@@ -427,7 +448,7 @@ unsigned TextControlElement::IndexForPosition(HTMLElement* inner_editor,
 
 bool TextControlElement::ShouldApplySelectionCache() const {
   const auto& doc = GetDocument();
-  return doc.FocusedElement() != this || doc.WillUpdateFocusAppearance();
+  return doc.FocusedElement() != this || doc.ShouldUpdateSelectionAfterLayout();
 }
 
 bool TextControlElement::SetSelectionRange(
@@ -509,18 +530,6 @@ VisiblePosition TextControlElement::VisiblePositionForIndex(int index) const {
   CharacterIterator it(start, end);
   it.Advance(index - 1);
   return CreateVisiblePosition(it.EndPosition(), TextAffinity::kUpstream);
-}
-
-// TODO(yosin): We should move |TextControlElement::IndexForVisiblePosition()|
-// to "ax_layout_object.cc" since this function is used only there.
-int TextControlElement::IndexForVisiblePosition(
-    const VisiblePosition& pos) const {
-  Position index_position = pos.DeepEquivalent().ParentAnchoredEquivalent();
-  if (EnclosingTextControl(index_position) != this)
-    return 0;
-  DCHECK(index_position.IsConnected()) << index_position;
-  return TextIterator::RangeLength(Position(InnerEditorElement(), 0),
-                                   index_position);
 }
 
 unsigned TextControlElement::selectionStart() const {
@@ -757,7 +766,7 @@ void TextControlElement::SelectionChanged(bool user_triggered) {
     return;
   const SelectionInDOMTree& selection =
       frame->Selection().GetSelectionInDOMTree();
-  if (selection.Type() != kRangeSelection)
+  if (!selection.IsRange())
     return;
   DispatchEvent(*Event::CreateBubble(event_type_names::kSelect));
 }
@@ -784,6 +793,13 @@ void TextControlElement::ParseAttribute(
     if (HTMLElement* inner_editor = InnerEditorElement()) {
       if (auto* frame = GetDocument().GetFrame())
         frame->GetSpellChecker().RemoveSpellingAndGrammarMarkers(*inner_editor);
+    }
+  } else if (params.name == html_names::kSpellcheckAttr) {
+    if (HTMLElement* inner_editor = InnerEditorElement()) {
+      if (auto* frame = GetDocument().GetFrame()) {
+        frame->GetSpellChecker().RespondToChangedEnablement(
+            *inner_editor, IsSpellCheckingEnabled());
+      }
     }
   } else {
     HTMLFormControlElementWithState::ParseAttribute(params);
@@ -916,6 +932,41 @@ String TextControlElement::ValueWithHardLineBreaks() const {
   if (!layout_object)
     return value();
 
+  if (layout_object->IsLayoutNGObject()) {
+    NGInlineCursor cursor(*layout_object);
+    if (!cursor)
+      return value();
+    const auto* mapping = NGInlineNode::GetOffsetMapping(layout_object);
+    if (!mapping)
+      return value();
+    Position break_position = GetNextSoftBreak(*mapping, cursor);
+    StringBuilder result;
+    for (Node& node : NodeTraversal::DescendantsOf(*inner_text)) {
+      if (IsA<HTMLBRElement>(node)) {
+        DCHECK_EQ(&node, inner_text->lastChild());
+      } else if (auto* text_node = DynamicTo<Text>(node)) {
+        String data = text_node->data();
+        unsigned length = data.length();
+        unsigned position = 0;
+        while (break_position.AnchorNode() == node &&
+               static_cast<unsigned>(break_position.OffsetInContainerNode()) <=
+                   length) {
+          unsigned break_offset = break_position.OffsetInContainerNode();
+          if (break_offset > position) {
+            result.Append(data, position, break_offset - position);
+            position = break_offset;
+            result.Append(kNewlineCharacter);
+          }
+          break_position = GetNextSoftBreak(*mapping, cursor);
+        }
+        result.Append(data, position, length - position);
+      }
+      while (break_position.AnchorNode() == node)
+        break_position = GetNextSoftBreak(*mapping, cursor);
+    }
+    return result.ToString();
+  }
+
   Node* break_node;
   unsigned break_offset;
   RootInlineBox* line = layout_object->FirstRootBox();
@@ -928,8 +979,6 @@ String TextControlElement::ValueWithHardLineBreaks() const {
   for (Node& node : NodeTraversal::DescendantsOf(*inner_text)) {
     if (IsA<HTMLBRElement>(node)) {
       DCHECK_EQ(&node, inner_text->lastChild());
-      if (&node != inner_text->lastChild())
-        result.Append(kNewlineCharacter);
     } else if (auto* text_node = DynamicTo<Text>(node)) {
       String data = text_node->data();
       unsigned length = data.length();
@@ -991,10 +1040,8 @@ String TextControlElement::DirectionForFormData() const {
       return dir_attribute_value;
 
     if (EqualIgnoringASCIICase(dir_attribute_value, "auto")) {
-      bool is_auto;
-      TextDirection text_direction =
-          element->DirectionalityIfhasDirAutoAttribute(is_auto);
-      return text_direction == TextDirection::kRtl ? "rtl" : "ltr";
+      return element->CachedDirectionality() == TextDirection::kRtl ? "rtl"
+                                                                    : "ltr";
     }
   }
 

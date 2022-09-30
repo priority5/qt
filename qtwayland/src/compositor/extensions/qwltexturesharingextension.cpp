@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWaylandCompositor module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include "qwltexturesharingextension_p.h"
 
@@ -40,7 +14,8 @@
 #include <QTimer>
 
 #include <QtGui/private/qtexturefilereader_p.h>
-#include <QtGui/QOpenGLTexture>
+
+#include <QtOpenGL/QOpenGLTexture>
 #include <QtGui/QImageReader>
 
 #include <QtQuick/QSGTexture>
@@ -48,66 +23,6 @@
 #include <QThread>
 
 QT_BEGIN_NAMESPACE
-
-class SharedTexture : public QSGTexture
-{
-    Q_OBJECT
-public:
-    SharedTexture(QtWayland::ServerBuffer *buffer);
-
-    int textureId() const override;
-    QSize textureSize() const override;
-    bool hasAlphaChannel() const override;
-    bool hasMipmaps() const override;
-
-    void bind() override;
-
-private:
-    void updateGLTexture() const;
-    QtWayland::ServerBuffer *m_buffer = nullptr;
-    mutable QOpenGLTexture *m_tex = nullptr;
-};
-
-SharedTexture::SharedTexture(QtWayland::ServerBuffer *buffer)
-    : m_buffer(buffer), m_tex(nullptr)
-{
-}
-
-int SharedTexture::textureId() const
-{
-    updateGLTexture();
-    return m_tex ? m_tex->textureId() : 0;
-}
-
-QSize SharedTexture::textureSize() const
-{
-    updateGLTexture();
-    return m_tex ? QSize(m_tex->width(), m_tex->height()) : QSize();
-}
-
-bool SharedTexture::hasAlphaChannel() const
-{
-    return true;
-}
-
-bool SharedTexture::hasMipmaps() const
-{
-    updateGLTexture();
-    return m_tex ? (m_tex->mipLevels() > 1) : false;
-}
-
-void SharedTexture::bind()
-{
-    updateGLTexture();
-    if (m_tex)
-        m_tex->bind();
-}
-
-inline void SharedTexture::updateGLTexture() const
-{
-    if (!m_tex && m_buffer)
-        m_tex = m_buffer->toOpenGlTexture();
-}
 
 class SharedTextureFactory : public QQuickTextureFactory
 {
@@ -133,9 +48,17 @@ public:
         return m_buffer ? (m_buffer->size().width() * m_buffer->size().height() * 4) : 0;
     }
 
-    QSGTexture *createTexture(QQuickWindow *) const override
+    QSGTexture *createTexture(QQuickWindow *window) const override
     {
-        return new SharedTexture(const_cast<QtWayland::ServerBuffer *>(m_buffer));
+        if (m_buffer != nullptr) {
+            QOpenGLTexture *texture = const_cast<QtWayland::ServerBuffer *>(m_buffer)->toOpenGlTexture();
+            return QNativeInterface::QSGOpenGLTexture::fromNative(texture->textureId(),
+                                                                   window,
+                                                                   m_buffer->size(),
+                                                                   QQuickWindow::TextureHasAlphaChannel);
+        }
+
+        return nullptr;
     }
 
 private:
@@ -455,9 +378,8 @@ QtWayland::ServerBuffer *QWaylandTextureSharingExtension::getCompressedBuffer(co
         return nullptr;
     }
 
-    QByteArray pixelData = QByteArray::fromRawData(td.data().constData() + td.dataOffset(), td.dataLength());
-
-    return m_server_buffer_integration->createServerBufferFromData(pixelData, td.size(), td.glInternalFormat());
+    return m_server_buffer_integration->createServerBufferFromData(td.getDataView(), td.size(),
+                                                                   td.glInternalFormat());
 }
 
 void QWaylandTextureSharingExtension::cleanupBuffers()
@@ -483,5 +405,7 @@ void QWaylandTextureSharingExtension::dumpBufferInfo()
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qwltexturesharingextension_p.cpp"
 
 #include "qwltexturesharingextension.moc"

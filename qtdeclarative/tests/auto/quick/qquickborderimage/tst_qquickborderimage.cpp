@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <qtest.h>
 #include <QTextDocument>
 #include <QTcpServer>
@@ -42,9 +17,9 @@
 #include <QtQuick/qquickview.h>
 #include <QtQml/qqmlcontext.h>
 
-#include "../../shared/testhttpserver.h"
-#include "../../shared/util.h"
-#include "../shared/visualtestutil.h"
+#include <QtQuickTestUtils/private/testhttpserver_p.h>
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include <QtQuickTestUtils/private/visualtestutils_p.h>
 
 Q_LOGGING_CATEGORY(lcTests, "qt.quick.tests")
 
@@ -96,6 +71,7 @@ void tst_qquickborderimage::cleanup()
 }
 
 tst_qquickborderimage::tst_qquickborderimage()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
 {
 }
 
@@ -429,7 +405,7 @@ void tst_qquickborderimage::statusChanges_data()
     QTest::newRow("localfile") << testFileUrl("colors.png").toString() << 1 << false << QQuickImageBase::Ready;
     QTest::newRow("nofile") << "" << 0 << false << QQuickImageBase::Null;
     QTest::newRow("nonexistent") << testFileUrl("thisfiledoesnotexist.png").toString() << 1 << false << QQuickImageBase::Error;
-    QTest::newRow("noprotocol") << QString("thisfiledoesnotexisteither.png") << 2 << false << QQuickImageBase::Error;
+    QTest::newRow("noprotocol") << QString("thisfiledoesnotexisteither.png") << 1 << false << QQuickImageBase::Error;
     QTest::newRow("remote") << "/colors.png" << 2 << true << QQuickImageBase::Ready;
 }
 
@@ -590,18 +566,24 @@ void tst_qquickborderimage::progressAndStatusChanges()
 #if QT_CONFIG(opengl)
 void tst_qquickborderimage::borderImageMesh()
 {
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
+
     QQuickView *window = new QQuickView;
 
     window->setSource(testFileUrl("nonmesh.qml"));
     window->show();
     QVERIFY(QTest::qWaitForWindowExposed(window));
+    if (window->rendererInterface()->graphicsApi() == QSGRendererInterface::Software)
+        QSKIP("Software backend has no ShaderEffect supported, skipping test");
+
     QImage nonmesh = window->grabWindow();
 
     window->setSource(testFileUrl("mesh.qml"));
     QImage mesh = window->grabWindow();
 
     QString errorMessage;
-    QVERIFY2(QQuickVisualTestUtil::compareImages(mesh, nonmesh, &errorMessage),
+    QVERIFY2(QQuickVisualTestUtils::compareImages(mesh, nonmesh, &errorMessage),
              qPrintable(errorMessage));
 }
 #endif
@@ -617,13 +599,12 @@ void tst_qquickborderimage::multiFrame_data()
 
 void tst_qquickborderimage::multiFrame()
 {
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
     QFETCH(QString, qmlfile);
     QFETCH(bool, asynchronous);
-    Q_UNUSED(asynchronous)
+    Q_UNUSED(asynchronous);
 
     QQuickView view(testFileUrl(qmlfile));
     QQuickBorderImage *image = qobject_cast<QQuickBorderImage*>(view.rootObject());

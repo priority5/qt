@@ -4,6 +4,8 @@
 
 #include "weblayer/browser/safe_browsing/safe_browsing_service.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/path_service.h"
 #include "components/prefs/pref_service.h"
@@ -11,21 +13,27 @@
 #include "components/safe_browsing/android/safe_browsing_api_handler_bridge.h"
 #include "components/safe_browsing/content/browser/browser_url_loader_throttle.h"
 #include "components/safe_browsing/content/browser/mojo_safe_browsing_impl.h"
-#include "components/safe_browsing/core/browser/safe_browsing_network_context.h"
+#include "components/safe_browsing/content/browser/safe_browsing_navigation_throttle.h"
+#include "components/safe_browsing/content/browser/safe_browsing_network_context.h"
+#include "components/safe_browsing/content/browser/triggers/trigger_manager.h"
+#include "components/safe_browsing/core/browser/realtime/url_lookup_service.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/core/realtime/url_lookup_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_context.h"
+#include "services/cert_verifier/public/mojom/cert_verifier_service_factory.mojom.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
 #include "weblayer/browser/browser_context_impl.h"
-#include "weblayer/browser/safe_browsing/safe_browsing_navigation_throttle.h"
+#include "weblayer/browser/browser_process.h"
 #include "weblayer/browser/safe_browsing/url_checker_delegate_impl.h"
+#include "weblayer/browser/safe_browsing/weblayer_safe_browsing_blocking_page_factory.h"
+#include "weblayer/browser/safe_browsing/weblayer_ui_manager_delegate.h"
+#include "weblayer/common/features.h"
 
 namespace weblayer {
 
@@ -36,7 +44,7 @@ network::mojom::NetworkContextParamsPtr CreateDefaultNetworkContextParams(
   network::mojom::NetworkContextParamsPtr network_context_params =
       network::mojom::NetworkContextParams::New();
   network_context_params->cert_verifier_params = content::GetCertVerifierParams(
-      network::mojom::CertVerifierCreationParams::New());
+      cert_verifier::mojom::CertVerifierCreationParams::New());
   network_context_params->user_agent = user_agent;
   return network_context_params;
 }
@@ -87,8 +95,8 @@ void SafeBrowsingService::Initialize() {
     return;
   }
 
-  safe_browsing_api_handler_.reset(
-      new safe_browsing::SafeBrowsingApiHandlerBridge());
+  safe_browsing_api_handler_ =
+      std::make_unique<safe_browsing::SafeBrowsingApiHandlerBridge>();
   safe_browsing::SafeBrowsingApiHandler::SetInstance(
       safe_browsing_api_handler_.get());
 
@@ -100,10 +108,13 @@ void SafeBrowsingService::Initialize() {
   // safebrowsing network context needs to be created on the UI thread.
   network_context_ =
       std::make_unique<safe_browsing::SafeBrowsingNetworkContext>(
-          user_data_dir,
+          user_data_dir, /*trigger_migration=*/false,
           base::BindRepeating(CreateDefaultNetworkContextParams, user_agent_));
 
   CreateSafeBrowsingUIManager();
+
+  // Needs to happen after |ui_manager_| is created.
+  CreateTriggerManager();
 }
 
 std::unique_ptr<blink::URLLoaderThrottle>
@@ -124,10 +135,14 @@ SafeBrowsingService::CreateURLLoaderThrottle(
 }
 
 std::unique_ptr<content::NavigationThrottle>
-SafeBrowsingService::CreateSafeBrowsingNavigationThrottle(
+SafeBrowsingService::MaybeCreateSafeBrowsingNavigationThrottleFor(
     content::NavigationHandle* handle) {
-  return std::make_unique<SafeBrowsingNavigationThrottle>(
-      handle, GetSafeBrowsingUIManager());
+  if (!base::FeatureList::IsEnabled(features::kWebLayerSafeBrowsing)) {
+    return nullptr;
+  }
+
+  return safe_browsing::SafeBrowsingNavigationThrottle::MaybeCreateThrottleFor(
+      handle, GetSafeBrowsingUIManager().get());
 }
 
 scoped_refptr<safe_browsing::UrlCheckerDelegate>
@@ -142,29 +157,66 @@ SafeBrowsingService::GetSafeBrowsingUrlCheckerDelegate() {
   return safe_browsing_url_checker_delegate_;
 }
 
-safe_browsing::RemoteSafeBrowsingDatabaseManager*
+scoped_refptr<safe_browsing::RemoteSafeBrowsingDatabaseManager>
 SafeBrowsingService::GetSafeBrowsingDBManager() {
   if (!safe_browsing_db_manager_) {
     CreateAndStartSafeBrowsingDBManager();
   }
-  return safe_browsing_db_manager_.get();
+  return safe_browsing_db_manager_;
 }
 
-SafeBrowsingUIManager* SafeBrowsingService::GetSafeBrowsingUIManager() {
-  return ui_manager_.get();
+scoped_refptr<safe_browsing::SafeBrowsingUIManager>
+SafeBrowsingService::GetSafeBrowsingUIManager() {
+  return ui_manager_;
+}
+
+safe_browsing::TriggerManager* SafeBrowsingService::GetTriggerManager() {
+  return trigger_manager_.get();
 }
 
 void SafeBrowsingService::CreateSafeBrowsingUIManager() {
   DCHECK(!ui_manager_);
-  ui_manager_ = new SafeBrowsingUIManager(this);
+  ui_manager_ = new safe_browsing::SafeBrowsingUIManager(
+      std::make_unique<WebLayerSafeBrowsingUIManagerDelegate>(),
+      std::make_unique<WebLayerSafeBrowsingBlockingPageFactory>(),
+      GURL(url::kAboutBlankURL));
+}
+
+void SafeBrowsingService::CreateTriggerManager() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  trigger_manager_ = std::make_unique<safe_browsing::TriggerManager>(
+      ui_manager_.get(), BrowserProcess::GetInstance()->GetLocalState());
 }
 
 void SafeBrowsingService::CreateAndStartSafeBrowsingDBManager() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   DCHECK(!safe_browsing_db_manager_);
 
   safe_browsing_db_manager_ =
       new safe_browsing::RemoteSafeBrowsingDatabaseManager();
+
+  if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::IO)) {
+    // Posting a task to start the DB here ensures that it will be started by
+    // the time that a consumer uses it on the IO thread, as such a consumer
+    // would need to make it available for usage on the IO thread via a
+    // PostTask() that will be ordered after this one.
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            &SafeBrowsingService::StartSafeBrowsingDBManagerOnIOThread,
+            base::Unretained(this)));
+  } else {
+    StartSafeBrowsingDBManagerOnIOThread();
+  }
+}
+
+void SafeBrowsingService::StartSafeBrowsingDBManagerOnIOThread() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  DCHECK(safe_browsing_db_manager_);
+
+  if (started_db_manager_)
+    return;
+
+  started_db_manager_ = true;
 
   // V4ProtocolConfig is not used. Just create one with empty values.
   safe_browsing::V4ProtocolConfig config("", false, "", "");
@@ -225,6 +277,7 @@ void SafeBrowsingService::StopDBManagerOnIOThread() {
   if (safe_browsing_db_manager_) {
     safe_browsing_db_manager_->StopOnIOThread(true /*shutdown*/);
     safe_browsing_db_manager_.reset();
+    started_db_manager_ = false;
   }
 }
 

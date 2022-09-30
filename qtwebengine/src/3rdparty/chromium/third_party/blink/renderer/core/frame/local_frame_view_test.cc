@@ -8,6 +8,7 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
+#include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
@@ -19,14 +20,12 @@
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_artifact.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "ui/gfx/geometry/size.h"
 
 using blink::test::RunPendingTasks;
 using testing::_;
-using testing::AnyNumber;
 
 namespace blink {
 namespace {
@@ -36,13 +35,12 @@ class AnimationMockChromeClient : public RenderingTestChromeClient {
   AnimationMockChromeClient() : has_scheduled_animation_(false) {}
 
   // ChromeClient
-  MOCK_METHOD2(AttachRootGraphicsLayer,
-               void(GraphicsLayer*, LocalFrame* localRoot));
-  MOCK_METHOD3(MockSetToolTip, void(LocalFrame*, const String&, TextDirection));
-  void SetToolTip(LocalFrame& frame,
-                  const String& tooltip_text,
-                  TextDirection dir) override {
-    MockSetToolTip(&frame, tooltip_text, dir);
+  MOCK_METHOD3(MockUpdateTooltipUnderCursor,
+               void(LocalFrame*, const String&, TextDirection));
+  void UpdateTooltipUnderCursor(LocalFrame& frame,
+                                const String& tooltip_text,
+                                TextDirection dir) override {
+    MockUpdateTooltipUnderCursor(&frame, tooltip_text, dir);
   }
 
   void ScheduleAnimation(const LocalFrameView*,
@@ -56,10 +54,7 @@ class LocalFrameViewTest : public RenderingTest {
  protected:
   LocalFrameViewTest()
       : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()),
-        chrome_client_(MakeGarbageCollected<AnimationMockChromeClient>()) {
-    EXPECT_CALL(GetAnimationMockChromeClient(), AttachRootGraphicsLayer(_, _))
-        .Times(AnyNumber());
-  }
+        chrome_client_(MakeGarbageCollected<AnimationMockChromeClient>()) {}
 
   ~LocalFrameViewTest() override {
     testing::Mock::VerifyAndClearExpectations(&GetAnimationMockChromeClient());
@@ -127,15 +122,17 @@ TEST_F(LocalFrameViewTest, SetPaintInvalidationOutOfUpdateAllLifecyclePhases) {
 TEST_F(LocalFrameViewTest, HideTooltipWhenScrollPositionChanges) {
   SetBodyInnerHTML("<div style='width:1000px;height:1000px'></div>");
 
-  EXPECT_CALL(GetAnimationMockChromeClient(),
-              MockSetToolTip(GetDocument().GetFrame(), String(), _));
+  EXPECT_CALL(
+      GetAnimationMockChromeClient(),
+      MockUpdateTooltipUnderCursor(GetDocument().GetFrame(), String(), _));
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
       ScrollOffset(1, 1), mojom::blink::ScrollType::kUser);
 
-  // Programmatic scrolling should not dismiss the tooltip, so setToolTip
-  // should not be called for this invocation.
-  EXPECT_CALL(GetAnimationMockChromeClient(),
-              MockSetToolTip(GetDocument().GetFrame(), String(), _))
+  // Programmatic scrolling should not dismiss the tooltip, so
+  // MockUpdateTooltipUnderCursor should not be called for this invocation.
+  EXPECT_CALL(
+      GetAnimationMockChromeClient(),
+      MockUpdateTooltipUnderCursor(GetDocument().GetFrame(), String(), _))
       .Times(0);
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
       ScrollOffset(2, 2), mojom::blink::ScrollType::kProgrammatic);
@@ -147,7 +144,7 @@ TEST_F(LocalFrameViewTest, HideTooltipWhenScrollPositionChanges) {
 TEST_F(LocalFrameViewTest, NoOverflowInIncrementVisuallyNonEmptyPixelCount) {
   EXPECT_FALSE(GetDocument().View()->IsVisuallyNonEmpty());
   GetDocument().View()->IncrementVisuallyNonEmptyPixelCount(
-      IntSize(65536, 65536));
+      gfx::Size(65536, 65536));
   EXPECT_TRUE(GetDocument().View()->IsVisuallyNonEmpty());
 }
 
@@ -163,8 +160,7 @@ TEST_F(LocalFrameViewTest,
     <div class='container'><div id='sticky'></div></div>
   )HTML");
 
-  LayoutBoxModelObject* sticky = ToLayoutBoxModelObject(
-      GetDocument().getElementById("sticky")->GetLayoutObject());
+  auto* sticky = To<LayoutBoxModelObject>(GetLayoutObjectByElementId("sticky"));
 
   // Deliberately invalidate the ancestor overflow layer. This approximates
   // http://crbug.com/696173, in which the ancestor overflow layer can be null
@@ -180,16 +176,44 @@ TEST_F(LocalFrameViewTest, UpdateLifecyclePhasesForPrintingDetachedFrame) {
   SetBodyInnerHTML("<iframe style='display: none'></iframe>");
   SetChildFrameHTML("A");
 
-  ChildDocument().SetPrinting(Document::kPrinting);
+  ChildFrame().StartPrinting(gfx::SizeF(200, 200), gfx::SizeF(200, 200), 1);
   ChildDocument().View()->UpdateLifecyclePhasesForPrinting();
 
   // The following checks that the detached frame has been walked for PrePaint.
-  EXPECT_EQ(DocumentLifecycle::kCompositingAssignmentsClean,
+  EXPECT_EQ(DocumentLifecycle::kPrePaintClean,
             GetDocument().Lifecycle().GetState());
-  EXPECT_EQ(DocumentLifecycle::kCompositingAssignmentsClean,
+  EXPECT_EQ(DocumentLifecycle::kPrePaintClean,
             ChildDocument().Lifecycle().GetState());
   auto* child_layout_view = ChildDocument().GetLayoutView();
   EXPECT_TRUE(child_layout_view->FirstFragment().PaintProperties());
+}
+
+TEST_F(LocalFrameViewTest, PrintFrameUpdateAllLifecyclePhases) {
+  SetBodyInnerHTML("<iframe></iframe>");
+  SetChildFrameHTML("A");
+
+  ChildFrame().StartPrinting(gfx::SizeF(200, 200), gfx::SizeF(200, 200), 1);
+  ChildDocument().View()->UpdateLifecyclePhasesForPrinting();
+
+  EXPECT_EQ(DocumentLifecycle::kPrePaintClean,
+            GetDocument().Lifecycle().GetState());
+  EXPECT_EQ(DocumentLifecycle::kPrePaintClean,
+            ChildDocument().Lifecycle().GetState());
+
+  // In case UpdateAllLifecyclePhases is called during child frame printing for
+  // any reason, we should not paint.
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(DocumentLifecycle::kPrePaintClean,
+            GetDocument().Lifecycle().GetState());
+  EXPECT_EQ(DocumentLifecycle::kPrePaintClean,
+            ChildDocument().Lifecycle().GetState());
+
+  ChildFrame().EndPrinting();
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(DocumentLifecycle::kPaintClean,
+            GetDocument().Lifecycle().GetState());
+  EXPECT_EQ(DocumentLifecycle::kPaintClean,
+            ChildDocument().Lifecycle().GetState());
 }
 
 TEST_F(LocalFrameViewTest, CanHaveScrollbarsIfScrollingAttrEqualsNoChanged) {
@@ -197,7 +221,8 @@ TEST_F(LocalFrameViewTest, CanHaveScrollbarsIfScrollingAttrEqualsNoChanged) {
   EXPECT_FALSE(ChildDocument().View()->CanHaveScrollbars());
 
   ChildDocument().WillChangeFrameOwnerProperties(
-      0, 0, mojom::blink::ScrollbarMode::kAlwaysOn, false, ColorScheme::kLight);
+      0, 0, mojom::blink::ScrollbarMode::kAlwaysOn, false,
+      mojom::blink::ColorScheme::kLight);
   EXPECT_TRUE(ChildDocument().View()->CanHaveScrollbars());
 }
 
@@ -319,10 +344,6 @@ TEST_F(LocalFrameViewTest,
 // activate synchronously while rendering is blocked waiting on a stylesheet.
 // See https://crbug.com/851338.
 TEST_F(SimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
-  // Style-sheets are parser-blocking, not render-blocking when
-  // BlockHTMLParserOnStyleSheets is enabled.
-  ScopedBlockHTMLParserOnStyleSheetsForTest scope(false);
-
   SimRequest main_resource("https://example.com/test.html", "text/html");
   SimSubresourceRequest css_resource("https://example.com/sheet.css",
                                      "text/css");
@@ -411,37 +432,38 @@ TEST_F(LocalFrameViewTest, TogglePaintEligibility) {
   PaintTiming& parent_timing = PaintTiming::From(GetDocument());
   PaintTiming& child_timing = PaintTiming::From(ChildDocument());
 
-  // Allow throttling.
-  DocumentLifecycle::AllowThrottlingScope throttling_scope(
-      GetDocument().Lifecycle());
-
   // Mainframes are unthrottled by default.
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
   EXPECT_FALSE(parent_timing.FirstEligibleToPaint().is_null());
 
   GetDocument().View()->MarkFirstEligibleToPaint();
   EXPECT_FALSE(parent_timing.FirstEligibleToPaint().is_null());
 
-  // Subframes are throttled by default (when throttling is allowed).
-  EXPECT_TRUE(ChildDocument().View()->ShouldThrottleRendering());
+  // Subframes are throttled when first loaded.
+  EXPECT_TRUE(ChildDocument().View()->ShouldThrottleRenderingForTest());
 
   // Toggle paint elgibility to true.
-  ChildDocument().View()->SetLifecycleUpdatesThrottledForTesting(
-      false /* throttled */);
-  ChildDocument().View()->UpdateRenderThrottlingStatus(
-      false /* hidden_for_throttling */, false /* subtree_throttled */);
+  ChildDocument().OverrideIsInitialEmptyDocument();
+  ChildDocument().View()->BeginLifecycleUpdates();
   ChildDocument().View()->MarkFirstEligibleToPaint();
-  EXPECT_FALSE(ChildDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(ChildDocument().View()->ShouldThrottleRenderingForTest());
   EXPECT_FALSE(child_timing.FirstEligibleToPaint().is_null());
 
   // Toggle paint elgibility to false.
-  ChildDocument().View()->SetLifecycleUpdatesThrottledForTesting(
-      true /* throttled */);
-  ChildDocument().View()->UpdateRenderThrottlingStatus(
-      true /* hidden_for_throttling */, true /* subtree_throttled */);
+  ChildDocument().View()->SetLifecycleUpdatesThrottledForTesting(true);
   ChildDocument().View()->MarkIneligibleToPaint();
-  EXPECT_TRUE(ChildDocument().View()->ShouldThrottleRendering());
+  EXPECT_TRUE(ChildDocument().View()->ShouldThrottleRenderingForTest());
   EXPECT_TRUE(child_timing.FirstEligibleToPaint().is_null());
+}
+
+TEST_F(LocalFrameViewTest, IsUpdatingLifecycle) {
+  SetBodyInnerHTML("<iframe srcdoc='Hello, world!'></iframe>>");
+  EXPECT_FALSE(GetFrame().View()->IsUpdatingLifecycle());
+  EXPECT_FALSE(ChildFrame().View()->IsUpdatingLifecycle());
+  GetFrame().View()->SetTargetStateForTest(DocumentLifecycle::kPaintClean);
+  EXPECT_TRUE(GetFrame().View()->IsUpdatingLifecycle());
+  EXPECT_TRUE(ChildFrame().View()->IsUpdatingLifecycle());
+  GetFrame().View()->SetTargetStateForTest(DocumentLifecycle::kUninitialized);
 }
 
 TEST_F(SimTest, PaintEligibilityNoSubframe) {
@@ -452,16 +474,12 @@ TEST_F(SimTest, PaintEligibilityNoSubframe) {
 
   PaintTiming& timing = PaintTiming::From(GetDocument());
 
-  // Allow throttling.
-  DocumentLifecycle::AllowThrottlingScope throttling_scope(
-      GetDocument().Lifecycle());
-
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
   EXPECT_TRUE(timing.FirstEligibleToPaint().is_null());
 
   Compositor().BeginFrame();
 
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
   EXPECT_FALSE(timing.FirstEligibleToPaint().is_null());
 }
 
@@ -480,20 +498,16 @@ TEST_F(SimTest, SameOriginPaintEligibility) {
   auto* frame_document = frame_element->contentDocument();
   PaintTiming& frame_timing = PaintTiming::From(*frame_document);
 
-  // Allow throttling.
-  DocumentLifecycle::AllowThrottlingScope throttling_scope(
-      GetDocument().Lifecycle());
-
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
 
   // Same origin frames are not throttled.
-  EXPECT_FALSE(frame_document->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_TRUE(frame_timing.FirstEligibleToPaint().is_null());
 
   Compositor().BeginFrame();
 
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
-  EXPECT_FALSE(frame_document->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
+  EXPECT_FALSE(frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_FALSE(frame_timing.FirstEligibleToPaint().is_null());
 }
 
@@ -511,20 +525,16 @@ TEST_F(SimTest, CrossOriginPaintEligibility) {
   auto* frame_document = frame_element->contentDocument();
   PaintTiming& frame_timing = PaintTiming::From(*frame_document);
 
-  // Allow throttling.
-  DocumentLifecycle::AllowThrottlingScope throttling_scope(
-      GetDocument().Lifecycle());
-
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
 
   // Hidden cross origin frames are throttled.
-  EXPECT_TRUE(frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_TRUE(frame_timing.FirstEligibleToPaint().is_null());
 
   Compositor().BeginFrame();
 
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
-  EXPECT_TRUE(frame_document->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
+  EXPECT_TRUE(frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_TRUE(frame_timing.FirstEligibleToPaint().is_null());
 }
 
@@ -550,22 +560,18 @@ TEST_F(SimTest, NestedCrossOriginPaintEligibility) {
   auto* inner_frame_document = inner_frame_element->contentDocument();
   PaintTiming& inner_frame_timing = PaintTiming::From(*inner_frame_document);
 
-  // Allow throttling.
-  DocumentLifecycle::AllowThrottlingScope throttling_scope(
-      GetDocument().Lifecycle());
-
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
-  EXPECT_FALSE(outer_frame_document->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
+  EXPECT_FALSE(outer_frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_TRUE(outer_frame_timing.FirstEligibleToPaint().is_null());
-  EXPECT_TRUE(inner_frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(inner_frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_TRUE(inner_frame_timing.FirstEligibleToPaint().is_null());
 
   Compositor().BeginFrame();
 
-  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
-  EXPECT_FALSE(outer_frame_document->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRenderingForTest());
+  EXPECT_FALSE(outer_frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_FALSE(outer_frame_timing.FirstEligibleToPaint().is_null());
-  EXPECT_TRUE(inner_frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(inner_frame_document->View()->ShouldThrottleRenderingForTest());
   EXPECT_TRUE(inner_frame_timing.FirstEligibleToPaint().is_null());
 }
 
@@ -611,16 +617,16 @@ TEST_F(LocalFrameViewTest, LifecycleNotificationsOnlyOnFullLifecycle) {
   EXPECT_EQ(observer->will_start_lifecycle_count(), 0);
   EXPECT_EQ(observer->did_finish_lifecycle_count(), 0);
 
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(observer->will_start_lifecycle_count(), 1);
   EXPECT_EQ(observer->did_finish_lifecycle_count(), 1);
 
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(observer->will_start_lifecycle_count(), 2);
   EXPECT_EQ(observer->did_finish_lifecycle_count(), 2);
 
   frame_view->UnregisterFromLifecycleNotifications(observer);
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(observer->will_start_lifecycle_count(), 2);
   EXPECT_EQ(observer->did_finish_lifecycle_count(), 2);
 }
@@ -646,11 +652,32 @@ TEST_F(LocalFrameViewTest, StartOfLifecycleTaskRunsOnFullLifecycle) {
   frame_view->UpdateLifecyclePhasesForPrinting();
   EXPECT_EQ(callback.calls, 0);
 
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(callback.calls, 1);
 
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(callback.calls, 1);
 }
+
+TEST_F(LocalFrameViewTest, DarkModeDocumentBackground) {
+  auto* frame_view = GetDocument().View();
+  GetDocument().documentElement()->SetInlineStyleProperty(
+      CSSPropertyID::kBackgroundColor, "white");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(frame_view->DocumentBackgroundColor(), Color::kWhite);
+
+  // Document background is inverted by the dark mode filter.
+  GetDocument().GetSettings()->SetForceDarkModeEnabled(true);
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(frame_view->DocumentBackgroundColor(), Color(18, 18, 18));
+
+  // Using color adjust background for base color in forced dark.
+  GetDocument().documentElement()->SetInlineStyleProperty(
+      CSSPropertyID::kBackgroundColor, "transparent");
+  UpdateAllLifecyclePhasesForTest();
+  frame_view->SetBaseBackgroundColor(Color(255, 0, 0));
+  EXPECT_EQ(frame_view->DocumentBackgroundColor(), Color(18, 18, 18));
+}
+
 }  // namespace
 }  // namespace blink

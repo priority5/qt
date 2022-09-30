@@ -7,18 +7,13 @@
 
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/table_model.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/table/table_grouper.h"
 #include "ui/views/controls/table/table_view.h"
 #include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/examples/example_base.h"
-
-namespace gfx {
-class ImageSkia;
-}
 
 namespace views {
 class Checkbox;
@@ -29,10 +24,13 @@ namespace examples {
 class VIEWS_EXAMPLES_EXPORT TableExample : public ExampleBase,
                                            public ui::TableModel,
                                            public TableGrouper,
-                                           public TableViewObserver,
-                                           public ButtonListener {
+                                           public TableViewObserver {
  public:
   TableExample();
+
+  TableExample(const TableExample&) = delete;
+  TableExample& operator=(const TableExample&) = delete;
+
   ~TableExample() override;
 
   // ExampleBase:
@@ -40,9 +38,9 @@ class VIEWS_EXAMPLES_EXPORT TableExample : public ExampleBase,
 
   // ui::TableModel:
   int RowCount() override;
-  base::string16 GetText(int row, int column_id) override;
-  gfx::ImageSkia GetIcon(int row) override;
-  base::string16 GetTooltip(int row) override;
+  std::u16string GetText(int row, int column_id) override;
+  ui::ImageModel GetIcon(int row) override;
+  std::u16string GetTooltip(int row) override;
   void SetObserver(ui::TableModelObserver* observer) override;
 
   // TableGrouper:
@@ -54,22 +52,17 @@ class VIEWS_EXAMPLES_EXPORT TableExample : public ExampleBase,
   void OnMiddleClick() override;
   void OnKeyDown(ui::KeyboardCode virtual_keycode) override;
 
-  // ButtonListener:
-  void ButtonPressed(Button* sender, const ui::Event& event) override;
-
  private:
   // The table to be tested.
-  TableView* table_ = nullptr;
+  raw_ptr<TableView> table_ = nullptr;
 
-  Checkbox* column1_visible_checkbox_ = nullptr;
-  Checkbox* column2_visible_checkbox_ = nullptr;
-  Checkbox* column3_visible_checkbox_ = nullptr;
-  Checkbox* column4_visible_checkbox_ = nullptr;
+  raw_ptr<Checkbox> column1_visible_checkbox_ = nullptr;
+  raw_ptr<Checkbox> column2_visible_checkbox_ = nullptr;
+  raw_ptr<Checkbox> column3_visible_checkbox_ = nullptr;
+  raw_ptr<Checkbox> column4_visible_checkbox_ = nullptr;
 
   SkBitmap icon1_;
   SkBitmap icon2_;
-
-  DISALLOW_COPY_AND_ASSIGN(TableExample);
 };
 
 }  // namespace examples

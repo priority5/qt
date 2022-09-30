@@ -7,6 +7,8 @@
 
 #include <memory>
 #include "third_party/blink/public/mojom/browser_interface_broker.mojom-shared.h"
+#include "third_party/blink/public/mojom/frame/back_forward_cache_controller.mojom-shared.h"
+#include "third_party/blink/public/mojom/worker/dedicated_worker_host.mojom-shared.h"
 #include "third_party/blink/public/platform/cross_variant_mojo_util.h"
 
 namespace blink {
@@ -23,14 +25,18 @@ class WebDedicatedWorker {
   // Called when content::DedicatedWorkerHost is created in the browser process.
   virtual void OnWorkerHostCreated(
       CrossVariantMojoRemote<mojom::BrowserInterfaceBrokerInterfaceBase>
-          browser_interface_broker) = 0;
+          browser_interface_broker,
+      CrossVariantMojoRemote<mojom::DedicatedWorkerHostInterfaceBase>
+          dedicated_worker_host) = 0;
 
   // Called when content::DedicatedWorkerHost started loading the main worker
   // script in the browser process, and the script information is sent back to
   // the content::DedicatedWorkerHostFactoryClient.
   virtual void OnScriptLoadStarted(
       std::unique_ptr<WorkerMainScriptLoadParameters>
-          worker_main_script_load_params) = 0;
+          worker_main_script_load_params,
+      CrossVariantMojoRemote<mojom::BackForwardCacheControllerHostInterfaceBase>
+          back_forward_cache_controller_host) = 0;
 
   // Called when content::DedicatedWorkerHost failed to start loading the main
   // worker script in the browser process.

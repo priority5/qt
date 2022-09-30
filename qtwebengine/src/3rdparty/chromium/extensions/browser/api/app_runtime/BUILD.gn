@@ -13,7 +13,13 @@ source_set("app_runtime") {
     "app_runtime_api.h",
   ]
 
-  deps = [ "//extensions/common/api" ]
+  deps = [
+    "//components/services/app_service/public/mojom",
+    "//extensions/common",
+    "//extensions/common/api",
+  ]
 
   public_deps = [ "//extensions/browser:browser_sources" ]
+
+  allow_circular_includes_from = [ "//extensions/browser:browser_sources" ]
 }

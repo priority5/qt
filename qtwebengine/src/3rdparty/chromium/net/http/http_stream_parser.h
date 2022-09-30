@@ -11,10 +11,11 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_piece.h"
+#include "base/time/time.h"
 #include "crypto/ec_private_key.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
@@ -55,6 +56,10 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
                    const HttpRequestInfo* request,
                    GrowableIOBuffer* read_buffer,
                    const NetLogWithSource& net_log);
+
+  HttpStreamParser(const HttpStreamParser&) = delete;
+  HttpStreamParser& operator=(const HttpStreamParser&) = delete;
+
   virtual ~HttpStreamParser();
 
   // These functions implement the interface described in HttpStream with
@@ -94,7 +99,12 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
 
   int64_t sent_bytes() const { return sent_bytes_; }
 
-  base::TimeTicks response_start_time() { return response_start_time_; }
+  base::TimeTicks first_response_start_time() const {
+    return first_response_start_time_;
+  }
+  base::TimeTicks non_informational_response_start_time() const {
+    return non_informational_response_start_time_;
+  }
   base::TimeTicks first_early_hints_time() { return first_early_hints_time_; }
 
   void GetSSLInfo(SSLInfo* ssl_info);
@@ -204,7 +214,7 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   State io_state_;
 
   // Null when read state machine is invoked.
-  const HttpRequestInfo* request_;
+  raw_ptr<const HttpRequestInfo> request_;
 
   // The request header data.  May include a merged request body.
   scoped_refptr<DrainableIOBuffer> request_headers_;
@@ -236,13 +246,26 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   // cannot be safely accessed after reading the final set of headers, as the
   // caller of SendRequest may have been destroyed - this happens in the case an
   // HttpResponseBodyDrainer is used.
-  HttpResponseInfo* response_;
+  raw_ptr<HttpResponseInfo> response_;
 
-  // Time at which the first bytes of the header response are about to be
-  // parsed.
-  base::TimeTicks response_start_time_;
+  // Time at which the first bytes of the first header response including
+  // informational responses (1xx) are about to be parsed. This corresponds to
+  // |LoadTimingInfo::receive_headers_start|. See also comments there.
+  base::TimeTicks first_response_start_time_;
 
-  // Time at which the first 103 Early Hints response is received.
+  // Time at which the first bytes of the current header response are about to
+  // be parsed. This is reset every time new response headers including
+  // non-informational responses (1xx) are parsed.
+  base::TimeTicks current_response_start_time_;
+
+  // Time at which the first byte of the non-informational header response
+  // (non-1xx) are about to be parsed. This corresponds to
+  // |LoadTimingInfo::receive_non_informational_headers_start|. See also
+  // comments there.
+  base::TimeTicks non_informational_response_start_time_;
+
+  // Time at which the first 103 Early Hints response is received. This
+  // corresponds to |LoadTimingInfo::first_early_hints_time|.
   base::TimeTicks first_early_hints_time_;
 
   // Indicates the content length.  If this value is less than zero
@@ -252,6 +275,11 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
 
   // True if reading a keep-alive response. False if not, or if don't yet know.
   bool response_is_keep_alive_;
+
+  // True if we've seen a response that has an HTTP status line. This is
+  // persistent across multiple response parsing. If we see a status line
+  // for a response, this will remain true forever.
+  bool has_seen_status_line_ = false;
 
   // Keep track of the number of response body bytes read so far.
   int64_t response_body_read_;
@@ -273,7 +301,7 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   // The underlying socket, owned by the caller. The HttpStreamParser must be
   // destroyed before the caller destroys the socket, or relinquishes ownership
   // of it.
-  StreamSocket* const stream_socket_;
+  const raw_ptr<StreamSocket> stream_socket_;
 
   // Whether the socket has already been used. Only used in HTTP/0.9 detection
   // logic.
@@ -297,8 +325,6 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   MutableNetworkTrafficAnnotationTag traffic_annotation_;
 
   base::WeakPtrFactory<HttpStreamParser> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(HttpStreamParser);
 };
 
 }  // namespace net

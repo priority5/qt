@@ -9,23 +9,27 @@
 
 namespace blink {
 
-Color StyleColor::Resolve(Color current_color, ColorScheme color_scheme) const {
+Color StyleColor::Resolve(Color current_color,
+                          mojom::blink::ColorScheme color_scheme,
+                          bool is_forced_color) const {
   if (IsCurrentColor())
     return current_color;
-  if (EffectiveColorKeyword() != CSSValueID::kInvalid)
+  if (EffectiveColorKeyword() != CSSValueID::kInvalid ||
+      (is_forced_color && IsSystemColorIncludingDeprecated()))
     return ColorFromKeyword(color_keyword_, color_scheme);
   return color_;
 }
 
 Color StyleColor::ResolveWithAlpha(Color current_color,
-                                   ColorScheme color_scheme,
-                                   int alpha) const {
-  Color color = Resolve(current_color, color_scheme);
+                                   mojom::blink::ColorScheme color_scheme,
+                                   int alpha,
+                                   bool is_forced_color) const {
+  Color color = Resolve(current_color, color_scheme, is_forced_color);
   return Color(color.Red(), color.Green(), color.Blue(), alpha);
 }
 
 Color StyleColor::ColorFromKeyword(CSSValueID keyword,
-                                   ColorScheme color_scheme) {
+                                   mojom::blink::ColorScheme color_scheme) {
   if (const char* value_name = getValueName(keyword)) {
     if (const NamedColor* named_color =
             FindColor(value_name, static_cast<wtf_size_t>(strlen(value_name))))
@@ -62,15 +66,40 @@ bool StyleColor::IsColorKeyword(CSSValueID id) {
          id == CSSValueID::kMenu;
 }
 
-bool StyleColor::IsSystemColor(CSSValueID id) {
+bool StyleColor::IsSystemColorIncludingDeprecated(CSSValueID id) {
   return (id >= CSSValueID::kActiveborder && id <= CSSValueID::kWindowtext) ||
          id == CSSValueID::kMenu;
 }
 
+bool StyleColor::IsSystemColor(CSSValueID id) {
+  switch (id) {
+    // SelectedItem, SelectedItemText not understood yet.
+    case CSSValueID::kCanvas:
+    case CSSValueID::kCanvastext:
+    case CSSValueID::kLinktext:
+    case CSSValueID::kVisitedtext:
+    case CSSValueID::kActivetext:
+    case CSSValueID::kButtonborder:
+    case CSSValueID::kButtonface:
+    case CSSValueID::kButtontext:
+    case CSSValueID::kField:
+    case CSSValueID::kFieldtext:
+    case CSSValueID::kHighlight:
+    case CSSValueID::kHighlighttext:
+    case CSSValueID::kGraytext:
+    case CSSValueID::kMark:
+    case CSSValueID::kMarktext:
+      return true;
+    default:
+      return false;
+  }
+}
+
 CSSValueID StyleColor::EffectiveColorKeyword() const {
   if (!RuntimeEnabledFeatures::CSSSystemColorComputeToSelfEnabled()) {
-    return IsSystemColor(color_keyword_) ? CSSValueID::kInvalid
-                                         : color_keyword_;
+    return IsSystemColorIncludingDeprecated(color_keyword_)
+               ? CSSValueID::kInvalid
+               : color_keyword_;
   }
   return color_keyword_;
 }

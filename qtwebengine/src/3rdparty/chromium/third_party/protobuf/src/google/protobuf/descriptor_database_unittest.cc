@@ -34,19 +34,20 @@
 //
 // This file makes extensive use of RFC 3092.  :)
 
+#include <google/protobuf/descriptor_database.h>
+
 #include <algorithm>
 #include <memory>
 
-#include <google/protobuf/descriptor.pb.h>
-#include <google/protobuf/descriptor.h>
-#include <google/protobuf/descriptor_database.h>
-#include <google/protobuf/text_format.h>
-
 #include <google/protobuf/stubs/logging.h>
 #include <google/protobuf/stubs/common.h>
+#include <google/protobuf/descriptor.pb.h>
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/text_format.h>
 #include <gmock/gmock.h>
 #include <google/protobuf/testing/googletest.h>
 #include <gtest/gtest.h>
+
 
 namespace google {
 namespace protobuf {
@@ -471,14 +472,17 @@ TEST_P(DescriptorDatabaseTest, ConflictingExtensionError) {
       "            extendee: \".Foo\" }");
 }
 
-INSTANTIATE_TEST_CASE_P(
-    Simple, DescriptorDatabaseTest,
+INSTANTIATE_TEST_SUITE_P(
+    Simple,
+    DescriptorDatabaseTest,
     testing::Values(&SimpleDescriptorDatabaseTestCase::New));
-INSTANTIATE_TEST_CASE_P(
-    MemoryConserving, DescriptorDatabaseTest,
+INSTANTIATE_TEST_SUITE_P(
+    MemoryConserving,
+    DescriptorDatabaseTest,
     testing::Values(&EncodedDescriptorDatabaseTestCase::New));
-INSTANTIATE_TEST_CASE_P(Pool, DescriptorDatabaseTest,
-                        testing::Values(&DescriptorPoolDatabaseTestCase::New));
+INSTANTIATE_TEST_SUITE_P(Pool,
+                         DescriptorDatabaseTest,
+                         testing::Values(&DescriptorPoolDatabaseTestCase::New));
 
 #endif  // GTEST_HAS_PARAM_TEST
 
@@ -546,7 +550,7 @@ TEST(SimpleDescriptorDatabaseExtraTest, FindAllPackageNames) {
   db.Add(f);
   db.Add(b);
 
-  std::vector<string> packages;
+  std::vector<std::string> packages;
   EXPECT_TRUE(db.FindAllPackageNames(&packages));
   EXPECT_THAT(packages, ::testing::UnorderedElementsAre("foo", ""));
 }
@@ -566,7 +570,7 @@ TEST(SimpleDescriptorDatabaseExtraTest, FindAllMessageNames) {
   db.Add(f);
   db.Add(b);
 
-  std::vector<string> messages;
+  std::vector<std::string> messages;
   EXPECT_TRUE(db.FindAllMessageNames(&messages));
   EXPECT_THAT(messages, ::testing::UnorderedElementsAre("foo.Foo", "Bar"));
 }
@@ -797,6 +801,7 @@ TEST_F(MergedDescriptorDatabaseTest, FindAllExtensionNumbers) {
     EXPECT_FALSE(reverse_merged_.FindAllExtensionNumbers("Blah", &numbers));
   }
 }
+
 
 }  // anonymous namespace
 }  // namespace protobuf

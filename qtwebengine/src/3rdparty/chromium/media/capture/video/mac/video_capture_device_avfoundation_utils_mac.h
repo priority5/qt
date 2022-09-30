@@ -15,27 +15,23 @@
 
 namespace media {
 
+std::string CAPTURE_EXPORT MacFourCCToString(OSType fourcc);
+
 // Returns a dictionary of capture devices with friendly name and unique id.
 // VideoCaptureDeviceMac should call this function to fetch the list of devices
 // available in the system; this method returns the list of device names that
 // have to be used with -[VideoCaptureDeviceAVFoundation setCaptureDevice:].
 base::scoped_nsobject<NSDictionary> GetVideoCaptureDeviceNames();
 
-// Retrieve the capture supported formats for a given device |descriptor|.
-// |implementation| is a class implementing FourCCToChromiumPixelFormat, which
-// our VideoCaptureDeviceAVFoundationProtocol implementations do.
-media::VideoCaptureFormats GetDeviceSupportedFormats(
-    Class implementation,
-    const media::VideoCaptureDeviceDescriptor& descriptor);
+// Extracts |base_address| and |length| out of a SampleBuffer. Returns true on
+// success and false if we failed to retrieve the information due to OS call
+// error return, or unexpected output parameters.
+[[nodiscard]] bool ExtractBaseAddressAndLength(char** base_address,
+                                               size_t* length,
+                                               CMSampleBufferRef sample_buffer);
 
-// Extracts |base_address| and |length| out of a SampleBuffer.
-void ExtractBaseAddressAndLength(char** base_address,
-                                 size_t* length,
-                                 CMSampleBufferRef sample_buffer);
-
-// Returns implementation class for VideoCaptureDeviceAVFoundation depending
-// on if |kMacNextGenerationCapturer| is enabled or disabled.
-Class GetVideoCaptureDeviceAVFoundationImplementationClass();
+gfx::Size CAPTURE_EXPORT GetPixelBufferSize(CVPixelBufferRef pixel_buffer);
+gfx::Size CAPTURE_EXPORT GetSampleBufferSize(CMSampleBufferRef sample_buffer);
 
 }  // namespace media
 

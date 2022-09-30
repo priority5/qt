@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <QtCore/qthreadstorage.h>
 
@@ -44,6 +8,7 @@
 #include "private/qanimationjobutil_p.h"
 #include "private/qqmlengine_p.h"
 #include "private/qqmlglobal_p.h"
+#include "private/qdoubleendedlist_p.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -63,6 +28,32 @@ QQmlAnimationTimer::QQmlAnimationTimer() :
     startAnimationPending(false), stopTimerPending(false),
     runningLeafAnimations(0)
 {
+}
+
+void QQmlAnimationTimer::unsetJobTimer(QAbstractAnimationJob *animation)
+{
+    if (!animation)
+        return;
+    if (animation->m_timer == this)
+        animation->m_timer = nullptr;
+
+    if (animation->isGroup()) {
+        QAnimationGroupJob *group = static_cast<QAnimationGroupJob *>(animation);
+        if (const auto children = group->children()) {
+            for (auto *child : *children)
+                unsetJobTimer(child);
+        }
+    }
+}
+
+QQmlAnimationTimer::~QQmlAnimationTimer()
+{
+    for (const auto &animation : qAsConst(animations))
+        unsetJobTimer(animation);
+    for (const auto &animation : qAsConst(animationsToStart))
+        unsetJobTimer(animation);
+    for (const auto &animation : qAsConst(runningPauseAnimations))
+        unsetJobTimer(animation);
 }
 
 QQmlAnimationTimer *QQmlAnimationTimer::instance(bool create)
@@ -86,7 +77,7 @@ void QQmlAnimationTimer::ensureTimerUpdate()
 {
     QUnifiedTimer *instU = QUnifiedTimer::instance(false);
     if (instU && isPaused)
-        instU->updateAnimationTimers(-1);
+        instU->updateAnimationTimers();
 }
 
 void QQmlAnimationTimer::updateAnimationsTime(qint64 delta)
@@ -216,6 +207,7 @@ void QQmlAnimationTimer::registerRunningAnimation(QAbstractAnimationJob *animati
 
 void QQmlAnimationTimer::unregisterRunningAnimation(QAbstractAnimationJob *animation)
 {
+    unsetJobTimer(animation);
     if (animation->userControlDisabled())
         return;
 
@@ -259,8 +251,6 @@ QAbstractAnimationJob::QAbstractAnimationJob()
     , m_currentLoop(0)
     , m_uncontrolledFinishTime(-1)
     , m_currentLoopStartTime(0)
-    , m_nextSibling(nullptr)
-    , m_previousSibling(nullptr)
     , m_hasRegisteredTimer(false)
     , m_isPause(false)
     , m_isGroup(false)
@@ -282,8 +272,10 @@ QAbstractAnimationJob::~QAbstractAnimationJob()
 
         Q_ASSERT(m_state == Stopped);
         if (oldState == Running) {
-            Q_ASSERT(QQmlAnimationTimer::instance() == m_timer);
-            m_timer->unregisterAnimation(this);
+            if (m_timer) {
+                Q_ASSERT(QQmlAnimationTimer::instance(false) == m_timer);
+                m_timer->unregisterAnimation(this);
+            }
         }
         Q_ASSERT(!m_hasRegisteredTimer);
     }
@@ -308,8 +300,9 @@ void QAbstractAnimationJob::setState(QAbstractAnimationJob::State newState)
     if (m_loopCount == 0)
         return;
 
-    if (!m_timer)
-        m_timer = QQmlAnimationTimer::instance();
+    if (!m_timer) // don't create a timer just to stop the animation
+        m_timer = QQmlAnimationTimer::instance(newState != Stopped);
+    Q_ASSERT(m_timer || newState == Stopped);
 
     State oldState = m_state;
     int oldCurrentTime = m_currentTime;
@@ -337,8 +330,9 @@ void QAbstractAnimationJob::setState(QAbstractAnimationJob::State newState)
     if (oldState == Running) {
         if (newState == Paused && m_hasRegisteredTimer)
             m_timer->ensureTimerUpdate();
-        //the animation, is not running any more
-        m_timer->unregisterAnimation(this);
+        // the animation is not running any more
+        if (m_timer)
+            m_timer->unregisterAnimation(this);
     } else if (newState == Running) {
         m_timer->registerAnimation(this, isTopLevel);
     }
@@ -484,8 +478,11 @@ void QAbstractAnimationJob::setCurrentTime(int msecs)
 
     RETURN_IF_DELETED(updateCurrentTime(m_currentTime));
 
-    if (m_currentLoop != oldLoop)
-        currentLoopChanged();
+    if (m_currentLoop != oldLoop) {
+        // CurrentLoop listeners may restart the job if e.g. from has changed. Stopping a job will
+        // destroy it, so account for that here.
+        RETURN_IF_DELETED(currentLoopChanged());
+    }
 
     // All animations are responsible for stopping the animation when their
     // own end state is reached; in this case the animation is time driven,
@@ -520,6 +517,14 @@ void QAbstractAnimationJob::stop()
 {
     if (m_state == Stopped)
         return;
+    setState(Stopped);
+}
+
+void QAbstractAnimationJob::complete()
+{
+    // Simulate the full animation cycle
+    setState(Running);
+    setCurrentTime(m_direction == Forward ? duration() : 0);
     setState(Stopped);
 }
 

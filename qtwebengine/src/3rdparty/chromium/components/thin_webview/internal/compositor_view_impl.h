@@ -9,7 +9,6 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/macros.h"
 #include "cc/layers/layer.h"
 #include "components/thin_webview/compositor_view.h"
 #include "content/public/browser/android/compositor_client.h"
@@ -35,7 +34,12 @@ class CompositorViewImpl : public CompositorView,
  public:
   CompositorViewImpl(JNIEnv* env,
                      jobject obj,
-                     ui::WindowAndroid* window_android);
+                     ui::WindowAndroid* window_android,
+                     int64_t java_background_color);
+
+  CompositorViewImpl(const CompositorViewImpl&) = delete;
+  CompositorViewImpl& operator=(const CompositorViewImpl&) = delete;
+
   ~CompositorViewImpl() override;
 
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& object);
@@ -67,8 +71,6 @@ class CompositorViewImpl : public CompositorView,
   scoped_refptr<cc::SolidColorLayer> root_layer_;
 
   int current_surface_format_;
-
-  DISALLOW_COPY_AND_ASSIGN(CompositorViewImpl);
 };
 
 }  // namespace android

@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QtTest/QTest>
 #include <QtTest/QSignalSpy>
@@ -36,11 +11,7 @@
 #include <QtNetwork/QTcpServer>
 #include <QtNetwork/QTcpSocket>
 #include <QtNetwork/QUdpSocket>
-#ifndef Q_OS_WINRT
 #include <private/qnativesocketengine_p.h>
-#else
-#include <private/qnativesocketengine_winrt_p.h>
-#endif
 #define NATIVESOCKETENGINE QNativeSocketEngine
 #ifdef Q_OS_UNIX
 #include <private/qnet_unix_p.h>
@@ -58,6 +29,7 @@ class tst_QSocketNotifier : public QObject
 {
     Q_OBJECT
 private slots:
+    void constructing();
     void unexpectedDisconnection();
     void mixingWithTimers();
 #ifdef Q_OS_UNIX
@@ -87,6 +59,51 @@ static QHostAddress makeNonAny(const QHostAddress &address,
     if (address == QHostAddress::AnyIPv6)
         return QHostAddress::LocalHostIPv6;
     return address;
+}
+
+void tst_QSocketNotifier::constructing()
+{
+    const qintptr fd = 15;
+
+    // Test constructing with no descriptor assigned.
+    {
+        QSocketNotifier notifier(QSocketNotifier::Read);
+
+        QVERIFY(!notifier.isValid());
+        QCOMPARE(notifier.socket(), Q_INT64_C(-1));
+        QCOMPARE(notifier.type(), QSocketNotifier::Read);
+        QVERIFY(!notifier.isEnabled());
+
+        notifier.setEnabled(true);
+        QVERIFY(!notifier.isEnabled());
+
+        notifier.setSocket(fd);
+        QVERIFY(notifier.isValid());
+        QCOMPARE(notifier.socket(), fd);
+        QVERIFY(!notifier.isEnabled());
+        notifier.setEnabled(true);
+        QVERIFY(notifier.isEnabled());
+    }
+
+    // Test constructing with the notifications enabled by default.
+    {
+        QSocketNotifier notifier(fd, QSocketNotifier::Write);
+
+        QVERIFY(notifier.isValid());
+        QCOMPARE(notifier.socket(), fd);
+        QCOMPARE(notifier.type(), QSocketNotifier::Write);
+        QVERIFY(notifier.isEnabled());
+
+        notifier.setSocket(fd);
+        QVERIFY(!notifier.isEnabled());
+
+        notifier.setEnabled(true);
+        QVERIFY(notifier.isEnabled());
+        notifier.setSocket(-1);
+        QVERIFY(!notifier.isValid());
+        QCOMPARE(notifier.socket(), Q_INT64_C(-1));
+        QVERIFY(!notifier.isEnabled());
+    }
 }
 
 class UnexpectedDisconnectTester : public QObject
@@ -130,10 +147,6 @@ signals:
 
 void tst_QSocketNotifier::unexpectedDisconnection()
 {
-#ifdef Q_OS_WINRT
-    // WinRT does not allow a connection to the localhost
-    QSKIP("Local connection not allowed", SkipAll);
-#else
     /*
       Given two sockets and two QSocketNotifiers registered on each
       their socket. If both sockets receive data, and the first slot
@@ -155,7 +168,7 @@ void tst_QSocketNotifier::unexpectedDisconnection()
     readEnd1.connectToHost(server.serverAddress(), server.serverPort());
     QVERIFY(readEnd1.waitForWrite());
     QCOMPARE(readEnd1.state(), QAbstractSocket::ConnectedState);
-    QVERIFY(server.waitForNewConnection());
+    QVERIFY(server.waitForNewConnection(5000));
     QTcpSocket *writeEnd1 = server.nextPendingConnection();
     QVERIFY(writeEnd1 != 0);
 
@@ -164,7 +177,7 @@ void tst_QSocketNotifier::unexpectedDisconnection()
     readEnd2.connectToHost(server.serverAddress(), server.serverPort());
     QVERIFY(readEnd2.waitForWrite());
     QCOMPARE(readEnd2.state(), QAbstractSocket::ConnectedState);
-    QVERIFY(server.waitForNewConnection());
+    QVERIFY(server.waitForNewConnection(5000));
     QTcpSocket *writeEnd2 = server.nextPendingConnection();
     QVERIFY(writeEnd2 != 0);
 
@@ -199,7 +212,6 @@ void tst_QSocketNotifier::unexpectedDisconnection()
     writeEnd1->close();
     writeEnd2->close();
     server.close();
-#endif // !Q_OS_WINRT
 }
 
 class MixingWithTimersHelper : public QObject
@@ -238,9 +250,6 @@ void MixingWithTimersHelper::socketFired()
 
 void tst_QSocketNotifier::mixingWithTimers()
 {
-#ifdef Q_OS_WINRT
-    QSKIP("WinRT does not allow connection to localhost", SkipAll);
-#else
     QTimer timer;
     timer.setInterval(0);
     timer.start();
@@ -265,7 +274,6 @@ void tst_QSocketNotifier::mixingWithTimers()
 
     QCOMPARE(helper.timerActivated, true);
     QTRY_COMPARE(helper.socketActivated, true);
-#endif // !Q_OS_WINRT
 }
 
 #ifdef Q_OS_UNIX
@@ -354,9 +362,6 @@ void tst_QSocketNotifier::async_writeDatagramSlot()
 
 void tst_QSocketNotifier::asyncMultipleDatagram()
 {
-#ifdef Q_OS_WINRT
-    QSKIP("WinRT does not allow connection to localhost", SkipAll);
-#else
     m_asyncSender = new QUdpSocket;
     m_asyncReceiver = new QUdpSocket;
 
@@ -386,7 +391,6 @@ void tst_QSocketNotifier::asyncMultipleDatagram()
 
     delete m_asyncSender;
     delete m_asyncReceiver;
-    #endif // !Q_OS_WINRT
 }
 
 void tst_QSocketNotifier::activationReason_data()

@@ -34,6 +34,7 @@
 #include <cstddef>
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 #if __OBJC__
 @class NSAttributedString;
@@ -46,24 +47,26 @@ class Point;
 }  // namespace gfx
 
 namespace blink {
-class WebFrameWidgetBase;
+class WebFrameWidgetImpl;
 class LocalFrame;
 
 class SubstringUtil {
  public:
   // Returns an autoreleased NSAttributedString that is the word under
-  // the given point inside the given WebFrameWidgetBase or nil on error.
+  // the given point inside the given WebFrameWidgetImpl or nil on error.
   // Upon return, |baselinePoint| is set to the left baseline point in
   // AppKit coordinates.
   CORE_EXPORT static NSAttributedString* AttributedWordAtPoint(
-      WebFrameWidgetBase*,
+      WebFrameWidgetImpl*,
       gfx::Point,
       gfx::Point& baseline_point);
 
   // Returns an autoreleased NSAttributedString that is a substring of the
   // Frame at the given range, or nil on error.
-  CORE_EXPORT static NSAttributedString*
-  AttributedSubstringInRange(LocalFrame*, size_t location, size_t length);
+  CORE_EXPORT static NSAttributedString* AttributedSubstringInRange(
+      LocalFrame*,
+      wtf_size_t location,
+      wtf_size_t length);
 
   // Returns an autoreleased NSAttributedString that is a substring of the
   // Frame at the given range, or nil on error.
@@ -71,8 +74,8 @@ class SubstringUtil {
   // dictionary lookup bubble.
   CORE_EXPORT static NSAttributedString* AttributedSubstringInRange(
       LocalFrame*,
-      size_t location,
-      size_t length,
+      wtf_size_t location,
+      wtf_size_t length,
       gfx::Point* baseline_point);
 };
 

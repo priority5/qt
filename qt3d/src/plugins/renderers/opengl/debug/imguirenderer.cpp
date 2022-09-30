@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 Klaralvdalens Datakonsult AB (KDAB).
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt3D module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 Klaralvdalens Datakonsult AB (KDAB).
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 /*
  * Based on https://github.com/seanchas116/qtimgui/
@@ -46,6 +10,7 @@
 
 #include "imguirenderer_p.h"
 #include <renderview_p.h>
+#include <rendercommand_p.h>
 #include <renderer_p.h>
 #include <submissioncontext_p.h>
 #include <Qt3DRender/private/geometryrenderermanager_p.h>
@@ -62,6 +27,10 @@
 #ifndef GL_VERTEX_ARRAY_BINDING
 // just for building on some platforms, won't run anyway as this requires GL/ES > 2
 #define GL_VERTEX_ARRAY_BINDING           0x85B5
+#endif
+
+#ifdef _MSC_VER
+#pragma warning (disable: 4996)     // 'This function or variable may be unsafe': strcpy, strdup, sprintf, vsnprintf, sscanf, fopen
 #endif
 
 QT_BEGIN_NAMESPACE
@@ -147,11 +116,11 @@ ImGuiRenderer::ImGuiRenderer(Qt3DRender::Render::OpenGL::Renderer *renderer)
 
 #ifndef QT_NO_CLIPBOARD
     io.SetClipboardTextFn = [](void *user_data, const char *text) {
-        Q_UNUSED(user_data)
+        Q_UNUSED(user_data);
         QGuiApplication::clipboard()->setText(QString::fromLatin1(text));
     };
     io.GetClipboardTextFn = [](void *user_data) {
-        Q_UNUSED(user_data)
+        Q_UNUSED(user_data);
         g_currentClipboardText = QGuiApplication::clipboard()->text().toUtf8();
         return static_cast<const char *>(g_currentClipboardText.data());
     };
@@ -163,12 +132,14 @@ ImGuiRenderer::ImGuiRenderer(Qt3DRender::Render::OpenGL::Renderer *renderer)
     m_jobsRange.first = m_jobsRange.second = 0.f;
 }
 
-void ImGuiRenderer::renderDebugOverlay(const QVector<RenderView *> &renderViews, const RenderView *renderView, int jobsInLastFrame)
+ImGuiRenderer::~ImGuiRenderer() = default;
+
+void ImGuiRenderer::renderDebugOverlay(const std::vector<RenderView *> &renderViews, const RenderView *renderView, int jobsInLastFrame)
 {
     if (!newFrame(renderView))
         return;
 
-    const int renderViewsCount = renderViews.size();
+    const int renderViewsCount = int(renderViews.size());
 
     int logIndex = qMin(IMGUI_PERF_LOG_SIZE - 1, ImGui::GetFrameCount());
     if (logIndex == IMGUI_PERF_LOG_SIZE - 1) {
@@ -321,7 +292,7 @@ void ImGuiRenderer::showGLInfo()
     ImGui::End();
 }
 
-void ImGuiRenderer::showRenderDetails(const QVector<RenderView *> &renderViews)
+void ImGuiRenderer::showRenderDetails(const std::vector<RenderView *> &renderViews)
 {
     ImGui::Begin("Render Views", &m_showRenderDetailsWindow);
 
@@ -552,18 +523,6 @@ bool ImGuiRenderer::createDeviceObjects()
         "{\n"
         "  Out_Color = Frag_Color * texture(Texture, Frag_UV.st);\n"
         "}\n";
-
-//    m_shaderHandle = m_funcs->glCreateProgram();
-//    m_vertHandle = m_funcs->glCreateShader(GL_VERTEX_SHADER);
-//    m_fragHandle = m_funcs->glCreateShader(GL_FRAGMENT_SHADER);
-//    auto *glContext = m_renderer->submissionContext()->openGLContext();
-//    m_funcs->glShaderSource(m_vertHandle, 1, &vertex_shader, nullptr);
-//    m_funcs->glShaderSource(m_fragHandle, 1, &fragment_shader, nullptr);
-//    m_funcs->glCompileShader(m_vertHandle);
-//    m_funcs->glCompileShader(m_fragHandle);
-//    m_funcs->glAttachShader(m_shaderHandle, m_vertHandle);
-//    m_funcs->glAttachShader(m_shaderHandle, m_fragHandle);
-//    m_funcs->glLinkProgram(m_shaderHandle);
 
     QString logs;
     m_shader = new QOpenGLShaderProgram(this);

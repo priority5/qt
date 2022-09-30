@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <unordered_set>
 
+#include "build/build_config.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/command_buffer/service/error_state.h"
 #include "gpu/command_buffer/service/feature_info.h"
@@ -256,7 +257,7 @@ void PopulateNumericCapabilities(Capabilities* caps,
     glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,
                   &caps->uniform_buffer_offset_alignment);
     caps->major_version = 3;
-    if (feature_info->IsWebGL2ComputeContext()) {
+    if (feature_info->IsES31ForTestingContext()) {
       glGetIntegerv(GL_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS,
                     &caps->max_atomic_counter_buffer_bindings);
       glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS,
@@ -286,7 +287,7 @@ bool CheckUniqueAndNonNullIds(GLsizei n, const GLuint* client_ids) {
 const char* GetServiceVersionString(const FeatureInfo* feature_info) {
   if (feature_info->IsWebGL2OrES3Context())
     return "OpenGL ES 3.0 Chromium";
-  else if (feature_info->IsWebGL2ComputeContext()) {
+  else if (feature_info->IsES31ForTestingContext()) {
     return "OpenGL ES 3.1 Chromium";
   } else
     return "OpenGL ES 2.0 Chromium";
@@ -296,7 +297,7 @@ const char* GetServiceShadingLanguageVersionString(
     const FeatureInfo* feature_info) {
   if (feature_info->IsWebGL2OrES3Context())
     return "OpenGL ES GLSL ES 3.0 Chromium";
-  else if (feature_info->IsWebGL2ComputeContext()) {
+  else if (feature_info->IsES31ForTestingContext()) {
     return "OpenGL ES GLSL ES 3.1 Chromium";
   } else
     return "OpenGL ES GLSL ES 1.0 Chromium";
@@ -735,7 +736,7 @@ bool ValidateCompressedTexSubDimensions(GLenum target,
         *error_message = "target == GL_TEXTURE_3D is not allowed";
         return false;
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     }
     case GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT:
     case GL_COMPRESSED_RGBA_BPTC_UNORM_EXT:
@@ -895,8 +896,10 @@ bool ValidateCopyTexFormatHelper(const FeatureInfo* feature_info,
   // YUV formats are not valid for CopyTex[Sub]Image.
   if (internal_format == GL_RGB_YCRCB_420_CHROMIUM ||
       internal_format == GL_RGB_YCBCR_420V_CHROMIUM ||
+      internal_format == GL_RGB_YCBCR_P010_CHROMIUM ||
       read_format == GL_RGB_YCRCB_420_CHROMIUM ||
-      read_format == GL_RGB_YCBCR_420V_CHROMIUM) {
+      read_format == GL_RGB_YCBCR_420V_CHROMIUM ||
+      read_format == GL_RGB_YCBCR_P010_CHROMIUM) {
     return false;
   }
   // Check we have compatible formats.
@@ -964,8 +967,7 @@ CopyTextureMethod GetCopyTextureCHROMIUMMethod(const FeatureInfo* feature_info,
                                                GLenum dest_internal_format,
                                                bool flip_y,
                                                bool premultiply_alpha,
-                                               bool unpremultiply_alpha,
-                                               bool dither) {
+                                               bool unpremultiply_alpha) {
   bool premultiply_alpha_change = premultiply_alpha ^ unpremultiply_alpha;
   bool source_format_color_renderable =
       Texture::ColorRenderable(feature_info, source_internal_format, false);
@@ -974,7 +976,7 @@ CopyTextureMethod GetCopyTextureCHROMIUMMethod(const FeatureInfo* feature_info,
   std::string output_error_msg;
 
   switch (dest_internal_format) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     // RGB5_A1 is not color-renderable on NVIDIA Mac, see
     // https://crbug.com/676209.
     case GL_RGB5_A1:
@@ -1036,7 +1038,7 @@ CopyTextureMethod GetCopyTextureCHROMIUMMethod(const FeatureInfo* feature_info,
   if (source_target == GL_TEXTURE_2D &&
       (dest_target == GL_TEXTURE_2D || dest_target == GL_TEXTURE_CUBE_MAP) &&
       source_format_color_renderable && copy_tex_image_format_valid &&
-      source_level == 0 && !flip_y && !premultiply_alpha_change && !dither) {
+      source_level == 0 && !flip_y && !premultiply_alpha_change) {
     auto source_texture_type = GLES2Util::GetGLReadPixelsImplementationType(
         source_internal_format, source_target);
     auto dest_texture_type = GLES2Util::GetGLReadPixelsImplementationType(

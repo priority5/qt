@@ -11,8 +11,8 @@
 #include "base/format_macros.h"
 #include "base/json/string_escape.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/process/process_handle.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -20,6 +20,54 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_log.h"
 #include "base/trace_event/traced_value.h"
+#include "build/build_config.h"
+
+#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+
+// Define static storage for trace event categories (see
+// PERFETTO_DEFINE_CATEGORIES).
+PERFETTO_TRACK_EVENT_STATIC_STORAGE();
+
+namespace perfetto {
+namespace legacy {
+
+template <>
+perfetto::ThreadTrack ConvertThreadId(const ::base::PlatformThreadId& thread) {
+  return perfetto::ThreadTrack::ForThread(static_cast<int32_t>(thread));
+}
+
+#if BUILDFLAG(IS_WIN)
+template <>
+perfetto::ThreadTrack ConvertThreadId(const int& thread) {
+  return perfetto::ThreadTrack::ForThread(static_cast<int32_t>(thread));
+}
+#endif  // BUILDFLAG(IS_WIN)
+
+}  // namespace legacy
+
+TraceTimestamp
+TraceTimestampTraits<::base::TimeTicks>::ConvertTimestampToTraceTimeNs(
+    const ::base::TimeTicks& ticks) {
+  return {TrackEvent::GetTraceClockId(),
+          static_cast<uint64_t>(ticks.since_origin().InNanoseconds())};
+}
+
+namespace internal {
+
+void WriteDebugAnnotation(protos::pbzero::DebugAnnotation* annotation,
+                          ::base::TimeTicks ticks) {
+  annotation->set_uint_value(ticks.since_origin().InMilliseconds());
+}
+
+void WriteDebugAnnotation(protos::pbzero::DebugAnnotation* annotation,
+                          ::base::Time time) {
+  annotation->set_uint_value(time.since_origin().InMilliseconds());
+}
+
+}  // namespace internal
+}  // namespace perfetto
+
+#endif  // BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 
 namespace base {
 namespace trace_event {

@@ -15,9 +15,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "base/win/winrt_foundation_helpers.h"
 
@@ -110,7 +108,10 @@ class AsyncOperation
         base::BindOnce(&AsyncOperation::OnResult, weak_factory_.GetWeakPtr());
   }
 
-  ~AsyncOperation() { DCHECK_CALLED_ON_VALID_THREAD(thread_checker_); }
+  AsyncOperation(const AsyncOperation&) = delete;
+  AsyncOperation& operator=(const AsyncOperation&) = delete;
+
+  ~AsyncOperation() override { DCHECK_CALLED_ON_VALID_THREAD(thread_checker_); }
 
   // ABI::Windows::Foundation::IAsyncOperation:
   IFACEMETHODIMP put_Completed(Handler* handler) override {
@@ -151,8 +152,6 @@ class AsyncOperation
 
   THREAD_CHECKER(thread_checker_);
   base::WeakPtrFactory<AsyncOperation> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AsyncOperation);
 };
 
 }  // namespace win

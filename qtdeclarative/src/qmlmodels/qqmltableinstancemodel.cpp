@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qqmltableinstancemodel_p.h"
 #include "qqmlabstractdelegatecomponent_p.h"
@@ -65,13 +29,7 @@ void QQmlTableInstanceModel::deleteModelItemLater(QQmlDelegateModelItem *modelIt
 
     delete modelItem->object;
     modelItem->object = nullptr;
-
-    if (modelItem->contextData) {
-        modelItem->contextData->invalidate();
-        Q_ASSERT(modelItem->contextData->refCount == 1);
-        modelItem->contextData = nullptr;
-    }
-
+    modelItem->contextData.reset();
     modelItem->deleteLater();
 }
 
@@ -83,9 +41,9 @@ QQmlTableInstanceModel::QQmlTableInstanceModel(QQmlContext *qmlContext, QObject 
 {
 }
 
-void QQmlTableInstanceModel::useImportVersion(int minorVersion)
+void QQmlTableInstanceModel::useImportVersion(QTypeRevision version)
 {
-    m_adaptorModel.useImportVersion(minorVersion);
+    m_adaptorModel.useImportVersion(version);
 }
 
 QQmlTableInstanceModel::~QQmlTableInstanceModel()
@@ -103,8 +61,7 @@ QQmlTableInstanceModel::~QQmlTableInstanceModel()
         if (modelItem->object) {
             delete modelItem->object;
             modelItem->object = nullptr;
-            modelItem->contextData->invalidate();
-            modelItem->contextData = nullptr;
+            modelItem->contextData.reset();
         }
     }
 
@@ -330,18 +287,32 @@ void QQmlTableInstanceModel::incubateModelItem(QQmlDelegateModelItem *modelItem,
     } else {
         modelItem->incubationTask = new QQmlTableInstanceModelIncubationTask(this, modelItem, incubationMode);
 
-        QQmlContextData *ctxt = new QQmlContextData;
         QQmlContext *creationContext = modelItem->delegate->creationContext();
-        ctxt->setParent(QQmlContextData::get(creationContext  ? creationContext : m_qmlContext.data()));
-        ctxt->contextObject = modelItem;
-        modelItem->contextData = ctxt;
+        const QQmlRefPointer<QQmlContextData> componentContext
+                = QQmlContextData::get(creationContext  ? creationContext : m_qmlContext.data());
 
-        QQmlComponentPrivate::get(modelItem->delegate)->incubateObject(
-                    modelItem->incubationTask,
-                    modelItem->delegate,
-                    m_qmlContext->engine(),
-                    ctxt,
-                    QQmlContextData::get(m_qmlContext));
+        QQmlComponentPrivate *cp = QQmlComponentPrivate::get(modelItem->delegate);
+        if (cp->isBound()) {
+            modelItem->contextData = componentContext;
+            cp->incubateObject(
+                        modelItem->incubationTask,
+                        modelItem->delegate,
+                        m_qmlContext->engine(),
+                        componentContext,
+                        QQmlContextData::get(m_qmlContext));
+        } else {
+            QQmlRefPointer<QQmlContextData> ctxt = QQmlContextData::createRefCounted(
+                        QQmlContextData::get(creationContext  ? creationContext : m_qmlContext.data()));
+            ctxt->setContextObject(modelItem);
+            modelItem->contextData = ctxt;
+
+            cp->incubateObject(
+                        modelItem->incubationTask,
+                        modelItem->delegate,
+                        m_qmlContext->engine(),
+                        ctxt,
+                        QQmlContextData::get(m_qmlContext));
+        }
     }
 
     // Remove the temporary guard
@@ -404,6 +375,34 @@ QQmlIncubator::Status QQmlTableInstanceModel::incubationStatus(int index) {
     return QQmlIncubator::Ready;
 }
 
+bool QQmlTableInstanceModel::setRequiredProperty(int index, const QString &name, const QVariant &value)
+{
+    // This function can be called from the view upon
+    // receiving the initItem signal. It can be used to
+    // give all required delegate properties used by the
+    // view an initial value.
+    const auto modelItem = m_modelItems.value(index, nullptr);
+    if (!modelItem)
+        return false;
+    if (!modelItem->object)
+        return false;
+    if (!modelItem->incubationTask)
+        return false;
+
+    bool wasInRequired = false;
+    const auto task = QQmlIncubatorPrivate::get(modelItem->incubationTask);
+    RequiredProperties &props = task->requiredProperties();
+    if (props.empty())
+        return false;
+
+    QQmlProperty componentProp = QQmlComponentPrivate::removePropertyFromRequired(
+                modelItem->object, name, props, QQmlEnginePrivate::get(task->enginePriv),
+                &wasInRequired);
+    if (wasInRequired)
+        componentProp.write(value);
+    return wasInRequired;
+}
+
 void QQmlTableInstanceModel::deleteIncubationTaskLater(QQmlIncubator *incubationTask)
 {
     // We often need to post-delete incubation tasks, since we cannot
@@ -433,7 +432,7 @@ void QQmlTableInstanceModel::setModel(const QVariant &model)
     drainReusableItemsPool(0);
     if (auto const aim = abstractItemModel())
         disconnect(aim, &QAbstractItemModel::dataChanged, this, &QQmlTableInstanceModel::dataChangedCallback);
-    m_adaptorModel.setModel(model, this, m_qmlContext->engine());
+    m_adaptorModel.setModel(model);
     if (auto const aim = abstractItemModel())
         connect(aim, &QAbstractItemModel::dataChanged, this, &QQmlTableInstanceModel::dataChangedCallback);
 }
@@ -484,10 +483,11 @@ const QAbstractItemModel *QQmlTableInstanceModel::abstractItemModel() const
 void QQmlTableInstanceModelIncubationTask::setInitialState(QObject *object)
 {
     initializeRequiredProperties(modelItemToIncubate, object);
-    if (QQmlIncubatorPrivate::get(this)->requiredProperties().empty()) {
-        modelItemToIncubate->object = object;
-        emit tableInstanceModel->initItem(modelItemToIncubate->index, object);
-    } else {
+    modelItemToIncubate->object = object;
+    emit tableInstanceModel->initItem(modelItemToIncubate->index, object);
+
+    if (!QQmlIncubatorPrivate::get(this)->requiredProperties().empty()) {
+        modelItemToIncubate->object = nullptr;
         object->deleteLater();
     }
 }
@@ -504,7 +504,7 @@ void QQmlTableInstanceModelIncubationTask::statusChanged(QQmlIncubator::Status s
     tableInstanceModel->incubatorStatusChanged(this, status);
 }
 
-#include "moc_qqmltableinstancemodel_p.cpp"
-
 QT_END_NAMESPACE
+
+#include "moc_qqmltableinstancemodel_p.cpp"
 

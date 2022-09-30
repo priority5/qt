@@ -5,6 +5,7 @@
 #include "gpu/vulkan/vulkan_image.h"
 
 #include "base/android/android_hardware_buffer_compat.h"
+#include "base/debug/crash_logging.h"
 #include "base/logging.h"
 #include "gpu/vulkan/vulkan_device_queue.h"
 #include "gpu/vulkan/vulkan_function_pointers.h"
@@ -18,12 +19,15 @@ bool VulkanImage::InitializeFromGpuMemoryBufferHandle(
     VkFormat format,
     VkImageUsageFlags usage,
     VkImageCreateFlags flags,
-    VkImageTiling image_tiling) {
+    VkImageTiling image_tiling,
+    uint32_t queue_family_index) {
   if (gmb_handle.type != gfx::GpuMemoryBufferType::ANDROID_HARDWARE_BUFFER) {
     DLOG(ERROR) << "gmb_handle.type is not supported. type:" << gmb_handle.type;
     return false;
   }
   DCHECK(gmb_handle.android_hardware_buffer.is_valid());
+  SCOPED_CRASH_KEY_BOOL("vulkan", "gmb_buffer.is_valid",
+                        gmb_handle.android_hardware_buffer.is_valid());
   auto& ahb_handle = gmb_handle.android_hardware_buffer;
 
   // To obtain format properties of an Android hardware buffer, include an
@@ -100,6 +104,11 @@ bool VulkanImage::InitializeFromGpuMemoryBufferHandle(
     return false;
   }
 
+  // Skia currently requires all wrapped VkImages to have transfer src and dst
+  // usage. Additionally all AHB support these usages when imported into vulkan.
+  usage_flags |=
+      VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
   VkImageCreateFlags create_flags = 0;
   if (ahb_desc.usage & AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT) {
     create_flags = VK_IMAGE_CREATE_PROTECTED_BIT;
@@ -124,8 +133,7 @@ bool VulkanImage::InitializeFromGpuMemoryBufferHandle(
     return false;
   }
 
-  // VkImage is imported from external.
-  queue_family_index_ = VK_QUEUE_FAMILY_EXTERNAL;
+  queue_family_index_ = queue_family_index;
 
   if (ahb_format_props.format == VK_FORMAT_UNDEFINED) {
     ycbcr_info_.emplace(VK_FORMAT_UNDEFINED, ahb_format_props.externalFormat,

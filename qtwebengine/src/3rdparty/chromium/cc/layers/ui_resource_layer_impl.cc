@@ -4,7 +4,8 @@
 
 #include "cc/layers/ui_resource_layer_impl.h"
 
-#include "base/strings/stringprintf.h"
+#include <memory>
+
 #include "base/trace_event/traced_value.h"
 #include "cc/base/math_util.h"
 #include "cc/trees/layer_tree_impl.h"
@@ -28,7 +29,7 @@ UIResourceLayerImpl::UIResourceLayerImpl(LayerTreeImpl* tree_impl, int id)
 UIResourceLayerImpl::~UIResourceLayerImpl() = default;
 
 std::unique_ptr<LayerImpl> UIResourceLayerImpl::CreateLayerImpl(
-    LayerTreeImpl* tree_impl) {
+    LayerTreeImpl* tree_impl) const {
   return UIResourceLayerImpl::Create(tree_impl, id());
 }
 
@@ -102,7 +103,7 @@ void UIResourceLayerImpl::AppendQuads(viz::CompositorRenderPass* render_pass,
   viz::ResourceId resource =
       ui_resource_id_
           ? layer_tree_impl()->ResourceIdForUIResource(ui_resource_id_)
-          : 0;
+          : viz::kInvalidResourceId;
   bool are_contents_opaque =
       resource ? (layer_tree_impl()->IsUIResourceOpaque(ui_resource_id_) ||
                   contents_opaque())

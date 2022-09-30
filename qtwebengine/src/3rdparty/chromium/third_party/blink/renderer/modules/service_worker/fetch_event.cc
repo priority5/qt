@@ -11,7 +11,7 @@
 #include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_error.h"
 #include "third_party/blink/public/platform/web_url_response.h"
-#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/core/dom/abort_signal.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/request.h"
@@ -19,9 +19,9 @@
 #include "third_party/blink/renderer/core/timing/performance_mark.h"
 #include "third_party/blink/renderer/core/timing/performance_measure.h"
 #include "third_party/blink/renderer/core/timing/worker_global_scope_performance.h"
+#include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/modules/service_worker/fetch_respond_with_observer.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_error.h"
-#include "third_party/blink/renderer/modules/service_worker/service_worker_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
@@ -153,7 +153,8 @@ void FetchEvent::OnNavigationPreloadResponse(
           ? FetchResponseData::CreateWithBuffer(BodyStreamBuffer::Create(
                 script_state, bytes_consumer,
                 MakeGarbageCollected<AbortSignal>(
-                    ExecutionContext::From(script_state))))
+                    ExecutionContext::From(script_state)),
+                /*cached_metadata_handler=*/nullptr))
           : FetchResponseData::Create();
   Vector<KURL> url_list(1);
   url_list[0] = preload_response_->CurrentRequestUrl();
@@ -166,7 +167,6 @@ void FetchEvent::OnNavigationPreloadResponse(
   response_data->InitFromResourceResponse(
       ExecutionContext::From(script_state), response_type, url_list,
       http_names::kGET, network::mojom::CredentialsMode::kInclude,
-      FetchRequestData::kBasicTainting,
       preload_response_->ToResourceResponse());
 
   FetchResponseData* tainted_response =
@@ -225,8 +225,6 @@ void FetchEvent::OnNavigationPreloadComplete(
   info->SetLoadResponseEnd(completion_time);
   info->SetInitialURL(request_->url());
   info->SetFinalResponse(resource_response);
-  info->AddFinalTransferSize(encoded_data_length == -1 ? 0
-                                                       : encoded_data_length);
   WorkerGlobalScopePerformance::performance(*worker_global_scope)
       ->GenerateAndAddResourceTiming(*info);
 }

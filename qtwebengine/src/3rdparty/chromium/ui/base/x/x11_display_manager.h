@@ -15,7 +15,6 @@
 #include "ui/display/display_change_notifier.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/x/event.h"
-#include "ui/gfx/x/x11_types.h"
 
 namespace views {
 class DesktopScreenX11Test;
@@ -44,11 +43,15 @@ class COMPONENT_EXPORT(UI_BASE_X) XDisplayManager
   class Delegate;
 
   explicit XDisplayManager(Delegate* delegate);
+
+  XDisplayManager(const XDisplayManager&) = delete;
+  XDisplayManager& operator=(const XDisplayManager&) = delete;
+
   ~XDisplayManager() override;
 
   void Init();
   bool IsXrandrAvailable() const;
-  bool ProcessEvent(x11::Event* xev);
+  void OnEvent(const x11::Event& xev);
   void UpdateDisplayList();
   void DispatchDelayedDisplayListUpdate();
   display::Display GetPrimaryDisplay() const;
@@ -83,16 +86,10 @@ class COMPONENT_EXPORT(UI_BASE_X) XDisplayManager
   // XRandR version. MAJOR * 100 + MINOR. Zero if no xrandr is present.
   const int xrandr_version_;
 
-  // The base of the event numbers used to represent XRandr events used in
-  // decoding events regarding output add/remove.
-  int xrandr_event_base_ = 0;
-
   // The task which fetches/updates display list info asynchronously.
   base::CancelableOnceClosure update_task_;
 
   X11WorkspaceHandler workspace_handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(XDisplayManager);
 };
 
 class COMPONENT_EXPORT(UI_BASE_X) XDisplayManager::Delegate {

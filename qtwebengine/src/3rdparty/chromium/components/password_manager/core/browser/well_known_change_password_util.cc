@@ -5,10 +5,8 @@
 #include "components/password_manager/core/browser/well_known_change_password_util.h"
 
 #include "base/check.h"
-#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
-#include "components/password_manager/core/common/password_manager_features.h"
 #include "url/gurl.h"
 
 namespace password_manager {
@@ -34,9 +32,8 @@ bool IsWellKnownChangePasswordUrl(const GURL& url) {
 GURL CreateChangePasswordUrl(const GURL& url) {
   DCHECK(url.is_valid());
   GURL::Replacements replacements;
-  if (base::FeatureList::IsEnabled(features::kWellKnownChangePassword))
-    replacements.SetPathStr(password_manager::kWellKnownChangePasswordPath);
-  return url.GetOrigin().ReplaceComponents(replacements);
+  replacements.SetPathStr(password_manager::kWellKnownChangePasswordPath);
+  return url.DeprecatedGetOriginAsURL().ReplaceComponents(replacements);
 }
 
 GURL CreateWellKnownNonExistingResourceURL(const GURL& url) {

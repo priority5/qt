@@ -1,42 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2013 John Layt <jlayt@kde.org>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
+// Copyright (C) 2022 The Qt Company Ltd.
+// Copyright (C) 2013 John Layt <jlayt@kde.org>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qtimezone.h"
 #include "qtimezoneprivate_p.h"
@@ -50,6 +14,8 @@
 
 QT_BEGIN_NAMESPACE
 
+using namespace Qt::StringLiterals;
+
 // Create default time zone using appropriate backend
 static QTimeZonePrivate *newBackendTimeZone()
 {
@@ -62,9 +28,9 @@ static QTimeZonePrivate *newBackendTimeZone()
 #else
 #if defined Q_OS_MAC
     return new QMacTimeZonePrivate();
-#elif defined(Q_OS_ANDROID) && !defined(Q_OS_ANDROID_EMBEDDED)
+#elif defined(Q_OS_ANDROID)
     return new QAndroidTimeZonePrivate();
-#elif defined(Q_OS_UNIX) || defined(Q_OS_ANDROID_EMBEDDED)
+#elif defined(Q_OS_UNIX)
     return new QTzTimeZonePrivate();
 #elif QT_CONFIG(icu)
     return new QIcuTimeZonePrivate();
@@ -89,9 +55,9 @@ static QTimeZonePrivate *newBackendTimeZone(const QByteArray &ianaId)
 #else
 #if defined Q_OS_MAC
     return new QMacTimeZonePrivate(ianaId);
-#elif defined(Q_OS_ANDROID) && !defined(Q_OS_ANDROID_EMBEDDED)
+#elif defined(Q_OS_ANDROID)
     return new QAndroidTimeZonePrivate(ianaId);
-#elif defined(Q_OS_UNIX) || defined(Q_OS_ANDROID_EMBEDDED)
+#elif defined(Q_OS_UNIX)
     return new QTzTimeZonePrivate(ianaId);
 #elif QT_CONFIG(icu)
     return new QIcuTimeZonePrivate(ianaId);
@@ -108,11 +74,11 @@ class QTimeZoneSingleton
 public:
     QTimeZoneSingleton() : backend(newBackendTimeZone()) {}
 
-    // The backend_tz is the tz to use in static methods such as availableTimeZoneIds() and
+    // The global_tz is the tz to use in static methods such as availableTimeZoneIds() and
     // isTimeZoneIdAvailable() and to create named IANA time zones.  This is usually the host
     // system, but may be different if the host resources are insufficient or if
     // QT_NO_SYSTEMLOCALE is set.  A simple UTC backend is used if no alternative is available.
-    QSharedDataPointer<QTimeZonePrivate> backend;
+    QExplicitlySharedDataPointer<QTimeZonePrivate> backend;
 };
 
 Q_GLOBAL_STATIC(QTimeZoneSingleton, global_tz);
@@ -169,10 +135,13 @@ Q_GLOBAL_STATIC(QTimeZoneSingleton, global_tz);
     Windows native time zone support is severely limited compared to the
     standard IANA TZ Database.  Windows time zones cover larger geographic
     areas and are thus less accurate in their conversions.  They also do not
-    support as much historic conversion data and so may only be accurate for
-    the current year.
+    support as much historical data and so may only be accurate for the
+    current year.  In particular, when MS's zone data claims that DST was
+    observed prior to 1900 (this is historically known to be untrue), the
+    claim is ignored and the standard time (allegedly) in force in 1900 is
+    taken to have always been in effect.
 
-    QTimeZone uses a conversion table derived form the Unicode CLDR data to map
+    QTimeZone uses a conversion table derived from the Unicode CLDR data to map
     between IANA IDs and Windows IDs.  Depending on your version of Windows
     and Qt, this table may not be able to provide a valid conversion, in which
     "UTC" will be returned.
@@ -184,10 +153,6 @@ Q_GLOBAL_STATIC(QTimeZoneSingleton, global_tz);
 
     \section2 System Time Zone
 
-    QTimeZone does not support any concept of a system or default time zone.
-    If you require a QDateTime that uses the current system time zone at any
-    given moment then you should use a Qt::TimeSpec of Qt::LocalTime.
-
     The method systemTimeZoneId() returns the current system IANA time zone
     ID which on Unix-like systems will always be correct.  On Windows this ID is
     translated from the Windows system ID using an internal translation
@@ -197,7 +162,13 @@ Q_GLOBAL_STATIC(QTimeZoneSingleton, global_tz);
 
     Creating a new QTimeZone instance using the system time zone ID will only
     produce a fixed named copy of the time zone, it will not change if the
-    system time zone changes.
+    system time zone changes.  QTimeZone::systemTimeZone() will return an
+    instance representing the zone named by this system ID.  Note that
+    constructing a QDateTime using this system zone may behave differently than
+    constructing a QDateTime that uses Qt::LocalTime as its Qt::TimeSpec, as the
+    latter directly uses system APIs for accessing local time information, which
+    may behave differently (and, in particular, might adapt if the user adjusts
+    the system zone setting).
 
     \section2 Time Zone Offsets
 
@@ -209,7 +180,10 @@ Q_GLOBAL_STATIC(QTimeZoneSingleton, global_tz);
     standard time in the time zone.  The daylight-saving time offset is the
     number of seconds to add to the standard time offset to obtain
     daylight-saving time (abbreviated DST and sometimes called "daylight time"
-    or "summer time") in the time zone.
+    or "summer time") in the time zone. The usual case for DST (using
+    standard time in winter, DST in summer) has a positive daylight-saving
+    time offset. However, some zones have negative DST offsets, used in
+    winter, with summer using standard time.
 
     Note that the standard and DST offsets for a time zone may change over time
     as countries have changed DST laws or even their standard time offset.
@@ -220,7 +194,7 @@ Q_GLOBAL_STATIC(QTimeZoneSingleton, global_tz);
     of the Unicode Data Files and Software License. See
     \l{unicode-cldr}{Unicode Common Locale Data Repository (CLDR)} for details.
 
-    \sa QDateTime
+    \sa QDateTime, QCalendar
 */
 
 /*!
@@ -311,7 +285,7 @@ Q_GLOBAL_STATIC(QTimeZoneSingleton, global_tz);
 /*!
     \typedef QTimeZone::OffsetDataList
 
-    Synonym for QVector<OffsetData>.
+    Synonym for QList<OffsetData>.
 */
 
 /*!
@@ -339,11 +313,11 @@ QTimeZone::QTimeZone(const QByteArray &ianaId)
     d = new QUtcTimeZonePrivate(ianaId);
     // If not a CLDR UTC offset ID then try creating it with the system backend.
     // Relies on backend not creating valid TZ with invalid name.
-    if (!d->isValid())
+    if (!d.constData()->isValid())
         d = ianaId.isEmpty() ? newBackendTimeZone() : newBackendTimeZone(ianaId);
     // Can also handle UTC with arbitrary (valid) offset, but only do so as
     // fall-back, since either of the above may handle it more informatively.
-    if (!d->isValid()) {
+    if (!d.constData()->isValid()) {
         qint64 offset = QUtcTimeZonePrivate::offsetFromUtcString(ianaId);
         if (offset != QTimeZonePrivate::invalidSeconds()) {
             // Should have abs(offset) < 24 * 60 * 60 = 86400.
@@ -373,24 +347,23 @@ QTimeZone::QTimeZone(int offsetSeconds)
     Creates a custom time zone with an ID of \a ianaId and an offset from UTC
     of \a offsetSeconds.  The \a name will be the name used by displayName()
     for the LongName, the \a abbreviation will be used by displayName() for the
-    ShortName and by abbreviation(), and the optional \a country will be used
-    by country().  The \a comment is an optional note that may be displayed in
+    ShortName and by abbreviation(), and the optional \a territory will be used
+    by territory().  The \a comment is an optional note that may be displayed in
     a GUI to assist users in selecting a time zone.
 
     The \a ianaId must not be one of the available system IDs returned by
     availableTimeZoneIds().  The \a offsetSeconds from UTC must be in the range
     -14 hours to +14 hours.
 
-    If the custom time zone does not have a specific country then set it to the
-    default value of QLocale::AnyCountry.
+    If the custom time zone does not have a specific territory then set it to the
+    default value of QLocale::AnyTerritory.
 */
 
 QTimeZone::QTimeZone(const QByteArray &ianaId, int offsetSeconds, const QString &name,
-                     const QString &abbreviation, QLocale::Country country, const QString &comment)
-    : d()
+                     const QString &abbreviation, QLocale::Territory territory, const QString &comment)
 {
     if (!isTimeZoneIdAvailable(ianaId))
-        d = new QUtcTimeZonePrivate(ianaId, offsetSeconds, name, abbreviation, country, comment);
+        d = new QUtcTimeZonePrivate(ianaId, offsetSeconds, name, abbreviation, territory, comment);
 }
 
 /*!
@@ -458,10 +431,7 @@ QTimeZone &QTimeZone::operator=(const QTimeZone &other)
 
 bool QTimeZone::operator==(const QTimeZone &other) const
 {
-    if (d && other.d)
-        return (*d == *other.d);
-    else
-        return (d == other.d);
+    return d == other.d || (d && other.d && *d == *other.d);
 }
 
 /*!
@@ -470,10 +440,7 @@ bool QTimeZone::operator==(const QTimeZone &other) const
 
 bool QTimeZone::operator!=(const QTimeZone &other) const
 {
-    if (d && other.d)
-        return (*d != *other.d);
-    else
-        return (d != other.d);
+    return d != other.d && (!d || !other.d || *d != *other.d);
 }
 
 /*!
@@ -482,38 +449,43 @@ bool QTimeZone::operator!=(const QTimeZone &other) const
 
 bool QTimeZone::isValid() const
 {
-    if (d)
-        return d->isValid();
-    else
-        return false;
+    return d && d->isValid();
 }
 
 /*!
     Returns the IANA ID for the time zone.
 
     IANA IDs are used on all platforms.  On Windows these are translated
-    from the Windows ID into the closest IANA ID for the time zone and country.
+    from the Windows ID into the closest IANA ID for the time zone and territory.
 */
 
 QByteArray QTimeZone::id() const
 {
-    if (d)
-        return d->id();
-    else
-        return QByteArray();
+    return d ? d->id() : QByteArray();
 }
 
 /*!
-    Returns the country for the time zone.
+    \since 6.2
+
+    Returns the territory for the time zone.
+*/
+QLocale::Territory QTimeZone::territory() const
+{
+    return isValid() ? d->territory() : QLocale::AnyTerritory;
+}
+
+#if QT_DEPRECATED_SINCE(6, 6)
+/*!
+    \deprecated [6.6] Use territory() instead.
+
+    Returns the territory for the time zone.
 */
 
 QLocale::Country QTimeZone::country() const
 {
-    if (isValid())
-        return d->country();
-    else
-        return QLocale::AnyCountry;
+    return territory();
 }
+#endif
 
 /*!
     Returns any comment for the time zone.
@@ -525,10 +497,7 @@ QLocale::Country QTimeZone::country() const
 
 QString QTimeZone::comment() const
 {
-    if (isValid())
-        return d->comment();
-    else
-        return QString();
+    return isValid() ? d->comment() : QString();
 }
 
 /*!
@@ -550,8 +519,8 @@ QString QTimeZone::displayName(const QDateTime &atDateTime, NameType nameType,
 {
     if (isValid())
         return d->displayName(atDateTime.toMSecsSinceEpoch(), nameType, locale);
-    else
-        return QString();
+
+    return QString();
 }
 
 /*!
@@ -574,8 +543,8 @@ QString QTimeZone::displayName(TimeType timeType, NameType nameType,
 {
     if (isValid())
         return d->displayName(timeType, nameType, locale);
-    else
-        return QString();
+
+    return QString();
 }
 
 /*!
@@ -592,8 +561,8 @@ QString QTimeZone::abbreviation(const QDateTime &atDateTime) const
 {
     if (isValid())
         return d->abbreviation(atDateTime.toMSecsSinceEpoch());
-    else
-        return QString();
+
+    return QString();
 }
 
 /*!
@@ -612,10 +581,12 @@ QString QTimeZone::abbreviation(const QDateTime &atDateTime) const
 
 int QTimeZone::offsetFromUtc(const QDateTime &atDateTime) const
 {
-    if (isValid())
-        return d->offsetFromUtc(atDateTime.toMSecsSinceEpoch());
-    else
-        return 0;
+    if (isValid()) {
+        const int offset = d->offsetFromUtc(atDateTime.toMSecsSinceEpoch());
+        if (offset !=  QTimeZonePrivate::invalidSeconds())
+            return offset;
+    }
+    return 0;
 }
 
 /*!
@@ -632,10 +603,12 @@ int QTimeZone::offsetFromUtc(const QDateTime &atDateTime) const
 
 int QTimeZone::standardTimeOffset(const QDateTime &atDateTime) const
 {
-    if (isValid())
-        return d->standardTimeOffset(atDateTime.toMSecsSinceEpoch());
-    else
-        return 0;
+    if (isValid()) {
+        const int offset = d->standardTimeOffset(atDateTime.toMSecsSinceEpoch());
+        if (offset !=  QTimeZonePrivate::invalidSeconds())
+            return offset;
+    }
+    return 0;
 }
 
 /*!
@@ -652,10 +625,12 @@ int QTimeZone::standardTimeOffset(const QDateTime &atDateTime) const
 
 int QTimeZone::daylightTimeOffset(const QDateTime &atDateTime) const
 {
-    if (hasDaylightTime())
-        return d->daylightTimeOffset(atDateTime.toMSecsSinceEpoch());
-    else
-        return 0;
+    if (hasDaylightTime()) {
+        const int offset = d->daylightTimeOffset(atDateTime.toMSecsSinceEpoch());
+        if (offset !=  QTimeZonePrivate::invalidSeconds())
+            return offset;
+    }
+    return 0;
 }
 
 /*!
@@ -666,10 +641,7 @@ int QTimeZone::daylightTimeOffset(const QDateTime &atDateTime) const
 
 bool QTimeZone::hasDaylightTime() const
 {
-    if (isValid())
-        return d->hasDaylightTime();
-    else
-        return false;
+    return isValid() && d->hasDaylightTime();
 }
 
 /*!
@@ -680,10 +652,7 @@ bool QTimeZone::hasDaylightTime() const
 
 bool QTimeZone::isDaylightTime(const QDateTime &atDateTime) const
 {
-    if (hasDaylightTime())
-        return d->isDaylightTime(atDateTime.toMSecsSinceEpoch());
-    else
-        return false;
+    return hasDaylightTime() && d->isDaylightTime(atDateTime.toMSecsSinceEpoch());
 }
 
 /*!
@@ -698,8 +667,8 @@ QTimeZone::OffsetData QTimeZone::offsetData(const QDateTime &forDateTime) const
 {
     if (hasTransitions())
         return QTimeZonePrivate::toOffsetData(d->data(forDateTime.toMSecsSinceEpoch()));
-    else
-        return QTimeZonePrivate::invalidOffsetData();
+
+    return QTimeZonePrivate::invalidOffsetData();
 }
 
 /*!
@@ -713,10 +682,7 @@ QTimeZone::OffsetData QTimeZone::offsetData(const QDateTime &forDateTime) const
 
 bool QTimeZone::hasTransitions() const
 {
-    if (isValid())
-        return d->hasTransitions();
-    else
-        return false;
+    return isValid() && d->hasTransitions();
 }
 
 /*!
@@ -736,8 +702,8 @@ QTimeZone::OffsetData QTimeZone::nextTransition(const QDateTime &afterDateTime) 
 {
     if (hasTransitions())
         return QTimeZonePrivate::toOffsetData(d->nextTransition(afterDateTime.toMSecsSinceEpoch()));
-    else
-        return QTimeZonePrivate::invalidOffsetData();
+
+    return QTimeZonePrivate::invalidOffsetData();
 }
 
 /*!
@@ -757,8 +723,8 @@ QTimeZone::OffsetData QTimeZone::previousTransition(const QDateTime &beforeDateT
 {
     if (hasTransitions())
         return QTimeZonePrivate::toOffsetData(d->previousTransition(beforeDateTime.toMSecsSinceEpoch()));
-    else
-        return QTimeZonePrivate::invalidOffsetData();
+
+    return QTimeZonePrivate::invalidOffsetData();
 }
 
 /*!
@@ -869,20 +835,20 @@ QList<QByteArray> QTimeZone::availableTimeZoneIds()
 }
 
 /*!
-    Returns a list of all available IANA time zone IDs for a given \a country.
+    Returns a list of all available IANA time zone IDs for a given \a territory.
 
-    As a special case, a \a country of Qt::AnyCountry returns those time zones
-    that do not have any country related to them, such as UTC.  If you require
+    As a special case, a \a territory of Qt::AnyTerritory returns those time zones
+    that do not have any territory related to them, such as UTC.  If you require
     a list of all time zone IDs for all countries then use the standard
     availableTimeZoneIds() method.
 
     \sa isTimeZoneIdAvailable()
 */
 
-QList<QByteArray> QTimeZone::availableTimeZoneIds(QLocale::Country country)
+QList<QByteArray> QTimeZone::availableTimeZoneIds(QLocale::Territory territory)
 {
-    return set_union(QUtcTimeZonePrivate().availableTimeZoneIds(country),
-                     global_tz->backend->availableTimeZoneIds(country));
+    return set_union(QUtcTimeZonePrivate().availableTimeZoneIds(territory),
+                     global_tz->backend->availableTimeZoneIds(territory));
 }
 
 /*!
@@ -926,21 +892,20 @@ QByteArray QTimeZone::windowsIdToDefaultIanaId(const QByteArray &windowsId)
 }
 
 /*!
-    Returns the default IANA ID for a given \a windowsId and \a country.
+    Returns the default IANA ID for a given \a windowsId and \a territory.
 
-    Because a Windows ID can cover several IANA IDs within a given country,
-    the most frequently used IANA ID in that country is returned.
+    Because a Windows ID can cover several IANA IDs within a given territory,
+    the most frequently used IANA ID in that territory is returned.
 
-    As a special case, QLocale::AnyCountry returns the default of those IANA IDs
-    that do not have any specific country.
+    As a special case, QLocale::AnyTerritory returns the default of those IANA IDs
+    that do not have any specific territory.
 
     \sa ianaIdToWindowsId(), windowsIdToIanaIds()
 */
 
-QByteArray QTimeZone::windowsIdToDefaultIanaId(const QByteArray &windowsId,
-                                                QLocale::Country country)
+QByteArray QTimeZone::windowsIdToDefaultIanaId(const QByteArray &windowsId, QLocale::Territory territory)
 {
-    return QTimeZonePrivate::windowsIdToDefaultIanaId(windowsId, country);
+    return QTimeZonePrivate::windowsIdToDefaultIanaId(windowsId, territory);
 }
 
 /*!
@@ -957,27 +922,41 @@ QList<QByteArray> QTimeZone::windowsIdToIanaIds(const QByteArray &windowsId)
 }
 
 /*!
-    Returns all the IANA IDs for a given \a windowsId and \a country.
+    Returns all the IANA IDs for a given \a windowsId and \a territory.
 
-    As a special case QLocale::AnyCountry returns those IANA IDs that do
-    not have any specific country.
+    As a special case QLocale::AnyTerritory returns those IANA IDs that do
+    not have any specific territory.
 
     The returned list is in order of frequency of usage, i.e. larger zones
-    within a country are listed first.
+    within a territory are listed first.
 
     \sa ianaIdToWindowsId(), windowsIdToDefaultIanaId()
 */
 
-QList<QByteArray> QTimeZone::windowsIdToIanaIds(const QByteArray &windowsId,
-                                                    QLocale::Country country)
+QList<QByteArray> QTimeZone::windowsIdToIanaIds(const QByteArray &windowsId, QLocale::Territory territory)
 {
-    return QTimeZonePrivate::windowsIdToIanaIds(windowsId, country);
+    return QTimeZonePrivate::windowsIdToIanaIds(windowsId, territory);
 }
 
+/*!
+    \fn QTimeZone QTimeZone::fromStdTimeZonePtr(const std::chrono::time_zone *timeZone)
+    \since 6.4
+
+    Returns a QTimeZone object representing the same time zone as \a timeZone.
+    The IANA ID of \a timeZone must be one of the available system IDs,
+    otherwise an invalid time zone will be returned.
+*/
+
 #ifndef QT_NO_DATASTREAM
+// Invalid, as an IANA ID: too long, starts with - and has other invalid characters in it
+static inline QString invalidId() { return QStringLiteral("-No Time Zone Specified!"); }
+
 QDataStream &operator<<(QDataStream &ds, const QTimeZone &tz)
 {
-    tz.d->serialize(ds);
+    if (tz.isValid())
+        tz.d->serialize(ds);
+    else
+        ds << invalidId();
     return ds;
 }
 
@@ -985,20 +964,25 @@ QDataStream &operator>>(QDataStream &ds, QTimeZone &tz)
 {
     QString ianaId;
     ds >> ianaId;
-    if (ianaId == QLatin1String("OffsetFromUtc")) {
+    if (ianaId == invalidId()) {
+        tz = QTimeZone();
+    } else if (ianaId == "OffsetFromUtc"_L1) {
         int utcOffset;
         QString name;
         QString abbreviation;
-        int country;
+        int territory;
         QString comment;
-        ds >> ianaId >> utcOffset >> name >> abbreviation >> country >> comment;
+        ds >> ianaId >> utcOffset >> name >> abbreviation >> territory >> comment;
         // Try creating as a system timezone, which succeeds (producing a valid
-        // zone) iff ianaId is valid; we can then ignore the other data.
+        // zone) iff ianaId is valid; use this if it is a plain offset from UTC
+        // zone, with the right offset, ignoring the other data:
         tz = QTimeZone(ianaId.toUtf8());
-        // If not, then construct a custom timezone using all the saved values:
-        if (!tz.isValid())
+        if (!tz.isValid() || tz.hasDaylightTime()
+            || tz.offsetFromUtc(QDateTime::fromMSecsSinceEpoch(0, Qt::UTC)) != utcOffset) {
+            // Construct a custom timezone using the saved values:
             tz = QTimeZone(ianaId.toUtf8(), utcOffset, name, abbreviation,
-                           QLocale::Country(country), comment);
+                           QLocale::Territory(territory), comment);
+        }
     } else {
         tz = QTimeZone(ianaId.toUtf8());
     }

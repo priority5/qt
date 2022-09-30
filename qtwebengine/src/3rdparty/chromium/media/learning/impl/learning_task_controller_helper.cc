@@ -27,7 +27,7 @@ LearningTaskControllerHelper::~LearningTaskControllerHelper() = default;
 void LearningTaskControllerHelper::BeginObservation(
     base::UnguessableToken id,
     FeatureVector features,
-    base::Optional<ukm::SourceId> source_id) {
+    absl::optional<ukm::SourceId> source_id) {
   auto& pending_example = pending_examples_[id];
 
   if (source_id)
@@ -35,10 +35,12 @@ void LearningTaskControllerHelper::BeginObservation(
 
   // Start feature prediction, so that we capture the current values.
   if (!feature_provider_.is_null()) {
-    feature_provider_.Post(
-        FROM_HERE, &FeatureProvider::AddFeatures, std::move(features),
-        base::BindOnce(&LearningTaskControllerHelper::OnFeaturesReadyTrampoline,
-                       task_runner_, AsWeakPtr(), id));
+    // TODO(dcheng): Convert this to use Then() helper.
+    feature_provider_.AsyncCall(&FeatureProvider::AddFeatures)
+        .WithArgs(std::move(features),
+                  base::BindOnce(
+                      &LearningTaskControllerHelper::OnFeaturesReadyTrampoline,
+                      task_runner_, AsWeakPtr(), id));
   } else {
     pending_example.example.features = std::move(features);
     pending_example.features_done = true;

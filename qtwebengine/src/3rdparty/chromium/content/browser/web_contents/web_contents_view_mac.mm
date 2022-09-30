@@ -6,6 +6,7 @@
 
 #import "content/browser/web_contents/web_contents_view_mac.h"
 
+#include <memory>
 #include <string>
 
 #import "base/mac/mac_util.h"
@@ -20,7 +21,6 @@
 #import "content/app_shim_remote_cocoa/web_contents_view_cocoa.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
-#include "content/browser/renderer_host/display_util.h"
 #include "content/browser/renderer_host/popup_menu_helper_mac.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -33,14 +33,15 @@
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
+#include "ui/display/display_util.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
 
-using blink::DragOperation;
 using blink::DragOperationsMask;
 using remote_cocoa::mojom::DraggingInfoPtr;
 using remote_cocoa::mojom::SelectionDirection;
 
-// Ensure that the blink::DragOperation enum values stay in sync with
+// Ensure that the blink::DragOperationsMask enum values stay in sync with
 // NSDragOperation constants, since the code below static_casts between 'em.
 #define STATIC_ASSERT_ENUM(a, b)                            \
   static_assert(static_cast<int>(a) == static_cast<int>(b), \
@@ -48,10 +49,7 @@ using remote_cocoa::mojom::SelectionDirection;
 STATIC_ASSERT_ENUM(NSDragOperationNone, blink::kDragOperationNone);
 STATIC_ASSERT_ENUM(NSDragOperationCopy, blink::kDragOperationCopy);
 STATIC_ASSERT_ENUM(NSDragOperationLink, blink::kDragOperationLink);
-STATIC_ASSERT_ENUM(NSDragOperationGeneric, blink::kDragOperationGeneric);
-STATIC_ASSERT_ENUM(NSDragOperationPrivate, blink::kDragOperationPrivate);
 STATIC_ASSERT_ENUM(NSDragOperationMove, blink::kDragOperationMove);
-STATIC_ASSERT_ENUM(NSDragOperationDelete, blink::kDragOperationDelete);
 STATIC_ASSERT_ENUM(NSDragOperationEvery, blink::kDragOperationEvery);
 
 namespace content {
@@ -113,13 +111,17 @@ gfx::NativeView WebContentsViewMac::GetNativeView() const {
 gfx::NativeView WebContentsViewMac::GetContentNativeView() const {
   RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (!rwhv)
-    return NULL;
+    return nullptr;
   return rwhv->GetNativeView();
 }
 
 gfx::NativeWindow WebContentsViewMac::GetTopLevelNativeWindow() const {
   NSWindow* window = [GetInProcessNSView() window];
-  return window ? window : delegate_->GetNativeWindow();
+  if (window)
+    return window;
+  if (delegate_)
+    return delegate_->GetNativeWindow();
+  return nullptr;
 }
 
 gfx::Rect WebContentsViewMac::GetContainerBounds() const {
@@ -135,6 +137,8 @@ gfx::Rect WebContentsViewMac::GetContainerBounds() const {
 
   return gfx::ScreenRectFromNSRect(bounds);
 }
+
+void WebContentsViewMac::OnCapturerCountChanged() {}
 
 void WebContentsViewMac::StartDragging(
     const DropData& drop_data,
@@ -153,8 +157,7 @@ void WebContentsViewMac::StartDragging(
   // The drag invokes a nested event loop, arrange to continue
   // processing events.
   base::CurrentThread::ScopedNestableTaskAllower allow;
-  NSDragOperation mask = static_cast<NSDragOperation>(allowed_operations) &
-                         ~NSDragOperationGeneric;
+  NSDragOperation mask = static_cast<NSDragOperation>(allowed_operations);
   [drag_dest_ setDragStartTrackersForProcess:source_rwh->GetProcess()->GetID()];
   drag_source_start_rwh_ = source_rwh->GetWeakPtr();
 
@@ -174,10 +177,7 @@ void WebContentsViewMac::Focus() {
   // Focus the the fullscreen view, if one exists; otherwise, focus the content
   // native view. This ensures that the view currently attached to a NSWindow is
   // being used to query or set first responder state.
-  RenderWidgetHostView* rwhv =
-      web_contents_->GetFullscreenRenderWidgetHostView();
-  if (!rwhv)
-    rwhv = web_contents_->GetRenderWidgetHostView();
+  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (!rwhv)
     return;
 
@@ -215,12 +215,6 @@ void WebContentsViewMac::FocusThroughTabTraversal(bool reverse) {
   if (delegate())
     delegate()->ResetStoredFocus();
 
-  content::RenderWidgetHostView* fullscreen_view =
-      web_contents_->GetFullscreenRenderWidgetHostView();
-  if (fullscreen_view) {
-    fullscreen_view->Focus();
-    return;
-  }
   web_contents_->GetRenderViewHost()->SetInitialFocus(reverse);
 }
 
@@ -228,8 +222,8 @@ DropData* WebContentsViewMac::GetDropData() const {
   return [drag_dest_ currentDropData];
 }
 
-void WebContentsViewMac::UpdateDragCursor(DragOperation operation) {
-  [drag_dest_ setCurrentOperation:operation];
+void WebContentsViewMac::UpdateDragCursor(ui::mojom::DragOperation operation) {
+  [drag_dest_ setCurrentOperation:static_cast<NSDragOperation>(operation)];
 }
 
 void WebContentsViewMac::GotFocus(RenderWidgetHostImpl* render_widget_host) {
@@ -260,9 +254,8 @@ void WebContentsViewMac::TakeFocus(bool reverse) {
     remote_ns_view_->TakeFocus(reverse);
 }
 
-void WebContentsViewMac::ShowContextMenu(
-    RenderFrameHost* render_frame_host,
-    const ContextMenuParams& params) {
+void WebContentsViewMac::ShowContextMenu(RenderFrameHost& render_frame_host,
+                                         const ContextMenuParams& params) {
   if (delegate())
     delegate()->ShowContextMenu(render_frame_host, params);
   else
@@ -279,8 +272,8 @@ void WebContentsViewMac::ShowPopupMenu(
     std::vector<blink::mojom::MenuItemPtr> menu_items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  popup_menu_helper_.reset(
-      new PopupMenuHelper(this, render_frame_host, std::move(popup_client)));
+  popup_menu_helper_ = std::make_unique<PopupMenuHelper>(
+      this, render_frame_host, std::move(popup_client));
   popup_menu_helper_->ShowPopupMenu(bounds, item_height, item_font_size,
                                     selected_item, std::move(menu_items),
                                     right_aligned, allow_multiple_selection);
@@ -389,10 +382,9 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForChildWidget(
   return view;
 }
 
-void WebContentsViewMac::SetPageTitle(const base::string16& title) {
+void WebContentsViewMac::SetPageTitle(const std::u16string& title) {
   // Meaningless on the Mac; widgets don't have a "title" attribute
 }
-
 
 void WebContentsViewMac::RenderViewReady() {}
 
@@ -573,7 +565,7 @@ void WebContentsViewMac::EndDrag(uint32_t drag_operation,
   web_contents_->DragSourceEndedAt(
       transformed_point.x(), transformed_point.y(),
       transformed_screen_point.x(), transformed_screen_point.y(),
-      static_cast<blink::DragOperation>(drag_operation),
+      static_cast<ui::mojom::DragOperation>(drag_operation),
       drag_source_start_rwh_.get());
 }
 
@@ -708,6 +700,11 @@ void WebContentsViewMac::ViewsHostableSetParentAccessible(
   views_host_accessibility_element_ = parent_accessibility_element;
   for (auto* rwhv_mac : GetChildViews())
     rwhv_mac->SetParentAccessibilityElement(views_host_accessibility_element_);
+}
+
+gfx::NativeViewAccessible
+WebContentsViewMac::ViewsHostableGetParentAccessible() {
+  return views_host_accessibility_element_;
 }
 
 gfx::NativeViewAccessible

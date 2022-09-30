@@ -33,7 +33,7 @@
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/editing/serializers/create_markup_options.h"
 #include "third_party/blink/renderer/core/editing/serializers/html_interchange.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -66,6 +66,7 @@ DocumentFragment* CreateFragmentForInnerOuterHTML(const String&,
                                                   Element*,
                                                   ParserContentPolicy,
                                                   const char* method,
+                                                  bool include_shadow_roots,
                                                   ExceptionState&);
 DocumentFragment* CreateFragmentForTransformToFragment(
     const String&,

@@ -19,7 +19,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_animated_color.h"
 
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/svg/animation/smil_animation_effect_parameters.h"
@@ -38,7 +38,7 @@ SVGColorProperty::SVGColorProperty(const String& color_string)
 String SVGColorProperty::ValueAsString() const {
   return style_color_.IsCurrentColor()
              ? "currentColor"
-             : cssvalue::CSSColorValue::SerializeAsCSSComponentValue(
+             : cssvalue::CSSColor::SerializeAsCSSComponentValue(
                    style_color_.GetColor());
 }
 
@@ -56,12 +56,12 @@ static inline Color FallbackColorForCurrentColor(
   return Color::kTransparent;
 }
 
-static inline ColorScheme ColorSchemeForSVGElement(
+static inline mojom::blink::ColorScheme ColorSchemeForSVGElement(
     const SVGElement* target_element) {
   DCHECK(target_element);
   if (const ComputedStyle* target_style = target_element->GetComputedStyle())
     return target_style->UsedColorScheme();
-  return ColorScheme::kLight;
+  return mojom::blink::ColorScheme::kLight;
 }
 
 void SVGColorProperty::Add(const SVGPropertyBase* other,
@@ -69,7 +69,8 @@ void SVGColorProperty::Add(const SVGPropertyBase* other,
   DCHECK(context_element);
 
   Color fallback_color = FallbackColorForCurrentColor(context_element);
-  ColorScheme color_scheme = ColorSchemeForSVGElement(context_element);
+  mojom::blink::ColorScheme color_scheme =
+      ColorSchemeForSVGElement(context_element);
   Color from_color = To<SVGColorProperty>(other)->style_color_.Resolve(
       fallback_color, color_scheme);
   Color to_color = style_color_.Resolve(fallback_color, color_scheme);
@@ -92,7 +93,8 @@ void SVGColorProperty::CalculateAnimatedValue(
   // Apply currentColor rules.
   DCHECK(context_element);
   Color fallback_color = FallbackColorForCurrentColor(context_element);
-  ColorScheme color_scheme = ColorSchemeForSVGElement(context_element);
+  mojom::blink::ColorScheme color_scheme =
+      ColorSchemeForSVGElement(context_element);
   Color from_color = from_style_color.Resolve(fallback_color, color_scheme);
   Color to_color = to_style_color.Resolve(fallback_color, color_scheme);
   Color to_at_end_of_duration_color =
@@ -129,7 +131,8 @@ float SVGColorProperty::CalculateDistance(
     const SVGElement* context_element) const {
   DCHECK(context_element);
   Color fallback_color = FallbackColorForCurrentColor(context_element);
-  ColorScheme color_scheme = ColorSchemeForSVGElement(context_element);
+  mojom::blink::ColorScheme color_scheme =
+      ColorSchemeForSVGElement(context_element);
 
   Color from_color = style_color_.Resolve(fallback_color, color_scheme);
   Color to_color = To<SVGColorProperty>(to_value)->style_color_.Resolve(

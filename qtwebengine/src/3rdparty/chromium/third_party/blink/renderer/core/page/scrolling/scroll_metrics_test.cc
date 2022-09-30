@@ -42,7 +42,7 @@ class ScrollMetricsTest : public SimTest {
   void SetUpHtml(const char*);
   void Scroll(Element*, const WebGestureDevice);
   void UpdateAllLifecyclePhases() {
-    GetDocument().View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+    GetDocument().View()->UpdateAllLifecyclePhasesForTest();
   }
 };
 
@@ -54,8 +54,8 @@ class NonCompositedMainThreadScrollingReasonRecordTest
 
 class ScrollBeginEventBuilder : public WebGestureEvent {
  public:
-  ScrollBeginEventBuilder(FloatPoint position,
-                          FloatPoint delta,
+  ScrollBeginEventBuilder(gfx::PointF position,
+                          gfx::PointF delta,
                           WebGestureDevice device)
       : WebGestureEvent(WebInputEvent::Type::kGestureScrollBegin,
                         WebInputEvent::kNoModifiers,
@@ -63,7 +63,7 @@ class ScrollBeginEventBuilder : public WebGestureEvent {
                         device) {
     SetPositionInWidget(position);
     SetPositionInScreen(position);
-    data.scroll_begin.delta_y_hint = delta.Y();
+    data.scroll_begin.delta_y_hint = delta.y();
     frame_scale_ = 1;
   }
 };
@@ -90,12 +90,10 @@ class ScrollEndEventBuilder : public WebGestureEvent {
 
 int NonCompositedMainThreadScrollingReasonRecordTest::GetBucketIndex(
     uint32_t reason) {
-  int index = 1;
-  while (!(reason & 1)) {
-    reason >>= 1;
+  int index = 0;
+  while (reason >>= 1)
     ++index;
-  }
-  DCHECK_EQ(reason, 1u);
+  DCHECK_NE(index, 0);
   return index;
 }
 
@@ -105,9 +103,9 @@ void ScrollMetricsTest::Scroll(Element* element,
   DCHECK(element->getBoundingClientRect());
   DOMRect* rect = element->getBoundingClientRect();
   ScrollBeginEventBuilder scroll_begin(
-      FloatPoint(rect->left() + rect->width() / 2,
-                 rect->top() + rect->height() / 2),
-      FloatPoint(0.f, 1.f), device);
+      gfx::PointF(rect->left() + rect->width() / 2,
+                  rect->top() + rect->height() / 2),
+      gfx::PointF(0.f, 1.f), device);
   ScrollUpdateEventBuilder scroll_update;
   ScrollEndEventBuilder scroll_end;
   GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(scroll_begin);
@@ -117,7 +115,7 @@ void ScrollMetricsTest::Scroll(Element* element,
 }
 
 void ScrollMetricsTest::SetUpHtml(const char* html_content) {
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(html_content);
@@ -182,7 +180,7 @@ TEST_F(NonCompositedMainThreadScrollingReasonRecordTest,
   box->setAttribute("class", "composited transform box");
   UpdateAllLifecyclePhases();
   Scroll(box, WebGestureDevice::kTouchpad);
-  EXPECT_FALSE(ToLayoutBox(box->GetLayoutObject())
+  EXPECT_FALSE(To<LayoutBox>(box->GetLayoutObject())
                    ->GetScrollableArea()
                    ->GetNonCompositedMainThreadScrollingReasons());
   EXPECT_WHEEL_BUCKET(kNotOpaqueForTextAndLCDText, 1);

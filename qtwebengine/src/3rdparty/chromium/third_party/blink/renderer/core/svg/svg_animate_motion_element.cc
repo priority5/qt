@@ -22,8 +22,8 @@
 #include "third_party/blink/renderer/core/svg/svg_animate_motion_element.h"
 
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/svg/animation/smil_animation_effect_parameters.h"
+#include "third_party/blink/renderer/core/svg/animation/smil_animation_value.h"
 #include "third_party/blink/renderer/core/svg/svg_mpath_element.h"
 #include "third_party/blink/renderer/core/svg/svg_parser_utilities.h"
 #include "third_party/blink/renderer/core/svg/svg_path_element.h"
@@ -127,7 +127,7 @@ void SVGAnimateMotionElement::UpdateAnimationPath() {
 template <typename CharType>
 static bool ParsePointInternal(const CharType* ptr,
                                const CharType* end,
-                               FloatPoint& point) {
+                               gfx::PointF& point) {
   if (!SkipOptionalSVGSpaces(ptr, end))
     return false;
 
@@ -139,13 +139,13 @@ static bool ParsePointInternal(const CharType* ptr,
   if (!ParseNumber(ptr, end, y))
     return false;
 
-  point = FloatPoint(x, y);
+  point = gfx::PointF(x, y);
 
   // disallow anything except spaces at the end
   return !SkipOptionalSVGSpaces(ptr, end);
 }
 
-static bool ParsePoint(const String& string, FloatPoint& point) {
+static bool ParsePoint(const String& string, gfx::PointF& point) {
   if (string.IsEmpty())
     return false;
   return WTF::VisitCharacters(string, [&](const auto* chars, unsigned length) {
@@ -153,24 +153,16 @@ static bool ParsePoint(const String& string, FloatPoint& point) {
   });
 }
 
-void SVGAnimateMotionElement::ResetAnimatedType(bool needs_underlying_value) {
-  SVGElement* target_element = targetElement();
-  DCHECK(target_element);
-  DCHECK(TargetCanHaveMotionTransform(*target_element));
-  AffineTransform* transform = target_element->AnimateMotionTransform();
-  DCHECK(transform);
-  transform->MakeIdentity();
+SMILAnimationValue SVGAnimateMotionElement::CreateAnimationValue() const {
+  DCHECK(targetElement());
+  DCHECK(TargetCanHaveMotionTransform(*targetElement()));
+  return SMILAnimationValue();
 }
 
-void SVGAnimateMotionElement::ClearAnimatedType() {
+void SVGAnimateMotionElement::ClearAnimationValue() {
   SVGElement* target_element = targetElement();
   DCHECK(target_element);
-  AffineTransform* transform = target_element->AnimateMotionTransform();
-  DCHECK(transform);
-  transform->MakeIdentity();
-
-  if (LayoutObject* target_layout_object = target_element->GetLayoutObject())
-    InvalidateForAnimateMotionTransformChange(*target_layout_object);
+  target_element->ClearAnimatedMotionTransform();
 }
 
 bool SVGAnimateMotionElement::CalculateToAtEndOfDurationValue(
@@ -197,20 +189,17 @@ bool SVGAnimateMotionElement::CalculateFromAndByValues(
   // Apply 'from' to 'to' to get 'by' semantics. If the animation mode
   // is 'by', |from_string| will be the empty string and yield a point
   // of (0,0).
-  to_point_ += from_point_;
+  to_point_ += from_point_.OffsetFromOrigin();
   to_point_at_end_of_duration_ = to_point_;
   return true;
 }
 
-void SVGAnimateMotionElement::CalculateAnimatedValue(float percentage,
-                                                     unsigned repeat_count,
-                                                     SVGSMILElement*) const {
+void SVGAnimateMotionElement::CalculateAnimationValue(
+    SMILAnimationValue& animation_value,
+    float percentage,
+    unsigned repeat_count) const {
   SMILAnimationEffectParameters parameters = ComputeEffectParameters();
-
-  SVGElement* target_element = targetElement();
-  DCHECK(target_element);
-  AffineTransform* transform = target_element->AnimateMotionTransform();
-  DCHECK(transform);
+  AffineTransform* transform = &animation_value.motion_transform;
 
   // If additive, we accumulate into the underlying (transform) value.
   if (!parameters.is_additive)
@@ -218,73 +207,55 @@ void SVGAnimateMotionElement::CalculateAnimatedValue(float percentage,
 
   if (GetAnimationMode() != kPathAnimation) {
     float animated_x = ComputeAnimatedNumber(
-        parameters, percentage, repeat_count, from_point_.X(), to_point_.X(),
-        to_point_at_end_of_duration_.X());
+        parameters, percentage, repeat_count, from_point_.x(), to_point_.x(),
+        to_point_at_end_of_duration_.x());
     float animated_y = ComputeAnimatedNumber(
-        parameters, percentage, repeat_count, from_point_.Y(), to_point_.Y(),
-        to_point_at_end_of_duration_.Y());
+        parameters, percentage, repeat_count, from_point_.y(), to_point_.y(),
+        to_point_at_end_of_duration_.y());
     transform->Translate(animated_x, animated_y);
     return;
   }
 
   DCHECK(!animation_path_.IsEmpty());
 
-  float position_on_path = animation_path_.length() * percentage;
-  FloatPoint position;
-  float angle;
-  animation_path_.PointAndNormalAtLength(position_on_path, position, angle);
+  const float path_length = animation_path_.length();
+  float position_on_path = path_length * percentage;
+  PointAndTangent position =
+      animation_path_.PointAndNormalAtLength(position_on_path);
 
   // Handle accumulate="sum".
   if (repeat_count && parameters.is_cumulative) {
-    FloatPoint position_at_end_of_duration =
-        animation_path_.PointAtLength(animation_path_.length());
-    position.Move(position_at_end_of_duration.X() * repeat_count,
-                  position_at_end_of_duration.Y() * repeat_count);
+    gfx::PointF position_at_end_of_duration =
+        animation_path_.PointAtLength(path_length);
+    position.point += gfx::ScalePoint(position_at_end_of_duration, repeat_count)
+                          .OffsetFromOrigin();
   }
 
-  transform->Translate(position.X(), position.Y());
+  transform->Translate(position.point.x(), position.point.y());
   RotateMode rotate_mode = GetRotateMode();
   if (rotate_mode != kRotateAuto && rotate_mode != kRotateAutoReverse)
     return;
   if (rotate_mode == kRotateAutoReverse)
-    angle += 180;
-  transform->Rotate(angle);
+    position.tangent_in_degrees += 180;
+  transform->Rotate(position.tangent_in_degrees);
 }
 
-void SVGAnimateMotionElement::ApplyResultsToTarget() {
-  // We accumulate to the target element transform list so there is not much to
-  // do here.
+void SVGAnimateMotionElement::ApplyResultsToTarget(
+    const SMILAnimationValue& animation_value) {
   SVGElement* target_element = targetElement();
   DCHECK(target_element);
-  AffineTransform* target_transform = target_element->AnimateMotionTransform();
-  DCHECK(target_transform);
-
-  if (LayoutObject* target_layout_object = target_element->GetLayoutObject())
-    InvalidateForAnimateMotionTransformChange(*target_layout_object);
-
-  // ...except in case where we have additional instances in <use> trees.
-  const auto& instances = target_element->InstancesForElement();
-  for (SVGElement* shadow_tree_element : instances) {
-    DCHECK(shadow_tree_element);
-    AffineTransform* shadow_transform =
-        shadow_tree_element->AnimateMotionTransform();
-    DCHECK(shadow_transform);
-    shadow_transform->SetTransform(*target_transform);
-    if (LayoutObject* layout_object = shadow_tree_element->GetLayoutObject())
-      InvalidateForAnimateMotionTransformChange(*layout_object);
-  }
+  target_element->SetAnimatedMotionTransform(animation_value.motion_transform);
 }
 
 float SVGAnimateMotionElement::CalculateDistance(const String& from_string,
                                                  const String& to_string) {
-  FloatPoint from;
-  FloatPoint to;
+  gfx::PointF from;
+  gfx::PointF to;
   if (!ParsePoint(from_string, from))
     return -1;
   if (!ParsePoint(to_string, to))
     return -1;
-  FloatSize diff = to - from;
-  return sqrtf(diff.Width() * diff.Width() + diff.Height() * diff.Height());
+  return (to - from).Length();
 }
 
 void SVGAnimateMotionElement::UpdateAnimationMode() {
@@ -292,14 +263,6 @@ void SVGAnimateMotionElement::UpdateAnimationMode() {
     SetAnimationMode(kPathAnimation);
   else
     SVGAnimationElement::UpdateAnimationMode();
-}
-
-void SVGAnimateMotionElement::InvalidateForAnimateMotionTransformChange(
-    LayoutObject& object) {
-  object.SetNeedsTransformUpdate();
-  // The transform paint property relies on the SVG transform value.
-  object.SetNeedsPaintPropertyUpdate();
-  MarkForLayoutAndParentResourceInvalidation(object);
 }
 
 }  // namespace blink

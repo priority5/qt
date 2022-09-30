@@ -5,7 +5,9 @@
 #ifndef CONTENT_BROWSER_FILE_SYSTEM_ACCESS_FILE_SYSTEM_CHOOSER_TEST_HELPERS_H_
 #define CONTENT_BROWSER_FILE_SYSTEM_ACCESS_FILE_SYSTEM_CHOOSER_TEST_HELPERS_H_
 
-#include "base/optional.h"
+#include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/select_file_dialog_factory.h"
@@ -20,9 +22,10 @@ struct SelectFileDialogParams {
   ~SelectFileDialogParams();
 
   ui::SelectFileDialog::Type type = ui::SelectFileDialog::SELECT_NONE;
-  base::Optional<ui::SelectFileDialog::FileTypeInfo> file_types;
+  absl::optional<ui::SelectFileDialog::FileTypeInfo> file_types;
   gfx::NativeWindow owning_window = {};
   int file_type_index = -1;
+  base::FilePath default_path;
 };
 
 // A fake ui::SelectFileDialog, which will cancel the file selection instead of
@@ -38,7 +41,7 @@ class CancellingSelectFileDialogFactory : public ui::SelectFileDialogFactory {
       std::unique_ptr<ui::SelectFilePolicy> policy) override;
 
  private:
-  SelectFileDialogParams* out_params_;
+  raw_ptr<SelectFileDialogParams> out_params_;
 };
 
 // A fake ui::SelectFileDialog, which will select one or more pre-determined
@@ -59,7 +62,7 @@ class FakeSelectFileDialogFactory : public ui::SelectFileDialogFactory {
 
  private:
   std::vector<ui::SelectedFileInfo> result_;
-  SelectFileDialogParams* out_params_;
+  raw_ptr<SelectFileDialogParams> out_params_;
 };
 
 }  // namespace content

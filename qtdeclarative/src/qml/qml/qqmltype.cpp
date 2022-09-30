@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qqmltype_p_p.h"
 
@@ -53,7 +17,7 @@
 QT_BEGIN_NAMESPACE
 
 QQmlTypePrivate::QQmlTypePrivate(QQmlType::RegistrationType type)
-    : regType(type), iid(nullptr), typeId(0), listId(0), revision(0),
+    : regType(type), iid(nullptr), revision(QTypeRevision::zero()),
     containsRevisionedAttributes(false), baseMetaObject(nullptr),
     index(-1), isSetup(false), isEnumFromCacheSetup(false), isEnumFromBaseSetup(false),
     haveSuperType(false)
@@ -63,6 +27,7 @@ QQmlTypePrivate::QQmlTypePrivate(QQmlType::RegistrationType type)
         extraData.cd = new QQmlCppTypeData;
         extraData.cd->allocationSize = 0;
         extraData.cd->newFunc = nullptr;
+        extraData.cd->createValueTypeFunc = nullptr;
         extraData.cd->parserStatusCast = -1;
         extraData.cd->extFunc = nullptr;
         extraData.cd->extMetaObject = nullptr;
@@ -71,12 +36,16 @@ QQmlTypePrivate::QQmlTypePrivate(QQmlType::RegistrationType type)
         extraData.cd->attachedPropertiesType = nullptr;
         extraData.cd->propertyValueSourceCast = -1;
         extraData.cd->propertyValueInterceptorCast = -1;
+        extraData.cd->finalizerCast = -1;
         extraData.cd->registerEnumClassesUnscoped = true;
+        extraData.cd->registerEnumsFromRelatedTypes = true;
         break;
     case QQmlType::SingletonType:
     case QQmlType::CompositeSingletonType:
         extraData.sd = new QQmlSingletonTypeData;
         extraData.sd->singletonInstanceInfo = nullptr;
+        extraData.sd->extFunc = nullptr;
+        extraData.sd->extMetaObject = nullptr;
         break;
     case QQmlType::InterfaceType:
         extraData.cd = nullptr;
@@ -86,6 +55,9 @@ QQmlTypePrivate::QQmlTypePrivate(QQmlType::RegistrationType type)
         break;
     case QQmlType::InlineComponentType:
         extraData.id = new QQmlInlineTypeData;
+        break;
+    case QQmlType::SequentialContainerType:
+        extraData.ld = new QQmlSequenceTypeData;
         break;
     default: qFatal("QQmlTypePrivate Internal Error.");
     }
@@ -112,6 +84,9 @@ QQmlTypePrivate::~QQmlTypePrivate()
     case QQmlType::InlineComponentType:
         delete  extraData.id;
         break;
+    case QQmlType::SequentialContainerType:
+        delete extraData.ld;
+        break;
     default: //Also InterfaceType, because it has no extra data
         break;
     }
@@ -132,34 +107,33 @@ QHashedString QQmlType::module() const
     return d->module;
 }
 
-int QQmlType::majorVersion() const
+QTypeRevision QQmlType::version() const
 {
     if (!d)
-        return -1;
-    return d->version_maj;
+        return QTypeRevision();
+    return d->version;
 }
 
-int QQmlType::minorVersion() const
+bool QQmlType::availableInVersion(QTypeRevision version) const
 {
-    if (!d)
-        return -1;
-    return d->version_min;
-}
-
-bool QQmlType::availableInVersion(int vmajor, int vminor) const
-{
-    Q_ASSERT(vmajor >= 0 && vminor >= 0);
     if (!d)
         return false;
-    return vmajor == d->version_maj && vminor >= d->version_min;
+
+    if (!version.hasMajorVersion())
+        return true;
+
+    if (version.majorVersion() != d->version.majorVersion())
+        return false;
+
+    return !version.hasMinorVersion() || version.minorVersion() >= d->version.minorVersion();
 }
 
-bool QQmlType::availableInVersion(const QHashedStringRef &module, int vmajor, int vminor) const
+bool QQmlType::availableInVersion(const QHashedStringRef &module, QTypeRevision version) const
 {
-    Q_ASSERT(vmajor >= 0 && vminor >= 0);
-    if (!d)
+    if (!d || module != d->module)
         return false;
-    return module == d->module && vmajor == d->version_maj && vminor >= d->version_min;
+
+    return availableInVersion(version);
 }
 
 QQmlType QQmlTypePrivate::resolveCompositeBaseType(QQmlEnginePrivate *engine) const
@@ -175,7 +149,8 @@ QQmlType QQmlTypePrivate::resolveCompositeBaseType(QQmlEnginePrivate *engine) co
     return QQmlMetaType::qmlType(mo);
 }
 
-QQmlPropertyCache *QQmlTypePrivate::compositePropertyCache(QQmlEnginePrivate *engine) const
+QQmlPropertyCache::ConstPtr QQmlTypePrivate::compositePropertyCache(
+        QQmlEnginePrivate *engine) const
 {
     // similar logic to resolveCompositeBaseType
     Q_ASSERT(isComposite());
@@ -185,34 +160,21 @@ QQmlPropertyCache *QQmlTypePrivate::compositePropertyCache(QQmlEnginePrivate *en
     if (td.isNull() || !td->isComplete())
         return nullptr;
     QV4::ExecutableCompilationUnit *compilationUnit = td->compilationUnit();
-    return compilationUnit->rootPropertyCache().data();
+    return compilationUnit->rootPropertyCache();
 }
 
 static bool isPropertyRevisioned(const QMetaObject *mo, int index)
 {
-    int i = index;
-    i -= mo->propertyOffset();
-    if (i < 0 && mo->d.superdata)
-        return isPropertyRevisioned(mo->d.superdata, index);
-
-    const QMetaObjectPrivate *mop = reinterpret_cast<const QMetaObjectPrivate*>(mo->d.data);
-    if (i >= 0 && i < mop->propertyCount) {
-        int handle = mop->propertyData + 3*i;
-        int flags = mo->d.data[handle + 2];
-
-        return (flags & Revisioned);
-    }
-
-    return false;
+    return mo->property(index).revision();
 }
 
 void QQmlTypePrivate::init() const
 {
-    if (isSetup)
+    if (isSetup.loadAcquire())
         return;
 
     QMutexLocker lock(QQmlMetaType::typeRegistrationLock());
-    if (isSetup)
+    if (isSetup.loadAcquire())
         return;
 
     const QMetaObject *mo = baseMetaObject;
@@ -221,20 +183,26 @@ void QQmlTypePrivate::init() const
         return;
     }
 
-    if (regType == QQmlType::CppType) {
-        // Setup extended meta object
+    auto setupExtendedMetaObject = [&](const QMetaObject *extMetaObject,
+                                       QObject *(*extFunc)(QObject *)) {
+        if (!extMetaObject)
+            return;
+
         // XXX - very inefficient
-        if (extraData.cd->extFunc) {
-            QMetaObjectBuilder builder;
-            QQmlMetaType::clone(builder, extraData.cd->extMetaObject, extraData.cd->extMetaObject,
-                                extraData.cd->extMetaObject);
-            builder.setFlags(QMetaObjectBuilder::DynamicMetaObject);
-            QMetaObject *mmo = builder.toMetaObject();
-            mmo->d.superdata = mo;
-            QQmlProxyMetaObject::ProxyData data = { mmo, extraData.cd->extFunc, 0, 0 };
-            metaObjects << data;
-        }
-    }
+        QMetaObjectBuilder builder;
+        QQmlMetaType::clone(builder, extMetaObject, extMetaObject, extMetaObject,
+                            extFunc ? QQmlMetaType::CloneAll : QQmlMetaType::CloneEnumsOnly);
+        QMetaObject *mmo = builder.toMetaObject();
+        mmo->d.superdata = mo;
+        QQmlProxyMetaObject::ProxyData data = { mmo, extFunc, 0, 0 };
+        metaObjects << data;
+        QQmlMetaType::registerMetaObjectForType(mmo, const_cast<QQmlTypePrivate *>(this));
+    };
+
+    if (regType == QQmlType::SingletonType)
+        setupExtendedMetaObject(extraData.sd->extMetaObject, extraData.sd->extFunc);
+    else if (regType == QQmlType::CppType)
+        setupExtendedMetaObject(extraData.cd->extMetaObject, extraData.cd->extFunc);
 
     metaObjects.append(QQmlMetaType::proxyData(
             mo, baseMetaObject, metaObjects.isEmpty() ? nullptr
@@ -266,46 +234,48 @@ void QQmlTypePrivate::init() const
         }
     }
 
-    isSetup = true;
+    isSetup.storeRelease(true);
     lock.unlock();
 }
 
 void QQmlTypePrivate::initEnums(QQmlEnginePrivate *engine) const
 {
-    const QQmlPropertyCache *cache = (!isEnumFromCacheSetup && isComposite())
+    QQmlPropertyCache::ConstPtr cache = (!isEnumFromCacheSetup.loadAcquire() && isComposite())
             ? compositePropertyCache(engine)
-            : nullptr;
+            : QQmlPropertyCache::ConstPtr();
 
-    const QMetaObject *metaObject = !isEnumFromBaseSetup
-            ? baseMetaObject // beware: It could be a singleton type without metaobject
+    // beware: It could be a singleton type without metaobject
+    const QMetaObject *metaObject = !isEnumFromBaseSetup.loadAcquire()
+            ? baseMetaObject
             : nullptr;
 
     if (!cache && !metaObject)
         return;
 
-    init();
+    init(); // init() can add to the metaObjects list. Therefore, check metaObjects only below
 
     QMutexLocker lock(QQmlMetaType::typeRegistrationLock());
 
     if (cache) {
         insertEnumsFromPropertyCache(cache);
-        isEnumFromCacheSetup = true;
+        isEnumFromCacheSetup.storeRelease(true);
     }
 
     if (metaObject) {
-        insertEnums(metaObject);
-        isEnumFromBaseSetup = true;
+        insertEnums(metaObjects.isEmpty() ? baseMetaObject : metaObjects.constFirst().metaObject);
+        isEnumFromBaseSetup.storeRelease(true);
     }
 }
 
 void QQmlTypePrivate::insertEnums(const QMetaObject *metaObject) const
 {
     // Add any enum values defined by 'related' classes
-    if (metaObject->d.relatedMetaObjects) {
-        const auto *related = metaObject->d.relatedMetaObjects;
-        if (related) {
-            while (*related)
-                insertEnums(*related++);
+    if (regType != QQmlType::CppType || extraData.cd->registerEnumsFromRelatedTypes) {
+        if (const auto *related = metaObject->d.relatedMetaObjects) {
+            while (const QMetaObject *relatedMetaObject = *related) {
+                insertEnums(relatedMetaObject);
+                ++related;
+            }
         }
     }
 
@@ -408,16 +378,19 @@ void QQmlTypePrivate::createEnumConflictReport(const QMetaObject *metaObject, co
     }
 }
 
-void QQmlTypePrivate::insertEnumsFromPropertyCache(const QQmlPropertyCache *cache) const
+void QQmlTypePrivate::insertEnumsFromPropertyCache(
+        const QQmlPropertyCache::ConstPtr &cache) const
 {
     const QMetaObject *cppMetaObject = cache->firstCppMetaObject();
 
-    while (cache && cache->metaObject() != cppMetaObject) {
+    for (const QQmlPropertyCache *currentCache = cache.data();
+         currentCache && currentCache->metaObject() != cppMetaObject;
+         currentCache = currentCache->parent().data()) {
 
-        int count = cache->qmlEnumCount();
+        int count = currentCache->qmlEnumCount();
         for (int ii = 0; ii < count; ++ii) {
             QStringHash<int> *scoped = new QStringHash<int>();
-            QQmlEnumData *enumData = cache->qmlEnum(ii);
+            QQmlEnumData *enumData = currentCache->qmlEnum(ii);
 
             for (int jj = 0; jj < enumData->values.count(); ++jj) {
                 const QQmlEnumValue &value = enumData->values.at(jj);
@@ -427,7 +400,6 @@ void QQmlTypePrivate::insertEnumsFromPropertyCache(const QQmlPropertyCache *cach
             scopedEnums << scoped;
             scopedEnumIndex.insert(enumData->name, scopedEnums.count()-1);
         }
-        cache = cache->parent();
     }
     insertEnums(cppMetaObject);
 }
@@ -472,37 +444,43 @@ QString QQmlType::qmlTypeName() const
     return d->name;
 }
 
+/*!
+   \internal
+   Allocates and initializes an object if the type is creatable.
+   Returns a pointer to the object, or nullptr if the type was
+   not creatable.
+ */
 QObject *QQmlType::create() const
+{
+    void *unused;
+    return create(&unused, 0);
+}
+
+/*!
+   \internal
+   \brief Like create without arguments, but allocates some extra space after the object.
+   \param memory An out-only argument. *memory will point to the start of the additionally
+                 allocated memory.
+   \param additionalMemory The amount of extra memory in bytes that shoudld be allocated.
+
+   \note This function is used to allocate the QQmlData next to the object in the
+   QQmlObjectCreator.
+
+   \overload
+ */
+QObject *QQmlType::create(void **memory, size_t additionalMemory) const
 {
     if (!d || !isCreatable())
         return nullptr;
 
     d->init();
 
-    QObject *rv = (QObject *)operator new(d->extraData.cd->allocationSize);
-    d->extraData.cd->newFunc(rv);
-
-    if (rv && !d->metaObjects.isEmpty())
-        (void)new QQmlProxyMetaObject(rv, &d->metaObjects);
-
-    return rv;
-}
-
-void QQmlType::create(QObject **out, void **memory, size_t additionalMemory) const
-{
-    if (!d || !isCreatable())
-        return;
-
-    d->init();
-
     QObject *rv = (QObject *)operator new(d->extraData.cd->allocationSize + additionalMemory);
-    d->extraData.cd->newFunc(rv);
+    d->extraData.cd->newFunc(rv, d->extraData.cd->userdata);
 
-    if (rv && !d->metaObjects.isEmpty())
-        (void)new QQmlProxyMetaObject(rv, &d->metaObjects);
-
-    *out = rv;
+    createProxy(rv);
     *memory = ((char *)rv) + d->extraData.cd->allocationSize;
+    return rv;
 }
 
 QQmlType::SingletonInstanceInfo *QQmlType::singletonInstanceInfo() const
@@ -521,6 +499,13 @@ QQmlCustomParser *QQmlType::customParser() const
     if (d->regType != CppType)
         return nullptr;
     return d->extraData.cd->customParser;
+}
+
+QQmlType::CreateValueTypeFunc QQmlType::createValueTypeFunction() const
+{
+    if (!d || d->regType != CppType)
+        return nullptr;
+    return d->extraData.cd->createValueTypeFunc;
 }
 
 QQmlType::CreateFunc QQmlType::createFunction() const
@@ -544,9 +529,32 @@ bool QQmlType::isCreatable() const
 
 QQmlType::ExtensionFunc QQmlType::extensionFunction() const
 {
-    if (!d || d->regType != CppType)
+    if (!d)
         return nullptr;
-    return d->extraData.cd->extFunc;
+
+    switch (d->regType) {
+    case CppType:
+        return d->extraData.cd->extFunc;
+    case SingletonType:
+        return d->extraData.sd->extFunc;
+    default:
+        return nullptr;
+    }
+}
+
+const QMetaObject *QQmlType::extensionMetaObject() const
+{
+    if (!d)
+        return nullptr;
+
+    switch (d->regType) {
+    case CppType:
+        return d->extraData.cd->extMetaObject;
+    case SingletonType:
+        return d->extraData.sd->extMetaObject;
+    default:
+        return nullptr;
+    }
 }
 
 bool QQmlType::isExtendedType() const
@@ -592,14 +600,24 @@ bool QQmlType::isQJSValueSingleton() const
     return d && d->regType == SingletonType && d->extraData.sd->singletonInstanceInfo->scriptCallback;
 }
 
-int QQmlType::typeId() const
+bool QQmlType::isSequentialContainer() const
 {
-    return d ? d->typeId : -1;
+    return d && d->regType == SequentialContainerType;
 }
 
-int QQmlType::qListTypeId() const
+QMetaType QQmlType::typeId() const
 {
-    return d ? d->listId : -1;
+    return d ? d->typeId : QMetaType{};
+}
+
+QMetaType QQmlType::qListTypeId() const
+{
+    return d ? d->listId : QMetaType{};
+}
+
+QMetaSequence QQmlType::listMetaSequence() const
+{
+    return isSequentialContainer() ? *d->extraData.ld : QMetaSequence();
 }
 
 const QMetaObject *QQmlType::metaObject() const
@@ -629,9 +647,9 @@ bool QQmlType::containsRevisionedAttributes() const
     return d->containsRevisionedAttributes;
 }
 
-int QQmlType::metaObjectRevision() const
+QTypeRevision QQmlType::metaObjectRevision() const
 {
-    return d ? d->revision : -1;
+    return d ? d->revision : QTypeRevision();
 }
 
 QQmlAttachedPropertiesFunc QQmlType::attachedPropertiesFunction(QQmlEnginePrivate *engine) const
@@ -647,20 +665,6 @@ const QMetaObject *QQmlType::attachedPropertiesType(QQmlEnginePrivate *engine) c
         return base->extraData.cd->attachedPropertiesType;
     return nullptr;
 }
-
-#if QT_DEPRECATED_SINCE(5, 14)
-/*
-This is the id passed to qmlAttachedPropertiesById().  This is different from the index
-for the case that a single class is registered under two or more names (eg. Item in
-Qt 4.7 and QtQuick 1.0).
-*/
-int QQmlType::attachedPropertiesId(QQmlEnginePrivate *engine) const
-{
-    if (const QQmlTypePrivate *base = d->attachedPropertiesBase(engine))
-        return base->index;
-    return -1;
-}
-#endif
 
 int QQmlType::parserStatusCast() const
 {
@@ -683,6 +687,13 @@ int QQmlType::propertyValueInterceptorCast() const
     return d->extraData.cd->propertyValueInterceptorCast;
 }
 
+int QQmlType::finalizerCast() const
+{
+    if (!d || d->regType != CppType)
+        return -1;
+    return d->extraData.cd->finalizerCast;
+}
+
 const char *QQmlType::interfaceIId() const
 {
     if (!d || d->regType != InterfaceType)
@@ -699,7 +710,7 @@ bool QQmlType::isInlineComponentType() const {
     return d ? d->regType == QQmlType::InlineComponentType : false;
 }
 
-int QQmlType::inlineComponendId() const {
+int QQmlType::inlineComponentId() const {
     bool ok = false;
     if (d->regType == QQmlType::RegistrationType::InlineComponentType) {
         Q_ASSERT(d->extraData.id->objectId != -1);
@@ -714,7 +725,7 @@ QUrl QQmlType::sourceUrl() const
     auto url = d ? d->sourceUrl() : QUrl();
     if (url.isValid() && d->regType == QQmlType::RegistrationType::InlineComponentType && d->extraData.id->objectId) {
         Q_ASSERT(url.hasFragment());
-        url.setFragment(QString::number(inlineComponendId()));
+        url.setFragment(QString::number(inlineComponentId()));
     }
     return url;
 }
@@ -806,7 +817,7 @@ int QQmlType::scopedEnumIndex(QQmlEnginePrivate *engine, const QString &name, bo
 
 int QQmlType::scopedEnumValue(QQmlEnginePrivate *engine, int index, const QV4::String *name, bool *ok) const
 {
-    Q_UNUSED(engine)
+    Q_UNUSED(engine);
     Q_ASSERT(ok);
     *ok = true;
 
@@ -823,7 +834,7 @@ int QQmlType::scopedEnumValue(QQmlEnginePrivate *engine, int index, const QV4::S
 
 int QQmlType::scopedEnumValue(QQmlEnginePrivate *engine, int index, const QString &name, bool *ok) const
 {
-    Q_UNUSED(engine)
+    Q_UNUSED(engine);
     Q_ASSERT(ok);
     *ok = true;
 
@@ -860,7 +871,7 @@ int QQmlType::scopedEnumValue(QQmlEnginePrivate *engine, const QByteArray &scope
     return -1;
 }
 
-int QQmlType::scopedEnumValue(QQmlEnginePrivate *engine, const QStringRef &scopedEnumName, const QStringRef &name, bool *ok) const
+int QQmlType::scopedEnumValue(QQmlEnginePrivate *engine, QStringView scopedEnumName, QStringView name, bool *ok) const
 {
     Q_ASSERT(ok);
     if (d) {
@@ -882,7 +893,7 @@ int QQmlType::scopedEnumValue(QQmlEnginePrivate *engine, const QStringRef &scope
     return -1;
 }
 
-int QQmlType::inlineComponentObjectId()
+int QQmlType::inlineComponentObjectId() const
 {
     if (!isInlineComponentType())
         return -1;
@@ -974,6 +985,12 @@ QString QQmlType::pendingResolutionName() const
 {
     Q_ASSERT(d && d->regType == QQmlType::RegistrationType::InlineComponentType);
     return d->extraData.id->inlineComponentName;
+}
+
+void QQmlType::createProxy(QObject *instance) const
+{
+    if (!d->metaObjects.isEmpty())
+        (void)new QQmlProxyMetaObject(instance, &d->metaObjects);
 }
 
 QT_END_NAMESPACE

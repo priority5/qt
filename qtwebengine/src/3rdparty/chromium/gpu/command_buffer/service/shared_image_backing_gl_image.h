@@ -5,10 +5,12 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_BACKING_GL_IMAGE_H_
 #define GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_BACKING_GL_IMAGE_H_
 
+#include "base/memory/raw_ptr.h"
 #include "gpu/command_buffer/service/shared_image_backing.h"
 #include "gpu/command_buffer/service/shared_image_backing_gl_common.h"
 #include "gpu/gpu_gles2_export.h"
 #include "ui/gl/gl_fence.h"
+#include "ui/gl/gl_image_memory.h"
 
 namespace gpu {
 
@@ -40,8 +42,8 @@ class SharedImageRepresentationGLTextureImpl
   bool BeginAccess(GLenum mode) override;
   void EndAccess() override;
 
-  SharedImageRepresentationGLTextureClient* const client_ = nullptr;
-  gles2::Texture* texture_;
+  const raw_ptr<SharedImageRepresentationGLTextureClient> client_ = nullptr;
+  raw_ptr<gles2::Texture> texture_;
   GLenum mode_ = 0;
 };
 
@@ -69,7 +71,7 @@ class SharedImageRepresentationGLTexturePassthroughImpl
   bool BeginAccess(GLenum mode) override;
   void EndAccess() override;
 
-  SharedImageRepresentationGLTextureClient* const client_ = nullptr;
+  const raw_ptr<SharedImageRepresentationGLTextureClient> client_ = nullptr;
   scoped_refptr<gles2::TexturePassthrough> texture_passthrough_;
   GLenum mode_ = 0;
 };
@@ -101,6 +103,10 @@ class SharedImageRepresentationSkiaImpl : public SharedImageRepresentationSkia {
       const SkSurfaceProps& surface_props,
       std::vector<GrBackendSemaphore>* begin_semaphores,
       std::vector<GrBackendSemaphore>* end_semaphores) override;
+  sk_sp<SkPromiseImageTexture> BeginWriteAccess(
+      std::vector<GrBackendSemaphore>* begin_semaphores,
+      std::vector<GrBackendSemaphore>* end_semaphore,
+      std::unique_ptr<GrBackendSurfaceMutableState>* end_state) override;
   void EndWriteAccess(sk_sp<SkSurface> surface) override;
   sk_sp<SkPromiseImageTexture> BeginReadAccess(
       std::vector<GrBackendSemaphore>* begin_semaphores,
@@ -110,13 +116,13 @@ class SharedImageRepresentationSkiaImpl : public SharedImageRepresentationSkia {
 
   void CheckContext();
 
-  SharedImageRepresentationGLTextureClient* const client_ = nullptr;
+  const raw_ptr<SharedImageRepresentationGLTextureClient> client_ = nullptr;
   scoped_refptr<SharedContextState> context_state_;
   sk_sp<SkPromiseImageTexture> promise_texture_;
 
-  SkSurface* write_surface_ = nullptr;
+  raw_ptr<SkSurface> write_surface_ = nullptr;
 #if DCHECK_IS_ON()
-  gl::GLContext* context_ = nullptr;
+  raw_ptr<gl::GLContext> context_ = nullptr;
 #endif
 };
 
@@ -131,12 +137,28 @@ class SharedImageRepresentationOverlayImpl
   ~SharedImageRepresentationOverlayImpl() override;
 
  private:
-  bool BeginReadAccess() override;
-  void EndReadAccess() override;
+  bool BeginReadAccess(std::vector<gfx::GpuFence>* acquire_fences) override;
+  void EndReadAccess(gfx::GpuFenceHandle release_fence) override;
   gl::GLImage* GetGLImage() override;
-  std::unique_ptr<gfx::GpuFence> GetReadFence() override;
 
   scoped_refptr<gl::GLImage> gl_image_;
+};
+
+class SharedImageRepresentationMemoryImpl
+    : public SharedImageRepresentationMemory {
+ public:
+  SharedImageRepresentationMemoryImpl(
+      SharedImageManager* manager,
+      SharedImageBacking* backing,
+      MemoryTypeTracker* tracker,
+      scoped_refptr<gl::GLImageMemory> image_memory);
+  ~SharedImageRepresentationMemoryImpl() override;
+
+ protected:
+  SkPixmap BeginReadAccess() override;
+
+ private:
+  scoped_refptr<gl::GLImageMemory> image_memory_;
 };
 
 // Implementation of SharedImageBacking that creates a GL Texture that is backed
@@ -146,6 +168,21 @@ class GPU_GLES2_EXPORT SharedImageBackingGLImage
     : public SharedImageBacking,
       public SharedImageRepresentationGLTextureClient {
  public:
+  // Used when SharedImageBackingGLImage is serving as a temporary SharedImage
+  // wrapper to an already-allocated texture. The returned backing will not
+  // create any new textures.
+  static std::unique_ptr<SharedImageBackingGLImage> CreateFromGLTexture(
+      scoped_refptr<gl::GLImage> image,
+      const Mailbox& mailbox,
+      viz::ResourceFormat format,
+      const gfx::Size& size,
+      const gfx::ColorSpace& color_space,
+      GrSurfaceOrigin surface_origin,
+      SkAlphaType alpha_type,
+      uint32_t usage,
+      GLenum texture_target,
+      scoped_refptr<gles2::TexturePassthrough> wrapped_gl_texture);
+
   SharedImageBackingGLImage(
       scoped_refptr<gl::GLImage> image,
       const Mailbox& mailbox,
@@ -168,6 +205,7 @@ class GPU_GLES2_EXPORT SharedImageBackingGLImage
   GLenum GetGLTarget() const;
   GLuint GetGLServiceId() const;
   std::unique_ptr<gfx::GpuFence> GetLastWriteGpuFence();
+  void SetReleaseFence(gfx::GpuFenceHandle release_fence);
 
  private:
   // SharedImageBacking:
@@ -191,11 +229,15 @@ class GPU_GLES2_EXPORT SharedImageBackingGLImage
   std::unique_ptr<SharedImageRepresentationDawn> ProduceDawn(
       SharedImageManager* manager,
       MemoryTypeTracker* tracker,
-      WGPUDevice device) final;
+      WGPUDevice device,
+      WGPUBackendType backend_type) final;
   std::unique_ptr<SharedImageRepresentationSkia> ProduceSkia(
       SharedImageManager* manager,
       MemoryTypeTracker* tracker,
       scoped_refptr<SharedContextState> context_state) override;
+  std::unique_ptr<SharedImageRepresentationMemory> ProduceMemory(
+      SharedImageManager* manager,
+      MemoryTypeTracker* tracker) override;
   std::unique_ptr<SharedImageRepresentationGLTexture>
   ProduceRGBEmulationGLTexture(SharedImageManager* manager,
                                MemoryTypeTracker* tracker) override;
@@ -234,6 +276,10 @@ class GPU_GLES2_EXPORT SharedImageBackingGLImage
 
   sk_sp<SkPromiseImageTexture> cached_promise_texture_;
   std::unique_ptr<gl::GLFence> last_write_gl_fence_;
+
+  // If this backing was displayed as an overlay, this fence may be set.
+  // Wait on this fence before allowing another access.
+  gfx::GpuFenceHandle release_fence_;
 
   base::WeakPtrFactory<SharedImageBackingGLImage> weak_factory_;
 };

@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "extensions/common/api/file_system.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
@@ -50,6 +50,13 @@ class FileSystemDelegate {
 
   virtual base::FilePath GetDefaultDirectory() = 0;
 
+  // If policies set downloads as managed, and `extension` respects the
+  // downloads policies, then return the managed directory to use for save-as
+  // operations.
+  virtual base::FilePath GetManagedSaveAsDirectory(
+      content::BrowserContext* browser_context,
+      const Extension& extension) = 0;
+
   // Shows a dialog to prompt the user to select files/directories. Returns
   // false if the dialog cannot be shown, i.e. there is no valid WebContents.
   virtual bool ShowSelectFileDialog(
@@ -64,7 +71,7 @@ class FileSystemDelegate {
   // for a given app.
   virtual void ConfirmSensitiveDirectoryAccess(
       bool has_write_permission,
-      const base::string16& app_name,
+      const std::u16string& app_name,
       content::WebContents* web_contents,
       base::OnceClosure on_accept,
       base::OnceClosure on_cancel) = 0;
@@ -73,7 +80,7 @@ class FileSystemDelegate {
   // string ID is found.
   virtual int GetDescriptionIdForAcceptType(const std::string& accept_type) = 0;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Checks whether the extension can be granted access.
   virtual GrantVolumesMode GetGrantVolumesMode(
       content::BrowserContext* browser_context,

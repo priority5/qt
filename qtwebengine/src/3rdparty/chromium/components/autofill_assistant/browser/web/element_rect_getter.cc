@@ -34,24 +34,24 @@ ElementRectGetter::ElementRectGetter(DevtoolsClient* devtools_client)
 
 ElementRectGetter::~ElementRectGetter() = default;
 
-void ElementRectGetter::Start(std::unique_ptr<ElementFinder::Result> element,
+void ElementRectGetter::Start(std::unique_ptr<ElementFinderResult> element,
                               ElementRectCallback callback) {
   GetBoundingClientRect(std::move(element), 0, RectF(), std::move(callback));
 }
 
 void ElementRectGetter::GetBoundingClientRect(
-    std::unique_ptr<ElementFinder::Result> element,
+    std::unique_ptr<ElementFinderResult> element,
     size_t index,
     const RectF& stacked_rect,
     ElementRectCallback callback) {
   std::string object_id;
   std::string node_frame_id;
-  if (index < element->frame_stack.size()) {
-    object_id = element->frame_stack[index].object_id;
-    node_frame_id = element->frame_stack[index].node_frame_id;
+  if (index < element->frame_stack().size()) {
+    object_id = element->frame_stack()[index].object_id;
+    node_frame_id = element->frame_stack()[index].node_frame_id;
   } else {
-    object_id = element->object_id;
-    node_frame_id = element->node_frame_id;
+    object_id = element->object_id();
+    node_frame_id = element->node_frame_id();
   }
 
   std::vector<std::unique_ptr<runtime::CallArgument>> arguments;
@@ -75,7 +75,7 @@ void ElementRectGetter::GetBoundingClientRect(
 
 void ElementRectGetter::OnGetClientRectResult(
     ElementRectCallback callback,
-    std::unique_ptr<ElementFinder::Result> element,
+    std::unique_ptr<ElementFinderResult> element,
     size_t index,
     const RectF& stacked_rect,
     const DevtoolsClient::ReplyStatus& reply_status,
@@ -84,13 +84,15 @@ void ElementRectGetter::OnGetClientRectResult(
       CheckJavaScriptResult(reply_status, result.get(), __FILE__, __LINE__);
   if (!status.ok() || !result->GetResult()->HasValue() ||
       !result->GetResult()->GetValue()->is_list() ||
-      result->GetResult()->GetValue()->GetList().size() != 4u) {
+      result->GetResult()->GetValue()->GetListDeprecated().size() != 4u) {
     VLOG(2) << __func__ << " Failed to get element rect: " << status;
-    std::move(callback).Run(false, RectF());
+    std::move(callback).Run(
+        JavaScriptErrorStatus(reply_status, __FILE__, __LINE__, nullptr),
+        RectF());
     return;
   }
 
-  const auto& list = result->GetResult()->GetValue()->GetList();
+  const auto& list = result->GetResult()->GetValue()->GetListDeprecated();
   // Value::GetDouble() is safe to call without checking the value type; it'll
   // return 0.0 if the value has the wrong type.
 
@@ -107,12 +109,13 @@ void ElementRectGetter::OnGetClientRectResult(
     rect.bottom = std::min(stacked_rect.bottom, stacked_rect.top + rect.bottom);
   }
 
-  if (index >= element->frame_stack.size()) {
-    std::move(callback).Run(true, rect);
-  } else {
-    GetBoundingClientRect(std::move(element), index + 1, rect,
-                          std::move(callback));
+  if (index >= element->frame_stack().size()) {
+    std::move(callback).Run(OkClientStatus(), rect);
+    return;
   }
+
+  GetBoundingClientRect(std::move(element), index + 1, rect,
+                        std::move(callback));
 }
 
 }  // namespace autofill_assistant

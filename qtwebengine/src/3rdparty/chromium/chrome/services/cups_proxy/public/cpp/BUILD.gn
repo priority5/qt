@@ -18,14 +18,15 @@ source_set("cpp") {
     "type_conversions.h",
   ]
 
-  deps = [ "//base" ]
+  deps = [
+    "//base",
+    "//chromeos/printing",
+  ]
 
   public_deps = [
     "//chrome/services/ipp_parser/public/cpp",
-    "//printing",
+    "//printing/backend",
   ]
-
-  configs += [ "//printing:cups" ]
 }
 
 source_set("unit_tests") {
@@ -34,6 +35,7 @@ source_set("unit_tests") {
   deps = [
     ":cpp",
     "//base",
+    "//chromeos/printing",
     "//testing/gmock",
     "//testing/gtest",
   ]

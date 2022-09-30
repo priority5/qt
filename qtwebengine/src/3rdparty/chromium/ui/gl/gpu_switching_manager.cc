@@ -4,6 +4,8 @@
 
 #include "ui/gl/gpu_switching_manager.h"
 
+#include "base/observer_list.h"
+
 namespace ui {
 
 // static
@@ -42,6 +44,12 @@ void GpuSwitchingManager::NotifyDisplayRemoved() {
   base::AutoLock auto_lock(lock_);
   for (GpuSwitchingObserver& observer : observer_list_)
     observer.OnDisplayRemoved();
+}
+
+void GpuSwitchingManager::NotifyDisplayMetricsChanged() {
+  base::AutoLock auto_lock(lock_);
+  for (GpuSwitchingObserver& observer : observer_list_)
+    observer.OnDisplayMetricsChanged();
 }
 
 }  // namespace ui

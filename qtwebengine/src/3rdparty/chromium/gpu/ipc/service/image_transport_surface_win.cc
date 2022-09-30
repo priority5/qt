@@ -27,17 +27,17 @@ gl::DirectCompositionSurfaceWin::Settings
 CreateDirectCompositionSurfaceSettings(
     const GpuDriverBugWorkarounds& workarounds) {
   gl::DirectCompositionSurfaceWin::Settings settings;
+  settings.no_downscaled_overlay_promotion =
+      workarounds.no_downscaled_overlay_promotion;
   settings.disable_nv12_dynamic_textures =
       workarounds.disable_nv12_dynamic_textures;
-  settings.disable_larger_than_screen_overlays =
-      workarounds.disable_larger_than_screen_overlays;
   settings.disable_vp_scaling = workarounds.disable_vp_scaling;
   settings.use_angle_texture_offset = features::IsUsingSkiaRenderer();
-  settings.reset_vp_when_colorspace_changes =
-      workarounds.reset_vp_when_colorspace_changes;
   settings.force_root_surface_full_damage =
       features::IsUsingSkiaRenderer() &&
       gl::ShouldForceDirectCompositionRootSurfaceFullDamage();
+  settings.force_root_surface_full_damage_always =
+      workarounds.force_direct_composition_full_damage_always;
   return settings;
 }
 }  // namespace

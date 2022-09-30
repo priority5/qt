@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env vpython3
 # Copyright 2020 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,7 +8,7 @@ The main contract is that the caller passes the arguments:
 
   --isolated-script-test-output=[FILENAME]
 json is written to that file in the format:
-https://chromium.googlesource.com/chromium/src/+/master/docs/testing/json_test_results_format.md
+https://chromium.googlesource.com/chromium/src/+/main/docs/testing/json_test_results_format.md
 
 Optional argument:
 
@@ -31,14 +31,17 @@ import sys
 import tempfile
 import traceback
 
-# Add //src/testing into sys.path for importing xvfb and test_env, and
-# //src/testing/scripts for importing common.
-d = os.path.dirname
-THIS_DIR = d(os.path.abspath(__file__))
-CHROMIUM_SRC_DIR = d(d(d(THIS_DIR)))
-sys.path.insert(0, os.path.join(CHROMIUM_SRC_DIR, 'testing'))
-sys.path.insert(0, os.path.join(CHROMIUM_SRC_DIR, 'testing', 'scripts'))
 
+def _AddToPathIfNeeded(path):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+
+_AddToPathIfNeeded(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src', 'tests', 'py_utils')))
+import angle_path_util
+
+angle_path_util.AddDepsDirToPath('testing/scripts')
 import common
 import xvfb
 import test_env
@@ -57,11 +60,13 @@ def IsWindows():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('executable', help='Test executable.')
-    parser.add_argument('--isolated-script-test-output', type=str, required=True)
-    # TODO(jmadill): Remove when removed from the recipes. http://anglebug.com/3162
-    parser.add_argument('--isolated-script-test-perf-output', type=str, required=False)
-    parser.add_argument('--isolated-script-test-filter', type=str, required=False)
+    parser.add_argument('--isolated-script-test-output', type=str)
+    parser.add_argument('--isolated-script-test-filter', type=str)
     parser.add_argument('--xvfb', help='Start xvfb.', action='store_true')
+
+    # Kept for compatiblity.
+    # TODO(jmadill): Remove when removed from the recipes. http://crbug.com/954415
+    parser.add_argument('--isolated-script-test-perf-output', type=str)
 
     args, extra_flags = parser.parse_known_args()
 
@@ -73,6 +78,9 @@ def main():
     if 'GTEST_SHARD_INDEX' in env:
         extra_flags += ['--shard-index=' + env['GTEST_SHARD_INDEX']]
         env.pop('GTEST_SHARD_INDEX')
+    if 'ISOLATED_OUTDIR' in env:
+        extra_flags += ['--isolated-outdir=' + env['ISOLATED_OUTDIR']]
+        env.pop('ISOLATED_OUTDIR')
 
     # Assume we want to set up the sandbox environment variables all the
     # time; doing so is harmless on non-Linux platforms and is needed

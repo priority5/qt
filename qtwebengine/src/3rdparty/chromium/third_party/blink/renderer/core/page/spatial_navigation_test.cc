@@ -6,11 +6,11 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
-#include "third_party/blink/renderer/core/exported/web_remote_frame_impl.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/frame/web_remote_frame_impl.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
@@ -71,10 +71,6 @@ class SpatialNavigationTest : public RenderingTest {
               LeftSideOfVisualViewport());
   }
 
-  void UpdateAllLifecyclePhases(LocalFrameView* frame_view) {
-    frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
-  }
-
   void AssertNormalizedHeight(Element* e, int line_height, bool will_shrink) {
     PhysicalRect search_origin =
         SearchOrigin(RootViewport(e->GetDocument().GetFrame()), e,
@@ -128,7 +124,7 @@ TEST_F(SpatialNavigationTest, RootFramesVisualViewport) {
   // Test RootViewport with a pinched viewport.
   VisualViewport& visual_viewport = GetFrame().GetPage()->GetVisualViewport();
   visual_viewport.SetScale(2);
-  visual_viewport.SetLocation(FloatPoint(200, 200));
+  visual_viewport.SetLocation(gfx::PointF(200, 200));
 
   LocalFrameView* root_frame_view = GetFrame().LocalFrameRoot().View();
   const PhysicalRect roots_visible_doc_rect(
@@ -168,7 +164,7 @@ TEST_F(SpatialNavigationTest, FindContainerWhenEnclosingContainerIsIframe) {
       "<!DOCTYPE html>"
       "<a>link</a>");
 
-  UpdateAllLifecyclePhases(ChildDocument().View());
+  UpdateAllLifecyclePhasesForTest();
   Element* iframe = GetDocument().QuerySelector("iframe");
   Element* link = ChildDocument().QuerySelector("a");
   Node* enclosing_container = ScrollableAreaOrDocumentOf(link);
@@ -528,7 +524,7 @@ TEST_F(SpatialNavigationTest,
       "<!DOCTYPE html>"
       "<a id='link'>link</a>");
 
-  UpdateAllLifecyclePhases(ChildDocument().View());
+  UpdateAllLifecyclePhasesForTest();
   Element* link = ChildDocument().QuerySelector("a");
   Element* iframe = GetDocument().QuerySelector("iframe");
 
@@ -564,7 +560,7 @@ TEST_F(SpatialNavigationTest, DivsCanClipIframes) {
       "<!DOCTYPE html>"
       "<a>link</a>");
 
-  UpdateAllLifecyclePhases(ChildDocument().View());
+  UpdateAllLifecyclePhasesForTest();
   Element* div = GetDocument().QuerySelector("div");
   Element* iframe = GetDocument().QuerySelector("iframe");
   Element* link = ChildDocument().QuerySelector("a");
@@ -607,7 +603,7 @@ TEST_F(SpatialNavigationTest, PartiallyVisibleIFrame) {
       "</style>"
       "<a id='child'>link</a>");
 
-  UpdateAllLifecyclePhases(ChildDocument().View());
+  UpdateAllLifecyclePhasesForTest();
   Element* child_element = ChildDocument().getElementById("child");
   Node* enclosing_container = ScrollableAreaOrDocumentOf(child_element);
   EXPECT_EQ(enclosing_container, ChildDocument());
@@ -658,7 +654,7 @@ TEST_F(SpatialNavigationTest, BottomOfPinchedViewport) {
   // Now, test SearchOrigin with a pinched viewport.
   VisualViewport& visual_viewport = GetFrame().GetPage()->GetVisualViewport();
   visual_viewport.SetScale(2);
-  visual_viewport.SetLocation(FloatPoint(200, 200));
+  visual_viewport.SetLocation(gfx::PointF(200, 200));
   origin = SearchOrigin(RootViewport(&GetFrame()), nullptr,
                         SpatialNavigationDirection::kUp);
   EXPECT_EQ(origin.Height(), 0);
@@ -788,6 +784,9 @@ TEST_F(SpatialNavigationTest, InlineImageLinkWithLineHeight) {
 }
 
 TEST_F(SpatialNavigationTest, InlineImageTextLinkWithLineHeight) {
+  // Fails when LayoutNG is disabled. See crbug.com/1160211
+  if (!RuntimeEnabledFeatures::LayoutNGEnabled())
+    return;
   LoadAhem();
   SetBodyInnerHTML(
       "<!DOCTYPE html>"
@@ -813,6 +812,9 @@ TEST_F(SpatialNavigationTest, InlineImageTextLinkWithLineHeight) {
 }
 
 TEST_F(SpatialNavigationTest, InlineLinkWithInnerBlock) {
+  // Fails when LayoutNG is disabled. See crbug.com/1160211
+  if (!RuntimeEnabledFeatures::LayoutNGEnabled())
+    return;
   LoadAhem();
   SetBodyInnerHTML(
       "<!DOCTYPE html>"
@@ -958,6 +960,9 @@ TEST_F(SpatialNavigationTest, NormalizedLineBrokenLink) {
 }
 
 TEST_F(SpatialNavigationTest, NormalizedLineBrokenLinkWithImg) {
+  // Fails when LayoutNG is disabled. See crbug.com/1160211
+  if (!RuntimeEnabledFeatures::LayoutNGEnabled())
+    return;
   LoadAhem();
   SetBodyInnerHTML(
       "<!DOCTYPE html>"
@@ -1107,7 +1112,7 @@ TEST_F(SpatialNavigationTest, TopOfPinchedViewport) {
   // Now, test SearchOrigin with a pinched viewport.
   VisualViewport& visual_viewport = GetFrame().GetPage()->GetVisualViewport();
   visual_viewport.SetScale(2);
-  visual_viewport.SetLocation(FloatPoint(200, 200));
+  visual_viewport.SetLocation(gfx::PointF(200, 200));
   origin = SearchOrigin(RootViewport(&GetFrame()), nullptr,
                         SpatialNavigationDirection::kDown);
   EXPECT_EQ(origin.Height(), 0);
@@ -1128,8 +1133,8 @@ TEST_F(SpatialNavigationTest, HasRemoteFrame) {
                                      "<iframe id='iframe'></iframe>",
                                      base_url);
 
-  webview->ResizeWithBrowserControls(IntSize(400, 400), 50, 0, false);
-  UpdateAllLifecyclePhases(webview->MainFrameImpl()->GetFrame()->View());
+  webview->ResizeWithBrowserControls(gfx::Size(400, 400), 50, 0, false);
+  UpdateAllLifecyclePhasesForTest();
 
   Element* iframe =
       webview->MainFrameImpl()->GetFrame()->GetDocument()->getElementById(
@@ -1230,7 +1235,7 @@ TEST_F(FocuslessSpatialNavigationSimTest, OpenSelectPopup) {
   if (!RuntimeEnabledFeatures::PagePopupEnabled())
     return;
 
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   WebView().MainFrameWidget()->SetFocus(true);
   WebView().SetIsActive(true);
 

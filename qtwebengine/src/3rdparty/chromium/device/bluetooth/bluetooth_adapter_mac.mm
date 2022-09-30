@@ -4,6 +4,7 @@
 
 #include "device/bluetooth/bluetooth_adapter_mac.h"
 
+#import <CoreBluetooth/CBManager.h>
 #include <CoreFoundation/CFNumber.h>
 #import <IOBluetooth/objc/IOBluetoothDevice.h>
 #import <IOBluetooth/objc/IOBluetoothHostController.h>
@@ -23,9 +24,8 @@
 #include "base/mac/scoped_ioobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -219,6 +219,25 @@ bool BluetoothAdapterMac::IsPresent() const {
   return CFBooleanGetValue(connected);
 }
 
+BluetoothAdapter::PermissionStatus BluetoothAdapterMac::GetOsPermissionStatus()
+    const {
+  if (@available(macOS 10.15.0, *)) {
+    switch (CBCentralManager.authorization) {
+      case CBManagerAuthorizationNotDetermined:
+        return PermissionStatus::kUndetermined;
+      case CBManagerAuthorizationRestricted:
+      case CBManagerAuthorizationDenied:
+        return PermissionStatus::kDenied;
+      case CBManagerAuthorizationAllowedAlways:
+        return PermissionStatus::kAllowed;
+    }
+  }
+
+  // There are no Core Bluetooth permissions before macOS 10.15 so assume we
+  // always have permission.
+  return PermissionStatus::kAllowed;
+}
+
 bool BluetoothAdapterMac::IsPowered() const {
   const_cast<BluetoothAdapterMac*>(this)->LazyInitialize();
   return classic_powered_ || IsLowEnergyPowered();
@@ -308,6 +327,16 @@ void BluetoothAdapterMac::RegisterAdvertisement(
 BluetoothLocalGattService* BluetoothAdapterMac::GetGattService(
     const std::string& identifier) const {
   return nullptr;
+}
+
+BluetoothAdapter::DeviceList BluetoothAdapterMac::GetDevices() {
+  LazyInitialize();
+  return BluetoothAdapter::GetDevices();
+}
+
+BluetoothAdapter::ConstDeviceList BluetoothAdapterMac::GetDevices() const {
+  const_cast<BluetoothAdapterMac*>(this)->LazyInitialize();
+  return BluetoothAdapter::GetDevices();
 }
 
 void BluetoothAdapterMac::ClassicDeviceFound(IOBluetoothDevice* device) {
@@ -580,7 +609,7 @@ void BluetoothAdapterMac::PollAdapter() {
       FROM_HERE,
       base::BindOnce(&BluetoothAdapterMac::PollAdapter,
                      weak_ptr_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kPollIntervalMs));
+      base::Milliseconds(kPollIntervalMs));
 }
 
 void BluetoothAdapterMac::ClassicDeviceAdded(IOBluetoothDevice* device) {
@@ -635,13 +664,13 @@ void BluetoothAdapterMac::LowEnergyDeviceUpdated(
   // https://developer.apple.com/documentation/corebluetooth/cbadvertisementdataserviceuuidskey
   BluetoothDevice::UUIDList advertised_uuids;
   NSArray* service_uuids =
-      [advertisement_data objectForKey:CBAdvertisementDataServiceUUIDsKey];
+      advertisement_data[CBAdvertisementDataServiceUUIDsKey];
   for (CBUUID* uuid in service_uuids) {
     advertised_uuids.push_back(
         BluetoothAdapterMac::BluetoothUUIDWithCBUUID(uuid));
   }
-  NSArray* overflow_service_uuids = [advertisement_data
-      objectForKey:CBAdvertisementDataOverflowServiceUUIDsKey];
+  NSArray* overflow_service_uuids =
+      advertisement_data[CBAdvertisementDataOverflowServiceUUIDsKey];
   for (CBUUID* uuid in overflow_service_uuids) {
     advertised_uuids.push_back(
         BluetoothAdapterMac::BluetoothUUIDWithCBUUID(uuid));
@@ -652,9 +681,9 @@ void BluetoothAdapterMac::LowEnergyDeviceUpdated(
   // https://developer.apple.com/documentation/corebluetooth/cbadvertisementdataservicedatakey
   BluetoothDevice::ServiceDataMap service_data_map;
   NSDictionary* service_data =
-      [advertisement_data objectForKey:CBAdvertisementDataServiceDataKey];
+      advertisement_data[CBAdvertisementDataServiceDataKey];
   for (CBUUID* uuid in service_data) {
-    NSData* data = [service_data objectForKey:uuid];
+    NSData* data = service_data[uuid];
     const uint8_t* bytes = static_cast<const uint8_t*>([data bytes]);
     size_t length = [data length];
     service_data_map.emplace(BluetoothAdapterMac::BluetoothUUIDWithCBUUID(uuid),
@@ -670,7 +699,7 @@ void BluetoothAdapterMac::LowEnergyDeviceUpdated(
   //
   BluetoothDevice::ManufacturerDataMap manufacturer_data_map;
   NSData* manufacturer_data =
-      [advertisement_data objectForKey:CBAdvertisementDataManufacturerDataKey];
+      advertisement_data[CBAdvertisementDataManufacturerDataKey];
   const uint8_t* bytes = static_cast<const uint8_t*>([manufacturer_data bytes]);
   size_t length = [manufacturer_data length];
   if (length > 1) {
@@ -684,31 +713,29 @@ void BluetoothAdapterMac::LowEnergyDeviceUpdated(
   //  0xXX: -127 to +127 dBm"
   // Core Specification Supplement (CSS) v7, Part 1.5
   // https://developer.apple.com/documentation/corebluetooth/cbadvertisementdatatxpowerlevelkey
-  NSNumber* tx_power =
-      [advertisement_data objectForKey:CBAdvertisementDataTxPowerLevelKey];
+  NSNumber* tx_power = advertisement_data[CBAdvertisementDataTxPowerLevelKey];
   int8_t clamped_tx_power = BluetoothDevice::ClampPower([tx_power intValue]);
 
   // Get the Advertising name
-  NSString* local_name =
-      [advertisement_data objectForKey:CBAdvertisementDataLocalNameKey];
+  NSString* local_name = advertisement_data[CBAdvertisementDataLocalNameKey];
 
   for (auto& observer : observers_) {
-    base::Optional<std::string> device_name_opt = device_mac->GetName();
-    base::Optional<std::string> local_name_opt =
+    absl::optional<std::string> device_name_opt = device_mac->GetName();
+    absl::optional<std::string> local_name_opt =
         base::SysNSStringToUTF8(local_name);
 
     observer.DeviceAdvertisementReceived(
         device_mac->GetAddress(), device_name_opt,
-        local_name == nil ? base::nullopt : local_name_opt, rssi,
-        tx_power == nil ? base::nullopt : base::make_optional(clamped_tx_power),
-        base::nullopt, /* TODO(crbug.com/588083) Implement appearance */
+        local_name == nil ? absl::nullopt : local_name_opt, rssi,
+        tx_power == nil ? absl::nullopt : absl::make_optional(clamped_tx_power),
+        absl::nullopt, /* TODO(crbug.com/588083) Implement appearance */
         advertised_uuids, service_data_map, manufacturer_data_map);
   }
 
   device_mac->UpdateAdvertisementData(
-      BluetoothDevice::ClampPower(rssi), base::nullopt /* flags */,
+      BluetoothDevice::ClampPower(rssi), absl::nullopt /* flags */,
       std::move(advertised_uuids),
-      tx_power == nil ? base::nullopt : base::make_optional(clamped_tx_power),
+      tx_power == nil ? absl::nullopt : absl::make_optional(clamped_tx_power),
       std::move(service_data_map), std::move(manufacturer_data_map));
 
   if (is_new_device) {
@@ -739,6 +766,11 @@ void BluetoothAdapterMac::LowEnergyCentralManagerUpdatedState() {
     DVLOG(1)
         << "Central no longer powered on. Notifying of device disconnection.";
     for (BluetoothDevice* device : GetDevices()) {
+      // GetDevices() returns instances of BluetoothClassicDeviceMac and
+      // BluetoothLowEnergyDeviceMac. The DidDisconnectPeripheral() method is
+      // only available on BluetoothLowEnergyDeviceMac.
+      if (!static_cast<BluetoothDeviceMac*>(device)->IsLowEnergyDevice())
+        continue;
       BluetoothLowEnergyDeviceMac* device_mac =
           static_cast<BluetoothLowEnergyDeviceMac*>(device);
       if (device_mac->IsGattConnected()) {
@@ -845,7 +877,7 @@ void BluetoothAdapterMac::DidFailToConnectPeripheral(CBPeripheral* peripheral,
   DVLOG(1) << *device_mac << ": Failed to connect to peripheral with error "
            << BluetoothAdapterMac::String(error)
            << ", error code: " << error_code;
-  device_mac->DidFailToConnectGatt(error_code);
+  device_mac->DidConnectGatt(error_code);
 }
 
 void BluetoothAdapterMac::DidDisconnectPeripheral(CBPeripheral* peripheral,
@@ -876,9 +908,16 @@ BluetoothAdapterMac::GetBluetoothLowEnergyDeviceMac(CBPeripheral* peripheral) {
       BluetoothLowEnergyDeviceMac::GetPeripheralHashAddress(peripheral);
   auto iter = devices_.find(device_address);
   if (iter == devices_.end()) {
-    return nil;
+    return nullptr;
   }
-  return static_cast<BluetoothLowEnergyDeviceMac*>(iter->second.get());
+  // device_mac can be BluetoothClassicDeviceMac* or
+  // BluetoothLowEnergyDeviceMac* To return valid BluetoothLowEnergyDeviceMac*
+  // we need to first check with IsLowEnergyDevice()
+  BluetoothDeviceMac* device_mac =
+      static_cast<BluetoothDeviceMac*>(iter->second.get());
+  return device_mac->IsLowEnergyDevice()
+             ? static_cast<BluetoothLowEnergyDeviceMac*>(device_mac)
+             : nullptr;
 }
 
 bool BluetoothAdapterMac::DoesCollideWithKnownDevice(

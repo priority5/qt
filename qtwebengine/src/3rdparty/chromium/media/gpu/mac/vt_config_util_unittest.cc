@@ -11,6 +11,7 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/strings/sys_string_conversions.h"
+#include "media/base/mac/color_space_util_mac.h"
 #include "media/formats/mp4/box_definitions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -57,7 +58,7 @@ base::span<const uint8_t> GetNestedDataValue(CFDictionaryRef dict,
 base::ScopedCFTypeRef<CVImageBufferRef> CreateCVImageBuffer(
     media::VideoColorSpace cs) {
   base::ScopedCFTypeRef<CFDictionaryRef> fmt(CreateFormatExtensions(
-      kCMVideoCodecType_H264, media::H264PROFILE_MAIN, cs, gl::HDRMetadata()));
+      kCMVideoCodecType_H264, media::H264PROFILE_MAIN, cs, gfx::HDRMetadata()));
 
   base::ScopedCFTypeRef<CVImageBufferRef> image_buffer;
   OSStatus err =
@@ -72,6 +73,34 @@ base::ScopedCFTypeRef<CVImageBufferRef> CreateCVImageBuffer(
   CVBufferSetAttachments(image_buffer.get(), fmt,
                          kCVAttachmentMode_ShouldNotPropagate);
   return image_buffer;
+}
+
+base::ScopedCFTypeRef<CMFormatDescriptionRef> CreateFormatDescription(
+    CFStringRef primaries,
+    CFStringRef transfer,
+    CFStringRef matrix) {
+  base::ScopedCFTypeRef<CFMutableDictionaryRef> extensions(
+      CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+                                &kCFTypeDictionaryKeyCallBacks,
+                                &kCFTypeDictionaryValueCallBacks));
+
+  if (primaries) {
+    CFDictionarySetValue(
+        extensions, kCMFormatDescriptionExtension_ColorPrimaries, primaries);
+  }
+  if (transfer) {
+    CFDictionarySetValue(
+        extensions, kCMFormatDescriptionExtension_TransferFunction, transfer);
+  }
+  if (matrix) {
+    CFDictionarySetValue(extensions, kCMFormatDescriptionExtension_YCbCrMatrix,
+                         matrix);
+  }
+  base::ScopedCFTypeRef<CMFormatDescriptionRef> result;
+  CMFormatDescriptionCreate(nullptr, kCMMediaType_Video,
+                            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                            extensions.get(), result.InitializeInto());
+  return result;
 }
 
 gfx::ColorSpace ToBT709_APPLE(gfx::ColorSpace cs) {
@@ -107,7 +136,7 @@ namespace media {
 TEST(VTConfigUtil, CreateFormatExtensions_H264_BT709) {
   base::ScopedCFTypeRef<CFDictionaryRef> fmt(
       CreateFormatExtensions(kCMVideoCodecType_H264, H264PROFILE_MAIN,
-                             VideoColorSpace::REC709(), base::nullopt));
+                             VideoColorSpace::REC709(), absl::nullopt));
   EXPECT_EQ("avc1", GetStrValue(fmt, kCMFormatDescriptionExtension_FormatName));
   EXPECT_EQ(24, GetIntValue(fmt, kCMFormatDescriptionExtension_Depth));
   EXPECT_EQ(kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
@@ -136,7 +165,7 @@ TEST(VTConfigUtil, CreateFormatExtensions_H264_BT2020_PQ) {
                       VideoColorSpace::TransferID::SMPTEST2084,
                       VideoColorSpace::MatrixID::BT2020_NCL,
                       gfx::ColorSpace::RangeID::FULL),
-      gl::HDRMetadata()));
+      gfx::HDRMetadata()));
   EXPECT_EQ("avc1", GetStrValue(fmt, kCMFormatDescriptionExtension_FormatName));
   EXPECT_EQ(24, GetIntValue(fmt, kCMFormatDescriptionExtension_Depth));
 
@@ -160,7 +189,7 @@ TEST(VTConfigUtil, CreateFormatExtensions_H264_BT2020_HLG) {
                       VideoColorSpace::TransferID::ARIB_STD_B67,
                       VideoColorSpace::MatrixID::BT2020_NCL,
                       gfx::ColorSpace::RangeID::FULL),
-      gl::HDRMetadata()));
+      gfx::HDRMetadata()));
   EXPECT_EQ("avc1", GetStrValue(fmt, kCMFormatDescriptionExtension_FormatName));
   EXPECT_EQ(24, GetIntValue(fmt, kCMFormatDescriptionExtension_Depth));
 
@@ -179,16 +208,16 @@ TEST(VTConfigUtil, CreateFormatExtensions_H264_BT2020_HLG) {
 
 TEST(VTConfigUtil, CreateFormatExtensions_HDRMetadata) {
   // Values from real YouTube HDR content.
-  gl::HDRMetadata hdr_meta;
+  gfx::HDRMetadata hdr_meta;
   hdr_meta.max_content_light_level = 1000;
   hdr_meta.max_frame_average_light_level = 600;
-  auto& mastering = hdr_meta.mastering_metadata;
-  mastering.luminance_min = 0;
-  mastering.luminance_max = 1000;
-  mastering.primary_r = gfx::PointF(0.68, 0.32);
-  mastering.primary_g = gfx::PointF(0.2649, 0.69);
-  mastering.primary_b = gfx::PointF(0.15, 0.06);
-  mastering.white_point = gfx::PointF(0.3127, 0.3290);
+  auto& cv_metadata = hdr_meta.color_volume_metadata;
+  cv_metadata.luminance_min = 0;
+  cv_metadata.luminance_max = 1000;
+  cv_metadata.primary_r = gfx::PointF(0.68, 0.32);
+  cv_metadata.primary_g = gfx::PointF(0.2649, 0.69);
+  cv_metadata.primary_b = gfx::PointF(0.15, 0.06);
+  cv_metadata.white_point = gfx::PointF(0.3127, 0.3290);
 
   base::ScopedCFTypeRef<CFDictionaryRef> fmt(CreateFormatExtensions(
       kCMVideoCodecType_H264, H264PROFILE_MAIN,
@@ -207,18 +236,18 @@ TEST(VTConfigUtil, CreateFormatExtensions_HDRMetadata) {
                                                  nullptr));
       mp4::MasteringDisplayColorVolume mdcv_box;
       ASSERT_TRUE(mdcv_box.Parse(box_reader.get()));
-      EXPECT_EQ(mdcv_box.display_primaries_gx, mastering.primary_g.x());
-      EXPECT_EQ(mdcv_box.display_primaries_gy, mastering.primary_g.y());
-      EXPECT_EQ(mdcv_box.display_primaries_bx, mastering.primary_b.x());
-      EXPECT_EQ(mdcv_box.display_primaries_by, mastering.primary_b.y());
-      EXPECT_EQ(mdcv_box.display_primaries_rx, mastering.primary_r.x());
-      EXPECT_EQ(mdcv_box.display_primaries_ry, mastering.primary_r.y());
-      EXPECT_EQ(mdcv_box.white_point_x, mastering.white_point.x());
-      EXPECT_EQ(mdcv_box.white_point_y, mastering.white_point.y());
+      EXPECT_EQ(mdcv_box.display_primaries_gx, cv_metadata.primary_g.x());
+      EXPECT_EQ(mdcv_box.display_primaries_gy, cv_metadata.primary_g.y());
+      EXPECT_EQ(mdcv_box.display_primaries_bx, cv_metadata.primary_b.x());
+      EXPECT_EQ(mdcv_box.display_primaries_by, cv_metadata.primary_b.y());
+      EXPECT_EQ(mdcv_box.display_primaries_rx, cv_metadata.primary_r.x());
+      EXPECT_EQ(mdcv_box.display_primaries_ry, cv_metadata.primary_r.y());
+      EXPECT_EQ(mdcv_box.white_point_x, cv_metadata.white_point.x());
+      EXPECT_EQ(mdcv_box.white_point_y, cv_metadata.white_point.y());
       EXPECT_EQ(mdcv_box.max_display_mastering_luminance,
-                mastering.luminance_max);
+                cv_metadata.luminance_max);
       EXPECT_EQ(mdcv_box.min_display_mastering_luminance,
-                mastering.luminance_min);
+                cv_metadata.luminance_min);
     }
 
     {
@@ -242,7 +271,7 @@ TEST(VTConfigUtil, CreateFormatExtensions_VP9Profile0) {
   constexpr VideoCodecProfile kTestProfile = VP9PROFILE_PROFILE0;
   const auto kTestColorSpace = VideoColorSpace::REC709();
   base::ScopedCFTypeRef<CFDictionaryRef> fmt(CreateFormatExtensions(
-      kCMVideoCodecType_VP9, kTestProfile, kTestColorSpace, base::nullopt));
+      kCMVideoCodecType_VP9, kTestProfile, kTestColorSpace, absl::nullopt));
   EXPECT_EQ(8, GetIntValue(fmt, base::SysUTF8ToCFStringRef(kBitDepthKey)));
 
   auto vpcc = GetNestedDataValue(
@@ -264,7 +293,7 @@ TEST(VTConfigUtil, CreateFormatExtensions_VP9Profile2) {
       VideoColorSpace::TransferID::SMPTEST2084,
       VideoColorSpace::MatrixID::BT2020_NCL, gfx::ColorSpace::RangeID::LIMITED);
   base::ScopedCFTypeRef<CFDictionaryRef> fmt(CreateFormatExtensions(
-      kCMVideoCodecType_VP9, kTestProfile, kTestColorSpace, base::nullopt));
+      kCMVideoCodecType_VP9, kTestProfile, kTestColorSpace, absl::nullopt));
   EXPECT_EQ(10, GetIntValue(fmt, base::SysUTF8ToCFStringRef(kBitDepthKey)));
 
   auto vpcc = GetNestedDataValue(
@@ -334,12 +363,10 @@ TEST(VTConfigUtil, GetImageBufferColorSpace_BT2020_PQ) {
   // When BT.2020 is unavailable the default should be BT.709.
   if (base::mac::IsAtLeastOS10_13()) {
     EXPECT_EQ(cs.ToGfxColorSpace(), image_buffer_cs);
-  } else if (base::mac::IsAtLeastOS10_11()) {
-    // 10.11 and 10.12 don't have HDR transfer functions.
+  } else {
+    // 10.12 doesn't have HDR transfer functions.
     cs.transfer = VideoColorSpace::TransferID::BT709;
     EXPECT_EQ(cs.ToGfxColorSpace(), image_buffer_cs);
-  } else {
-    EXPECT_EQ(gfx::ColorSpace::CreateREC709(), image_buffer_cs);
   }
 }
 
@@ -355,13 +382,29 @@ TEST(VTConfigUtil, GetImageBufferColorSpace_BT2020_HLG) {
   // When BT.2020 is unavailable the default should be BT.709.
   if (base::mac::IsAtLeastOS10_13()) {
     EXPECT_EQ(cs.ToGfxColorSpace(), image_buffer_cs);
-  } else if (base::mac::IsAtLeastOS10_11()) {
-    // 10.11 and 10.12 don't have HDR transfer functions.
+  } else {
+    // 10.12 doesn't have HDR transfer functions.
     cs.transfer = VideoColorSpace::TransferID::BT709;
     EXPECT_EQ(cs.ToGfxColorSpace(), image_buffer_cs);
-  } else {
-    EXPECT_EQ(gfx::ColorSpace::CreateREC709(), image_buffer_cs);
   }
+}
+
+TEST(VTConfigUtil, FormatDescriptionInvalid) {
+  auto format_descriptor =
+      CreateFormatDescription(CFSTR("Cows"), CFSTR("Go"), CFSTR("Moo"));
+  ASSERT_TRUE(format_descriptor);
+  auto cs = GetFormatDescriptionColorSpace(format_descriptor);
+  EXPECT_EQ(gfx::ColorSpace::CreateREC709(), cs);
+}
+
+TEST(VTConfigUtil, FormatDescriptionBT709) {
+  auto format_descriptor =
+      CreateFormatDescription(kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
+                              kCMFormatDescriptionTransferFunction_ITU_R_709_2,
+                              kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2);
+  ASSERT_TRUE(format_descriptor);
+  auto cs = GetFormatDescriptionColorSpace(format_descriptor);
+  EXPECT_EQ(ToBT709_APPLE(gfx::ColorSpace::CreateREC709()), cs);
 }
 
 }  // namespace media

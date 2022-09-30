@@ -34,8 +34,8 @@ std::vector<std::string> GetSomeRules() {
 }
 
 base::CommandLine::StringType AsciiToNativeString(std::string ascii) {
-#if defined(OS_WIN)
-  return base::ASCIIToUTF16(ascii);
+#if BUILDFLAG(IS_WIN)
+  return base::ASCIIToWide(ascii);
 #else
   return ascii;
 #endif

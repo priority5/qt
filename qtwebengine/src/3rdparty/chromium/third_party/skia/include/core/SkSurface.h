@@ -13,7 +13,9 @@
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkSurfaceProps.h"
 
+#if SK_SUPPORT_GPU
 #include "include/gpu/GrTypes.h"
+#endif
 
 #if defined(SK_BUILD_FOR_ANDROID) && __ANDROID_API__ >= 26
 #include <android/hardware_buffer.h>
@@ -31,9 +33,12 @@ class GrBackendRenderTarget;
 class GrBackendSemaphore;
 class GrBackendSurfaceMutableState;
 class GrBackendTexture;
-class GrContext;
+class GrDirectContext;
 class GrRecordingContext;
 class GrRenderTarget;
+enum GrSurfaceOrigin: int;
+
+namespace skgpu::graphite { class Recorder; }
 
 /** \class SkSurface
     SkSurface is responsible for managing the pixels that a canvas draws into. The pixels can be
@@ -206,7 +211,7 @@ public:
         @param releaseContext      state passed to textureReleaseProc
         @return                    SkSurface if all parameters are valid; otherwise, nullptr
     */
-    static sk_sp<SkSurface> MakeFromBackendTexture(GrContext* context,
+    static sk_sp<SkSurface> MakeFromBackendTexture(GrRecordingContext* context,
                                                    const GrBackendTexture& backendTexture,
                                                    GrSurfaceOrigin origin, int sampleCnt,
                                                    SkColorType colorType,
@@ -240,7 +245,7 @@ public:
         @param releaseContext           state passed to releaseProc
         @return                         SkSurface if all parameters are valid; otherwise, nullptr
     */
-    static sk_sp<SkSurface> MakeFromBackendRenderTarget(GrContext* context,
+    static sk_sp<SkSurface> MakeFromBackendRenderTarget(GrRecordingContext* context,
                                                 const GrBackendRenderTarget& backendRenderTarget,
                                                 GrSurfaceOrigin origin,
                                                 SkColorType colorType,
@@ -249,16 +254,109 @@ public:
                                                 RenderTargetReleaseProc releaseProc = nullptr,
                                                 ReleaseContext releaseContext = nullptr);
 
-#if GR_TEST_UTILS
-    // TODO: Remove this.
-    static sk_sp<SkSurface> MakeFromBackendTextureAsRenderTarget(GrContext* context,
-                                                            const GrBackendTexture& backendTexture,
-                                                            GrSurfaceOrigin origin,
-                                                            int sampleCnt,
-                                                            SkColorType colorType,
-                                                            sk_sp<SkColorSpace> colorSpace,
-                                                            const SkSurfaceProps* surfaceProps);
+    /** Returns SkSurface on GPU indicated by context. Allocates memory for
+        pixels, based on the width, height, and SkColorType in SkImageInfo.  budgeted
+        selects whether allocation for pixels is tracked by context. imageInfo
+        describes the pixel format in SkColorType, and transparency in
+        SkAlphaType, and color matching in SkColorSpace.
+
+        sampleCount requests the number of samples per pixel.
+        Pass zero to disable multi-sample anti-aliasing.  The request is rounded
+        up to the next supported count, or rounded down if it is larger than the
+        maximum supported count.
+
+        surfaceOrigin pins either the top-left or the bottom-left corner to the origin.
+
+        shouldCreateWithMips hints that SkImage returned by makeImageSnapshot() is mip map.
+
+        If SK_SUPPORT_GPU is defined as zero, has no effect and returns nullptr.
+
+        @param context               GPU context
+        @param imageInfo             width, height, SkColorType, SkAlphaType, SkColorSpace;
+                                     width, or height, or both, may be zero
+        @param sampleCount           samples per pixel, or 0 to disable full scene anti-aliasing
+        @param surfaceProps          LCD striping orientation and setting for device independent
+                                     fonts; may be nullptr
+        @param shouldCreateWithMips  hint that SkSurface will host mip map images
+        @return                      SkSurface if all parameters are valid; otherwise, nullptr
+    */
+    static sk_sp<SkSurface> MakeRenderTarget(GrRecordingContext* context, SkBudgeted budgeted,
+                                             const SkImageInfo& imageInfo,
+                                             int sampleCount, GrSurfaceOrigin surfaceOrigin,
+                                             const SkSurfaceProps* surfaceProps,
+                                             bool shouldCreateWithMips = false);
+
+    /** Returns SkSurface on GPU indicated by context. Allocates memory for
+        pixels, based on the width, height, and SkColorType in SkImageInfo.  budgeted
+        selects whether allocation for pixels is tracked by context. imageInfo
+        describes the pixel format in SkColorType, and transparency in
+        SkAlphaType, and color matching in SkColorSpace.
+
+        sampleCount requests the number of samples per pixel.
+        Pass zero to disable multi-sample anti-aliasing.  The request is rounded
+        up to the next supported count, or rounded down if it is larger than the
+        maximum supported count.
+
+        SkSurface bottom-left corner is pinned to the origin.
+
+        @param context      GPU context
+        @param imageInfo    width, height, SkColorType, SkAlphaType, SkColorSpace,
+                            of raster surface; width, or height, or both, may be zero
+        @param sampleCount  samples per pixel, or 0 to disable multi-sample anti-aliasing
+        @param surfaceProps LCD striping orientation and setting for device independent
+                            fonts; may be nullptr
+        @return             SkSurface if all parameters are valid; otherwise, nullptr
+    */
+    static sk_sp<SkSurface> MakeRenderTarget(GrRecordingContext* context, SkBudgeted budgeted,
+                                             const SkImageInfo& imageInfo, int sampleCount,
+                                             const SkSurfaceProps* surfaceProps) {
+#if SK_SUPPORT_GPU
+        return MakeRenderTarget(context, budgeted, imageInfo, sampleCount,
+                                kBottomLeft_GrSurfaceOrigin, surfaceProps);
+#else
+        // TODO(kjlubick, scroggo) Remove this once Android is updated.
+        return nullptr;
 #endif
+    }
+
+    /** Returns SkSurface on GPU indicated by context. Allocates memory for
+        pixels, based on the width, height, and SkColorType in SkImageInfo.  budgeted
+        selects whether allocation for pixels is tracked by context. imageInfo
+        describes the pixel format in SkColorType, and transparency in
+        SkAlphaType, and color matching in SkColorSpace.
+
+        SkSurface bottom-left corner is pinned to the origin.
+
+        @param context    GPU context
+        @param imageInfo  width, height, SkColorType, SkAlphaType, SkColorSpace,
+                          of raster surface; width, or height, or both, may be zero
+        @return           SkSurface if all parameters are valid; otherwise, nullptr
+    */
+    static sk_sp<SkSurface> MakeRenderTarget(GrRecordingContext* context, SkBudgeted budgeted,
+                                             const SkImageInfo& imageInfo) {
+#if SK_SUPPORT_GPU
+        if (!imageInfo.width() || !imageInfo.height()) {
+            return nullptr;
+        }
+        return MakeRenderTarget(context, budgeted, imageInfo, 0, kBottomLeft_GrSurfaceOrigin,
+                                nullptr);
+#else
+        // TODO(kjlubick, scroggo) Remove this once Android is updated.
+        return nullptr;
+#endif
+    }
+
+    /** Returns SkSurface on GPU indicated by context that is compatible with the provided
+        characterization. budgeted selects whether allocation for pixels is tracked by context.
+
+        @param context           GPU context
+        @param characterization  description of the desired SkSurface
+        @return                  SkSurface if all parameters are valid; otherwise, nullptr
+    */
+    static sk_sp<SkSurface> MakeRenderTarget(GrRecordingContext* context,
+                                             const SkSurfaceCharacterization& characterization,
+                                             SkBudgeted budgeted);
+
 
 #if defined(SK_BUILD_FOR_ANDROID) && __ANDROID_API__ >= 26
     /** Private.
@@ -278,13 +376,19 @@ public:
         @param colorSpace      range of colors; may be nullptr
         @param surfaceProps    LCD striping orientation and setting for device independent
                                fonts; may be nullptr
+        @param fromWindow      Whether or not the AHardwareBuffer is part of an Android Window.
+                               Currently only used with Vulkan backend.
         @return                created SkSurface, or nullptr
     */
-    static sk_sp<SkSurface> MakeFromAHardwareBuffer(GrContext* context,
+    static sk_sp<SkSurface> MakeFromAHardwareBuffer(GrDirectContext* context,
                                                     AHardwareBuffer* hardwareBuffer,
                                                     GrSurfaceOrigin origin,
                                                     sk_sp<SkColorSpace> colorSpace,
-                                                    const SkSurfaceProps* surfaceProps);
+                                                    const SkSurfaceProps* surfaceProps
+#ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
+                                                    , bool fromWindow = false
+#endif  // SK_BUILD_FOR_ANDROID_FRAMEWORK
+                                                    );
 #endif
 
 #ifdef SK_METAL
@@ -343,118 +447,6 @@ public:
                                             const SkSurfaceProps* surfaceProps)
                                             SK_API_AVAILABLE(macos(10.11), ios(9.0));
 #endif
-
-    /** Returns SkSurface on GPU indicated by context. Allocates memory for
-        pixels, based on the width, height, and SkColorType in SkImageInfo.  budgeted
-        selects whether allocation for pixels is tracked by context. imageInfo
-        describes the pixel format in SkColorType, and transparency in
-        SkAlphaType, and color matching in SkColorSpace.
-
-        sampleCount requests the number of samples per pixel.
-        Pass zero to disable multi-sample anti-aliasing.  The request is rounded
-        up to the next supported count, or rounded down if it is larger than the
-        maximum supported count.
-
-        surfaceOrigin pins either the top-left or the bottom-left corner to the origin.
-
-        shouldCreateWithMips hints that SkImage returned by makeImageSnapshot() is mip map.
-
-        If SK_SUPPORT_GPU is defined as zero, has no effect and returns nullptr.
-
-        @param context               GPU context
-        @param imageInfo             width, height, SkColorType, SkAlphaType, SkColorSpace;
-                                     width, or height, or both, may be zero
-        @param sampleCount           samples per pixel, or 0 to disable full scene anti-aliasing
-        @param surfaceProps          LCD striping orientation and setting for device independent
-                                     fonts; may be nullptr
-        @param shouldCreateWithMips  hint that SkSurface will host mip map images
-        @return                      SkSurface if all parameters are valid; otherwise, nullptr
-    */
-    static sk_sp<SkSurface> MakeRenderTarget(GrRecordingContext* context, SkBudgeted budgeted,
-                                             const SkImageInfo& imageInfo,
-                                             int sampleCount, GrSurfaceOrigin surfaceOrigin,
-                                             const SkSurfaceProps* surfaceProps,
-                                             bool shouldCreateWithMips = false);
-
-    /** Deprecated.
-    */
-    static sk_sp<SkSurface> MakeRenderTarget(GrContext* context, SkBudgeted budgeted,
-                                             const SkImageInfo& imageInfo,
-                                             int sampleCount, GrSurfaceOrigin surfaceOrigin,
-                                             const SkSurfaceProps* surfaceProps,
-                                             bool shouldCreateWithMips = false);
-
-    /** Returns SkSurface on GPU indicated by context. Allocates memory for
-        pixels, based on the width, height, and SkColorType in SkImageInfo.  budgeted
-        selects whether allocation for pixels is tracked by context. imageInfo
-        describes the pixel format in SkColorType, and transparency in
-        SkAlphaType, and color matching in SkColorSpace.
-
-        sampleCount requests the number of samples per pixel.
-        Pass zero to disable multi-sample anti-aliasing.  The request is rounded
-        up to the next supported count, or rounded down if it is larger than the
-        maximum supported count.
-
-        SkSurface bottom-left corner is pinned to the origin.
-
-        @param context      GPU context
-        @param imageInfo    width, height, SkColorType, SkAlphaType, SkColorSpace,
-                            of raster surface; width, or height, or both, may be zero
-        @param sampleCount  samples per pixel, or 0 to disable multi-sample anti-aliasing
-        @param surfaceProps LCD striping orientation and setting for device independent
-                            fonts; may be nullptr
-        @return             SkSurface if all parameters are valid; otherwise, nullptr
-    */
-    static sk_sp<SkSurface> MakeRenderTarget(GrRecordingContext* context, SkBudgeted budgeted,
-                                             const SkImageInfo& imageInfo, int sampleCount,
-                                             const SkSurfaceProps* surfaceProps) {
-        return MakeRenderTarget(context, budgeted, imageInfo, sampleCount,
-                                kBottomLeft_GrSurfaceOrigin, surfaceProps);
-    }
-
-    /** Deprecated.
-    */
-    static sk_sp<SkSurface> MakeRenderTarget(GrContext* context, SkBudgeted budgeted,
-                                             const SkImageInfo& imageInfo, int sampleCount,
-                                             const SkSurfaceProps* surfaceProps);
-
-    /** Returns SkSurface on GPU indicated by context. Allocates memory for
-        pixels, based on the width, height, and SkColorType in SkImageInfo.  budgeted
-        selects whether allocation for pixels is tracked by context. imageInfo
-        describes the pixel format in SkColorType, and transparency in
-        SkAlphaType, and color matching in SkColorSpace.
-
-        SkSurface bottom-left corner is pinned to the origin.
-
-        @param context    GPU context
-        @param imageInfo  width, height, SkColorType, SkAlphaType, SkColorSpace,
-                          of raster surface; width, or height, or both, may be zero
-        @return           SkSurface if all parameters are valid; otherwise, nullptr
-    */
-    static sk_sp<SkSurface> MakeRenderTarget(GrRecordingContext* context, SkBudgeted budgeted,
-                                             const SkImageInfo& imageInfo) {
-        if (!imageInfo.width() || !imageInfo.height()) {
-            return nullptr;
-        }
-        return MakeRenderTarget(context, budgeted, imageInfo, 0, kBottomLeft_GrSurfaceOrigin,
-                                nullptr);
-    }
-
-    /** Deprecated.
-    */
-    static sk_sp<SkSurface> MakeRenderTarget(GrContext* context, SkBudgeted budgeted,
-                                             const SkImageInfo& imageInfo);
-
-    /** Returns SkSurface on GPU indicated by context that is compatible with the provided
-        characterization. budgeted selects whether allocation for pixels is tracked by context.
-
-        @param context           GPU context
-        @param characterization  description of the desired SkSurface
-        @return                  SkSurface if all parameters are valid; otherwise, nullptr
-    */
-    static sk_sp<SkSurface> MakeRenderTarget(GrRecordingContext* context,
-                                             const SkSurfaceCharacterization& characterization,
-                                             SkBudgeted budgeted);
 
     /** Is this surface compatible with the provided characterization?
 
@@ -527,6 +519,13 @@ public:
      */
     GrRecordingContext* recordingContext();
 
+    /** Returns the recorder being used by the SkSurface.
+
+        @return the recorder, if available; nullptr otherwise
+     */
+    skgpu::graphite::Recorder* recorder();
+
+#if SK_SUPPORT_GPU
     enum BackendHandleAccess {
         kFlushRead_BackendHandleAccess,    //!< back-end object is readable
         kFlushWrite_BackendHandleAccess,   //!< back-end object is writable
@@ -589,6 +588,7 @@ public:
                                ContentChangeMode mode = kRetain_ContentChangeMode,
                                TextureReleaseProc textureReleaseProc = nullptr,
                                ReleaseContext releaseContext = nullptr);
+#endif
 
     /** Returns SkCanvas that draws into SkSurface. Subsequent calls return the same SkCanvas.
         SkCanvas returned is managed and owned by SkSurface, and is deleted when SkSurface
@@ -650,12 +650,18 @@ public:
         @param canvas  SkCanvas drawn into
         @param x       horizontal offset in SkCanvas
         @param y       vertical offset in SkCanvas
+        @param sampling what technique to use when sampling the surface pixels
         @param paint   SkPaint containing SkBlendMode, SkColorFilter, SkImageFilter,
                        and so on; or nullptr
 
         example: https://fiddle.skia.org/c/@Surface_draw
     */
-    void draw(SkCanvas* canvas, SkScalar x, SkScalar y, const SkPaint* paint);
+    void draw(SkCanvas* canvas, SkScalar x, SkScalar y, const SkSamplingOptions& sampling,
+              const SkPaint* paint);
+
+    void draw(SkCanvas* canvas, SkScalar x, SkScalar y, const SkPaint* paint = nullptr) {
+        this->draw(canvas, x, y, SkSamplingOptions(), paint);
+    }
 
     /** Copies SkSurface pixel address, row bytes, and SkImageInfo to SkPixmap, if address
         is available, and returns true. If pixel address is not available, return
@@ -779,6 +785,7 @@ public:
         asyncRescaleAndReadPixelsYUV420().
      */
     using RescaleGamma = SkImage::RescaleGamma;
+    using RescaleMode  = SkImage::RescaleMode;
 
     /** Makes surface pixel data available to caller, possibly asynchronously. It can also rescale
         the surface pixels.
@@ -799,21 +806,21 @@ public:
         occur to guarantee a finite time before the callback is called.
 
         The data is valid for the lifetime of AsyncReadResult with the exception that if the
-        SkSurface is GPU-backed the data is immediately invalidated if the GrContext is abandoned
+        SkSurface is GPU-backed the data is immediately invalidated if the context is abandoned
         or destroyed.
 
         @param info            info of the requested pixels
         @param srcRect         subrectangle of surface to read
         @param rescaleGamma    controls whether rescaling is done in the surface's gamma or whether
                                the source data is transformed to a linear gamma before rescaling.
-        @param rescaleQuality  controls the quality (and cost) of the rescaling
+        @param rescaleMode     controls the technique of the rescaling
         @param callback        function to call with result of the read
         @param context         passed to callback
      */
     void asyncRescaleAndReadPixels(const SkImageInfo& info,
                                    const SkIRect& srcRect,
                                    RescaleGamma rescaleGamma,
-                                   SkFilterQuality rescaleQuality,
+                                   RescaleMode rescaleMode,
                                    ReadPixelsCallback callback,
                                    ReadPixelsContext context);
 
@@ -832,7 +839,7 @@ public:
         called.
 
         The data is valid for the lifetime of AsyncReadResult with the exception that if the
-        SkSurface is GPU-backed the data is immediately invalidated if the GrContext is abandoned
+        SkSurface is GPU-backed the data is immediately invalidated if the context is abandoned
         or destroyed.
 
         @param yuvColorSpace  The transformation from RGB to YUV. Applied to the resized image
@@ -842,7 +849,7 @@ public:
         @param dstSize        The size to rescale srcRect to
         @param rescaleGamma   controls whether rescaling is done in the surface's gamma or whether
                               the source data is transformed to a linear gamma before rescaling.
-        @param rescaleQuality controls the quality (and cost) of the rescaling
+        @param rescaleMode    controls the sampling technique of the rescaling
         @param callback       function to call with the planar read result
         @param context        passed to callback
      */
@@ -851,7 +858,7 @@ public:
                                          const SkIRect& srcRect,
                                          const SkISize& dstSize,
                                          RescaleGamma rescaleGamma,
-                                         SkFilterQuality rescaleQuality,
+                                         RescaleMode rescaleMode,
                                          ReadPixelsCallback callback,
                                          ReadPixelsContext context);
 
@@ -898,20 +905,35 @@ public:
     /** Call to ensure all reads/writes of the surface have been issued to the underlying 3D API.
         Skia will correctly order its own draws and pixel operations. This must to be used to ensure
         correct ordering when the surface backing store is accessed outside Skia (e.g. direct use of
-        the 3D API or a windowing system). GrContext has additional flush and submit methods that
-        apply to all surfaces and images created from a GrContext. This is equivalent to calling
-        SkSurface::flush with a default GrFlushInfo followed by GrContext::submit.
+        the 3D API or a windowing system). GrDirectContext has additional flush and submit methods
+        that apply to all surfaces and images created from a GrDirectContext. This is equivalent to
+        calling SkSurface::flush with a default GrFlushInfo followed by
+        GrDirectContext::submit(syncCpu).
     */
-    void flushAndSubmit();
+    void flushAndSubmit(bool syncCpu = false);
 
     enum class BackendSurfaceAccess {
         kNoAccess,  //!< back-end object will not be used by client
         kPresent,   //!< back-end surface will be used for presenting to screen
     };
 
+#if SK_SUPPORT_GPU
+    /** If a surface is GPU texture backed, is being drawn with MSAA, and there is a resolve
+        texture, this call will insert a resolve command into the stream of gpu commands. In order
+        for the resolve to actually have an effect, the work still needs to be flushed and submitted
+        to the GPU after recording the resolve command. If a resolve is not supported or the
+        SkSurface has no dirty work to resolve, then this call is a no-op.
+
+        This call is most useful when the SkSurface is created by wrapping a single sampled gpu
+        texture, but asking Skia to render with MSAA. If the client wants to use the wrapped texture
+        outside of Skia, the only way to trigger a resolve is either to call this command or use
+        SkSurface::flush.
+     */
+    void resolveMSAA();
+
     /** Issues pending SkSurface commands to the GPU-backed API objects and resolves any SkSurface
-        MSAA. A call to GrContext::submit is always required to ensure work is actually sent to the
-        gpu. Some specific API details:
+        MSAA. A call to GrDirectContext::submit is always required to ensure work is actually sent
+        to the gpu. Some specific API details:
             GL: Commands are actually sent to the driver, but glFlush is never called. Thus some
                 sync objects from the flush will not be valid until a submission occurs.
 
@@ -943,7 +965,7 @@ public:
         the GPU. Thus the client should not have the GPU wait on any of the semaphores passed in
         with the GrFlushInfo. Regardless of whether semaphores were submitted to the GPU or not, the
         client is still responsible for deleting any initialized semaphores.
-        Regardleess of semaphore submission the context will still be flushed. It should be
+        Regardless of semaphore submission the context will still be flushed. It should be
         emphasized that a return value of GrSemaphoresSubmitted::kNo does not mean the flush did not
         happen. It simply means there were no semaphores submitted to the GPU. A caller should only
         take this as a failure if they passed in semaphores to be submitted.
@@ -956,8 +978,8 @@ public:
     GrSemaphoresSubmitted flush(BackendSurfaceAccess access, const GrFlushInfo& info);
 
     /** Issues pending SkSurface commands to the GPU-backed API objects and resolves any SkSurface
-        MSAA. A call to GrContext::submit is always required to ensure work is actually sent to the
-        gpu. Some specific API details:
+        MSAA. A call to GrDirectContext::submit is always required to ensure work is actually sent
+        to the gpu. Some specific API details:
             GL: Commands are actually sent to the driver, but glFlush is never called. Thus some
                 sync objects from the flush will not be valid until a submission occurs.
 
@@ -1001,8 +1023,9 @@ public:
     */
     GrSemaphoresSubmitted flush(const GrFlushInfo& info,
                                 const GrBackendSurfaceMutableState* newState = nullptr);
+#endif // SK_SUPPORT_GPU
 
-    void flush() { this->flush({}); }
+    void flush();
 
     /** Inserts a list of GPU semaphores that the current GPU-backed API must wait on before
         executing any more commands on the GPU for this surface. If this call returns false, then
@@ -1036,18 +1059,25 @@ public:
     */
     bool characterize(SkSurfaceCharacterization* characterization) const;
 
-    /** Draws deferred display list created using SkDeferredDisplayListRecorder.
-        Has no effect and returns false if SkSurfaceCharacterization stored in
-        deferredDisplayList is not compatible with SkSurface.
+    /** Draws the deferred display list created via a SkDeferredDisplayListRecorder.
+        If the deferred display list is not compatible with this SkSurface, the draw is skipped
+        and false is return.
 
-        raster surface returns false.
+        The xOffset and yOffset parameters are experimental and, if not both zero, will cause
+        the draw to be ignored.
+        When implemented, if xOffset or yOffset are non-zero, the DDL will be drawn offset by that
+        amount into the surface.
 
         @param deferredDisplayList  drawing commands
+        @param xOffset              x-offset at which to draw the DDL
+        @param yOffset              y-offset at which to draw the DDL
         @return                     false if deferredDisplayList is not compatible
 
         example: https://fiddle.skia.org/c/@Surface_draw_2
     */
-    bool draw(sk_sp<const SkDeferredDisplayList> deferredDisplayList);
+    bool draw(sk_sp<const SkDeferredDisplayList> deferredDisplayList,
+              int xOffset = 0,
+              int yOffset = 0);
 
 protected:
     SkSurface(int width, int height, const SkSurfaceProps* surfaceProps);

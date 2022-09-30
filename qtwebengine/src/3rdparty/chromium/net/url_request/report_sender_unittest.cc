@@ -5,8 +5,7 @@
 #include "net/url_request/report_sender.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/load_flags.h"
@@ -21,6 +20,8 @@
 #include "net/test/url_request/url_request_mock_data_job.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -82,6 +83,10 @@ void SuccessCallback(bool* called) {
 class MockServerErrorJob : public URLRequestJob {
  public:
   explicit MockServerErrorJob(URLRequest* request) : URLRequestJob(request) {}
+
+  MockServerErrorJob(const MockServerErrorJob&) = delete;
+  MockServerErrorJob& operator=(const MockServerErrorJob&) = delete;
+
   ~MockServerErrorJob() override = default;
 
  protected:
@@ -92,23 +97,22 @@ class MockServerErrorJob : public URLRequestJob {
         "Content-Length: 0\n");
   }
   void Start() override { NotifyHeadersComplete(); }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockServerErrorJob);
 };
 
 class MockServerErrorJobInterceptor : public URLRequestInterceptor {
  public:
   MockServerErrorJobInterceptor() = default;
+
+  MockServerErrorJobInterceptor(const MockServerErrorJobInterceptor&) = delete;
+  MockServerErrorJobInterceptor& operator=(
+      const MockServerErrorJobInterceptor&) = delete;
+
   ~MockServerErrorJobInterceptor() override = default;
 
   std::unique_ptr<URLRequestJob> MaybeInterceptRequest(
       URLRequest* request) const override {
     return std::make_unique<MockServerErrorJob>(request);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockServerErrorJobInterceptor);
 };
 
 // A network delegate that lets tests check that a report
@@ -118,9 +122,14 @@ class MockServerErrorJobInterceptor : public URLRequestInterceptor {
 class TestReportSenderNetworkDelegate : public NetworkDelegateImpl {
  public:
   TestReportSenderNetworkDelegate()
-      : url_request_destroyed_callback_(base::DoNothing::Repeatedly()),
-        all_url_requests_destroyed_callback_(base::DoNothing::Repeatedly()),
+      : url_request_destroyed_callback_(base::DoNothing()),
+        all_url_requests_destroyed_callback_(base::DoNothing()),
         num_requests_(0) {}
+
+  TestReportSenderNetworkDelegate(const TestReportSenderNetworkDelegate&) =
+      delete;
+  TestReportSenderNetworkDelegate& operator=(
+      const TestReportSenderNetworkDelegate&) = delete;
 
   void ExpectReport(const std::string& report) {
     expect_reports_.insert(report);
@@ -143,6 +152,11 @@ class TestReportSenderNetworkDelegate : public NetworkDelegateImpl {
     expected_content_type_ = content_type;
   }
 
+  void set_expected_network_isolation_key(
+      const NetworkIsolationKey& expected_network_isolation_key) {
+    expected_network_isolation_key_ = expected_network_isolation_key;
+  }
+
   // NetworkDelegateImpl implementation.
   int OnBeforeURLRequest(URLRequest* request,
                          CompletionOnceCallback callback,
@@ -152,6 +166,12 @@ class TestReportSenderNetworkDelegate : public NetworkDelegateImpl {
     EXPECT_STRCASEEQ("POST", request->method().data());
     EXPECT_FALSE(request->allow_credentials());
     EXPECT_TRUE(request->load_flags() & LOAD_DO_NOT_SAVE_COOKIES);
+
+    EXPECT_EQ(expected_network_isolation_key_,
+              request->isolation_info().network_isolation_key());
+    EXPECT_EQ(IsolationInfo::RequestType::kOther,
+              request->isolation_info().request_type());
+    EXPECT_TRUE(request->site_for_cookies().IsNull());
 
     const HttpRequestHeaders& extra_headers = request->extra_request_headers();
     std::string content_type;
@@ -179,15 +199,16 @@ class TestReportSenderNetworkDelegate : public NetworkDelegateImpl {
   GURL expect_url_;
   std::set<std::string> expect_reports_;
   std::string expected_content_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestReportSenderNetworkDelegate);
+  NetworkIsolationKey expected_network_isolation_key_;
 };
 
 class ReportSenderTest : public TestWithTaskEnvironment {
  public:
-  ReportSenderTest() : context_(true) {
-    context_.set_network_delegate(&network_delegate_);
-    context_.Init();
+  ReportSenderTest() {
+    auto builder = CreateTestURLRequestContextBuilder();
+    builder->set_network_delegate(
+        std::make_unique<TestReportSenderNetworkDelegate>());
+    context_ = builder->Build();
   }
 
   void SetUp() override {
@@ -201,7 +222,14 @@ class ReportSenderTest : public TestWithTaskEnvironment {
 
   void TearDown() override { URLRequestFilter::GetInstance()->ClearHandlers(); }
 
-  TestURLRequestContext* context() { return &context_; }
+  URLRequestContext* context() { return context_.get(); }
+
+  TestReportSenderNetworkDelegate& network_delegate() {
+    // This cast is safe because we set a TestReportSenderNetworkDelegate in the
+    // constructor.
+    return *static_cast<TestReportSenderNetworkDelegate*>(
+        context_->network_delegate());
+  }
 
  protected:
   void SendReport(
@@ -211,17 +239,22 @@ class ReportSenderTest : public TestWithTaskEnvironment {
       size_t request_sequence_number,
       base::OnceCallback<void()> success_callback,
       base::OnceCallback<void(const GURL&, int, int)> error_callback) {
+    NetworkIsolationKey network_isolation_key =
+        NetworkIsolationKey::CreateTransient();
+
     base::RunLoop run_loop;
-    network_delegate_.set_url_request_destroyed_callback(
+    network_delegate().set_url_request_destroyed_callback(
         run_loop.QuitClosure());
 
-    network_delegate_.set_expect_url(url);
-    network_delegate_.ExpectReport(report);
-    network_delegate_.set_expected_content_type("application/foobar");
+    network_delegate().set_expect_url(url);
+    network_delegate().ExpectReport(report);
+    network_delegate().set_expected_content_type("application/foobar");
+    network_delegate().set_expected_network_isolation_key(
+        network_isolation_key);
 
-    EXPECT_EQ(request_sequence_number, network_delegate_.num_requests());
+    EXPECT_EQ(request_sequence_number, network_delegate().num_requests());
 
-    reporter->Send(url, "application/foobar", report,
+    reporter->Send(url, "application/foobar", report, network_isolation_key,
                    std::move(success_callback), std::move(error_callback));
 
     // The report is sent asynchronously, so wait for the report's
@@ -229,7 +262,7 @@ class ReportSenderTest : public TestWithTaskEnvironment {
     // sent.
     run_loop.Run();
 
-    EXPECT_EQ(request_sequence_number + 1, network_delegate_.num_requests());
+    EXPECT_EQ(request_sequence_number + 1, network_delegate().num_requests());
   }
 
   void SendReport(ReportSender* reporter,
@@ -241,10 +274,8 @@ class ReportSenderTest : public TestWithTaskEnvironment {
                base::OnceCallback<void(const GURL&, int, int)>());
   }
 
-  TestReportSenderNetworkDelegate network_delegate_;
-
  private:
-  TestURLRequestContext context_;
+  std::unique_ptr<URLRequestContext> context_;
 };
 
 // Test that ReportSender::Send creates a URLRequest for the
@@ -264,54 +295,54 @@ TEST_F(ReportSenderTest, SendMultipleReportsSequentially) {
 
 TEST_F(ReportSenderTest, SendMultipleReportsSimultaneously) {
   base::RunLoop run_loop;
-  network_delegate_.set_all_url_requests_destroyed_callback(
+  network_delegate().set_all_url_requests_destroyed_callback(
       run_loop.QuitClosure());
 
   GURL url = URLRequestMockDataJob::GetMockHttpsUrl("dummy data", 1);
-  network_delegate_.set_expect_url(url);
-  network_delegate_.ExpectReport(kDummyReport);
-  network_delegate_.ExpectReport(kSecondDummyReport);
-  network_delegate_.set_expected_content_type("application/foobar");
+  network_delegate().set_expect_url(url);
+  network_delegate().ExpectReport(kDummyReport);
+  network_delegate().ExpectReport(kSecondDummyReport);
+  network_delegate().set_expected_content_type("application/foobar");
 
   ReportSender reporter(context(), TRAFFIC_ANNOTATION_FOR_TESTS);
 
-  EXPECT_EQ(0u, network_delegate_.num_requests());
+  EXPECT_EQ(0u, network_delegate().num_requests());
 
-  reporter.Send(url, "application/foobar", kDummyReport,
+  reporter.Send(url, "application/foobar", kDummyReport, NetworkIsolationKey(),
                 base::OnceCallback<void()>(),
                 base::OnceCallback<void(const GURL&, int, int)>());
   reporter.Send(url, "application/foobar", kSecondDummyReport,
-                base::OnceCallback<void()>(),
+                NetworkIsolationKey(), base::OnceCallback<void()>(),
                 base::OnceCallback<void(const GURL&, int, int)>());
 
   run_loop.Run();
 
-  EXPECT_EQ(2u, network_delegate_.num_requests());
+  EXPECT_EQ(2u, network_delegate().num_requests());
 }
 
 // Test that pending URLRequests get cleaned up when the report sender
 // is deleted.
 TEST_F(ReportSenderTest, PendingRequestGetsDeleted) {
   bool url_request_destroyed = false;
-  network_delegate_.set_url_request_destroyed_callback(base::BindRepeating(
+  network_delegate().set_url_request_destroyed_callback(base::BindRepeating(
       &MarkURLRequestDestroyed, base::Unretained(&url_request_destroyed)));
 
   GURL url = URLRequestFailedJob::GetMockHttpUrlWithFailurePhase(
       URLRequestFailedJob::START, ERR_IO_PENDING);
-  network_delegate_.set_expect_url(url);
-  network_delegate_.ExpectReport(kDummyReport);
-  network_delegate_.set_expected_content_type("application/foobar");
+  network_delegate().set_expect_url(url);
+  network_delegate().ExpectReport(kDummyReport);
+  network_delegate().set_expected_content_type("application/foobar");
 
-  EXPECT_EQ(0u, network_delegate_.num_requests());
+  EXPECT_EQ(0u, network_delegate().num_requests());
 
   std::unique_ptr<ReportSender> reporter(
       new ReportSender(context(), TRAFFIC_ANNOTATION_FOR_TESTS));
-  reporter->Send(url, "application/foobar", kDummyReport,
+  reporter->Send(url, "application/foobar", kDummyReport, NetworkIsolationKey(),
                  base::OnceCallback<void()>(),
                  base::OnceCallback<void(const GURL&, int, int)>());
   reporter.reset();
 
-  EXPECT_EQ(1u, network_delegate_.num_requests());
+  EXPECT_EQ(1u, network_delegate().num_requests());
   EXPECT_TRUE(url_request_destroyed);
 }
 

@@ -4,6 +4,8 @@
 
 #include "components/payments/content/payment_app_service.h"
 
+#include <utility>
+
 #include "base/feature_list.h"
 #include "components/payments/content/android_app_communication.h"
 #include "components/payments/content/android_payment_app_factory.h"
@@ -18,8 +20,9 @@
 namespace payments {
 
 PaymentAppService::PaymentAppService(content::BrowserContext* context) {
-  factories_.emplace_back(std::make_unique<AutofillPaymentAppFactory>());
-
+  if (base::FeatureList::IsEnabled(::features::kPaymentRequestBasicCard)) {
+    factories_.emplace_back(std::make_unique<AutofillPaymentAppFactory>());
+  }
   if (base::FeatureList::IsEnabled(::features::kServiceWorkerPaymentApps)) {
     factories_.push_back(std::make_unique<ServiceWorkerPaymentAppFactory>());
   }
@@ -35,7 +38,7 @@ PaymentAppService::PaymentAppService(content::BrowserContext* context) {
 
   // SecurePaymentConfirmation is enabled if both the feature flag and the Blink
   // runtime feature "SecurePaymentConfirmation" are enabled.
-  if (base::FeatureList::IsEnabled(features::kSecurePaymentConfirmation)) {
+  if (base::FeatureList::IsEnabled(::features::kSecurePaymentConfirmation)) {
     factories_.push_back(
         std::make_unique<SecurePaymentConfirmationAppFactory>());
   }
@@ -56,6 +59,11 @@ void PaymentAppService::Create(
 
 void PaymentAppService::Shutdown() {
   factories_.clear();
+}
+
+void PaymentAppService::AddFactoryForTesting(
+    std::unique_ptr<PaymentAppFactory> factory) {
+  factories_.push_back(std::move(factory));
 }
 
 }  // namespace payments

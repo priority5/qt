@@ -4,9 +4,9 @@
 
 package org.chromium.weblayer;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -14,12 +14,14 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.StrictMode;
+import android.os.SystemClock;
 import android.util.AndroidRuntimeException;
 import android.util.Log;
 import android.webkit.ValueCallback;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.Fragment;
 
@@ -29,6 +31,7 @@ import org.chromium.weblayer_private.interfaces.IBrowserFragment;
 import org.chromium.weblayer_private.interfaces.IMediaRouteDialogFragment;
 import org.chromium.weblayer_private.interfaces.IProfile;
 import org.chromium.weblayer_private.interfaces.IRemoteFragmentClient;
+import org.chromium.weblayer_private.interfaces.ISettingsFragment;
 import org.chromium.weblayer_private.interfaces.ISiteSettingsFragment;
 import org.chromium.weblayer_private.interfaces.IWebLayer;
 import org.chromium.weblayer_private.interfaces.IWebLayerClient;
@@ -71,17 +74,10 @@ public class WebLayer {
     @NonNull
     private final IWebLayer mImpl;
 
-    /** The result of calling {@link #initializeWebViewCompatibilityMode}. */
-    public enum WebViewCompatibilityResult {
-        /** Compatibility mode has been successfully set up. */
-        SUCCESS,
-
-        /** This version of the WebLayer implementation does not support WebView compatibility. */
-        FAILURE_UNSUPPORTED_VERSION,
-
-        /** An uncategorized failure happened. */
-        FAILURE_OTHER,
-    }
+    // Times used for logging UMA histograms.
+    private static long sClassLoaderCreationTime;
+    private static long sContextCreationTime;
+    private static long sWebLayerLoaderCreationTime;
 
     /**
      * Returns true if WebLayer is available. This tries to load WebLayer, but does no
@@ -101,16 +97,6 @@ public class WebLayer {
         if (!isAvailable(context)) {
             throw new UnsupportedVersionException(sLoader.getVersion());
         }
-    }
-
-    /**
-     * Deprecated. This is no longer necessary since WebView compatibility mode is now enabled by
-     * default. This will be removed once the client app is updated.
-     */
-    public static WebViewCompatibilityResult initializeWebViewCompatibilityMode(
-            @NonNull Context appContext) {
-        ThreadCheck.ensureOnUiThread();
-        return WebViewCompatibilityResult.SUCCESS;
     }
 
     /**
@@ -267,23 +253,29 @@ public class WebLayer {
             // Use the application context as the supplied context may have a shorter lifetime.
             mContext = context.getApplicationContext();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                    && context.getAttributionTag() != null) {
+                    && ApiHelperForR.getAttributionTag(context) != null) {
                 // Getting the application context means we lose any attribution. Use the
                 // attribution tag from the supplied context so that embedders have a way to set an
                 // attribution tag.
-                mContext = mContext.createAttributionContext(context.getAttributionTag());
+                mContext = ApiHelperForR.createAttributionContext(
+                        mContext, ApiHelperForR.getAttributionTag(context));
             }
             try {
-                Class factoryClass = getOrCreateRemoteClassLoader(mContext).loadClass(
-                        "org.chromium.weblayer_private.WebLayerFactoryImpl");
+                Class factoryClass = loadRemoteClass(
+                        mContext, "org.chromium.weblayer_private.WebLayerFactoryImpl");
+                long start = SystemClock.elapsedRealtime();
                 mFactory = IWebLayerFactory.Stub.asInterface(
                         (IBinder) factoryClass
                                 .getMethod("create", String.class, int.class, int.class)
                                 .invoke(null, WebLayerClientVersionConstants.PRODUCT_VERSION,
                                         WebLayerClientVersionConstants.PRODUCT_MAJOR_VERSION, -1));
+                sWebLayerLoaderCreationTime = SystemClock.elapsedRealtime() - start;
                 available = mFactory.isClientSupported();
                 majorVersion = mFactory.getImplementationMajorVersion();
                 version = mFactory.getImplementationVersion();
+                if (available) {
+                    available = majorVersion >= WebLayerVersionConstants.MIN_VERSION;
+                }
                 // See comment in WebLayerFactoryImpl.isClientSupported() for details on this.
                 if (available
                         && WebLayerClientVersionConstants.PRODUCT_MAJOR_VERSION > majorVersion) {
@@ -420,15 +412,10 @@ public class WebLayer {
      * Get or create the incognito profile with the name {@link profileName}.
      *
      * @param profileName The name of the profile. Null is mapped to an empty string.
-     *
-     * @since 87
      */
     @NonNull
     public Profile getIncognitoProfile(@Nullable String profileName) {
         ThreadCheck.ensureOnUiThread();
-        if (WebLayer.getSupportedMajorVersionInternal() < 87) {
-            throw new UnsupportedOperationException();
-        }
         IProfile iprofile;
         try {
             iprofile = mImpl.getIncognitoProfile(sanitizeProfileName(profileName));
@@ -442,7 +429,6 @@ public class WebLayer {
      * Return a list of Profile names currently on disk. This does not include incognito
      * profiles. This will not include profiles that are being deleted from disk.
      * WebLayer must be initialized before calling this.
-     * @since 82
      */
     public void enumerateAllProfileNames(@NonNull Callback<String[]> callback) {
         ThreadCheck.ensureOnUiThread();
@@ -458,8 +444,6 @@ public class WebLayer {
      * Returns the user agent string used by WebLayer.
      *
      * @return The user-agent string.
-     *
-     * @since 84.
      */
     public String getUserAgentString() {
         ThreadCheck.ensureOnUiThread();
@@ -506,60 +490,70 @@ public class WebLayer {
     /**
      * Creates a new WebLayer Fragment.
      *
-     * {@link persistenceId} uniquely identifies the Browser for saving the set of tabs and
-     * navigations. A value of null does not save/restore any state. A non-null value results in
-     * asynchronously restoring the tabs and navigations. Supplying a non-null value means the
-     * Browser initially has no tabs (until restore is complete).
-     *
      * @param profileName Null to indicate in-memory profile. Otherwise, name cannot be empty
      * and should contain only alphanumeric and underscore characters since it will be used as
      * a directory name in the file system.
      * @param persistenceId If non-null and not empty uniquely identifies the Browser for saving
      * state.
      *
-     * @since 81
+     * @see Browser for details on {@link persistenceId}
      */
     @NonNull
     public static Fragment createBrowserFragment(
             @Nullable String profileName, @Nullable String persistenceId) {
-        String sanitizedName = sanitizeProfileName(profileName);
-        boolean isIncognito = "".equals(sanitizedName);
-        return createBrowserFragmentImpl(sanitizedName, persistenceId, isIncognito);
+        BrowserFragmentCreateParams params = (new BrowserFragmentCreateParams.Builder())
+                                                     .setProfileName(profileName)
+                                                     .setPersistenceId(persistenceId)
+                                                     .build();
+        return createBrowserFragmentWithParams(params);
     }
 
     /**
      * Creates a new WebLayer Fragment using the incognito profile with the specified name.
      *
-     * @param profileName The name of the incongito profile, null is mapped to an empty string.
+     * @param profileName The name of the incognito profile, null is mapped to an empty string.
      * @param persistenceId If non-null and not empty uniquely identifies the Browser for saving
      * state.
      *
      * @throws UnsupportedOperationException If {@link params} is incognito and name is not empty
-     *         and <= 87.
-     *
-     * @since 87
+     *         and <= 87. In order for this function not to trigger loading of WebLayer the
+     *         exception is thrown later on.
      */
     @NonNull
     public static Fragment createBrowserFragmentWithIncognitoProfile(
             @Nullable String profileName, @Nullable String persistenceId) {
-        return createBrowserFragmentImpl(sanitizeProfileName(profileName), persistenceId, true);
+        BrowserFragmentCreateParams params = (new BrowserFragmentCreateParams.Builder())
+                                                     .setProfileName(profileName)
+                                                     .setPersistenceId(persistenceId)
+                                                     .setIsIncognito(true)
+                                                     .build();
+        return createBrowserFragmentWithParams(params);
     }
 
-    private static Fragment createBrowserFragmentImpl(
-            @NonNull String profileName, @Nullable String persistenceId, boolean isIncognito) {
+    /**
+     * Creates a new WebLayer Fragment using the supplied params.
+     *
+     * @param params The Fragment parameters.
+     *
+     * @throws UnsupportedOperationException If {@link params} is incognito and name is not empty
+     *         and <= 87. In order for this function not to trigger loading of WebLayer the
+     *         exception is thrown later on.
+     */
+    @NonNull
+    public static Fragment createBrowserFragmentWithParams(
+            @NonNull BrowserFragmentCreateParams params) {
         ThreadCheck.ensureOnUiThread();
-        if (WebLayer.getSupportedMajorVersionInternal() < 87 && isIncognito
-                && !"".equals(profileName)) {
-            // Incognito profiles are only allowed to have non-empty names in >= 87.
-            throw new UnsupportedOperationException();
-        }
-
+        String profileName = sanitizeProfileName(params.getProfileName());
+        boolean isIncognito = params.isIncognito() || "".equals(profileName);
+        // Support for named incognito profiles was added in 87. Checking is done in
+        // BrowserFragment, as this code should not trigger loading WebLayer.
         Bundle args = new Bundle();
         args.putString(BrowserFragmentArgs.PROFILE_NAME, profileName);
-        if (persistenceId != null) {
-            args.putString(BrowserFragmentArgs.PERSISTENCE_ID, persistenceId);
+        if (params.getPersistenceId() != null) {
+            args.putString(BrowserFragmentArgs.PERSISTENCE_ID, params.getPersistenceId());
         }
         args.putBoolean(BrowserFragmentArgs.IS_INCOGNITO, isIncognito);
+        args.putBoolean(BrowserFragmentArgs.USE_VIEW_MODEL, params.getUseViewModel());
         BrowserFragment fragment = new BrowserFragment();
         fragment.setArguments(args);
         return fragment;
@@ -574,14 +568,29 @@ public class WebLayer {
      * This method may be called multiple times to update experient IDs if they change.
      *
      * @param experimentIds An array of integer active experiment IDs relevant to WebLayer.
-     *
-     * @since 84
      */
-    public void registerExternalExperimentIDs(
-            @NonNull String trialName, @NonNull int[] experimentIds) {
+    public void registerExternalExperimentIDs(@NonNull int[] experimentIds) {
         ThreadCheck.ensureOnUiThread();
         try {
-            mImpl.registerExternalExperimentIDs(trialName, experimentIds);
+            // First param no longer used. First param was not used in the backend as of 85, and
+            // always supplied as empty as of 89 client.
+            mImpl.registerExternalExperimentIDs("", experimentIds);
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+    }
+
+    /**
+     * Returns the value of X-Client-Data header.
+     * @since 101
+     */
+    public String getXClientDataHeader() {
+        ThreadCheck.ensureOnUiThread();
+        if (getSupportedMajorVersionInternal() < 101) {
+            throw new UnsupportedOperationException();
+        }
+        try {
+            return mImpl.getXClientDataHeader();
         } catch (RemoteException e) {
             throw new APICallException(e);
         }
@@ -594,6 +603,20 @@ public class WebLayer {
             IRemoteFragmentClient remoteFragmentClient, Bundle fragmentArgs) {
         try {
             return mImpl.createBrowserFragmentImpl(
+                    remoteFragmentClient, ObjectWrapper.wrap(fragmentArgs));
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+    }
+
+    /**
+     * Returns the remote counterpart of the SettingsFragment.
+     */
+    /* package */ ISettingsFragment connectSettingsFragment(
+            IRemoteFragmentClient remoteFragmentClient, Bundle fragmentArgs) {
+        try {
+            assert getSupportedMajorVersionInternal() >= 89;
+            return mImpl.createSettingsFragmentImpl(
                     remoteFragmentClient, ObjectWrapper.wrap(fragmentArgs));
         } catch (RemoteException e) {
             throw new APICallException(e);
@@ -618,9 +641,6 @@ public class WebLayer {
      */
     /* package */ IMediaRouteDialogFragment connectMediaRouteDialogFragment(
             IRemoteFragmentClient remoteFragmentClient) {
-        if (getSupportedMajorVersionInternal() < 87) {
-            throw new UnsupportedOperationException();
-        }
         try {
             return mImpl.createMediaRouteDialogFragmentImpl(remoteFragmentClient);
         } catch (RemoteException e) {
@@ -645,12 +665,13 @@ public class WebLayer {
     /**
      * Creates a ClassLoader for the remote (weblayer implementation) side.
      */
-    static ClassLoader getOrCreateRemoteClassLoader(Context appContext)
+    static Class<?> loadRemoteClass(Context appContext, String className)
             throws PackageManager.NameNotFoundException, ReflectiveOperationException {
         if (sRemoteClassLoader != null) {
-            return sRemoteClassLoader;
+            return sRemoteClassLoader.loadClass(className);
         }
 
+        long start = SystemClock.elapsedRealtime();
         // Child processes do not need WebView compatibility since there is no chance
         // WebView will run in the same process.
         if (sDisableWebViewCompatibilityMode) {
@@ -658,19 +679,26 @@ public class WebLayer {
             // Android versions before O do not support isolated splits, so WebLayer will be loaded
             // as a normal split which is already available from the base class loader.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Attempt to find the class in the base ClassLoader, if it doesn't exist then load
+                // the weblayer ClassLoader.
                 try {
-                    // If the implementation APK does not support isolated splits, this will just
-                    // return the original context.
-                    context = ApiHelperForO.createContextForSplit(context, "weblayer");
-                } catch (PackageManager.NameNotFoundException e) {
-                    // WebLayer not in split, proceed with the base context.
+                    Class.forName(className, false, context.getClassLoader());
+                } catch (ClassNotFoundException e) {
+                    try {
+                        // If the implementation APK does not support isolated splits, this will
+                        // just return the original context.
+                        context = ApiHelperForO.createContextForSplit(context, "weblayer");
+                    } catch (PackageManager.NameNotFoundException e2) {
+                        // WebLayer not in split, proceed with the base context.
+                    }
                 }
             }
             sRemoteClassLoader = context.getClassLoader();
         } else {
             sRemoteClassLoader = WebViewCompatibilityHelper.initialize(appContext);
         }
-        return sRemoteClassLoader;
+        sClassLoaderCreationTime = SystemClock.elapsedRealtime() - start;
+        return sRemoteClassLoader.loadClass(className);
     }
 
     /**
@@ -681,6 +709,7 @@ public class WebLayer {
         if (sRemoteContext != null) {
             return sRemoteContext;
         }
+        long start = SystemClock.elapsedRealtime();
         Class<?> webViewFactoryClass = Class.forName("android.webkit.WebViewFactory");
         String implPackageName = getImplPackageName(appContext);
         sAppContext = appContext;
@@ -696,6 +725,7 @@ public class WebLayer {
                     (String) webViewFactoryClass.getMethod("getWebViewPackageName").invoke(null);
             sRemoteContext = createRemoteContextFromPackageName(appContext, implPackageName);
         }
+        sContextCreationTime = SystemClock.elapsedRealtime() - start;
         return sRemoteContext;
     }
 
@@ -774,11 +804,52 @@ public class WebLayer {
             // The id is part of the public library to avoid conflicts.
             return R.id.weblayer_media_session_notification;
         }
+
+        @Override
+        public long getClassLoaderCreationTime() {
+            return sClassLoaderCreationTime;
+        }
+
+        @Override
+        public long getContextCreationTime() {
+            return sContextCreationTime;
+        }
+
+        @Override
+        public long getWebLayerLoaderCreationTime() {
+            return sWebLayerLoaderCreationTime;
+        }
+
+        @Override
+        public Intent createRemoteMediaServiceIntent() {
+            StrictModeWorkaround.apply();
+            return new Intent(WebLayer.getAppContext(), RemoteMediaService.class);
+        }
+
+        @Override
+        public int getPresentationApiNotificationId() {
+            StrictModeWorkaround.apply();
+            // The id is part of the public library to avoid conflicts.
+            return R.id.weblayer_presentation_api_notification;
+        }
+
+        @Override
+        public int getRemotePlaybackApiNotificationId() {
+            StrictModeWorkaround.apply();
+            // The id is part of the public library to avoid conflicts.
+            return R.id.weblayer_remote_playback_api_notification;
+        }
+
+        @Override
+        public int getMaxNavigationsPerTabForInstanceState() {
+            return Browser.getMaxNavigationsPerTabForInstanceState();
+        }
     }
 
+    /** Utility class to use new APIs that were added in O (API level 26). */
     @VerifiesOnO
-    @TargetApi(Build.VERSION_CODES.O)
-    private static final class ApiHelperForO {
+    @RequiresApi(Build.VERSION_CODES.O)
+    /* package */ static final class ApiHelperForO {
         /** See {@link Context.createContextForSplit(String) }. */
         public static Context createContextForSplit(Context context, String name)
                 throws PackageManager.NameNotFoundException {
@@ -788,6 +859,25 @@ public class WebLayer {
             } finally {
                 StrictMode.setThreadPolicy(oldPolicy);
             }
+        }
+
+        /** See {@link ApplicationInfo#splitNames}. */
+        public static String[] getSplitNames(ApplicationInfo info) {
+            return info.splitNames;
+        }
+    }
+
+    @VerifiesOnR
+    @RequiresApi(Build.VERSION_CODES.R)
+    private static final class ApiHelperForR {
+        /** See {@link Context.getAttributionTag() }. */
+        public static String getAttributionTag(Context context) {
+            return context.getAttributionTag();
+        }
+
+        /** See {@link Context.createAttributionContext(String) }. */
+        public static Context createAttributionContext(Context context, String tag) {
+            return context.createAttributionContext(tag);
         }
     }
 }

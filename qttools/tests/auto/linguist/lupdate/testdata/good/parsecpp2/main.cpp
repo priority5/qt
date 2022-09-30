@@ -1,30 +1,30 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // IMPORTANT!!!! If you want to add testdata to this file, 
 // always add it to the end in order to not change the linenumbers of translations!!!
@@ -50,7 +50,7 @@ line c++ comment } (with brace)
 #define This is another // comment in } define \
      something } comment
 } // complain here
-
+#include <QtCore>
 
 
 // Nested class in same file
@@ -64,7 +64,7 @@ class TopLevel::Nested {
     void foo();
 };
 
-TopLevel::Nested::foo()
+void TopLevel::Nested::foo()
 {
     TopLevel::tr("TopLevel");
 }
@@ -76,7 +76,7 @@ class TopLevel2::Nested {
     void foo();
 };
 
-TopLevel2::Nested::foo()
+void TopLevel2::Nested::foo()
 {
     TopLevel2::tr("TopLevel2");
 }
@@ -99,26 +99,26 @@ void ToBeUsed::caller()
 {
     tr("NameSpace::ToBeUsed");
 }
+#include <QtWidgets/QApplication>
 
-
-
+bool me = false;
 // QTBUG-11818
 //% "Foo"
-QObject::tr("Hello World");
-QObject::tr("Hello World");
+QString s1 = QObject::tr("Hello World");
+QString s2 = QObject::tr("Hello World");
 //% "Bar"
-QApplication::translate("QObject", "Hello World");
-QApplication::translate("QObject", "Hello World");
+QString s3 = QApplication::translate("QObject", "Hello World");
+QString s4 = QApplication::translate("QObject", "Hello World");
 //% "Baz"
-clear = me;
-QObject::tr("Hello World");
+bool clear = me;
+QString s5 = QObject::tr("Hello World");
 
 
 
 // QTBUG-11843: complain about missing source in id-based messages
-qtTrId("no_source");
+QString s6 = qtTrId("no_source");
 
-QObject::tr(R"(simple one)" R"delim(enter
+QString s7 = QObject::tr(R"(simple one)" R"delim(enter
 )delim" R"delim(with delimiter )delim inside)delim" u8R"(with quote " inside)");
 
 QLatin1String not_translated(R"(
@@ -136,6 +136,14 @@ And whether pigs have wings."
 const QString nodelimiter(QObject::tr(R"(
                             This is a test string
 )"));
-const Qstring withdelimiter = QObject::tr(R"delim(
+const QString withdelimiter = QObject::tr(R"delim(
 This is a test string
 )delim");
+
+
+// New in C++14: integer literals may contain single quotes as separator.
+struct IntLiteralsWithSeparators {
+    long d = 10'000'000'0'00;
+    int x = 0x1'AF'FE;
+    int X = 0X2'E5E7;
+};

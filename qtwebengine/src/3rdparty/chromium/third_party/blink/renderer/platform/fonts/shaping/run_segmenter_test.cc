@@ -7,7 +7,6 @@
 #include <string>
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/fonts/orientation_iterator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -252,20 +251,58 @@ TEST_F(RunSegmenterTest, NonEmojiPresentationSymbols) {
         FontFallbackPriority::kText}});
 }
 
-TEST_F(RunSegmenterTest, StartOffset) {
-  String text = String::FromUTF8("abcשלום");
-  text.Ensure16Bit();
+TEST_F(RunSegmenterTest, CJKBracketsAfterLatinLetter) {
+  CheckRunsHorizontal(
+      {{"A", USCRIPT_LATIN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText},
+       {"\u300C"   // CJK LEFT CORNER BRACKET
+        "\u56FD"   // CJK UNIFIED IDEOGRAPH
+        "\u300D",  // CJK RIGHT CORNER BRACKET
+        USCRIPT_HAN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText}});
+}
 
-  // skip first 3 characters
-  unsigned start_offset = 3;
-  Vector<SegmenterExpectedRun> expect;
-  expect.push_back(SegmenterExpectedRun(
-      start_offset, text.length(), USCRIPT_HEBREW,
-      OrientationIterator::kOrientationKeep, FontFallbackPriority::kText));
+TEST_F(RunSegmenterTest, CJKBracketsAfterLatinParenthesis) {
+  CheckRunsHorizontal(
+      {{"A(", USCRIPT_LATIN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText},
+       {"\u300C"   // CJK LEFT CORNER BRACKET
+        "\u56FD"   // CJK UNIFIED IDEOGRAPH
+        "\u300D",  // CJK RIGHT CORNER BRACKET
+        USCRIPT_HAN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText},
+       {")", USCRIPT_LATIN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText}});
+}
 
-  RunSegmenter run_segmenter(text.Characters16(), text.length() - start_offset,
-                             FontOrientation::kHorizontal, start_offset);
-  VerifyRuns(&run_segmenter, expect);
+TEST_F(RunSegmenterTest, CJKBracketsWithLatinParenthesisInside) {
+  CheckRunsHorizontal(
+      {{"A", USCRIPT_LATIN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText},
+       {"\u300C"  // CJK LEFT CORNER BRACKET
+        "\u56FD"  // CJK UNIFIED IDEOGRAPH
+        "(",
+        USCRIPT_HAN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText},
+       {"A", USCRIPT_LATIN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText},
+       {")"
+        "\u300D",  // CJK RIGHT CORNER BRACKET
+        USCRIPT_HAN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText}});
+}
+
+TEST_F(RunSegmenterTest, CJKBracketsAfterUnmatchingLatinParenthesis) {
+  CheckRunsHorizontal(
+      {{"A((", USCRIPT_LATIN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText},
+       {"\u300C"   // CJK LEFT CORNER BRACKET
+        "\u56FD"   // CJK UNIFIED IDEOGRAPH
+        "\u300D",  // CJK RIGHT CORNER BRACKET
+        USCRIPT_HAN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText},
+       {")", USCRIPT_LATIN, OrientationIterator::kOrientationKeep,
+        FontFallbackPriority::kText}});
 }
 
 }  // namespace blink

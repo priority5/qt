@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include "baselineprotocol.h"
 #include <QLibraryInfo>
 #include <QImage>
@@ -39,6 +14,7 @@
 #include <QThread>
 #include <QTime>
 #include <QPointer>
+#include <QRegularExpression>
 
 const QString PI_Project(QLS("Project"));
 const QString PI_TestCase(QLS("TestCase"));
@@ -67,7 +43,7 @@ PlatformInfo PlatformInfo::localHostInfo()
     PlatformInfo pi;
     pi.insert(PI_HostName, QHostInfo::localHostName());
     pi.insert(PI_QtVersion, QLS(qVersion()));
-    pi.insert(PI_QMakeSpec, QString(QLS(QMAKESPEC)).remove(QRegExp(QLS("^.*mkspecs/"))));
+    pi.insert(PI_QMakeSpec, QString(QLS(QMAKESPEC)).remove(QRegularExpression(QLS("^.*mkspecs/"))));
 #if QT_VERSION >= 0x050000
     pi.insert(PI_QtBuildMode, QLibraryInfo::isDebugBuild() ? QLS("QtDebug") : QLS("QtRelease"));
 #endif
@@ -272,7 +248,7 @@ void ImageItem::writeImageToStream(QDataStream &out) const
     out << quint8('Q') << quint8(image.format());
     out << quint8(QSysInfo::ByteOrder) << quint8(0);       // pad to multiple of 4 bytes
     out << quint32(image.width()) << quint32(image.height()) << quint32(image.bytesPerLine());
-    out << qCompress((const uchar *)image.constBits(), image.byteCount());
+    out << qCompress((const uchar *)image.constBits(), image.sizeInBytes());
     //# can be followed by colormap for formats that use it
 }
 

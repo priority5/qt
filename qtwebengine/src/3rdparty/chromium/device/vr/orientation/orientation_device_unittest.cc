@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
@@ -80,6 +80,9 @@ class FakeScreen : public display::Screen {
 
 class VROrientationDeviceTest : public testing::Test {
  public:
+  VROrientationDeviceTest(const VROrientationDeviceTest&) = delete;
+  VROrientationDeviceTest& operator=(const VROrientationDeviceTest&) = delete;
+
   void onDisplaySynced() {}
 
  protected:
@@ -143,7 +146,7 @@ class VROrientationDeviceTest : public testing::Test {
         [](base::OnceClosure quit_closure,
            base::OnceCallback<void(mojom::VRPosePtr)> callback,
            mojom::XRFrameDataPtr ptr) {
-          std::move(callback).Run(std::move(ptr->pose));
+          std::move(callback).Run(std::move(ptr->mojo_from_viewer));
           std::move(quit_closure).Run();
         },
         loop.QuitClosure(), std::move(callback)));
@@ -239,8 +242,6 @@ class VROrientationDeviceTest : public testing::Test {
 
   std::unique_ptr<FakeScreen> fake_screen_;
   std::unique_ptr<ScopedScreenOverride> scoped_screen_override_;
-
-  DISALLOW_COPY_AND_ASSIGN(VROrientationDeviceTest);
 };
 
 TEST_F(VROrientationDeviceTest, InitializationTest) {

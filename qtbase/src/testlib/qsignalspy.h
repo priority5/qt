@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtTest module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QSIGNALSPY_H
 #define QSIGNALSPY_H
@@ -44,9 +8,8 @@
 #include <QtCore/qlist.h>
 #include <QtCore/qobject.h>
 #include <QtCore/qmetaobject.h>
-#include <QtCore/qvariant.h>
-#include <QtCore/qvector.h>
 #include <QtTest/qtesteventloop.h>
+#include <QtCore/qvariant.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -193,23 +156,21 @@ private:
     {
         args.reserve(member.parameterCount());
         for (int i = 0; i < member.parameterCount(); ++i) {
-            int tp = member.parameterType(i);
-            if (tp == QMetaType::UnknownType && obj) {
+            QMetaType tp = member.parameterMetaType(i);
+            if (!tp.isValid() && obj) {
                 void *argv[] = { &tp, &i };
                 QMetaObject::metacall(const_cast<QObject*>(obj),
                                       QMetaObject::RegisterMethodArgumentMetaType,
                                       member.methodIndex(), argv);
-                if (tp == -1)
-                    tp = QMetaType::UnknownType;
             }
-            if (tp == QMetaType::UnknownType) {
+            if (!tp.isValid()) {
                 qWarning("QSignalSpy: Unable to handle parameter '%s' of type '%s' of method '%s',"
                          " use qRegisterMetaType to register it.",
                          member.parameterNames().at(i).constData(),
                          member.parameterTypes().at(i).constData(),
                          member.name().constData());
             }
-            args << tp;
+            args << tp.id();
         }
     }
 
@@ -222,7 +183,7 @@ private:
             if (type == QMetaType::QVariant)
                 list << *reinterpret_cast<QVariant *>(a[i + 1]);
             else
-                list << QVariant(type, a[i + 1]);
+                list << QVariant(QMetaType(type), a[i + 1]);
         }
         append(list);
 
@@ -233,7 +194,7 @@ private:
     // the full, normalized signal name
     QByteArray sig;
     // holds the QMetaType types for the argument list of the signal
-    QVector<int> args;
+    QList<int> args;
 
     QTestEventLoop m_loop;
     bool m_waiting;

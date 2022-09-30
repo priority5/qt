@@ -24,9 +24,10 @@ per-file screen*=oshima@chromium.org
 per-file canvas*=danakj@chromium.org
 
 # Overlay transforms.
-per-file overlay*=alexst@chromium.org
-per-file overlay*=khushalsagar@chromium.org
 per-file overlay*=spang@chromium.org
+
+# Overlay plane data.
+per-file overlay_plane_data*=rjkroege@chromium.org
 
 # Transform, interpolated transform and transform util.
 per-file transform*=danakj@chromium.org
@@ -60,6 +61,3 @@ per-file *vector_icon*=estade@chromium.org
 
 # If you're doing structural changes get a review from one of the OWNERS.
 per-file BUILD.gn=*
-
-# COMPONENT: UI>GFX
-# TEAM: graphics-dev@chromium.org

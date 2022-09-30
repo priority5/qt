@@ -5,7 +5,6 @@
 #ifndef WEBLAYER_BROWSER_NO_STATE_PREFETCH_PRERENDER_TAB_HELPER_H_
 #define WEBLAYER_BROWSER_NO_STATE_PREFETCH_PRERENDER_TAB_HELPER_H_
 
-#include "base/macros.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -14,13 +13,13 @@ class WebContents;
 }
 
 namespace prerender {
-class PrerenderManager;
+class NoStatePrefetchManager;
 }
 
 namespace weblayer {
 
-// Notifies the prerender::PrerenderManager with the events happening in the
-// prerendered WebContents.
+// Notifies the prerender::NoStatePrefetchManager with the events happening in
+// the prerendered WebContents.
 class PrerenderTabHelper
     : public content::WebContentsObserver,
       public content::WebContentsUserData<PrerenderTabHelper> {

@@ -1,52 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the examples of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:BSD$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** BSD License Usage
-** Alternatively, you may use this file under the terms of the BSD license
-** as follows:
-**
-** "Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions are
-** met:
-**   * Redistributions of source code must retain the above copyright
-**     notice, this list of conditions and the following disclaimer.
-**   * Redistributions in binary form must reproduce the above copyright
-**     notice, this list of conditions and the following disclaimer in
-**     the documentation and/or other materials provided with the
-**     distribution.
-**   * Neither the name of The Qt Company Ltd nor the names of its
-**     contributors may be used to endorse or promote products derived
-**     from this software without specific prior written permission.
-**
-**
-** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-** "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-** LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-** A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-** OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-** SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-** LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-** OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 #include "languagechooser.h"
 #include "mainwindow.h"
@@ -97,12 +50,12 @@ LanguageChooser::LanguageChooser(const QString &defaultLang, QWidget *parent)
     setWindowTitle("I18N");
 }
 
-bool LanguageChooser::languageMatch(const QString &lang, const QString &qmFile)
+bool LanguageChooser::languageMatch(QStringView lang, QStringView qmFile)
 {
     //qmFile: i18n_xx.qm
-    const QString prefix = "i18n_";
+    const QStringView prefix{ u"i18n_" };
     const int langTokenLength = 2; /*FIXME: is checking two chars enough?*/
-    return qmFile.midRef(qmFile.indexOf(prefix) + prefix.length(), langTokenLength) == lang.leftRef(langTokenLength);
+    return qmFile.mid(qmFile.indexOf(prefix) + prefix.length(), langTokenLength) == lang.left(langTokenLength);
 }
 
 bool LanguageChooser::eventFilter(QObject *object, QEvent *event)
@@ -129,8 +82,11 @@ void LanguageChooser::checkBoxToggled()
     MainWindow *window = mainWindowForCheckBoxMap.value(checkBox);
     if (!window) {
         QTranslator translator;
-        translator.load(qmFileForCheckBoxMap.value(checkBox));
-        qApp->installTranslator(&translator);
+        const QString qmlFile = qmFileForCheckBoxMap.value(checkBox);
+        if (translator.load(qmlFile))
+            QCoreApplication::installTranslator(&translator);
+        else
+            qWarning("Unable to load %s", qPrintable(QDir::toNativeSeparators(qmlFile)));
 
         window = new MainWindow;
         window->setPalette(colorForLanguage(checkBox->text()));
@@ -166,14 +122,16 @@ QStringList LanguageChooser::findQmFiles()
 QString LanguageChooser::languageName(const QString &qmFile)
 {
     QTranslator translator;
-    translator.load(qmFile);
-
+    if (!translator.load(qmFile)) {
+        qWarning("Unable to load %s", qPrintable(QDir::toNativeSeparators(qmFile)));
+        return {};
+    }
     return translator.translate("MainWindow", "English");
 }
 
 QColor LanguageChooser::colorForLanguage(const QString &language)
 {
-    uint hashValue = qHash(language);
+    size_t hashValue = qHash(language);
     int red = 156 + (hashValue & 0x3F);
     int green = 156 + ((hashValue >> 6) & 0x3F);
     int blue = 156 + ((hashValue >> 12) & 0x3F);

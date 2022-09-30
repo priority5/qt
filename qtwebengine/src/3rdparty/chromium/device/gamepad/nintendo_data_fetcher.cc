@@ -5,7 +5,7 @@
 #include "device/gamepad/nintendo_data_fetcher.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "device/gamepad/gamepad_service.h"
 #include "device/gamepad/gamepad_uma.h"
 
@@ -94,6 +94,12 @@ void NintendoDataFetcher::DeviceRemoved(mojom::HidDeviceInfoPtr device_info) {
   if (NintendoController::IsNintendoController(gamepad_id)) {
     RemoveDevice(device_info->guid);
   }
+}
+
+void NintendoDataFetcher::DeviceChanged(mojom::HidDeviceInfoPtr device_info) {
+  // Ignore updated device info. NintendoController will retain the old
+  // HidDeviceInfo. This is fine since it does not rely on any HidDeviceInfo
+  // members that could change.
 }
 
 bool NintendoDataFetcher::AddDevice(mojom::HidDeviceInfoPtr device_info) {

@@ -10,7 +10,7 @@
 
 #include "base/callback.h"
 #include "base/time/time.h"
-#include "third_party/blink/public/platform/web_client_hints_type.h"
+#include "third_party/blink/public/common/client_hints/enabled_client_hints.h"
 
 namespace blink {
 
@@ -68,6 +68,11 @@ class WebContentSettingsClient {
     return enabled_per_settings;
   }
 
+  // Controls whether auto dark web content is allowed for this frame.
+  virtual bool AllowAutoDarkWebContent(bool enabled_per_settings) {
+    return enabled_per_settings;
+  }
+
   // Controls whether access to read the clipboard is allowed for this frame.
   virtual bool AllowReadFromClipboard(bool default_value) {
     return default_value;
@@ -94,10 +99,6 @@ class WebContentSettingsClient {
   // Reports that passive mixed content was found at the provided URL.
   virtual void PassiveInsecureContentFound(const WebURL&) {}
 
-  // Notifies the client that the frame would have instantiated a plugin if
-  // plugins were enabled.
-  virtual void DidNotAllowPlugins() {}
-
   // Notifies the client that the frame would have executed script if script
   // were enabled.
   virtual void DidNotAllowScript() {}
@@ -105,7 +106,7 @@ class WebContentSettingsClient {
   // Called to persist the received client hint preferences when |url| was
   // fetched. The preferences should be persisted for |duration|.
   virtual void PersistClientHints(
-      const WebEnabledClientHints& enabled_client_hints,
+      const EnabledClientHints& enabled_client_hints,
       base::TimeDelta duration,
       const blink::WebURL& url) {}
 

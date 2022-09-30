@@ -2,32 +2,38 @@
 
 #############################################################################
 ##
-## Copyright (C) 2017 The Qt Company Ltd.
-## Contact: http://www.qt.io/licensing/
+## Copyright (C) 2022 The Qt Company Ltd.
+## Contact: https://www.qt.io/licensing/
 ##
 ## This file is part of the provisioning scripts of the Qt Toolkit.
 ##
-## $QT_BEGIN_LICENSE:LGPL21$
+## $QT_BEGIN_LICENSE:LGPL$
 ## Commercial License Usage
 ## Licensees holding valid commercial Qt licenses may use this file in
 ## accordance with the commercial license agreement provided with the
 ## Software or, alternatively, in accordance with the terms contained in
 ## a written agreement between you and The Qt Company. For licensing terms
-## and conditions see http://www.qt.io/terms-conditions. For further
-## information use the contact form at http://www.qt.io/contact-us.
+## and conditions see https://www.qt.io/terms-conditions. For further
+## information use the contact form at https://www.qt.io/contact-us.
 ##
 ## GNU Lesser General Public License Usage
 ## Alternatively, this file may be used under the terms of the GNU Lesser
-## General Public License version 2.1 or version 3 as published by the Free
-## Software Foundation and appearing in the file LICENSE.LGPLv21 and
-## LICENSE.LGPLv3 included in the packaging of this file. Please review the
-## following information to ensure the GNU Lesser General Public License
-## requirements will be met: https://www.gnu.org/licenses/lgpl.html and
-## http://www.gnu.org/licenses/old-licenses/lgpl-2.1.html.
+## General Public License version 3 as published by the Free Software
+## Foundation and appearing in the file LICENSE.LGPL3 included in the
+## packaging of this file. Please review the following information to
+## ensure the GNU Lesser General Public License version 3 requirements
+## will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
 ##
-## As a special exception, The Qt Company gives you certain additional
-## rights. These rights are described in The Qt Company LGPL Exception
-## version 1.1, included in the file LGPL_EXCEPTION.txt in this package.
+## GNU General Public License Usage
+## Alternatively, this file may be used under the terms of the GNU
+## General Public License version 2.0 or (at your option) the GNU General
+## Public license version 3 or any later version approved by the KDE Free
+## Qt Foundation. The licenses are as published by the Free Software
+## Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
+## included in the packaging of this file. Please review the following
+## information to ensure the GNU General Public License requirements will
+## be met: https://www.gnu.org/licenses/gpl-2.0.html and
+## https://www.gnu.org/licenses/gpl-3.0.html.
 ##
 ## $QT_END_LICENSE$
 ##
@@ -51,15 +57,21 @@ sdkTargetFolder="$targetFolder/sdk"
 
 basePath="http://ci-files01-hki.intra.qt.io/input/android"
 
-toolsVersion="r26.1.1"
-toolsFile="sdk-tools-linux-4333796.zip"
-ndkVersion="r20"
-ndkFile="android-ndk-$ndkVersion-linux-x86_64.zip"
-sdkBuildToolsVersion="29.0.3"
-sdkApiLevel="android-29"
+toolsVersion="2.1"
+toolsFile="commandlinetools-linux-6609375_latest.zip"
+ndkVersion="r23b"
+ndkFile="android-ndk-$ndkVersion-linux.zip"
+sdkBuildToolsVersion="31.0.0"
+sdkApiLevel="android-31"
 
-toolsSha1="8c7c28554a32318461802c1291d76fccfafde054"
-ndkSha1="8665fc84a1b1f0d6ab3b5fdd1e30200cc7b9adff"
+toolsSha1="9172381ff070ee2a416723c1989770cf4b0d1076"
+ndkSha1="f47ec4c4badd11e9f593a8450180884a927c330d"
+
+# Android automotive
+sdkApiLevelAutomovie="android-30"
+androidAutomotive11Url="$basePath/${sdkApiLevelAutomovie}_automotive.tar.gz"
+androidAutomotive="android-automotive"
+android11Sha="4a5cd2bea7ce323b724c3ff1faab13d99f9d2be9"
 
 toolsTargetFile="/tmp/$toolsFile"
 toolsSourceFile="$basePath/$toolsFile"
@@ -88,17 +100,20 @@ sdkmanager_no_progress_bar_cmd="tr '\r' '\n'  |  grep -v '^\[[ =]*\]'"
 # But don't let the pipeline hide sdkmanager failures.
 set -o pipefail
 
+sudo mkdir "$sdkTargetFolder/cmdline-tools"
+sudo mv "$sdkTargetFolder/tools" "$sdkTargetFolder/cmdline-tools"
+
 echo "Running SDK manager for platforms;$sdkApiLevel, platform-tools and build-tools;$sdkBuildToolsVersion."
 # shellcheck disable=SC2031
 if [ "$http_proxy" != "" ]; then
     proxy_host=$(echo "$proxy" | cut -d'/' -f3 | cut -d':' -f1)
     proxy_port=$(echo "$proxy" | cut -d':' -f3)
-    echo "y" | "$sdkTargetFolder/tools/bin/sdkmanager"  \
+    echo "y" | "$sdkTargetFolder/cmdline-tools/tools/bin/sdkmanager" --sdk_root=$sdkTargetFolder  \
                    --no_https --proxy=http --proxy_host="$proxy_host" --proxy_port="$proxy_port"  \
                    "platforms;$sdkApiLevel" "platform-tools" "build-tools;$sdkBuildToolsVersion"  \
         | eval $sdkmanager_no_progress_bar_cmd
 else
-    echo "y" | "$sdkTargetFolder/tools/bin/sdkmanager"  \
+    echo "y" | "$sdkTargetFolder/cmdline-tools/tools/bin/sdkmanager" --sdk_root=$sdkTargetFolder  \
                    "platforms;$sdkApiLevel" "platform-tools" "build-tools;$sdkBuildToolsVersion"  \
         | eval $sdkmanager_no_progress_bar_cmd
 fi
@@ -106,8 +121,7 @@ fi
 echo "Checking the contents of Android SDK..."
 ls -l "$sdkTargetFolder"
 
-SetEnvVar "ANDROID_SDK_HOME" "$sdkTargetFolder"
-SetEnvVar "ANDROID_NDK_HOME" "$targetFolder/android-ndk-$ndkVersion"
+SetEnvVar "ANDROID_SDK_ROOT" "$sdkTargetFolder"
 SetEnvVar "ANDROID_NDK_ROOT" "$targetFolder/android-ndk-$ndkVersion"
 SetEnvVar "ANDROID_NDK_HOST" "linux-x86_64"
 SetEnvVar "ANDROID_API_VERSION" "$sdkApiLevel"
@@ -118,16 +132,25 @@ echo "Android SDK Build Tools = $sdkBuildToolsVersion" >> ~/versions.txt
 echo "Android SDK API level = $sdkApiLevel" >> ~/versions.txt
 echo "Android NDK = $ndkVersion" >> ~/versions.txt
 
-cd "$sdkTargetFolder/tools/bin"
-./sdkmanager --install "emulator"  \
+cd "$sdkTargetFolder/cmdline-tools/tools/bin"
+./sdkmanager --install "emulator" --sdk_root=$sdkTargetFolder \
     | eval $sdkmanager_no_progress_bar_cmd
-echo "y" | ./sdkmanager --install "system-images;android-21;google_apis;x86"  \
+echo "y" | ./sdkmanager --install "system-images;android-23;google_apis;x86"  \
     | eval $sdkmanager_no_progress_bar_cmd
 
 
 echo "Checking the contents of Android SDK again..."
 ls -l "$sdkTargetFolder"
 
-echo "no" | ./avdmanager create avd -n x86emulator -k "system-images;android-21;google_apis;x86" -c 2048M -f
+echo "no" | ./avdmanager create avd -n emulator_x86_api_23 -c 2048M -f \
+    -k "system-images;android-23;google_apis;x86"
+
+echo "Install $sdkApiLevelAutomovie $androidAutomotive"
+DownloadURL "$androidAutomotive11Url" "$androidAutomotive11Url" "$android11Sha" \
+    "/tmp/${sdkApiLevelAutomovie}_automotive.tar.gz"
+sudo tar -xzf "/tmp/${sdkApiLevelAutomovie}_automotive.tar.gz" -C $sdkTargetFolder/system-images
+echo "no" | ./avdmanager create avd -n automotive_emulator_x86_api_30 -c 2048M -f \
+    -k "system-images;${sdkApiLevelAutomovie};${androidAutomotive};x86"
+
 # Purely informative, show the list of avd devices
 ./avdmanager list avd

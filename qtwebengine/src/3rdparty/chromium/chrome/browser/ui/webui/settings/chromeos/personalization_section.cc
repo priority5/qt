@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/personalization_section.h"
 
+#include "ash/constants/ash_features.h"
+#include "ash/constants/ash_pref_names.h"
 #include "ash/public/cpp/ambient/ambient_client.h"
 #include "ash/public/cpp/ambient/ambient_prefs.h"
 #include "base/bind.h"
@@ -13,13 +15,13 @@
 #include "chrome/browser/ui/webui/settings/chromeos/ambient_mode_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/change_picture_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/os_settings_features_util.h"
+#include "chrome/browser/ui/webui/settings/chromeos/personalization_hub_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_tag_registry.h"
 #include "chrome/browser/ui/webui/settings/chromeos/wallpaper_handler.h"
 #include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -122,13 +124,76 @@ const std::vector<SearchConcept>& GetAmbientModeOffSearchConcepts() {
   return *tags;
 }
 
+const std::vector<SearchConcept>& GetDarkModeSearchConcepts() {
+  static const base::NoDestructor<std::vector<SearchConcept>> tags({
+      {IDS_OS_SETTINGS_TAG_DARK_MODE_SUBPAGE,
+       mojom::kDarkModeSubpagePath,
+       mojom::SearchResultIcon::kDarkMode,
+       mojom::SearchResultDefaultRank::kMedium,
+       mojom::SearchResultType::kSubpage,
+       {.subpage = mojom::Subpage::kDarkMode},
+       {IDS_OS_SETTINGS_TAG_DARK_MODE_SUBPAGE_ALT1,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_SUBPAGE_ALT2,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_SUBPAGE_ALT3, SearchConcept::kAltTagEnd}},
+      {IDS_OS_SETTINGS_TAG_DARK_MODE_THEMED,
+       mojom::kDarkModeSubpagePath,
+       mojom::SearchResultIcon::kDarkMode,
+       mojom::SearchResultDefaultRank::kMedium,
+       mojom::SearchResultType::kSetting,
+       {.setting = mojom::Setting::kDarkModeThemed},
+       {IDS_OS_SETTINGS_TAG_DARK_MODE_THEMED_ALT1,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_THEMED_ALT2, SearchConcept::kAltTagEnd}},
+  });
+  return *tags;
+}
+
+const std::vector<SearchConcept>& GetDarkModeOnSearchConcepts() {
+  static const base::NoDestructor<std::vector<SearchConcept>> tags({
+      {IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF,
+       mojom::kDarkModeSubpagePath,
+       mojom::SearchResultIcon::kDarkMode,
+       mojom::SearchResultDefaultRank::kMedium,
+       mojom::SearchResultType::kSetting,
+       {.setting = mojom::Setting::kDarkModeOnOff},
+       {IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT1,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT2,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT3,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT4,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_OFF_ALT5}},
+  });
+  return *tags;
+}
+
+const std::vector<SearchConcept>& GetDarkModeOffSearchConcepts() {
+  static const base::NoDestructor<std::vector<SearchConcept>> tags({
+      {IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON,
+       mojom::kDarkModeSubpagePath,
+       mojom::SearchResultIcon::kDarkMode,
+       mojom::SearchResultDefaultRank::kMedium,
+       mojom::SearchResultType::kSetting,
+       {.setting = mojom::Setting::kDarkModeOnOff},
+       {IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT1,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT2,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT3,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT4,
+        IDS_OS_SETTINGS_TAG_DARK_MODE_TURN_ON_ALT5}},
+  });
+  return *tags;
+}
+
 bool IsAmbientModeAllowed() {
+  // TODO(b/172029925): Set up to test this code.
   return chromeos::features::IsAmbientModeEnabled() &&
+         ash::AmbientClient::Get() &&
          ash::AmbientClient::Get()->IsAmbientModeAllowed();
 }
 
 bool IsAmbientModePhotoPreviewAllowed() {
   return chromeos::features::IsAmbientModePhotoPreviewEnabled();
+}
+
+bool IsDarkModeAllowed() {
+  return ash::features::IsDarkLightModeEnabled();
 }
 
 GURL GetGooglePhotosURL() {
@@ -147,19 +212,37 @@ PersonalizationSection::PersonalizationSection(
   if (features::IsGuestModeActive())
     return;
 
+  if (ash::features::IsPersonalizationHubEnabled()) {
+    // Personalization search is handled by Personalization Hub when feature is
+    // on.
+    return;
+  }
+
   SearchTagRegistry::ScopedTagUpdater updater = registry()->StartUpdate();
   updater.AddSearchTags(GetPersonalizationSearchConcepts());
 
+  if (IsAmbientModeAllowed() || IsDarkModeAllowed())
+    pref_change_registrar_.Init(pref_service_);
+
   if (IsAmbientModeAllowed()) {
     updater.AddSearchTags(GetAmbientModeSearchConcepts());
-
-    pref_change_registrar_.Init(pref_service_);
     pref_change_registrar_.Add(
         ash::ambient::prefs::kAmbientModeEnabled,
         base::BindRepeating(
             &PersonalizationSection::OnAmbientModeEnabledStateChanged,
             base::Unretained(this)));
     OnAmbientModeEnabledStateChanged();
+  }
+
+  if (IsDarkModeAllowed()) {
+    updater.AddSearchTags(GetDarkModeSearchConcepts());
+
+    pref_change_registrar_.Add(
+        ash::prefs::kDarkModeEnabled,
+        base::BindRepeating(
+            &PersonalizationSection::OnDarkModeEnabledStateChanged,
+            base::Unretained(this)));
+    OnDarkModeEnabledStateChanged();
   }
 }
 
@@ -202,7 +285,20 @@ void PersonalizationSection::AddLoadTimeData(
        IDS_OS_SETTINGS_AMBIENT_MODE_ALBUMS_SUBPAGE_ALBUM_SELECTED},
       {"ambientModeAlbumsSubpageAlbumUnselected",
        IDS_OS_SETTINGS_AMBIENT_MODE_ALBUMS_SUBPAGE_ALBUM_UNSELECTED},
+      {"ambientModeLastArtAlbumMessage",
+       IDS_OS_SETTINGS_AMBIENT_MODE_LAST_ART_ALBUM_MESSAGE},
+      {"ambientModeArtAlbumDialogCloseButtonLabel",
+       IDS_OS_SETTINGS_AMBIENT_MODE_ART_ALBUM_DIALOG_CLOSE_BUTTON_LABEL},
       {"changePictureTitle", IDS_OS_SETTINGS_CHANGE_PICTURE_TITLE},
+      {"darkModeTitle", IDS_OS_SETTINGS_DARK_MODE_TITLE},
+      {"darkModeOn", IDS_OS_SETTINGS_DARK_MODE_ON},
+      {"darkModeOff", IDS_OS_SETTINGS_DARK_MODE_OFF},
+      {"darkModeThemedRadioGroupTitle",
+       IDS_OS_SETTINGS_DARK_MODE_THEMED_RADIO_GROUP_TITLE},
+      {"darkModeThemedRadioGroupDescription",
+       IDS_OS_SETTINGS_DARK_MODE_THEMED_RADIO_GROUP_DESCRIPTION},
+      {"darkModeThemedOn", IDS_OS_SETTINGS_DARK_MODE_THEMED_ON},
+      {"darkModeThemedOff", IDS_OS_SETTINGS_DARK_MODE_THEMED_OFF},
       {"openWallpaperApp", IDS_OS_SETTINGS_OPEN_WALLPAPER_APP},
       {"personalizationPageTitle", IDS_OS_SETTINGS_PERSONALIZATION},
       {"setWallpaper", IDS_OS_SETTINGS_SET_WALLPAPER},
@@ -224,8 +320,11 @@ void PersonalizationSection::AddLoadTimeData(
        IDS_SETTINGS_PHOTO_DISCARD_ACCESSIBLE_TEXT},
       {"photoModeAccessibleText", IDS_SETTINGS_PHOTO_MODE_ACCESSIBLE_TEXT},
       {"videoModeAccessibleText", IDS_SETTINGS_VIDEO_MODE_ACCESSIBLE_TEXT},
+      {"personalizationHubTitle", IDS_OS_SETTINGS_OPEN_PERSONALIZATION_HUB},
+      {"personalizationHubSubtitle",
+       IDS_OS_SETTINGS_OPEN_PERSONALIZATION_HUB_SUBTITLE},
   };
-  AddLocalizedStringsBulk(html_source, kLocalizedStrings);
+  html_source->AddLocalizedStrings(kLocalizedStrings);
 
   html_source->AddBoolean(
       "changePictureVideoModeEnabled",
@@ -243,6 +342,9 @@ void PersonalizationSection::AddLoadTimeData(
       l10n_util::GetStringFUTF16(
           IDS_OS_SETTINGS_AMBIENT_MODE_ALBUMS_SUBPAGE_GOOGLE_PHOTOS_NO_ALBUM,
           base::UTF8ToUTF16(GetGooglePhotosURL().spec())));
+  html_source->AddBoolean("isDarkModeAllowed", IsDarkModeAllowed());
+  html_source->AddBoolean("isPersonalizationHubEnabled",
+                          ash::features::IsPersonalizationHubEnabled());
 }
 
 void PersonalizationSection::AddHandlers(content::WebUI* web_ui) {
@@ -250,11 +352,16 @@ void PersonalizationSection::AddHandlers(content::WebUI* web_ui) {
       std::make_unique<chromeos::settings::WallpaperHandler>());
   web_ui->AddMessageHandler(
       std::make_unique<chromeos::settings::ChangePictureHandler>());
+  if (ash::features::IsPersonalizationHubEnabled()) {
+    web_ui->AddMessageHandler(
+        std::make_unique<chromeos::settings::PersonalizationHubHandler>());
+  }
 
   if (!profile()->IsGuestSession() &&
       chromeos::features::IsAmbientModeEnabled()) {
     web_ui->AddMessageHandler(
-        std::make_unique<chromeos::settings::AmbientModeHandler>());
+        std::make_unique<chromeos::settings::AmbientModeHandler>(
+            pref_service_));
   }
 }
 
@@ -315,6 +422,18 @@ void PersonalizationSection::RegisterHierarchy(
       mojom::SearchResultIcon::kWallpaper,
       mojom::SearchResultDefaultRank::kMedium,
       mojom::kAmbientModeArtGalleryAlbumSubpagePath);
+
+  // Dark mode.
+  generator->RegisterTopLevelSubpage(
+      IDS_OS_SETTINGS_AMBIENT_MODE_TITLE, mojom::Subpage::kDarkMode,
+      mojom::SearchResultIcon::kWallpaper,
+      mojom::SearchResultDefaultRank::kMedium, mojom::kDarkModeSubpagePath);
+  static constexpr mojom::Setting kDarkModeSettings[] = {
+      mojom::Setting::kDarkModeOnOff,
+      mojom::Setting::kDarkModeThemed,
+  };
+  RegisterNestedSettingBulk(mojom::Subpage::kDarkMode, kDarkModeSettings,
+                            generator);
 }
 
 void PersonalizationSection::OnAmbientModeEnabledStateChanged() {
@@ -326,6 +445,18 @@ void PersonalizationSection::OnAmbientModeEnabledStateChanged() {
   } else {
     updater.RemoveSearchTags(GetAmbientModeOnSearchConcepts());
     updater.AddSearchTags(GetAmbientModeOffSearchConcepts());
+  }
+}
+
+void PersonalizationSection::OnDarkModeEnabledStateChanged() {
+  SearchTagRegistry::ScopedTagUpdater updater = registry()->StartUpdate();
+
+  if (pref_service_->GetBoolean(ash::prefs::kDarkModeEnabled)) {
+    updater.AddSearchTags(GetDarkModeOnSearchConcepts());
+    updater.RemoveSearchTags(GetDarkModeOffSearchConcepts());
+  } else {
+    updater.RemoveSearchTags(GetDarkModeOnSearchConcepts());
+    updater.AddSearchTags(GetDarkModeOffSearchConcepts());
   }
 }
 

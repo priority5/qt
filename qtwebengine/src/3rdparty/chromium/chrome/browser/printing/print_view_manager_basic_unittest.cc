@@ -12,8 +12,8 @@
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/printing/printing_init.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "components/printing/common/print_messages.h"
 #include "content/public/browser/render_process_host.h"
+#include "printing/mojom/print.mojom.h"
 
 namespace printing {
 
@@ -53,10 +53,9 @@ TEST_F(PrintViewManagerBasicTest, CancelJobDuringDestruction) {
 
   // Setup enough of a PrinterQuery to make GetPrintedPagesCount work
   auto queue = g_browser_process->print_job_manager()->queue();
-  auto query = queue->CreatePrinterQuery(main_rfh()->GetProcess()->GetID(),
-                                         main_rfh()->GetRoutingID());
+  auto query = queue->CreatePrinterQuery(main_rfh()->GetGlobalId());
   base::RunLoop runloop;
-  query->SetSettings(GetPrintTicket(PrinterType::kLocal),
+  query->SetSettings(GetPrintTicket(mojom::PrinterType::kLocal),
                      runloop.QuitClosure());
   runloop.Run();
   auto cookie = query->cookie();

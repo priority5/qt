@@ -12,10 +12,6 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
-#if defined(OS_CHROMEOS)
-#include "ui/base/ui_base_features.h"
-#endif
-
 namespace content {
 namespace responsiveness {
 

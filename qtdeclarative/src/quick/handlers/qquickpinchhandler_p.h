@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QQUICKPINCHHANDLER_H
 #define QQUICKPINCHHANDLER_H
@@ -70,16 +34,10 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPinchHandler : public QQuickMultiPointHandler
     Q_PROPERTY(qreal activeScale READ activeScale NOTIFY updated)
     Q_PROPERTY(qreal rotation READ rotation NOTIFY updated)
     Q_PROPERTY(QVector2D translation READ translation NOTIFY updated)
-#if QT_DEPRECATED_SINCE(5, 12)
-    Q_PROPERTY(qreal minimumX READ minimumX WRITE setMinimumX NOTIFY minimumXChanged)   // ### Qt 6: remove
-    Q_PROPERTY(qreal maximumX READ maximumX WRITE setMaximumX NOTIFY maximumXChanged)   // ### Qt 6: remove
-    Q_PROPERTY(qreal minimumY READ minimumY WRITE setMinimumY NOTIFY minimumYChanged)   // ### Qt 6: remove
-    Q_PROPERTY(qreal maximumY READ maximumY WRITE setMaximumY NOTIFY maximumYChanged)   // ### Qt 6: remove
-#endif
     Q_PROPERTY(QQuickDragAxis * xAxis READ xAxis CONSTANT)
     Q_PROPERTY(QQuickDragAxis * yAxis READ yAxis CONSTANT)
     QML_NAMED_ELEMENT(PinchHandler)
-    QML_ADDED_IN_MINOR_VERSION(12)
+    QML_ADDED_IN_VERSION(2, 12)
 
 public:
     explicit QQuickPinchHandler(QQuickItem *parent = nullptr);
@@ -101,36 +59,20 @@ public:
     qreal activeScale() const { return m_activeScale; }
     qreal rotation() const { return m_activeRotation; }
 
-#if QT_DEPRECATED_SINCE(5, 12)
-    void warnAboutMinMaxDeprecated() const;
-    qreal minimumX() const { warnAboutMinMaxDeprecated(); return m_minimumX; }
-    void setMinimumX(qreal minX);
-    qreal maximumX() const { warnAboutMinMaxDeprecated(); return m_maximumX; }
-    void setMaximumX(qreal maxX);
-    qreal minimumY() const { warnAboutMinMaxDeprecated(); return m_minimumY; }
-    void setMinimumY(qreal minY);
-    qreal maximumY() const { warnAboutMinMaxDeprecated(); return m_maximumY; }
-    void setMaximumY(qreal maxY);
-#endif
-
     QQuickDragAxis *xAxis() { return &m_xAxis; }
     QQuickDragAxis *yAxis() { return &m_yAxis; }
 
-signals:
+Q_SIGNALS:
     void minimumScaleChanged();
     void maximumScaleChanged();
     void minimumRotationChanged();
     void maximumRotationChanged();
-    void minimumXChanged();
-    void maximumXChanged();
-    void minimumYChanged();
-    void maximumYChanged();
     void updated();
 
 protected:
-    bool wantsPointerEvent(QQuickPointerEvent *event) override;
+    bool wantsPointerEvent(QPointerEvent *event) override;
     void onActiveChanged() override;
-    void handlePointerEventImpl(QQuickPointerEvent *event) override;
+    void handlePointerEventImpl(QPointerEvent *event) override;
 
 private:
     // properties
@@ -145,10 +87,6 @@ private:
     qreal m_minimumRotation = -qInf();
     qreal m_maximumRotation = qInf();
 
-    qreal m_minimumX = -qInf();
-    qreal m_maximumX = qInf();
-    qreal m_minimumY = -qInf();
-    qreal m_maximumY = qInf();
     QQuickDragAxis m_xAxis;
     QQuickDragAxis m_yAxis;
 

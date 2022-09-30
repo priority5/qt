@@ -16,6 +16,7 @@ static_library("core") {
     "launch_location.h",
     "offline_content_aggregator.cc",
     "offline_content_aggregator.h",
+    "offline_content_provider.cc",
     "offline_content_provider.h",
     "offline_item.cc",
     "offline_item.h",
@@ -55,7 +56,10 @@ static_library("core") {
       "android/offline_item_visuals_bridge.h",
     ]
 
-    deps += [ ":jni_headers" ]
+    deps += [
+      ":jni_headers",
+      "//url:gurl_android",
+    ]
   }
 }
 
@@ -110,8 +114,8 @@ if (is_android) {
 
     deps = [
       "//base:base_java",
-      "//base:jni_java",
-      "//third_party/android_deps:androidx_annotation_annotation_java",
+      "//third_party/androidx:androidx_annotation_annotation_java",
+      "//url:gurl_java",
     ]
   }
 

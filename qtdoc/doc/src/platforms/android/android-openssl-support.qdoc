@@ -1,34 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
 \page android-openssl-support.html
+\ingroup androidplatform
 \title Adding OpenSSL Support for Android
 \brief Provides instructions to package OpenSSL libraries with your Qt application for Android.
+\previouspage deployment-android.html
+\nextpage android-manifest-file-configuration.html
 
 The Qt installation package comes with OpenSSL support but the OpenSSL libraries
 are not part of the package due to legal restrictions in some countries. If your
@@ -139,8 +118,8 @@ the following step to include those libraries in your project:
         endif()
         \endcode
 
-        Alternatively, you can either use the Qt for Android variable ANDROID_EXTRA_LIBS to add
-        extra libraries, mainly \c libcrypto and \c libssl. For QMake use:
+        Alternatively, you can use the following project variable to add extra
+        libraries, such as \c libcrypto and \c libssl. For QMake use:
 
         \badcode
         ANDROID_EXTRA_LIBS += \
@@ -151,10 +130,9 @@ the following step to include those libraries in your project:
         For CMake:
 
         \badcode
-        set(ANDROID_EXTRA_LIBS
-            <path_to_libs_dir>/ibcrypto_1_1.so
-            <path_to_libs_dir>/libssl_1_1.so
-        CACHE INTERNAL "")
+        set_property(TARGET <target name> PROPERTY QT_ANDROID_EXTRA_LIBS
+            <path_to_libs_dir>/libcrypto_1_1.so
+            <path_to_libs_dir>/libssl_1_1.so)
         \endcode
 
         \note When targeting multiple architectures, include OpenSSL libraries

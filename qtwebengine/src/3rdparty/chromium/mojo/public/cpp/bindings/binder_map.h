@@ -10,9 +10,8 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/lib/binder_map_internal.h"
 
@@ -79,7 +78,7 @@ class BinderMapWithContext {
   // will be left intact for the caller.
   //
   // This method is only usable when ContextType is void.
-  bool TryBind(mojo::GenericPendingReceiver* receiver) WARN_UNUSED_RESULT {
+  [[nodiscard]] bool TryBind(mojo::GenericPendingReceiver* receiver) {
     static_assert(IsVoidContext::value,
                   "TryBind() must be called with a context value when "
                   "ContextType is non-void.");
@@ -93,17 +92,29 @@ class BinderMapWithContext {
 
   // Like above, but passes |context| to the binder if one exists. Only usable
   // when ContextType is non-void.
-  bool TryBind(ContextValueType context,
-               mojo::GenericPendingReceiver* receiver) WARN_UNUSED_RESULT {
+  [[nodiscard]] bool TryBind(ContextValueType context,
+                             mojo::GenericPendingReceiver* receiver) {
     static_assert(!IsVoidContext::value,
                   "TryBind() must be called without a context value when "
                   "ContextType is void.");
     auto it = binders_.find(*receiver->interface_name());
     if (it == binders_.end())
-      return false;
+      return default_binder_ && default_binder_.Run(context, *receiver);
 
     it->second->BindInterface(std::move(context), receiver->PassPipe());
     return true;
+  }
+
+  // DO NOT USE. This sets a generic default handler for any receiver that
+  // doesn't match a registered binder. It's a transitional API to help migrate
+  // some older code to BinderMap. Reliance on this mechanism makes security
+  // auditing more difficult. Note that this intentionally only supports use
+  // with a non-void ContextType, since that's the only existing use case.
+  using DefaultBinder =
+      base::RepeatingCallback<bool(ContextValueType context,
+                                   mojo::GenericPendingReceiver&)>;
+  void SetDefaultBinderDeprecated(DefaultBinder binder) {
+    default_binder_ = std::move(binder);
   }
 
  private:
@@ -113,6 +124,7 @@ class BinderMapWithContext {
       std::string,
       std::unique_ptr<internal::GenericCallbackBinderWithContext<ContextType>>>
       binders_;
+  DefaultBinder default_binder_;
 };
 
 // Common alias for BinderMapWithContext that has no context. Binders added to

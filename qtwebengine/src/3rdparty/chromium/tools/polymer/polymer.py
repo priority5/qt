@@ -86,8 +86,6 @@ _preserve_url_scheme = False
 
 # Use an OrderedDict, since the order these redirects are applied matters.
 _chrome_redirects = OrderedDict([
-    ('chrome://resources/polymer/v1_0/', POLYMER_V1_DIR),
-    ('chrome://resources/', 'ui/webui/resources/'),
     ('//resources/polymer/v1_0/', POLYMER_V1_DIR),
     ('//resources/', 'ui/webui/resources/'),
 ])
@@ -105,7 +103,7 @@ _chrome_reverse_redirects = {
 # 1) normalized, meaning converted from a chrome or scheme-relative or relative
 #    URL to to an absolute path starting at the repo's root
 # 2) converted to an equivalent JS normalized path
-# 3) de-normalized, meaning converted back to a chrome or scheme-relative or
+# 3) de-normalized, meaning converted back to a scheme or scheme-relative or
 #    relative URL
 # 4) converted to a JS import statement
 class Dependency:
@@ -114,7 +112,11 @@ class Dependency:
     self.html_path = dst
 
     if self.html_path.startswith('chrome://'):
-      self.input_format = 'chrome'
+      self.input_format = 'scheme'
+      self.input_scheme = 'chrome'
+    elif self.html_path.startswith('chrome-extension://'):
+      self.input_format = 'scheme'
+      self.input_scheme = 'chrome-extension'
     elif self.html_path.startswith('//'):
       self.input_format = 'scheme-relative'
     else:
@@ -126,12 +128,18 @@ class Dependency:
     self.js_path = self._to_js()
 
   def _to_html_normalized(self):
-    if self.input_format == 'chrome' or self.input_format == 'scheme-relative':
+    if self.input_format == 'scheme' or self.input_format == 'scheme-relative':
       self.html_path_normalized = self.html_path
+
+      if self.input_format == 'scheme':
+        # Strip the URL scheme.
+        colon_index = self.html_path_normalized.find(':')
+        self.html_path_normalized = self.html_path_normalized[colon_index + 1:]
+
       for r in _chrome_redirects:
-        if self.html_path.startswith(r):
-          self.html_path_normalized = (
-              self.html_path.replace(r, _chrome_redirects[r]))
+        if self.html_path_normalized.startswith(r):
+          self.html_path_normalized = (self.html_path_normalized.replace(
+              r, _chrome_redirects[r]))
           break
       return self.html_path_normalized
 
@@ -147,31 +155,33 @@ class Dependency:
 
     if self.html_path_normalized == 'ui/webui/resources/html/polymer.html':
       if self.output_format == 'relative':
-        self.output_format = 'chrome'
+        self.output_format = 'scheme'
+        self.input_scheme = 'chrome'
       return POLYMER_V3_DIR + 'polymer/polymer_bundled.min.js'
+
+    extension = ('.js'
+                 if self.html_path_normalized in _migrated_imports else '.m.js')
 
     if re.match(r'ui/webui/resources/html/', self.html_path_normalized):
       return (self.html_path_normalized
           .replace(r'ui/webui/resources/html/', 'ui/webui/resources/js/')
-          .replace(r'.html', '.m.js'))
+          .replace(r'.html', extension))
 
-    extension = (
-        '.js' if self.html_path_normalized in _migrated_imports else '.m.js')
     return self.html_path_normalized.replace(r'.html', extension)
 
   def _to_js(self):
     js_path = self.js_path_normalized
 
-    if self.output_format == 'chrome' or self.output_format == 'scheme-relative':
+    if self.output_format == 'scheme' or self.output_format == 'scheme-relative':
       for r in _chrome_reverse_redirects:
         if self.js_path_normalized.startswith(r):
           js_path = self.js_path_normalized.replace(
               r, _chrome_reverse_redirects[r])
           break
 
-      # Restore the chrome:// scheme if |preserve_url_scheme| is enabled.
-      if _preserve_url_scheme and self.output_format == 'chrome':
-        js_path = "chrome:" + js_path
+      # Restore the original scheme if |preserve_url_scheme| is enabled.
+      if _preserve_url_scheme and self.output_format == 'scheme':
+        js_path = self.input_scheme + ":" + js_path
       return js_path
 
     assert self.output_format == 'relative'
@@ -193,7 +203,7 @@ class Dependency:
     return 'import \'%s\';' % self.js_path
 
 
-def _generate_js_imports(html_file):
+def _generate_js_imports(html_file, html_type):
   output = []
   imports_start_offset = -1
   imports_end_index = -1
@@ -218,7 +228,19 @@ def _generate_js_imports(html_file):
 
         # Convert HTML import URL to equivalent JS import URL.
         dep = Dependency(html_file, match.group(1))
-        js_import = dep.to_js_import(_auto_imports)
+
+        auto_imports = _auto_imports
+
+        # Override default polymer.html auto import for non dom-module cases.
+        if html_type == 'iron-iconset':
+          auto_imports = _auto_imports.copy()
+          auto_imports["ui/webui/resources/html/polymer.html"] = ["html"]
+        elif html_type == 'custom-style' or html_type == 'style-module':
+          auto_imports = _auto_imports.copy()
+          del auto_imports["ui/webui/resources/html/polymer.html"]
+
+        js_import = dep.to_js_import(auto_imports)
+
         if dep.html_path_normalized in _ignore_imports:
           output.append('// ' + js_import)
         else:
@@ -369,7 +391,7 @@ def process_v3_ready(js_file, html_file):
 
 def _process_dom_module(js_file, html_file):
   html_template = _extract_template(html_file, 'dom-module')
-  js_imports = _generate_js_imports(html_file)
+  js_imports = _generate_js_imports(html_file, 'dom-module')
 
   # Remove IFFE opening/closing lines.
   IIFE_OPENING = '(function() {\n'
@@ -387,10 +409,15 @@ def _process_dom_module(js_file, html_file):
   # Ignore lines with an ignore annotation.
   IGNORE_LINE_REGEX = '\s*/\* #ignore \*/(\S|\s)*'
 
+  # Special syntax used for files using ES class syntax. (OOBE screens)
+  JS_IMPORTS_PLACEHOLDER_REGEX = '/* #js_imports_placeholder */';
+  HTML_TEMPLATE_PLACEHOLDER_REGEX = '/* #html_template_placeholder */';
+
   with io.open(js_file, encoding='utf-8') as f:
     lines = f.readlines()
 
   imports_added = False
+  html_content_added = False
   iife_found = False
   cr_define_found = False
   cr_define_end_line = -1
@@ -409,18 +436,33 @@ def _process_dom_module(js_file, html_file):
         line = '\n'.join(js_imports) + '\n\n'
         cr_define_found = True
         imports_added = True
-      elif line.startswith('Polymer({\n'):
+      elif JS_IMPORTS_PLACEHOLDER_REGEX in line:
+        line = line.replace(JS_IMPORTS_PLACEHOLDER_REGEX,
+                            '\n'.join(js_imports) + '\n')
+        imports_added = True
+      elif 'Polymer({\n' in line:
         # Place the JS imports right before the opening "Polymer({" line.
-        line = line.replace(
-            r'Polymer({', '%s\n\nPolymer({' % '\n'.join(js_imports))
+        line = '\n'.join(js_imports) + '\n\n' + line
         imports_added = True
 
-    # Place the HTML content right after the opening "Polymer({" line.
-    # Note: There is currently an assumption that only one Polymer() declaration
-    # exists per file.
-    line = line.replace(
-        r'Polymer({',
-        'Polymer({\n  _template: html`%s`,' % html_template)
+    # Place the HTML content right after the opening "Polymer({" line if using
+    # the Polymer() factory method, or replace HTML_TEMPLATE_PLACEHOLDER_REGEX
+    # with the HTML content if the files is using ES6 class syntax.
+    # Note: There is currently an assumption that only one Polymer() declaration,
+    # or one class declaration exists per file.
+    error_message = """Multiple Polymer() declarations found, or mixed ES6 class
+                       syntax with Polymer() declarations in the same file"""
+    if 'Polymer({' in line:
+      assert not html_content_added, error_message
+      line = line.replace(
+          r'Polymer({',
+          'Polymer({\n  _template: html`%s`,' % html_template)
+      html_content_added = True
+    elif HTML_TEMPLATE_PLACEHOLDER_REGEX in line:
+      assert not html_content_added, error_message
+      line = line.replace(HTML_TEMPLATE_PLACEHOLDER_REGEX,
+        'static get template() {\n    return html`%s`;\n  }' % html_template)
+      html_content_added = True
 
     line = line.replace(EXPORT_LINE_REGEX, 'export')
 
@@ -451,7 +493,7 @@ def _process_dom_module(js_file, html_file):
 
 def _process_style_module(js_file, html_file):
   html_template = _extract_template(html_file, 'style-module')
-  js_imports = _generate_js_imports(html_file)
+  js_imports = _generate_js_imports(html_file, 'style-module')
 
   style_id = _extract_dom_module_id(html_file)
 
@@ -478,7 +520,7 @@ document.body.appendChild(template.content.cloneNode(true));""" % {
 
 def _process_custom_style(js_file, html_file):
   html_template = _extract_template(html_file, 'custom-style')
-  js_imports = _generate_js_imports(html_file)
+  js_imports = _generate_js_imports(html_file, 'custom-style')
 
   js_template = \
 """%(js_imports)s
@@ -494,7 +536,7 @@ document.head.appendChild($_documentContainer.content);""" % {
 
 def _process_iron_iconset(js_file, html_file):
   html_template = _extract_template(html_file, 'iron-iconset')
-  js_imports = _generate_js_imports(html_file)
+  js_imports = _generate_js_imports(html_file, 'iron-iconset')
 
   js_template = \
 """%(js_imports)s

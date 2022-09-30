@@ -6,12 +6,11 @@
 
 #include <utility>
 
-#include "base/optional.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/common/frame.mojom.h"
-#include "content/common/frame_messages.h"
+#include "content/common/navigation_params_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -19,6 +18,8 @@
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/url_constants.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom.h"
 
 namespace content {
 
@@ -31,7 +32,7 @@ bool VerifyBlobToken(
     const GURL& received_url) {
   DCHECK_NE(ChildProcessHost::kInvalidUniqueID, process_id);
 
-  if (received_token) {
+  if (received_token.is_valid()) {
     if (!received_url.SchemeIsBlob()) {
       bad_message::ReceivedBadMessage(
           process_id, bad_message::BLOB_URL_TOKEN_FOR_NON_BLOB_URL);
@@ -95,7 +96,7 @@ bool VerifyDownloadUrlParams(SiteInstance* site_instance,
 }
 
 bool VerifyOpenURLParams(SiteInstance* site_instance,
-                         const mojom::OpenURLParamsPtr& params,
+                         const blink::mojom::OpenURLParamsPtr& params,
                          GURL* out_validated_url,
                          scoped_refptr<network::SharedURLLoaderFactory>*
                              out_blob_url_loader_factory) {
@@ -111,18 +112,15 @@ bool VerifyOpenURLParams(SiteInstance* site_instance,
   process->FilterURL(false, out_validated_url);
 
   // Verify |params.blob_url_token| and populate |out_blob_url_loader_factory|.
-  mojo::PendingRemote<blink::mojom::BlobURLToken> blob_url_token(
-      mojo::ScopedMessagePipeHandle(std::move(params->blob_url_token)),
-      blink::mojom::BlobURLToken::Version_);
-  if (!VerifyBlobToken(process_id, blob_url_token, params->url))
+  if (!VerifyBlobToken(process_id, params->blob_url_token, params->url))
     return false;
 
-  if (blob_url_token.is_valid()) {
+  if (params->blob_url_token.is_valid()) {
     *out_blob_url_loader_factory =
         ChromeBlobStorageContext::URLLoaderFactoryForToken(
-            BrowserContext::GetStoragePartition(
-                site_instance->GetBrowserContext(), site_instance),
-            std::move(blob_url_token));
+            site_instance->GetBrowserContext()->GetStoragePartition(
+                site_instance),
+            std::move(params->blob_url_token));
   }
 
   // Verify |params.post_body|.
@@ -143,7 +141,7 @@ bool VerifyOpenURLParams(SiteInstance* site_instance,
 
 bool VerifyBeginNavigationCommonParams(
     SiteInstance* site_instance,
-    mojom::CommonNavigationParams* common_params) {
+    blink::mojom::CommonNavigationParams* common_params) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(site_instance);
   DCHECK(common_params);
@@ -166,7 +164,8 @@ bool VerifyBeginNavigationCommonParams(
   }
 
   // Verify |transition| is webby.
-  if (!PageTransitionIsWebTriggerable(common_params->transition)) {
+  if (!PageTransitionIsWebTriggerable(
+          ui::PageTransitionFromInt(common_params->transition))) {
     bad_message::ReceivedBadMessage(
         process, bad_message::RFHI_BEGIN_NAVIGATION_NON_WEBBY_TRANSITION);
     return false;
@@ -190,6 +189,12 @@ bool VerifyBeginNavigationCommonParams(
         process, bad_message::RFH_BASE_URL_FOR_DATA_URL_SPECIFIED);
     return false;
   }
+
+  // Asynchronous (browser-controlled, but) renderer-initiated navigations can
+  // not be same-document. Allowing this incorrectly could have us try to
+  // navigate an existing document to a different site.
+  if (NavigationTypeUtils::IsSameDocument(common_params->navigation_type))
+    return false;
 
   // Verification succeeded.
   return true;

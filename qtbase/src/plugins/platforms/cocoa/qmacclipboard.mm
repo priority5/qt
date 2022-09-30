@@ -1,41 +1,7 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+#include <AppKit/AppKit.h>
 
 #include "qmacclipboard.h"
 #include <QtGui/qclipboard.h>
@@ -53,10 +19,7 @@
 
 QT_BEGIN_NAMESPACE
 
-/*****************************************************************************
-  QClipboard debug facilities
- *****************************************************************************/
-//#define DEBUG_PASTEBOARD
+using namespace Qt::StringLiterals;
 
 /*****************************************************************************
    QMacPasteboard code
@@ -82,7 +45,7 @@ OSStatus PasteboardGetItemCountSafe(PasteboardRef paste, ItemCount *cnt)
 class QMacMimeData : public QMimeData
 {
 public:
-    QVariant variantData(const QString &mime) { return retrieveData(mime, QVariant::Invalid); }
+    QVariant variantData(const QString &mime) { return retrieveData(mime, QMetaType()); }
 private:
     QMacMimeData();
 };
@@ -183,7 +146,7 @@ OSStatus QMacPasteboard::promiseKeeper(PasteboardRef paste, PasteboardItemID id,
         }
     }
 
-    if (!promise.itemId && flavorAsQString == QLatin1String("com.trolltech.qt.MimeTypeName")) {
+    if (!promise.itemId && flavorAsQString == "com.trolltech.qt.MimeTypeName"_L1) {
         // we have promised this data, but won't be able to convert, so return null data.
         // This helps in making the application/x-qt-mime-type-name hidden from normal use.
         QByteArray ba;
@@ -194,15 +157,13 @@ OSStatus QMacPasteboard::promiseKeeper(PasteboardRef paste, PasteboardItemID id,
 
     if (!promise.itemId) {
         // There was no promise that could deliver data for the
-        // given id and flavor. This should not happend.
+        // given id and flavor. This should not happen.
         qDebug("Pasteboard: %d: Request for %ld, %s, but no promise found!", __LINE__, promise_id, qPrintable(flavorAsQString));
         return cantGetFlavorErr;
     }
 
-#ifdef DEBUG_PASTEBOARD
-    qDebug("PasteBoard: Calling in promise for %s[%ld] [%s] (%s) [%d]", qPrintable(promise.mime), promise_id,
+    qCDebug(lcQpaClipboard, "PasteBoard: Calling in promise for %s[%ld] [%s] (%s) [%d]", qPrintable(promise.mime), promise_id,
            qPrintable(flavorAsQString), qPrintable(promise.convertor->convertorName()), promise.offset);
-#endif
 
     // Get the promise data. If this is a "lazy" promise call variantData()
     // to request the data from the application.
@@ -235,10 +196,8 @@ QMacPasteboard::hasOSType(int c_flavor) const
     if (PasteboardGetItemCountSafe(paste, &cnt) || !cnt)
         return false;
 
-#ifdef DEBUG_PASTEBOARD
-    qDebug("PasteBoard: hasOSType [%c%c%c%c]", (c_flavor>>24)&0xFF, (c_flavor>>16)&0xFF,
+    qCDebug(lcQpaClipboard, "PasteBoard: hasOSType [%c%c%c%c]", (c_flavor>>24)&0xFF, (c_flavor>>16)&0xFF,
            (c_flavor>>8)&0xFF, (c_flavor>>0)&0xFF);
-#endif
     for (uint index = 1; index <= cnt; ++index) {
 
         PasteboardItemID id;
@@ -257,16 +216,12 @@ QMacPasteboard::hasOSType(int c_flavor) const
             if (preferredTag)
                 CFRelease(preferredTag);
             if (os_flavor == c_flavor) {
-#ifdef DEBUG_PASTEBOARD
-                qDebug("  - Found!");
-#endif
+                qCDebug(lcQpaClipboard, "  - Found!");
                 return true;
             }
         }
     }
-#ifdef DEBUG_PASTEBOARD
-    qDebug("  - NotFound!");
-#endif
+    qCDebug(lcQpaClipboard, "  - NotFound!");
     return false;
 }
 
@@ -282,9 +237,7 @@ QMacPasteboard::hasFlavor(QString c_flavor) const
     if (PasteboardGetItemCountSafe(paste, &cnt) || !cnt)
         return false;
 
-#ifdef DEBUG_PASTEBOARD
-    qDebug("PasteBoard: hasFlavor [%s]", qPrintable(c_flavor));
-#endif
+    qCDebug(lcQpaClipboard, "PasteBoard: hasFlavor [%s]", qPrintable(c_flavor));
     for (uint index = 1; index <= cnt; ++index) {
 
         PasteboardItemID id;
@@ -293,15 +246,11 @@ QMacPasteboard::hasFlavor(QString c_flavor) const
 
         PasteboardFlavorFlags flags;
         if (PasteboardGetItemFlavorFlags(paste, id, QCFString(c_flavor), &flags) == noErr) {
-#ifdef DEBUG_PASTEBOARD
-            qDebug("  - Found!");
-#endif
+            qCDebug(lcQpaClipboard, "  - Found!");
             return true;
         }
     }
-#ifdef DEBUG_PASTEBOARD
-    qDebug("  - NotFound!");
-#endif
+    qCDebug(lcQpaClipboard, "  - NotFound!");
     return false;
 }
 
@@ -311,7 +260,7 @@ public:
     QMacPasteboardMimeSource(const QMacPasteboard *p) : QMimeData(), paste(p) { }
     ~QMacPasteboardMimeSource() { }
     virtual QStringList formats() const { return paste->formats(); }
-    virtual QVariant retrieveData(const QString &format, QVariant::Type type) const { return paste->retrieveData(format, type); }
+    virtual QVariant retrieveData(const QString &format, QMetaType type) const { return paste->retrieveData(format, type); }
 };
 
 QMimeData
@@ -338,14 +287,14 @@ QMacPasteboard::setMimeData(QMimeData *mime_src, DataRequestType dataRequestType
     mime = mime_src;
 
     QList<QMacInternalPasteboardMime*> availableConverters = QMacInternalPasteboardMime::all(mime_type);
-    if (mime != 0) {
+    if (mime != nullptr) {
         clear_helper();
         QStringList formats = mime_src->formats();
 
         // QMimeData sub classes reimplementing the formats() might not expose the
         // temporary "application/x-qt-mime-type-name" mimetype. So check the existence
         // of this mime type while doing drag and drop.
-        QString dummyMimeType(QLatin1String("application/x-qt-mime-type-name"));
+        QString dummyMimeType("application/x-qt-mime-type-name"_L1);
         if (!formats.contains(dummyMimeType)) {
             QByteArray dummyType = mime_src->data(dummyMimeType);
             if (!dummyType.isEmpty()) {
@@ -359,7 +308,7 @@ QMacPasteboard::setMimeData(QMimeData *mime_src, DataRequestType dataRequestType
                 // Hack: The Rtf handler converts incoming Rtf to Html. We do
                 // not want to convert outgoing Html to Rtf but instead keep
                 // posting it as Html. Skip the Rtf handler here.
-                if (c->convertorName() == QLatin1String("Rtf"))
+                if (c->convertorName() == "Rtf"_L1)
                     continue;
                 QString flavor(c->flavorFor(mimeType));
                 if (!flavor.isEmpty()) {
@@ -375,10 +324,8 @@ QMacPasteboard::setMimeData(QMimeData *mime_src, DataRequestType dataRequestType
                         QMacPasteboard::Promise promise(itemID, c, mimeType, mimeData, item, dataRequestType);
                         promises.append(promise);
                         PasteboardPutItemFlavor(paste, reinterpret_cast<PasteboardItemID>(itemID), QCFString(flavor), 0, kPasteboardFlavorNoFlags);
-#ifdef DEBUG_PASTEBOARD
-                        qDebug(" -  adding %d %s [%s] <%s> [%d]",
+                        qCDebug(lcQpaClipboard, " -  adding %ld %s [%s] <%s> [%d]",
                                itemID, qPrintable(mimeType), qPrintable(flavor), qPrintable(c->convertorName()), item);
-#endif
                     }
                 }
             }
@@ -399,9 +346,7 @@ QMacPasteboard::formats() const
     if (PasteboardGetItemCountSafe(paste, &cnt) || !cnt)
         return ret;
 
-#ifdef DEBUG_PASTEBOARD
-    qDebug("PasteBoard: Formats [%d]", (int)cnt);
-#endif
+    qCDebug(lcQpaClipboard, "PasteBoard: Formats [%d]", (int)cnt);
     for (uint index = 1; index <= cnt; ++index) {
 
         PasteboardItemID id;
@@ -415,14 +360,10 @@ QMacPasteboard::formats() const
         const int type_count = CFArrayGetCount(types);
         for (int i = 0; i < type_count; ++i) {
             const QString flavor = QString::fromCFString((CFStringRef)CFArrayGetValueAtIndex(types, i));
-#ifdef DEBUG_PASTEBOARD
-            qDebug(" -%s", qPrintable(QString(flavor)));
-#endif
+            qCDebug(lcQpaClipboard, " -%s", qPrintable(QString(flavor)));
             QString mimeType = QMacInternalPasteboardMime::flavorToMime(mime_type, flavor);
             if (!mimeType.isEmpty() && !ret.contains(mimeType)) {
-#ifdef DEBUG_PASTEBOARD
-                qDebug("   -<%d> %s [%s]", ret.size(), qPrintable(mimeType), qPrintable(QString(flavor)));
-#endif
+                qCDebug(lcQpaClipboard, "   -<%lld> %s [%s]", ret.size(), qPrintable(mimeType), qPrintable(QString(flavor)));
                 ret << mimeType;
             }
         }
@@ -442,9 +383,7 @@ QMacPasteboard::hasFormat(const QString &format) const
     if (PasteboardGetItemCountSafe(paste, &cnt) || !cnt)
         return false;
 
-#ifdef DEBUG_PASTEBOARD
-    qDebug("PasteBoard: hasFormat [%s]", qPrintable(format));
-#endif
+    qCDebug(lcQpaClipboard, "PasteBoard: hasFormat [%s]", qPrintable(format));
     for (uint index = 1; index <= cnt; ++index) {
 
         PasteboardItemID id;
@@ -458,14 +397,10 @@ QMacPasteboard::hasFormat(const QString &format) const
         const int type_count = CFArrayGetCount(types);
         for (int i = 0; i < type_count; ++i) {
             const QString flavor = QString::fromCFString((CFStringRef)CFArrayGetValueAtIndex(types, i));
-#ifdef DEBUG_PASTEBOARD
-            qDebug(" -%s [0x%x]", qPrintable(QString(flavor)), mime_type);
-#endif
+            qCDebug(lcQpaClipboard, " -%s [0x%x]", qPrintable(QString(flavor)), mime_type);
             QString mimeType = QMacInternalPasteboardMime::flavorToMime(mime_type, flavor);
-#ifdef DEBUG_PASTEBOARD
             if (!mimeType.isEmpty())
-                qDebug("   - %s", qPrintable(mimeType));
-#endif
+                qCDebug(lcQpaClipboard, "   - %s", qPrintable(mimeType));
             if (mimeType == format)
                 return true;
         }
@@ -474,7 +409,7 @@ QMacPasteboard::hasFormat(const QString &format) const
 }
 
 QVariant
-QMacPasteboard::retrieveData(const QString &format, QVariant::Type) const
+QMacPasteboard::retrieveData(const QString &format, QMetaType) const
 {
     if (!paste)
         return QVariant();
@@ -485,9 +420,7 @@ QMacPasteboard::retrieveData(const QString &format, QVariant::Type) const
     if (PasteboardGetItemCountSafe(paste, &cnt) || !cnt)
         return QByteArray();
 
-#ifdef DEBUG_PASTEBOARD
-    qDebug("Pasteboard: retrieveData [%s]", qPrintable(format));
-#endif
+    qCDebug(lcQpaClipboard, "Pasteboard: retrieveData [%s]", qPrintable(format));
     const QList<QMacInternalPasteboardMime *> mimes = QMacInternalPasteboardMime::all(mime_type);
     for (int mime = 0; mime < mimes.size(); ++mime) {
         QMacInternalPasteboardMime *c = mimes.at(mime);
@@ -496,9 +429,9 @@ QMacPasteboard::retrieveData(const QString &format, QVariant::Type) const
             // Converting via PasteboardCopyItemFlavorData below will for some UITs result
             // in newlines mapping to '\r' instead of '\n'. To work around this we shortcut
             // the conversion via NSPasteboard's NSStringPboardType if possible.
-            if (c_flavor == QLatin1String("com.apple.traditional-mac-plain-text")
-             || c_flavor == QLatin1String("public.utf8-plain-text")
-             || c_flavor == QLatin1String("public.utf16-plain-text")) {
+            if (c_flavor == "com.apple.traditional-mac-plain-text"_L1
+             || c_flavor == "public.utf8-plain-text"_L1
+             || c_flavor == "public.utf16-plain-text"_L1) {
                 QString str = qt_mac_get_pasteboardString(paste);
                 if (!str.isEmpty())
                     return str;
@@ -523,18 +456,14 @@ QMacPasteboard::retrieveData(const QString &format, QVariant::Type) const
                         if (PasteboardCopyItemFlavorData(paste, id, flavor, &macBuffer) == noErr) {
                             QByteArray buffer((const char *)CFDataGetBytePtr(macBuffer), CFDataGetLength(macBuffer));
                             if (!buffer.isEmpty()) {
-#ifdef DEBUG_PASTEBOARD
-                                qDebug("  - %s [%s] (%s)", qPrintable(format), qPrintable(QString::fromNSString(flavor)), qPrintable(c->convertorName()));
-#endif
+                                qCDebug(lcQpaClipboard, "  - %s [%s] (%s)", qPrintable(format), qPrintable(c_flavor), qPrintable(c->convertorName()));
                                 buffer.detach(); //detach since we release the macBuffer
                                 retList.append(buffer);
                                 break; //skip to next element
                             }
                         }
                     } else {
-#ifdef DEBUG_PASTEBOARD
-                        qDebug("  - NoMatch %s [%s] (%s)", qPrintable(c_flavor), qPrintable(QString::fromNSString(flavor)), qPrintable(c->convertorName()));
-#endif
+                        qCDebug(lcQpaClipboard, "  - NoMatch %s [%s] (%s)", qPrintable(c_flavor), qPrintable(QString::fromCFString(flavor)), qPrintable(c->convertorName()));
                     }
                 }
             }
@@ -558,9 +487,7 @@ void QMacPasteboard::clear_helper()
 void
 QMacPasteboard::clear()
 {
-#ifdef DEBUG_PASTEBOARD
-    qDebug("PasteBoard: clear!");
-#endif
+    qCDebug(lcQpaClipboard, "PasteBoard: clear!");
     clear_helper();
 }
 
@@ -574,10 +501,8 @@ QMacPasteboard::sync() const
     if (fromGlobal)
         const_cast<QMacPasteboard *>(this)->setMimeData(nullptr);
 
-#ifdef DEBUG_PASTEBOARD
     if (fromGlobal)
-        qDebug("Pasteboard: Synchronize!");
-#endif
+        qCDebug(lcQpaClipboard, "Pasteboard: Synchronize!");
     return fromGlobal;
 }
 
@@ -594,7 +519,7 @@ QString qt_mac_get_pasteboardString(PasteboardRef paste)
         pb = [NSPasteboard generalPasteboard];
     }
     if (pb) {
-        NSString *text = [pb stringForType:NSStringPboardType];
+        NSString *text = [pb stringForType:NSPasteboardTypeString];
         if (text)
             return QString::fromNSString(text);
     }

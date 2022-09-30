@@ -1,31 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2016 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// Copyright (C) 2016 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifdef QT_GUI_LIB
 #  include <QtGui/QGuiApplication>
@@ -34,11 +9,13 @@
 #endif
 
 #include <QtCore/private/qglobal_p.h>
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QSignalSpy>
 
 #include <qtimer.h>
 #include <qthread.h>
 #include <qelapsedtimer.h>
+#include <qproperty.h>
 
 #if defined Q_OS_UNIX
 #include <unistd.h>
@@ -88,17 +65,24 @@ private slots:
     void dontBlockEvents();
     void postedEventsShouldNotStarveTimers();
     void callOnTimeout();
+
+    void bindToTimer();
+    void bindTimer();
 };
 
 void tst_QTimer::zeroTimer()
 {
     QTimer timer;
+    QVERIFY(!timer.isSingleShot());
     timer.setInterval(0);
+    timer.setSingleShot(true);
+    QVERIFY(timer.isSingleShot());
 
     QSignalSpy timeoutSpy(&timer, &QTimer::timeout);
     timer.start();
 
-    QCoreApplication::processEvents();
+    // Pass timeout to work round glib issue, see QTBUG-84291.
+    QCoreApplication::processEvents(QEventLoop::AllEvents, INT_MAX);
 
     QCOMPARE(timeoutSpy.count(), 1);
 }
@@ -106,7 +90,9 @@ void tst_QTimer::zeroTimer()
 void tst_QTimer::singleShotTimeout()
 {
     QTimer timer;
+    QVERIFY(!timer.isSingleShot());
     timer.setSingleShot(true);
+    QVERIFY(timer.isSingleShot());
 
     QSignalSpy timeoutSpy(&timer, &QTimer::timeout);
     timer.start(100);
@@ -204,7 +190,9 @@ void tst_QTimer::remainingTimeInitial()
     QFETCH(Qt::TimerType, timerType);
 
     QTimer timer;
+    QCOMPARE(timer.timerType(), Qt::CoarseTimer);
     timer.setTimerType(timerType);
+    QCOMPARE(timer.timerType(), timerType);
     timer.start(startTimeMs);
 
     const int rt = timer.remainingTime();
@@ -335,7 +323,8 @@ public:
         secondTimerId = -1; // started later
     }
 
-    bool event(QEvent *e) {
+    bool event(QEvent *e) override
+    {
         if (e->type() == 4002) {
             // got the posted event
             if (timeoutsForFirst == 1 && timeoutsForSecond == 0)
@@ -345,7 +334,8 @@ public:
         return QObject::event(e);
     }
 
-    void timerEvent(QTimerEvent *te) {
+    void timerEvent(QTimerEvent *te) override
+    {
         if (te->timerId() == firstTimerId) {
             if (++timeoutsForFirst == 1) {
                 killTimer(extraTimerId);
@@ -403,7 +393,7 @@ public:
         : inTimerEvent(false), timerEventRecursed(false), interval(interval)
     { }
 
-    void timerEvent(QTimerEvent *timerEvent)
+    void timerEvent(QTimerEvent *timerEvent) override
     {
         timerEventRecursed = inTimerEvent;
         if (timerEventRecursed) {
@@ -460,7 +450,7 @@ public:
         : times(0), target(target), recurse(false)
     { }
 
-    void timerEvent(QTimerEvent *timerEvent)
+    void timerEvent(QTimerEvent *timerEvent) override
     {
         if (++times == target) {
             killTimer(timerEvent->timerId());
@@ -579,7 +569,7 @@ public:
         interval = interval ? 0 : 1000;
     }
 
-    void timerEvent(QTimerEvent* ev)
+    void timerEvent(QTimerEvent* ev) override
     {
         if (ev->timerId() != m_timer.timerId())
             return;
@@ -677,7 +667,7 @@ public:
         delete timer;
     }
 
-    void run()
+    void run() override
     {
         QEventLoop eventLoop;
         timer = new QTimer;
@@ -947,7 +937,7 @@ class DontBlockEvents : public QObject
     Q_OBJECT
 public:
     DontBlockEvents();
-    void timerEvent(QTimerEvent*);
+    void timerEvent(QTimerEvent*) override;
 
     int count;
     int total;
@@ -1072,6 +1062,95 @@ void tst_QTimer::callOnTimeout()
     QVERIFY(!connection);
 }
 
+void tst_QTimer::bindToTimer()
+{
+    QTimer timer;
+
+    // singleShot property
+    QProperty<bool> singleShot;
+    singleShot.setBinding(timer.bindableSingleShot().makeBinding());
+    QCOMPARE(timer.isSingleShot(), singleShot);
+
+    timer.setSingleShot(true);
+    QVERIFY(singleShot);
+    timer.setSingleShot(false);
+    QVERIFY(!singleShot);
+
+    // interval property
+    QProperty<int> interval;
+    interval.setBinding([&](){ return timer.interval(); });
+    QCOMPARE(timer.interval(), interval);
+
+    timer.setInterval(10);
+    QCOMPARE(interval, 10);
+    timer.setInterval(100);
+    QCOMPARE(interval, 100);
+
+    // timerType property
+    QProperty<Qt::TimerType> timerType;
+    timerType.setBinding(timer.bindableTimerType().makeBinding());
+    QCOMPARE(timer.timerType(), timerType);
+
+    timer.setTimerType(Qt::PreciseTimer);
+    QCOMPARE(timerType, Qt::PreciseTimer);
+
+    timer.setTimerType(Qt::VeryCoarseTimer);
+    QCOMPARE(timerType, Qt::VeryCoarseTimer);
+
+    // active property
+    QProperty<bool> active;
+    active.setBinding([&](){ return timer.isActive(); });
+    QCOMPARE(active, timer.isActive());
+
+    timer.start(1000);
+    QVERIFY(active);
+
+    timer.stop();
+    QVERIFY(!active);
+}
+
+void tst_QTimer::bindTimer()
+{
+    QTimer timer;
+
+    // singleShot property
+    QVERIFY(!timer.isSingleShot());
+
+    QProperty<bool> singleShot;
+    timer.bindableSingleShot().setBinding(Qt::makePropertyBinding(singleShot));
+
+    singleShot = true;
+    QVERIFY(timer.isSingleShot());
+    singleShot = false;
+    QVERIFY(!timer.isSingleShot());
+
+    // interval property
+    QCOMPARE(timer.interval(), 0);
+
+    QProperty<int> interval;
+    timer.bindableInterval().setBinding(Qt::makePropertyBinding(interval));
+
+    interval = 10;
+    QCOMPARE(timer.interval(), 10);
+    interval = 100;
+    QCOMPARE(timer.interval(), 100);
+    timer.setInterval(50);
+    QCOMPARE(timer.interval(), 50);
+    interval = 30;
+    QCOMPARE(timer.interval(), 50);
+
+    // timerType property
+    QCOMPARE(timer.timerType(), Qt::CoarseTimer);
+
+    QProperty<Qt::TimerType> timerType;
+    timer.bindableTimerType().setBinding(Qt::makePropertyBinding(timerType));
+
+    timerType = Qt::PreciseTimer;
+    QCOMPARE(timer.timerType(), Qt::PreciseTimer);
+    timerType = Qt::VeryCoarseTimer;
+    QCOMPARE(timer.timerType(), Qt::VeryCoarseTimer);
+}
+
 class OrderHelper : public QObject
 {
     Q_OBJECT
@@ -1084,7 +1163,7 @@ public:
         FunctorNoCtx
     };
     Q_ENUM(CallType)
-    QVector<CallType> calls;
+    QList<CallType> calls;
 
     void triggerCall(CallType callType)
     {
@@ -1116,7 +1195,7 @@ Q_DECLARE_METATYPE(OrderHelper::CallType)
 
 void tst_QTimer::timerOrder()
 {
-    QFETCH(QVector<OrderHelper::CallType>, calls);
+    QFETCH(QList<OrderHelper::CallType>, calls);
 
     OrderHelper helper;
 
@@ -1128,9 +1207,9 @@ void tst_QTimer::timerOrder()
 
 void tst_QTimer::timerOrder_data()
 {
-    QTest::addColumn<QVector<OrderHelper::CallType>>("calls");
+    QTest::addColumn<QList<OrderHelper::CallType>>("calls");
 
-    QVector<OrderHelper::CallType> calls = {
+    QList<OrderHelper::CallType> calls = {
         OrderHelper::String, OrderHelper::PMF,
         OrderHelper::Functor, OrderHelper::FunctorNoCtx
     };
@@ -1164,7 +1243,7 @@ struct StaticSingleShotUser
     }
     OrderHelper helper;
 
-    static QVector<OrderHelper::CallType> calls()
+    static QList<OrderHelper::CallType> calls()
     {
         return {OrderHelper::String, OrderHelper::PMF,
                 OrderHelper::Functor, OrderHelper::FunctorNoCtx};

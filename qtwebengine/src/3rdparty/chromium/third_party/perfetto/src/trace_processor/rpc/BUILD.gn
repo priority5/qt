@@ -36,6 +36,7 @@ source_set("rpc") {
     "../../../protos/perfetto/trace_processor:zero",
     "../../base",
     "../../protozero",
+    "../../protozero:proto_ring_buffer",
   ]
 }
 
@@ -49,6 +50,7 @@ perfetto_unittest_source_set("unittests") {
     "../../../gn:gtest_and_gmock",
     "../../../protos/perfetto/trace_processor:zero",
     "../../base",
+    "../../protozero",
   ]
 }
 
@@ -64,7 +66,7 @@ if (enable_perfetto_trace_processor_httpd) {
       "../../../include/perfetto/trace_processor",
       "../../../protos/perfetto/trace_processor:zero",
       "../../base",
-      "../../base:unix_socket",
+      "../../base/http",
       "../../protozero",
     ]
   }

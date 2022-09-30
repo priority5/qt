@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 
 namespace blink {
@@ -19,14 +18,18 @@ class WebView;
 
 namespace content {
 
-class WebViewTestProxy;
+class WebFrameTestProxy;
 
 // TextInputController is bound to window.textInputController in Javascript
 // when content_shell is running. Web tests use it to exercise various
 // corners of text input.
 class TextInputController {
  public:
-  explicit TextInputController(WebViewTestProxy* web_view_test_proxy);
+  explicit TextInputController(WebFrameTestProxy* web_frame_test_proxy);
+
+  TextInputController(const TextInputController&) = delete;
+  TextInputController& operator=(const TextInputController&) = delete;
+
   ~TextInputController();
 
   void Install(blink::WebLocalFrame* frame);
@@ -55,11 +58,9 @@ class TextInputController {
   // accepting IME. Could return nullptr if no such frame exists.
   blink::WebInputMethodController* GetInputMethodController();
 
-  WebViewTestProxy* web_view_test_proxy_;
+  WebFrameTestProxy* const web_frame_test_proxy_;
 
   base::WeakPtrFactory<TextInputController> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(TextInputController);
 };
 
 }  // namespace content

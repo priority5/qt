@@ -7,23 +7,26 @@
 #include <stdint.h>
 
 #include <limits>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/base64url.h"
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
+#include "base/numerics/safe_math.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_byteorder.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "net/base/idempotency.h"
 #include "net/base/ip_address.h"
 #include "net/base/port_util.h"
 #include "net/base/upload_bytes_element_reader.h"
@@ -35,27 +38,31 @@
 #include "net/dns/dns_response.h"
 #include "net/dns/dns_server_iterator.h"
 #include "net/dns/dns_session.h"
-#include "net/dns/dns_socket_allocator.h"
 #include "net/dns/dns_test_util.h"
 #include "net/dns/dns_util.h"
+#include "net/dns/public/dns_over_https_config.h"
 #include "net/dns/public/dns_over_https_server_config.h"
 #include "net/dns/public/dns_protocol.h"
+#include "net/dns/public/secure_dns_policy.h"
 #include "net/dns/resolve_context.h"
+#include "net/http/http_util.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_with_source.h"
-#include "net/log/test_net_log.h"
 #include "net/proxy_resolution/proxy_config_service_fixed.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_with_task_environment.h"
 #include "net/test/url_request/url_request_failed_job.h"
 #include "net/third_party/uri_template/uri_template.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 using net::test::IsOk;
 
@@ -63,14 +70,31 @@ namespace net {
 
 namespace {
 
-base::TimeDelta kTimeout = base::TimeDelta::FromSeconds(1);
+base::TimeDelta kFallbackPeriod = base::Seconds(1);
 
 const char kMockHostname[] = "mock.http";
 
-std::string DomainFromDot(const base::StringPiece& dotted) {
-  std::string out;
-  EXPECT_TRUE(DNSDomainFromDot(dotted, &out));
-  return out;
+// Like `net::DNSDomainFromDot()` except allows converting more names than
+// accepted by that utility.
+std::string DomainFromDot(base::StringPiece dotted_name) {
+  std::string dns_name;
+
+  while (true) {
+    size_t next_dot = dotted_name.find('.');
+    if (next_dot == base::StringPiece::npos) {
+      dns_name.append(1, base::checked_cast<base::StringPiece::value_type>(
+                             dotted_name.size()));
+      dns_name.append(static_cast<std::string>(dotted_name));
+      dns_name.append(1, 0);
+      return dns_name;
+    } else {
+      dns_name.append(
+          1, base::checked_cast<base::StringPiece::value_type>(next_dot));
+      dns_name.append(
+          static_cast<std::string>(dotted_name.substr(0, next_dot)));
+      dotted_name = dotted_name.substr(next_dot + 1);
+    }
+  }
 }
 
 enum class Transport { UDP, TCP, HTTPS };
@@ -105,6 +129,10 @@ class DnsSocketData {
                                 query_->io_buffer()->size(),
                                 num_reads_and_writes()));
   }
+
+  DnsSocketData(const DnsSocketData&) = delete;
+  DnsSocketData& operator=(const DnsSocketData&) = delete;
+
   ~DnsSocketData() = default;
 
   // All responses must be added before GetProvider.
@@ -180,7 +208,7 @@ class DnsSocketData {
       reads_.push_back(MockRead(SYNCHRONOUS, ERR_IO_PENDING,
                                 writes_.size() + reads_.size()));
     }
-    provider_.reset(new SequencedSocketData(reads_, writes_));
+    provider_ = std::make_unique<SequencedSocketData>(reads_, writes_);
     if (Transport::TCP == transport_ || Transport::HTTPS == transport_) {
       provider_->set_connect_data(MockConnect(reads_[0].mode, OK));
     }
@@ -201,8 +229,6 @@ class DnsSocketData {
   std::vector<MockWrite> writes_;
   std::vector<MockRead> reads_;
   std::unique_ptr<SequencedSocketData> provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(DnsSocketData);
 };
 
 class TestSocketFactory;
@@ -212,13 +238,14 @@ class FailingUDPClientSocket : public MockUDPClientSocket {
  public:
   FailingUDPClientSocket(SocketDataProvider* data, net::NetLog* net_log)
       : MockUDPClientSocket(data, net_log) {}
+
+  FailingUDPClientSocket(const FailingUDPClientSocket&) = delete;
+  FailingUDPClientSocket& operator=(const FailingUDPClientSocket&) = delete;
+
   ~FailingUDPClientSocket() override = default;
   int Connect(const IPEndPoint& endpoint) override {
     return ERR_CONNECTION_REFUSED;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FailingUDPClientSocket);
 };
 
 // A variant of MockUDPClientSocket which notifies the factory OnConnect.
@@ -228,19 +255,21 @@ class TestUDPClientSocket : public MockUDPClientSocket {
                       SocketDataProvider* data,
                       net::NetLog* net_log)
       : MockUDPClientSocket(data, net_log), factory_(factory) {}
+
+  TestUDPClientSocket(const TestUDPClientSocket&) = delete;
+  TestUDPClientSocket& operator=(const TestUDPClientSocket&) = delete;
+
   ~TestUDPClientSocket() override = default;
   int Connect(const IPEndPoint& endpoint) override;
 
  private:
-  TestSocketFactory* factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestUDPClientSocket);
+  raw_ptr<TestSocketFactory> factory_;
 };
 
 // Creates TestUDPClientSockets and keeps endpoints reported via OnConnect.
 class TestSocketFactory : public MockClientSocketFactory {
  public:
-  TestSocketFactory() : fail_next_socket_(false) {}
+  TestSocketFactory() = default;
   ~TestSocketFactory() override = default;
 
   std::unique_ptr<DatagramClientSocket> CreateDatagramClientSocket(
@@ -277,19 +306,17 @@ class TestSocketFactory : public MockClientSocketFactory {
     explicit RemoteNameserver(DnsOverHttpsServerConfig secure_nameserver)
         : secure_nameserver(secure_nameserver) {}
 
-    base::Optional<IPEndPoint> insecure_nameserver;
-    base::Optional<DnsOverHttpsServerConfig> secure_nameserver;
+    absl::optional<IPEndPoint> insecure_nameserver;
+    absl::optional<DnsOverHttpsServerConfig> secure_nameserver;
   };
 
   std::vector<RemoteNameserver> remote_endpoints_;
-  bool fail_next_socket_;
+  bool fail_next_socket_ = false;
   bool diverse_source_ports_ = true;
 
  private:
   StaticSocketDataProvider empty_data_;
   uint16_t next_source_port_ = 123;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSocketFactory);
 };
 
 int TestUDPClientSocket::Connect(const IPEndPoint& endpoint) {
@@ -301,35 +328,33 @@ int TestUDPClientSocket::Connect(const IPEndPoint& endpoint) {
 class TransactionHelper {
  public:
   // If |expected_answer_count| < 0 then it is the expected net error.
-  TransactionHelper(const char* hostname,
-                    uint16_t qtype,
-                    bool secure,
-                    int expected_answer_count,
-                    ResolveContext* context)
-      : hostname_(hostname),
-        qtype_(qtype),
-        secure_(secure),
-        response_(nullptr),
-        expected_answer_count_(expected_answer_count),
-        cancel_in_callback_(false),
-        context_(context),
-        completed_(false) {}
+  explicit TransactionHelper(int expected_answer_count)
+      : expected_answer_count_(expected_answer_count) {}
 
   // Mark that the transaction shall be destroyed immediately upon callback.
   void set_cancel_in_callback() { cancel_in_callback_ = true; }
 
-  void StartTransaction(DnsTransactionFactory* factory) {
-    EXPECT_EQ(NULL, transaction_.get());
-    transaction_ = factory->CreateTransaction(
-        hostname_, qtype_,
-        base::BindOnce(&TransactionHelper::OnTransactionComplete,
-                       base::Unretained(this)),
-        NetLogWithSource::Make(&net_log_, net::NetLogSourceType::NONE), secure_,
-        factory->GetSecureDnsModeForTest(), context_);
-    transaction_->SetRequestPriority(DEFAULT_PRIORITY);
-    EXPECT_EQ(hostname_, transaction_->GetHostname());
-    EXPECT_EQ(qtype_, transaction_->GetType());
-    transaction_->Start();
+  void StartTransaction(DnsTransactionFactory* factory,
+                        const char* hostname,
+                        uint16_t qtype,
+                        bool secure,
+                        ResolveContext* context) {
+    std::unique_ptr<DnsTransaction> transaction = factory->CreateTransaction(
+        hostname, qtype,
+        NetLogWithSource::Make(net::NetLog::Get(), net::NetLogSourceType::NONE),
+        secure, factory->GetSecureDnsModeForTest(), context,
+        true /* fast_timeout */);
+    transaction->SetRequestPriority(DEFAULT_PRIORITY);
+    EXPECT_EQ(qtype, transaction->GetType());
+    StartTransaction(std::move(transaction));
+  }
+
+  void StartTransaction(std::unique_ptr<DnsTransaction> transaction) {
+    EXPECT_FALSE(transaction_);
+    transaction_ = std::move(transaction);
+    qtype_ = transaction_->GetType();
+    transaction_->Start(base::BindOnce(
+        &TransactionHelper::OnTransactionComplete, base::Unretained(this)));
   }
 
   void Cancel() {
@@ -337,18 +362,15 @@ class TransactionHelper {
     transaction_.reset(nullptr);
   }
 
-  void OnTransactionComplete(DnsTransaction* t,
-                             int rv,
+  void OnTransactionComplete(int rv,
                              const DnsResponse* response,
-                             base::Optional<std::string> doh_provider_id) {
+                             absl::optional<std::string> doh_provider_id) {
     EXPECT_FALSE(completed_);
-    EXPECT_EQ(transaction_.get(), t);
 
     completed_ = true;
     response_ = response;
 
-    if (transaction_complete_run_loop_)
-      transaction_complete_run_loop_->QuitWhenIdle();
+    transaction_complete_run_loop_.Quit();
 
     if (cancel_in_callback_) {
       Cancel();
@@ -363,7 +385,7 @@ class TransactionHelper {
       ASSERT_TRUE(response != nullptr);
       EXPECT_EQ(static_cast<unsigned>(expected_answer_count_),
                 response->answer_count());
-      EXPECT_EQ(qtype_, response->qtype());
+      EXPECT_EQ(qtype_, response->GetSingleQType());
 
       DnsRecordParser parser = response->Parser();
       DnsResourceRecord record;
@@ -378,52 +400,38 @@ class TransactionHelper {
   bool has_completed() const { return completed_; }
   const DnsResponse* response() const { return response_; }
 
-  // Shorthands for commonly used commands.
-
-  bool Run(DnsTransactionFactory* factory) {
-    StartTransaction(factory);
-    base::RunLoop().RunUntilIdle();
-    return has_completed();
+  // Runs until the completion callback is called. Transaction must have already
+  // been started or this will never complete.
+  void RunUntilComplete() {
+    DCHECK(transaction_);
+    DCHECK(!transaction_complete_run_loop_.running());
+    transaction_complete_run_loop_.Run();
+    DCHECK(has_completed());
   }
-
-  bool RunUntilDone(DnsTransactionFactory* factory) {
-    DCHECK(!transaction_complete_run_loop_);
-    transaction_complete_run_loop_ = std::make_unique<base::RunLoop>();
-    StartTransaction(factory);
-    transaction_complete_run_loop_->Run();
-    transaction_complete_run_loop_.reset();
-    return has_completed();
-  }
-
-  NetLog* net_log() { return &net_log_; }
 
  private:
-  std::string hostname_;
-  uint16_t qtype_;
-  bool secure_;
+  uint16_t qtype_ = 0;
   std::unique_ptr<DnsTransaction> transaction_;
-  const DnsResponse* response_;
+  raw_ptr<const DnsResponse> response_ = nullptr;
   int expected_answer_count_;
-  bool cancel_in_callback_;
-  ResolveContext* context_;
-  std::unique_ptr<base::RunLoop> transaction_complete_run_loop_;
-  bool completed_;
-  TestNetLog net_log_;
+  bool cancel_in_callback_ = false;
+  base::RunLoop transaction_complete_run_loop_;
+  bool completed_ = false;
 };
 
 // Callback that allows a test to modify HttpResponseinfo
 // before the response is sent to the requester. This allows
 // response headers to be changed.
-typedef base::RepeatingCallback<void(URLRequest* request,
-                                     HttpResponseInfo* info)>
-    ResponseModifierCallback;
+using ResponseModifierCallback =
+    base::RepeatingCallback<void(URLRequest* request, HttpResponseInfo* info)>;
 
 // Callback that allows the test to substitute its own implementation
 // of URLRequestJob to handle the request.
-typedef base::RepeatingCallback<std::unique_ptr<URLRequestJob>(
-    URLRequest* request,
-    SocketDataProvider* data_provider)>
-    DohJobMakerCallback;
+using DohJobMakerCallback = base::RepeatingCallback<std::unique_ptr<
+    URLRequestJob>(URLRequest* request, SocketDataProvider* data_provider)>;
+
+// Callback to notify that URLRequestJob::Start has been called.
+using UrlRequestStartedCallback = base::RepeatingCallback<void()>;
 
 // Subclass of URLRequestJob which takes a SocketDataProvider with data
 // representing both a DNS over HTTPS query and response.
@@ -432,12 +440,14 @@ class URLRequestMockDohJob : public URLRequestJob, public AsyncSocket {
   URLRequestMockDohJob(
       URLRequest* request,
       SocketDataProvider* data_provider,
-      ResponseModifierCallback response_modifier = ResponseModifierCallback())
+      ResponseModifierCallback response_modifier = ResponseModifierCallback(),
+      UrlRequestStartedCallback on_start = UrlRequestStartedCallback())
       : URLRequestJob(request),
         content_length_(0),
         leftover_data_len_(0),
         data_provider_(data_provider),
-        response_modifier_(response_modifier) {
+        response_modifier_(response_modifier),
+        on_start_(on_start) {
     data_provider_->Initialize(this);
     MatchQueryData(request, data_provider);
   }
@@ -456,6 +466,7 @@ class URLRequestMockDohJob : public URLRequestJob, public AsyncSocket {
           encoded_query, base::Base64UrlDecodePolicy::IGNORE_PADDING,
           &decoded_query));
     } else if (request->method() == "POST") {
+      EXPECT_EQ(IDEMPOTENT, request->GetIdempotency());
       const UploadDataStream* stream = request->get_upload_for_testing();
       auto* readers = stream->GetElementReaders();
       EXPECT_TRUE(readers);
@@ -482,12 +493,17 @@ class URLRequestMockDohJob : public URLRequestJob, public AsyncSocket {
 
   // URLRequestJob implementation:
   void Start() override {
+    if (on_start_)
+      on_start_.Run();
     // Start reading asynchronously so that all error reporting and data
     // callbacks happen as they would for network requests.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(&URLRequestMockDohJob::StartAsync,
                                   weak_factory_.GetWeakPtr()));
   }
+
+  URLRequestMockDohJob(const URLRequestMockDohJob&) = delete;
+  URLRequestMockDohJob& operator=(const URLRequestMockDohJob&) = delete;
 
   ~URLRequestMockDohJob() override {
     if (data_provider_)
@@ -572,14 +588,13 @@ class URLRequestMockDohJob : public URLRequestJob, public AsyncSocket {
   const int content_length_;
   const char* leftover_data_;
   int leftover_data_len_;
-  SocketDataProvider* data_provider_;
+  raw_ptr<SocketDataProvider> data_provider_;
   const ResponseModifierCallback response_modifier_;
-  IOBuffer* pending_buf_;
+  const UrlRequestStartedCallback on_start_;
+  raw_ptr<IOBuffer> pending_buf_;
   int pending_buf_size_;
 
   base::WeakPtrFactory<URLRequestMockDohJob> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(URLRequestMockDohJob);
 };
 
 class DnsTransactionTestBase : public testing::Test {
@@ -614,13 +629,14 @@ class DnsTransactionTestBase : public testing::Test {
     filter->AddHostnameInterceptor(url.scheme(), url.host(),
                                    std::make_unique<DohJobInterceptor>(this));
     CHECK_LE(num_doh_servers, 255u);
+    std::vector<string> templates;
+    templates.reserve(num_doh_servers);
     for (size_t i = 0; i < num_doh_servers; ++i) {
-      std::string server_template(URLRequestMockDohJob::GetMockHttpsUrl(
-                                      base::StringPrintf("doh_test_%zu", i)) +
-                                  "{?dns}");
-      config_.dns_over_https_servers.push_back(
-          DnsOverHttpsServerConfig(server_template, use_post));
+      templates.push_back(URLRequestMockDohJob::GetMockHttpsUrl(
+                              base::StringPrintf("doh_test_%zu", i)) +
+                          (use_post ? "" : "{?dns}"));
     }
+    config_.doh_config = *DnsOverHttpsConfig::FromStrings(std::move(templates));
     ConfigureFactory();
 
     if (make_available) {
@@ -634,14 +650,11 @@ class DnsTransactionTestBase : public testing::Test {
 
   // Called after fully configuring |config|.
   void ConfigureFactory() {
-    socket_factory_.reset(new TestSocketFactory());
-    session_ = new DnsSession(
-        config_,
-        std::make_unique<DnsSocketAllocator>(
-            socket_factory_.get(), config_.nameservers, nullptr /* net_log */),
-        base::BindRepeating(&DnsTransactionTestBase::GetNextId,
-                            base::Unretained(this)),
-        nullptr /* NetLog */);
+    session_ =
+        new DnsSession(config_,
+                       base::BindRepeating(&DnsTransactionTestBase::GetNextId,
+                                           base::Unretained(this)),
+                       nullptr /* NetLog */);
     resolve_context_->InvalidateCachesAndPerSessionData(
         session_.get(), false /* network_change */);
     transaction_factory_ = DnsTransactionFactory::CreateFactory(session_.get());
@@ -715,7 +728,7 @@ class DnsTransactionTestBase : public testing::Test {
   }
 
   // Add expected query of |dotted_name| and |qtype| and no response.
-  void AddQueryAndTimeout(
+  void AddHangingQuery(
       const char* dotted_name,
       uint16_t qtype,
       DnsQuery::PaddingStrategy padding_strategy =
@@ -776,7 +789,7 @@ class DnsTransactionTestBase : public testing::Test {
         EXPECT_EQ(
             socket_factory_->remote_endpoints_[i].secure_nameserver.value(),
             session_->config()
-                .dns_over_https_servers[servers[i] - num_insecure_nameservers]);
+                .doh_config.servers()[servers[i] - num_insecure_nameservers]);
       }
     }
   }
@@ -786,17 +799,17 @@ class DnsTransactionTestBase : public testing::Test {
     // configured servers, because it won't be there and we still want
     // to handle it.
     bool server_found = request->url().path() == "/redirect-destination";
-    for (auto server : config_.dns_over_https_servers) {
+    for (auto server : config_.doh_config.servers()) {
       if (server_found)
         break;
       std::string url_base =
-          GetURLFromTemplateWithoutParameters(server.server_template);
-      if (server.use_post && request->method() == "POST") {
+          GetURLFromTemplateWithoutParameters(server.server_template());
+      if (server.use_post() && request->method() == "POST") {
         if (url_base == request->url().spec()) {
           server_found = true;
           socket_factory_->remote_endpoints_.emplace_back(server);
         }
-      } else if (!server.use_post && request->method() == "GET") {
+      } else if (!server.use_post() && request->method() == "GET") {
         std::string prefix = url_base + "?dns=";
         auto mispair = std::mismatch(prefix.begin(), prefix.end(),
                                      request->url().spec().begin());
@@ -825,7 +838,7 @@ class DnsTransactionTestBase : public testing::Test {
     }
 
     EXPECT_FALSE(request->allow_credentials());
-    EXPECT_TRUE(request->disable_secure_dns());
+    EXPECT_EQ(SecureDnsPolicy::kBootstrap, request->secure_dns_policy());
 
     std::string accept;
     EXPECT_TRUE(request->extra_request_headers().GetHeader("Accept", &accept));
@@ -846,13 +859,17 @@ class DnsTransactionTestBase : public testing::Test {
     if (doh_job_maker_)
       return doh_job_maker_.Run(request, provider);
 
-    return std::make_unique<URLRequestMockDohJob>(request, provider,
-                                                  response_modifier_);
+    return std::make_unique<URLRequestMockDohJob>(
+        request, provider, response_modifier_, on_start_);
   }
 
   class DohJobInterceptor : public URLRequestInterceptor {
    public:
     explicit DohJobInterceptor(DnsTransactionTestBase* test) : test_(test) {}
+
+    DohJobInterceptor(const DohJobInterceptor&) = delete;
+    DohJobInterceptor& operator=(const DohJobInterceptor&) = delete;
+
     ~DohJobInterceptor() override {}
 
     // URLRequestInterceptor implementation:
@@ -862,9 +879,7 @@ class DnsTransactionTestBase : public testing::Test {
     }
 
    private:
-    DnsTransactionTestBase* test_;
-
-    DISALLOW_COPY_AND_ASSIGN(DohJobInterceptor);
+    raw_ptr<DnsTransactionTestBase> test_;
   };
 
   void SetResponseModifierCallback(ResponseModifierCallback response_modifier) {
@@ -875,15 +890,22 @@ class DnsTransactionTestBase : public testing::Test {
     doh_job_maker_ = doh_job_maker;
   }
 
+  void SetUrlRequestStartedCallback(UrlRequestStartedCallback on_start) {
+    on_start_ = on_start;
+  }
+
   void SetUp() override {
     // By default set one server,
     ConfigureNumServers(1);
     // and no retransmissions,
     config_.attempts = 1;
-    // and an arbitrary timeout.
-    config_.timeout = kTimeout;
-
-    request_context_ = std::make_unique<TestURLRequestContext>();
+    // and an arbitrary fallback period.
+    config_.fallback_period = kFallbackPeriod;
+    auto context_builder = CreateTestURLRequestContextBuilder();
+    socket_factory_ = std::make_unique<TestSocketFactory>();
+    context_builder->set_client_socket_factory_for_testing(
+        socket_factory_.get());
+    request_context_ = context_builder->Build();
     resolve_context_ = std::make_unique<ResolveContext>(
         request_context_.get(), false /* enable_caching */);
 
@@ -921,11 +943,12 @@ class DnsTransactionTestBase : public testing::Test {
 
   base::circular_deque<int> transaction_ids_;
   std::unique_ptr<TestSocketFactory> socket_factory_;
-  std::unique_ptr<TestURLRequestContext> request_context_;
+  std::unique_ptr<URLRequestContext> request_context_;
   std::unique_ptr<ResolveContext> resolve_context_;
   scoped_refptr<DnsSession> session_;
   std::unique_ptr<DnsTransactionFactory> transaction_factory_;
   ResponseModifierCallback response_modifier_;
+  UrlRequestStartedCallback on_start_;
   DohJobMakerCallback doh_job_maker_;
 
   // Whether multiple IsolationInfos should be expected (due to there being
@@ -956,12 +979,12 @@ class DnsTransactionTestWithMockTime : public DnsTransactionTestBase,
 
 TEST_F(DnsTransactionTest, Lookup) {
   AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram,
-                           base::size(kT0ResponseDatagram));
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, LookupWithEDNSOption) {
@@ -972,12 +995,13 @@ TEST_F(DnsTransactionTest, LookupWithEDNSOption) {
   expected_opt_rdata.AddOpt(ednsOpt);
 
   AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram, base::size(kT0ResponseDatagram),
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram),
                            &expected_opt_rdata);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, LookupWithMultipleEDNSOptions) {
@@ -995,30 +1019,29 @@ TEST_F(DnsTransactionTest, LookupWithMultipleEDNSOptions) {
   }
 
   AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram, base::size(kT0ResponseDatagram),
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram),
                            &expected_opt_rdata);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 // Concurrent lookup tests assume that DnsTransaction::Start immediately
 // consumes a socket from ClientSocketFactory.
 TEST_F(DnsTransactionTest, ConcurrentLookup) {
   AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram,
-                           base::size(kT0ResponseDatagram));
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram));
   AddAsyncQueryAndResponse(1 /* id */, kT1HostName, kT1Qtype,
-                           kT1ResponseDatagram,
-                           base::size(kT1ResponseDatagram));
+                           kT1ResponseDatagram, std::size(kT1ResponseDatagram));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  helper0.StartTransaction(transaction_factory_.get());
-  TransactionHelper helper1(kT1HostName, kT1Qtype, false /* secure */,
-                            kT1RecordCount, resolve_context_.get());
-  helper1.StartTransaction(transaction_factory_.get());
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  TransactionHelper helper1(kT1RecordCount);
+  helper1.StartTransaction(transaction_factory_.get(), kT1HostName, kT1Qtype,
+                           false /* secure */, resolve_context_.get());
 
   base::RunLoop().RunUntilIdle();
 
@@ -1028,18 +1051,16 @@ TEST_F(DnsTransactionTest, ConcurrentLookup) {
 
 TEST_F(DnsTransactionTest, CancelLookup) {
   AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram,
-                           base::size(kT0ResponseDatagram));
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram));
   AddAsyncQueryAndResponse(1 /* id */, kT1HostName, kT1Qtype,
-                           kT1ResponseDatagram,
-                           base::size(kT1ResponseDatagram));
+                           kT1ResponseDatagram, std::size(kT1ResponseDatagram));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  helper0.StartTransaction(transaction_factory_.get());
-  TransactionHelper helper1(kT1HostName, kT1Qtype, false /* secure */,
-                            kT1RecordCount, resolve_context_.get());
-  helper1.StartTransaction(transaction_factory_.get());
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  TransactionHelper helper1(kT1RecordCount);
+  helper1.StartTransaction(transaction_factory_.get(), kT1HostName, kT1Qtype,
+                           false /* secure */, resolve_context_.get());
 
   helper0.Cancel();
 
@@ -1051,30 +1072,28 @@ TEST_F(DnsTransactionTest, CancelLookup) {
 
 TEST_F(DnsTransactionTest, DestroyFactory) {
   AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram,
-                           base::size(kT0ResponseDatagram));
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  helper0.StartTransaction(transaction_factory_.get());
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
 
   // Destroying the client does not affect running requests.
   transaction_factory_.reset(nullptr);
 
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_TRUE(helper0.has_completed());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, CancelFromCallback) {
   AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram,
-                           base::size(kT0ResponseDatagram));
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
+  TransactionHelper helper0(kT0RecordCount);
   helper0.set_cancel_in_callback();
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, MismatchedResponseSync) {
@@ -1084,20 +1103,21 @@ TEST_F(DnsTransactionTest, MismatchedResponseSync) {
   // First attempt receives mismatched response synchronously.
   std::unique_ptr<DnsSocketData> data(new DnsSocketData(
       0 /* id */, kT0HostName, kT0Qtype, SYNCHRONOUS, Transport::UDP));
-  data->AddResponseData(kT1ResponseDatagram, base::size(kT1ResponseDatagram),
+  data->AddResponseData(kT1ResponseDatagram, std::size(kT1ResponseDatagram),
                         SYNCHRONOUS);
   AddSocketData(std::move(data));
 
   // Second attempt receives valid response synchronously.
   std::unique_ptr<DnsSocketData> data1(new DnsSocketData(
       0 /* id */, kT0HostName, kT0Qtype, SYNCHRONOUS, Transport::UDP));
-  data1->AddResponseData(kT0ResponseDatagram, base::size(kT0ResponseDatagram),
+  data1->AddResponseData(kT0ResponseDatagram, std::size(kT0ResponseDatagram),
                          SYNCHRONOUS);
   AddSocketData(std::move(data1));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, MismatchedResponseAsync) {
@@ -1107,34 +1127,39 @@ TEST_F(DnsTransactionTest, MismatchedResponseAsync) {
   // First attempt receives mismatched response asynchronously.
   std::unique_ptr<DnsSocketData> data0(new DnsSocketData(
       0 /* id */, kT0HostName, kT0Qtype, ASYNC, Transport::UDP));
-  data0->AddResponseData(kT1ResponseDatagram, base::size(kT1ResponseDatagram),
+  data0->AddResponseData(kT1ResponseDatagram, std::size(kT1ResponseDatagram),
                          ASYNC);
   AddSocketData(std::move(data0));
 
   // Second attempt receives valid response asynchronously.
   std::unique_ptr<DnsSocketData> data1(new DnsSocketData(
       0 /* id */, kT0HostName, kT0Qtype, ASYNC, Transport::UDP));
-  data1->AddResponseData(kT0ResponseDatagram, base::size(kT0ResponseDatagram),
+  data1->AddResponseData(kT0ResponseDatagram, std::size(kT0ResponseDatagram),
                          ASYNC);
   AddSocketData(std::move(data1));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
+// Test that responses are not accepted when only the response ID mismatches.
+// Tests against incorrect transaction ID validation, which is anti-pattern #1
+// from the "NAME:WRECK" report:
+// https://www.forescout.com/company/resources/namewreck-breaking-and-fixing-dns-implementations/
 TEST_F(DnsTransactionTest, MismatchedResponseFail) {
   ConfigureFactory();
 
   // Attempt receives mismatched response and fails because only one attempt is
   // allowed.
   AddAsyncQueryAndResponse(1 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram,
-                           base::size(kT0ResponseDatagram));
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, MismatchedResponseNxdomain) {
@@ -1146,23 +1171,26 @@ TEST_F(DnsTransactionTest, MismatchedResponseNxdomain) {
   // Second attempt receives valid NXDOMAIN response.
   std::unique_ptr<DnsSocketData> data(new DnsSocketData(
       0 /* id */, kT0HostName, kT0Qtype, SYNCHRONOUS, Transport::UDP));
-  data->AddResponseData(kT1ResponseDatagram, base::size(kT1ResponseDatagram),
+  data->AddResponseData(kT1ResponseDatagram, std::size(kT1ResponseDatagram),
                         SYNCHRONOUS);
   data->AddRcode(dns_protocol::kRcodeNXDOMAIN, ASYNC);
   AddSocketData(std::move(data));
   AddSyncQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeNXDOMAIN);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, ServerFail) {
   AddAsyncQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_DNS_SERVER_FAILED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_SERVER_FAILED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
+
   ASSERT_NE(helper0.response(), nullptr);
   EXPECT_EQ(helper0.response()->rcode(), dns_protocol::kRcodeSERVFAIL);
 }
@@ -1170,34 +1198,45 @@ TEST_F(DnsTransactionTest, ServerFail) {
 TEST_F(DnsTransactionTest, NoDomain) {
   AddAsyncQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeNXDOMAIN);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
-TEST_F(DnsTransactionTestWithMockTime, Timeout) {
+TEST_F(DnsTransactionTestWithMockTime, Timeout_FastTimeout) {
   config_.attempts = 3;
   ConfigureFactory();
 
-  AddQueryAndTimeout(kT0HostName, kT0Qtype);
-  AddQueryAndTimeout(kT0HostName, kT0Qtype);
-  AddQueryAndTimeout(kT0HostName, kT0Qtype);
+  AddHangingQuery(kT0HostName, kT0Qtype);
+  AddHangingQuery(kT0HostName, kT0Qtype);
+  AddHangingQuery(kT0HostName, kT0Qtype);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_DNS_TIMED_OUT, resolve_context_.get());
+  TransactionHelper helper0(ERR_DNS_TIMED_OUT);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), false /* secure */,
+          SecureDnsMode::kOff, resolve_context_.get(), true /* fast_timeout */);
 
-  // Finish when the third attempt times out.
-  EXPECT_FALSE(helper0.Run(transaction_factory_.get()));
-  FastForwardBy(resolve_context_->NextClassicTimeout(0, 0, session_.get()));
+  helper0.StartTransaction(std::move(transaction));
+
+  // Finish when the third attempt expires its fallback period.
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(helper0.has_completed());
-  FastForwardBy(resolve_context_->NextClassicTimeout(0, 1, session_.get()));
+  FastForwardBy(
+      resolve_context_->NextClassicFallbackPeriod(0, 0, session_.get()));
   EXPECT_FALSE(helper0.has_completed());
-  FastForwardBy(resolve_context_->NextClassicTimeout(0, 2, session_.get()));
+  FastForwardBy(
+      resolve_context_->NextClassicFallbackPeriod(0, 1, session_.get()));
+  EXPECT_FALSE(helper0.has_completed());
+  FastForwardBy(
+      resolve_context_->NextClassicFallbackPeriod(0, 2, session_.get()));
   EXPECT_TRUE(helper0.has_completed());
 }
 
 TEST_F(DnsTransactionTestWithMockTime, ServerFallbackAndRotate) {
-  // Test that we fallback on both server failure and timeout.
+  // Test that we fallback on both server failure and fallback period
+  // expiration.
   config_.attempts = 2;
   // The next request should start from the next server.
   config_.rotate = true;
@@ -1205,9 +1244,9 @@ TEST_F(DnsTransactionTestWithMockTime, ServerFallbackAndRotate) {
   ConfigureFactory();
 
   // Responses for first request.
-  AddQueryAndTimeout(kT0HostName, kT0Qtype);
+  AddHangingQuery(kT0HostName, kT0Qtype);
   AddAsyncQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL);
-  AddQueryAndTimeout(kT0HostName, kT0Qtype);
+  AddHangingQuery(kT0HostName, kT0Qtype);
   AddAsyncQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL);
   AddAsyncQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeNXDOMAIN);
   // Responses for second request.
@@ -1215,15 +1254,19 @@ TEST_F(DnsTransactionTestWithMockTime, ServerFallbackAndRotate) {
   AddAsyncQueryAndRcode(kT1HostName, kT1Qtype, dns_protocol::kRcodeSERVFAIL);
   AddAsyncQueryAndRcode(kT1HostName, kT1Qtype, dns_protocol::kRcodeNXDOMAIN);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-  TransactionHelper helper1(kT1HostName, kT1Qtype, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
+  TransactionHelper helper1(ERR_NAME_NOT_RESOLVED);
 
-  EXPECT_FALSE(helper0.Run(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(helper0.has_completed());
   FastForwardUntilNoTasksRemain();
   EXPECT_TRUE(helper0.has_completed());
-  EXPECT_TRUE(helper1.Run(transaction_factory_.get()));
+
+  helper1.StartTransaction(transaction_factory_.get(), kT1HostName, kT1Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper1.RunUntilComplete();
 
   size_t kOrder[] = {
       // The first transaction.
@@ -1238,7 +1281,7 @@ TEST_F(DnsTransactionTestWithMockTime, ServerFallbackAndRotate) {
       2,
       1,
   };
-  CheckServerOrder(kOrder, base::size(kOrder));
+  CheckServerOrder(kOrder, std::size(kOrder));
 }
 
 TEST_F(DnsTransactionTest, SuffixSearchAboveNdots) {
@@ -1259,14 +1302,16 @@ TEST_F(DnsTransactionTest, SuffixSearchAboveNdots) {
   AddAsyncQueryAndRcode("x.y.z.c", dns_protocol::kTypeA,
                         dns_protocol::kRcodeNXDOMAIN);
 
-  TransactionHelper helper0("x.y.z", dns_protocol::kTypeA, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
 
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), "x.y.z",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
 
   // Also check if suffix search causes server rotation.
   size_t kOrder0[] = {0, 1, 0, 1};
-  CheckServerOrder(kOrder0, base::size(kOrder0));
+  CheckServerOrder(kOrder0, std::size(kOrder0));
 }
 
 TEST_F(DnsTransactionTest, SuffixSearchBelowNdots) {
@@ -1296,22 +1341,25 @@ TEST_F(DnsTransactionTest, SuffixSearchBelowNdots) {
   AddAsyncQueryAndRcode("x", dns_protocol::kTypeAAAA,
                         dns_protocol::kRcodeNXDOMAIN);
 
-  TransactionHelper helper0("x.y", dns_protocol::kTypeA, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
+  helper0.StartTransaction(transaction_factory_.get(), "x.y",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
 
   // A single-label name.
-  TransactionHelper helper1("x", dns_protocol::kTypeA, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-
-  EXPECT_TRUE(helper1.Run(transaction_factory_.get()));
+  TransactionHelper helper1(ERR_NAME_NOT_RESOLVED);
+  helper1.StartTransaction(transaction_factory_.get(), "x",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper1.RunUntilComplete();
 
   // A fully-qualified name.
-  TransactionHelper helper2("x.", dns_protocol::kTypeAAAA, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-
-  EXPECT_TRUE(helper2.Run(transaction_factory_.get()));
+  TransactionHelper helper2(ERR_NAME_NOT_RESOLVED);
+  helper2.StartTransaction(transaction_factory_.get(), "x.",
+                           dns_protocol::kTypeAAAA, false /* secure */,
+                           resolve_context_.get());
+  helper2.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, EmptySuffixSearch) {
@@ -1320,18 +1368,18 @@ TEST_F(DnsTransactionTest, EmptySuffixSearch) {
                         dns_protocol::kRcodeNXDOMAIN);
 
   // A fully-qualified name.
-  TransactionHelper helper0("x.", dns_protocol::kTypeA, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
+  helper0.StartTransaction(transaction_factory_.get(), "x.",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
 
   // A single label name is not even attempted.
-  TransactionHelper helper1("singlelabel", dns_protocol::kTypeA,
-                            false /* secure */, ERR_DNS_SEARCH_EMPTY,
-                            resolve_context_.get());
-
-  helper1.Run(transaction_factory_.get());
-  EXPECT_TRUE(helper1.has_completed());
+  TransactionHelper helper1(ERR_DNS_SEARCH_EMPTY);
+  helper1.StartTransaction(transaction_factory_.get(), "singlelabel",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper1.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, DontAppendToMultiLabelName) {
@@ -1355,17 +1403,23 @@ TEST_F(DnsTransactionTest, DontAppendToMultiLabelName) {
   AddAsyncQueryAndRcode("x.c", dns_protocol::kTypeA,
                         dns_protocol::kRcodeNXDOMAIN);
 
-  TransactionHelper helper0("x.y.z", dns_protocol::kTypeA, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
+  helper0.StartTransaction(transaction_factory_.get(), "x.y.z",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
 
-  TransactionHelper helper1("x.y", dns_protocol::kTypeA, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-  EXPECT_TRUE(helper1.Run(transaction_factory_.get()));
+  TransactionHelper helper1(ERR_NAME_NOT_RESOLVED);
+  helper1.StartTransaction(transaction_factory_.get(), "x.y",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper1.RunUntilComplete();
 
-  TransactionHelper helper2("x", dns_protocol::kTypeA, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-  EXPECT_TRUE(helper2.Run(transaction_factory_.get()));
+  TransactionHelper helper2(ERR_NAME_NOT_RESOLVED);
+  helper2.StartTransaction(transaction_factory_.get(), "x",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper2.RunUntilComplete();
 }
 
 const uint8_t kResponseNoData[] = {
@@ -1391,12 +1445,14 @@ TEST_F(DnsTransactionTest, SuffixSearchStop) {
   AddAsyncQueryAndRcode("x.y.z.a", dns_protocol::kTypeA,
                         dns_protocol::kRcodeNXDOMAIN);
   AddAsyncQueryAndResponse(0 /* id */, "x.y.z.b", dns_protocol::kTypeA,
-                           kResponseNoData, base::size(kResponseNoData));
+                           kResponseNoData, std::size(kResponseNoData));
 
-  TransactionHelper helper0("x.y.z", dns_protocol::kTypeA, false /* secure */,
-                            0 /* answers */, resolve_context_.get());
+  TransactionHelper helper0(0 /* answers */);
 
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), "x.y.z",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, SyncFirstQuery) {
@@ -1405,11 +1461,12 @@ TEST_F(DnsTransactionTest, SyncFirstQuery) {
   ConfigureFactory();
 
   AddSyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                          kT0ResponseDatagram, base::size(kT0ResponseDatagram));
+                          kT0ResponseDatagram, std::size(kT0ResponseDatagram));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, SyncFirstQueryWithSearch) {
@@ -1421,12 +1478,12 @@ TEST_F(DnsTransactionTest, SyncFirstQueryWithSearch) {
                        dns_protocol::kRcodeNXDOMAIN);
   // "www.ccs.neu.edu"
   AddAsyncQueryAndResponse(2 /* id */, kT2HostName, kT2Qtype,
-                           kT2ResponseDatagram,
-                           base::size(kT2ResponseDatagram));
+                           kT2ResponseDatagram, std::size(kT2ResponseDatagram));
 
-  TransactionHelper helper0("www", kT2Qtype, false /* secure */, kT2RecordCount,
-                            resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT2RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), "www", kT2Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, SyncSearchQuery) {
@@ -1437,11 +1494,12 @@ TEST_F(DnsTransactionTest, SyncSearchQuery) {
   AddAsyncQueryAndRcode("www.lab.ccs.neu.edu", dns_protocol::kTypeA,
                         dns_protocol::kRcodeNXDOMAIN);
   AddSyncQueryAndResponse(2 /* id */, kT2HostName, kT2Qtype,
-                          kT2ResponseDatagram, base::size(kT2ResponseDatagram));
+                          kT2ResponseDatagram, std::size(kT2ResponseDatagram));
 
-  TransactionHelper helper0("www", kT2Qtype, false /* secure */, kT2RecordCount,
-                            resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT2RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), "www", kT2Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, ConnectFailure) {
@@ -1453,11 +1511,13 @@ TEST_F(DnsTransactionTest, ConnectFailure) {
   socket_factory_->AddSocketDataProvider(&data_provider);
 
   transaction_ids_.push_back(0);  // Needed to make a DnsUDPAttempt.
-  TransactionHelper helper0("www.chromium.org", dns_protocol::kTypeA,
-                            false /* secure */, ERR_CONNECTION_REFUSED,
-                            resolve_context_.get());
+  TransactionHelper helper0(ERR_CONNECTION_REFUSED);
 
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), "www.chromium.org",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
+
   EXPECT_FALSE(helper0.response());
   EXPECT_FALSE(session_->udp_tracker()->low_entropy());
 }
@@ -1471,11 +1531,13 @@ TEST_F(DnsTransactionTest, ConnectFailure_SocketLimitReached) {
   socket_factory_->AddSocketDataProvider(&data_provider);
 
   transaction_ids_.push_back(0);  // Needed to make a DnsUDPAttempt.
-  TransactionHelper helper0("www.chromium.org", dns_protocol::kTypeA,
-                            false /* secure */, ERR_CONNECTION_REFUSED,
-                            resolve_context_.get());
+  TransactionHelper helper0(ERR_CONNECTION_REFUSED);
 
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), "www.chromium.org",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
+
   EXPECT_FALSE(helper0.response());
   EXPECT_TRUE(session_->udp_tracker()->low_entropy());
 }
@@ -1489,23 +1551,24 @@ TEST_F(DnsTransactionTest, ConnectFailureFollowedBySuccess) {
   socket_factory_->fail_next_socket_ = true;
   // Second DNS query succeeds.
   AddAsyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                           kT0ResponseDatagram,
-                           base::size(kT0ResponseDatagram));
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+                           kT0ResponseDatagram, std::size(kT0ResponseDatagram));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsGetLookup) {
   ConfigureDohServers(false /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsGetFailure) {
@@ -1515,9 +1578,10 @@ TEST_F(DnsTransactionTest, HttpsGetFailure) {
                    DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
                    false /* enqueue_transaction_id */);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_SERVER_FAILED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_SERVER_FAILED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
   ASSERT_NE(helper0.response(), nullptr);
   EXPECT_EQ(helper0.response()->rcode(), dns_protocol::kRcodeSERVFAIL);
 }
@@ -1526,25 +1590,27 @@ TEST_F(DnsTransactionTest, HttpsGetMalformed) {
   ConfigureDohServers(false /* use_post */);
   // Use T1 response, which is malformed for a T0 request.
   AddQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype, kT1ResponseDatagram,
-                      base::size(kT1ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT1ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookup) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostFailure) {
@@ -1554,9 +1620,10 @@ TEST_F(DnsTransactionTest, HttpsPostFailure) {
                    DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
                    false /* enqueue_transaction_id */);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_SERVER_FAILED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_SERVER_FAILED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
   ASSERT_NE(helper0.response(), nullptr);
   EXPECT_EQ(helper0.response()->rcode(), dns_protocol::kRcodeSERVFAIL);
 }
@@ -1565,26 +1632,28 @@ TEST_F(DnsTransactionTest, HttpsPostMalformed) {
   ConfigureDohServers(true /* use_post */);
   // Use T1 response, which is malformed for a T0 request.
   AddQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype, kT1ResponseDatagram,
-                      base::size(kT1ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT1ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookupAsync) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT0ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 std::unique_ptr<URLRequestJob> DohJobMakerCallbackFailLookup(
@@ -1598,15 +1667,15 @@ std::unique_ptr<URLRequestJob> DohJobMakerCallbackFailLookup(
 TEST_F(DnsTransactionTest, HttpsPostLookupFailDohServerLookup) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_SECURE_RESOLVER_HOSTNAME_RESOLUTION_FAILED,
-                            resolve_context_.get());
+  TransactionHelper helper0(ERR_DNS_SECURE_RESOLVER_HOSTNAME_RESOLUTION_FAILED);
   SetDohJobMakerCallback(base::BindRepeating(DohJobMakerCallbackFailLookup));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 std::unique_ptr<URLRequestJob> DohJobMakerCallbackFailStart(
@@ -1620,14 +1689,15 @@ std::unique_ptr<URLRequestJob> DohJobMakerCallbackFailStart(
 TEST_F(DnsTransactionTest, HttpsPostLookupFailStart) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_FAILED, resolve_context_.get());
+  TransactionHelper helper0(ERR_FAILED);
   SetDohJobMakerCallback(base::BindRepeating(DohJobMakerCallbackFailStart));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 std::unique_ptr<URLRequestJob> DohJobMakerCallbackFailSync(
@@ -1645,10 +1715,11 @@ TEST_F(DnsTransactionTest, HttpsPostLookupFailSync) {
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128));
   data->AddResponseWithLength(std::make_unique<DnsResponse>(), SYNCHRONOUS, 0);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
   SetDohJobMakerCallback(base::BindRepeating(DohJobMakerCallbackFailSync));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 std::unique_ptr<URLRequestJob> DohJobMakerCallbackFailAsync(
@@ -1662,14 +1733,15 @@ std::unique_ptr<URLRequestJob> DohJobMakerCallbackFailAsync(
 TEST_F(DnsTransactionTest, HttpsPostLookupFailAsync) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
   SetDohJobMakerCallback(base::BindRepeating(DohJobMakerCallbackFailAsync));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookup2Sync) {
@@ -1679,11 +1751,12 @@ TEST_F(DnsTransactionTest, HttpsPostLookup2Sync) {
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128));
   data->AddResponseData(kT0ResponseDatagram, 20, SYNCHRONOUS);
   data->AddResponseData(kT0ResponseDatagram + 20,
-                        base::size(kT0ResponseDatagram) - 20, SYNCHRONOUS);
+                        std::size(kT0ResponseDatagram) - 20, SYNCHRONOUS);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookup2Async) {
@@ -1693,11 +1766,12 @@ TEST_F(DnsTransactionTest, HttpsPostLookup2Async) {
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128));
   data->AddResponseData(kT0ResponseDatagram, 20, ASYNC);
   data->AddResponseData(kT0ResponseDatagram + 20,
-                        base::size(kT0ResponseDatagram) - 20, ASYNC);
+                        std::size(kT0ResponseDatagram) - 20, ASYNC);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookupAsyncWithAsyncZeroRead) {
@@ -1705,13 +1779,14 @@ TEST_F(DnsTransactionTest, HttpsPostLookupAsyncWithAsyncZeroRead) {
   std::unique_ptr<DnsSocketData> data(new DnsSocketData(
       0, kT0HostName, kT0Qtype, SYNCHRONOUS, Transport::HTTPS,
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128));
-  data->AddResponseData(kT0ResponseDatagram, base::size(kT0ResponseDatagram),
+  data->AddResponseData(kT0ResponseDatagram, std::size(kT0ResponseDatagram),
                         ASYNC);
   data->AddResponseData(kT0ResponseDatagram, 0, ASYNC);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookupSyncWithAsyncZeroRead) {
@@ -1719,13 +1794,14 @@ TEST_F(DnsTransactionTest, HttpsPostLookupSyncWithAsyncZeroRead) {
   std::unique_ptr<DnsSocketData> data(new DnsSocketData(
       0, kT0HostName, kT0Qtype, SYNCHRONOUS, Transport::HTTPS,
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128));
-  data->AddResponseData(kT0ResponseDatagram, base::size(kT0ResponseDatagram),
+  data->AddResponseData(kT0ResponseDatagram, std::size(kT0ResponseDatagram),
                         SYNCHRONOUS);
   data->AddResponseData(kT0ResponseDatagram, 0, ASYNC);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookupAsyncThenSync) {
@@ -1735,11 +1811,12 @@ TEST_F(DnsTransactionTest, HttpsPostLookupAsyncThenSync) {
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128));
   data->AddResponseData(kT0ResponseDatagram, 20, ASYNC);
   data->AddResponseData(kT0ResponseDatagram + 20,
-                        base::size(kT0ResponseDatagram) - 20, SYNCHRONOUS);
+                        std::size(kT0ResponseDatagram) - 20, SYNCHRONOUS);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookupAsyncThenSyncError) {
@@ -1750,9 +1827,10 @@ TEST_F(DnsTransactionTest, HttpsPostLookupAsyncThenSyncError) {
   data->AddResponseData(kT0ResponseDatagram, 20, ASYNC);
   data->AddReadError(ERR_FAILED, SYNCHRONOUS);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_FAILED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_FAILED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookupAsyncThenAsyncError) {
@@ -1763,9 +1841,10 @@ TEST_F(DnsTransactionTest, HttpsPostLookupAsyncThenAsyncError) {
   data->AddResponseData(kT0ResponseDatagram, 20, ASYNC);
   data->AddReadError(ERR_FAILED, ASYNC);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_FAILED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_FAILED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookupSyncThenAsyncError) {
@@ -1776,9 +1855,10 @@ TEST_F(DnsTransactionTest, HttpsPostLookupSyncThenAsyncError) {
   data->AddResponseData(kT0ResponseDatagram, 20, SYNCHRONOUS);
   data->AddReadError(ERR_FAILED, ASYNC);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_FAILED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_FAILED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsPostLookupSyncThenSyncError) {
@@ -1789,9 +1869,10 @@ TEST_F(DnsTransactionTest, HttpsPostLookupSyncThenSyncError) {
   data->AddResponseData(kT0ResponseDatagram, 20, SYNCHRONOUS);
   data->AddReadError(ERR_FAILED, SYNCHRONOUS);
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_FAILED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_FAILED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsNotAvailable) {
@@ -1800,9 +1881,10 @@ TEST_F(DnsTransactionTest, HttpsNotAvailable) {
   ASSERT_FALSE(resolve_context_->GetDohServerAvailability(
       0u /* doh_server_index */, session_.get()));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_BLOCKED_BY_CLIENT, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_BLOCKED_BY_CLIENT);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, HttpsMarkHttpsBad) {
@@ -1819,7 +1901,7 @@ TEST_F(DnsTransactionTest, HttpsMarkHttpsBad) {
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT0ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -1834,15 +1916,18 @@ TEST_F(DnsTransactionTest, HttpsMarkHttpsBad) {
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT0ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  TransactionHelper helper1(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+
+  TransactionHelper helper0(kT0RecordCount);
+  TransactionHelper helper1(kT0RecordCount);
+
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
+
   // UDP server 0 is our only UDP server, so it will be good. HTTPS
   // servers 0 and 1 failed and will be marked bad. HTTPS server 2 succeeded
   // so it will be good.
@@ -1864,9 +1949,11 @@ TEST_F(DnsTransactionTest, HttpsMarkHttpsBad) {
     EXPECT_EQ(doh_itr->GetNextAttemptIndex(), 1u);
   }
   size_t kOrder0[] = {1, 2, 3};
-  CheckServerOrder(kOrder0, base::size(kOrder0));
+  CheckServerOrder(kOrder0, std::size(kOrder0));
 
-  EXPECT_TRUE(helper1.RunUntilDone(transaction_factory_.get()));
+  helper1.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper1.RunUntilComplete();
   // UDP server 0 is still our only UDP server, so it will be good by
   // definition. HTTPS server 2 started out as good, so it was tried first and
   // failed. HTTPS server 0 then had the oldest failure so it would be the next
@@ -1893,7 +1980,7 @@ TEST_F(DnsTransactionTest, HttpsMarkHttpsBad) {
       1, 2, 3, /* transaction0 */
       3, 1, 2  /* transaction1 */
   };
-  CheckServerOrder(kOrder1, base::size(kOrder1));
+  CheckServerOrder(kOrder1, std::size(kOrder1));
 }
 
 TEST_F(DnsTransactionTest, HttpsPostFailThenHTTPFallback) {
@@ -1903,36 +1990,38 @@ TEST_F(DnsTransactionTest, HttpsPostFailThenHTTPFallback) {
                    DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
                    false /* enqueue_transaction_id */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
   size_t kOrder0[] = {1, 2};
-  CheckServerOrder(kOrder0, base::size(kOrder0));
+  CheckServerOrder(kOrder0, std::size(kOrder0));
 }
 
 TEST_F(DnsTransactionTest, HttpsPostFailTwice) {
   config_.attempts = 3;
   ConfigureDohServers(true /* use_post */, 2);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_FAILED, resolve_context_.get());
+  TransactionHelper helper0(ERR_FAILED);
   SetDohJobMakerCallback(base::BindRepeating(DohJobMakerCallbackFailStart));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
   size_t kOrder0[] = {1, 2};
-  CheckServerOrder(kOrder0, base::size(kOrder0));
+  CheckServerOrder(kOrder0, std::size(kOrder0));
 }
 
 TEST_F(DnsTransactionTest, HttpsNotAvailableThenHttpFallback) {
@@ -1953,15 +2042,16 @@ TEST_F(DnsTransactionTest, HttpsNotAvailableThenHttpFallback) {
     EXPECT_FALSE(doh_itr->AttemptAvailable());
   }
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
   size_t kOrder0[] = {2};
-  CheckServerOrder(kOrder0, base::size(kOrder0));
+  CheckServerOrder(kOrder0, std::size(kOrder0));
   {
     std::unique_ptr<DnsServerIterator> doh_itr =
         resolve_context_->GetDohIterator(
@@ -1998,14 +2088,15 @@ TEST_F(DnsTransactionTest, HttpsFailureThenNotAvailable_Automatic) {
                            nullptr /* opt_rdata */,
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_CONNECTION_REFUSED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_CONNECTION_REFUSED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 
   // Expect fallback not attempted because other servers not available in
   // AUTOMATIC mode until they have recorded a success.
   size_t kOrder0[] = {1};
-  CheckServerOrder(kOrder0, base::size(kOrder0));
+  CheckServerOrder(kOrder0, std::size(kOrder0));
 
   {
     std::unique_ptr<DnsServerIterator> doh_itr =
@@ -2057,14 +2148,15 @@ TEST_F(DnsTransactionTest, HttpsFailureThenNotAvailable_Secure) {
                            nullptr /* opt_rdata */,
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_CONNECTION_REFUSED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_CONNECTION_REFUSED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 
   // Expect fallback to attempt all servers because SECURE mode does not require
   // server availability.
   size_t kOrder0[] = {1, 2, 3};
-  CheckServerOrder(kOrder0, base::size(kOrder0));
+  CheckServerOrder(kOrder0, std::size(kOrder0));
 
   // Expect server 0 to be preferred due to least recent failure.
   {
@@ -2095,9 +2187,10 @@ TEST_F(DnsTransactionTest, MaxHttpsFailures_NonConsecutive) {
                              nullptr /* opt_rdata */,
                              DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                              false /* enqueue_transaction_id */);
-    TransactionHelper failure(kT0HostName, kT0Qtype, true /* secure */,
-                              ERR_CONNECTION_REFUSED, resolve_context_.get());
-    EXPECT_TRUE(failure.RunUntilDone(transaction_factory_.get()));
+    TransactionHelper failure(ERR_CONNECTION_REFUSED);
+    failure.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                             true /* secure */, resolve_context_.get());
+    failure.RunUntilComplete();
 
     std::unique_ptr<DnsServerIterator> doh_itr =
         resolve_context_->GetDohIterator(
@@ -2109,13 +2202,14 @@ TEST_F(DnsTransactionTest, MaxHttpsFailures_NonConsecutive) {
 
   // A success should reset the failure counter for DoH.
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper success(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(success.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper success(kT0RecordCount);
+  success.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  success.RunUntilComplete();
   {
     std::unique_ptr<DnsServerIterator> doh_itr =
         resolve_context_->GetDohIterator(
@@ -2131,10 +2225,11 @@ TEST_F(DnsTransactionTest, MaxHttpsFailures_NonConsecutive) {
                            nullptr /* opt_rdata */,
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
-  TransactionHelper last_failure(kT0HostName, kT0Qtype, true /* secure */,
-                                 ERR_CONNECTION_REFUSED,
-                                 resolve_context_.get());
-  EXPECT_TRUE(last_failure.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper last_failure(ERR_CONNECTION_REFUSED);
+  last_failure.StartTransaction(transaction_factory_.get(), kT0HostName,
+                                kT0Qtype, true /* secure */,
+                                resolve_context_.get());
+  last_failure.RunUntilComplete();
   {
     std::unique_ptr<DnsServerIterator> doh_itr =
         resolve_context_->GetDohIterator(
@@ -2163,9 +2258,10 @@ TEST_F(DnsTransactionTest, MaxHttpsFailures_Consecutive) {
                              nullptr /* opt_rdata */,
                              DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                              false /* enqueue_transaction_id */);
-    TransactionHelper failure(kT0HostName, kT0Qtype, true /* secure */,
-                              ERR_CONNECTION_REFUSED, resolve_context_.get());
-    EXPECT_TRUE(failure.RunUntilDone(transaction_factory_.get()));
+    TransactionHelper failure(ERR_CONNECTION_REFUSED);
+    failure.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                             true /* secure */, resolve_context_.get());
+    failure.RunUntilComplete();
     std::unique_ptr<DnsServerIterator> doh_itr =
         resolve_context_->GetDohIterator(
             session_->config(), SecureDnsMode::kAutomatic, session_.get());
@@ -2180,10 +2276,11 @@ TEST_F(DnsTransactionTest, MaxHttpsFailures_Consecutive) {
                            nullptr /* opt_rdata */,
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
-  TransactionHelper last_failure(kT0HostName, kT0Qtype, true /* secure */,
-                                 ERR_CONNECTION_REFUSED,
-                                 resolve_context_.get());
-  EXPECT_TRUE(last_failure.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper last_failure(ERR_CONNECTION_REFUSED);
+  last_failure.StartTransaction(transaction_factory_.get(), kT0HostName,
+                                kT0Qtype, true /* secure */,
+                                resolve_context_.get());
+  last_failure.RunUntilComplete();
   {
     std::unique_ptr<DnsServerIterator> doh_itr =
         resolve_context_->GetDohIterator(
@@ -2213,14 +2310,17 @@ TEST_F(DnsTransactionTest, SuccessfulTransactionStartedBeforeUnavailable) {
       0, kT0HostName, kT0Qtype, ASYNC, Transport::HTTPS,
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128));
   data->AddReadError(ERR_IO_PENDING, ASYNC);
-  data->AddResponseData(kT0ResponseDatagram, base::size(kT0ResponseDatagram),
+  data->AddResponseData(kT0ResponseDatagram, std::size(kT0ResponseDatagram),
                         ASYNC);
   SequencedSocketData* sequenced_socket_data = data->GetProvider();
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
 
-  TransactionHelper delayed_success(kT0HostName, kT0Qtype, true /* secure */,
-                                    kT0RecordCount, resolve_context_.get());
-  EXPECT_FALSE(delayed_success.Run(transaction_factory_.get()));
+  TransactionHelper delayed_success(kT0RecordCount);
+  delayed_success.StartTransaction(transaction_factory_.get(), kT0HostName,
+                                   kT0Qtype, true /* secure */,
+                                   resolve_context_.get());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(delayed_success.has_completed());
 
   // Trigger DoH server unavailability with a bunch of failures.
   for (size_t i = 0; i < ResolveContext::kAutomaticModeFailureLimit; i++) {
@@ -2229,9 +2329,10 @@ TEST_F(DnsTransactionTest, SuccessfulTransactionStartedBeforeUnavailable) {
                              nullptr /* opt_rdata */,
                              DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                              false /* enqueue_transaction_id */);
-    TransactionHelper failure(kT0HostName, kT0Qtype, true /* secure */,
-                              ERR_CONNECTION_REFUSED, resolve_context_.get());
-    EXPECT_TRUE(failure.RunUntilDone(transaction_factory_.get()));
+    TransactionHelper failure(ERR_CONNECTION_REFUSED);
+    failure.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                             true /* secure */, resolve_context_.get());
+    failure.RunUntilComplete();
   }
   EXPECT_FALSE(resolve_context_->GetDohServerAvailability(
       0u /* doh_server_index */, session_.get()));
@@ -2239,8 +2340,7 @@ TEST_F(DnsTransactionTest, SuccessfulTransactionStartedBeforeUnavailable) {
   // Resume first query.
   ASSERT_FALSE(delayed_success.has_completed());
   sequenced_socket_data->Resume();
-  base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(delayed_success.has_completed());
+  delayed_success.RunUntilComplete();
 
   // Expect DoH server is available again.
   EXPECT_TRUE(resolve_context_->GetDohServerAvailability(
@@ -2261,6 +2361,9 @@ class CookieCallback {
     loop_to_quit_->Quit();
   }
 
+  CookieCallback(const CookieCallback&) = delete;
+  CookieCallback& operator=(const CookieCallback&) = delete;
+
   void GetCookieListCallback(
       const net::CookieAccessResultList& list,
       const net::CookieAccessResultList& excluded_cookies) {
@@ -2268,7 +2371,7 @@ class CookieCallback {
     loop_to_quit_->Quit();
   }
 
-  void Reset() { loop_to_quit_.reset(new base::RunLoop()); }
+  void Reset() { loop_to_quit_ = std::make_unique<base::RunLoop>(); }
 
   void WaitUntilDone() { loop_to_quit_->Run(); }
 
@@ -2278,48 +2381,51 @@ class CookieCallback {
   net::CookieList list_;
   bool result_;
   std::unique_ptr<base::RunLoop> loop_to_quit_;
-  DISALLOW_COPY_AND_ASSIGN(CookieCallback);
 };
 
 TEST_F(DnsTransactionTest, HttpsPostTestNoCookies) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  TransactionHelper helper1(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
+  TransactionHelper helper0(kT0RecordCount);
+  TransactionHelper helper1(kT0RecordCount);
   SetResponseModifierCallback(base::BindRepeating(MakeResponseWithCookie));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 
   CookieCallback callback;
   request_context_->cookie_store()->GetCookieListWithOptionsAsync(
       GURL(GetURLFromTemplateWithoutParameters(
-          config_.dns_over_https_servers[0].server_template)),
-      CookieOptions::MakeAllInclusive(),
+          config_.doh_config.servers()[0].server_template())),
+      CookieOptions::MakeAllInclusive(), CookiePartitionKeyCollection(),
       base::BindOnce(&CookieCallback::GetCookieListCallback,
                      base::Unretained(&callback)));
   callback.WaitUntilDone();
   EXPECT_EQ(0u, callback.cookie_list_size());
   callback.Reset();
   GURL cookie_url(GetURLFromTemplateWithoutParameters(
-      config_.dns_over_https_servers[0].server_template));
+      config_.doh_config.servers()[0].server_template()));
   auto cookie = CanonicalCookie::Create(
       cookie_url, "test-cookie=you-still-fail", base::Time::Now(),
-      base::nullopt /* server_time */);
+      absl::nullopt /* server_time */,
+      absl::nullopt /* cookie_partition_key */);
   request_context_->cookie_store()->SetCanonicalCookieAsync(
       std::move(cookie), cookie_url, CookieOptions(),
       base::BindOnce(&CookieCallback::SetCookieCallback,
                      base::Unretained(&callback)));
-  EXPECT_TRUE(helper1.RunUntilDone(transaction_factory_.get()));
+  helper1.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper1.RunUntilComplete();
 }
 
 void MakeResponseWithoutLength(URLRequest* request, HttpResponseInfo* info) {
@@ -2329,14 +2435,15 @@ void MakeResponseWithoutLength(URLRequest* request, HttpResponseInfo* info) {
 TEST_F(DnsTransactionTest, HttpsPostNoContentLength) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
+  TransactionHelper helper0(kT0RecordCount);
   SetResponseModifierCallback(base::BindRepeating(MakeResponseWithoutLength));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 void MakeResponseWithBadRequestResponse(URLRequest* request,
@@ -2347,15 +2454,16 @@ void MakeResponseWithBadRequestResponse(URLRequest* request,
 TEST_F(DnsTransactionTest, HttpsPostWithBadRequestResponse) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
   SetResponseModifierCallback(
       base::BindRepeating(MakeResponseWithBadRequestResponse));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 void MakeResponseWrongType(URLRequest* request, HttpResponseInfo* info) {
@@ -2366,14 +2474,15 @@ void MakeResponseWrongType(URLRequest* request, HttpResponseInfo* info) {
 TEST_F(DnsTransactionTest, HttpsPostWithWrongType) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
   SetResponseModifierCallback(base::BindRepeating(MakeResponseWrongType));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 void MakeResponseRedirect(URLRequest* request, HttpResponseInfo* info) {
@@ -2387,19 +2496,20 @@ void MakeResponseRedirect(URLRequest* request, HttpResponseInfo* info) {
 TEST_F(DnsTransactionTest, HttpsGetRedirect) {
   ConfigureDohServers(false /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
+  TransactionHelper helper0(kT0RecordCount);
   SetResponseModifierCallback(base::BindRepeating(MakeResponseRedirect));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 void MakeResponseNoType(URLRequest* request, HttpResponseInfo* info) {
@@ -2409,14 +2519,15 @@ void MakeResponseNoType(URLRequest* request, HttpResponseInfo* info) {
 TEST_F(DnsTransactionTest, HttpsPostWithNoType) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
   SetResponseModifierCallback(base::BindRepeating(MakeResponseNoType));
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, CanLookupDohServerName) {
@@ -2427,9 +2538,11 @@ TEST_F(DnsTransactionTest, CanLookupDohServerName) {
                            nullptr /* opt_rdata */,
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
-  TransactionHelper helper0("mock", dns_protocol::kTypeA, true /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
+  helper0.StartTransaction(transaction_factory_.get(), "mock",
+                           dns_protocol::kTypeA, true /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 class CountingObserver : public net::NetLog::ThreadSafeObserver {
@@ -2456,46 +2569,103 @@ class CountingObserver : public net::NetLog::ThreadSafeObserver {
   int dict_count_;
 };
 
-TEST_F(DnsTransactionTest, HttpsPostLookupWithLog) {
+// Flaky on MSAN. https://crbug.com/1245953
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_HttpsPostLookupWithLog \
+  DISABLED_HttpsPostLookupWithLog
+#else
+#define MAYBE_HttpsPostLookupWithLog \
+  HttpsPostLookupWithLog
+#endif
+TEST_F(DnsTransactionTest, MAYBE_HttpsPostLookupWithLog) {
   ConfigureDohServers(true /* use_post */);
   AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
-  TransactionHelper helper0(kT0HostName, kT0Qtype, true /* secure */,
-                            kT0RecordCount, resolve_context_.get());
+  TransactionHelper helper0(kT0RecordCount);
   CountingObserver observer;
-  helper0.net_log()->AddObserver(&observer, NetLogCaptureMode::kEverything);
-  EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
+  NetLog::Get()->AddObserver(&observer, NetLogCaptureMode::kEverything);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(observer.count(), 5);
-  EXPECT_EQ(observer.dict_count(), 3);
+  EXPECT_EQ(observer.count(), 14);
+  EXPECT_EQ(observer.dict_count(), 6);
 }
 
-// Test for when a slow DoH response is delayed until after the initial timeout
-// and no more attempts are configured.
+// Test for when a slow DoH response is delayed until after the initial fallback
+// period (but succeeds before the full timeout period).
 TEST_F(DnsTransactionTestWithMockTime, SlowHttpsResponse_SingleAttempt) {
   config_.doh_attempts = 1;
   ConfigureDohServers(false /* use_post */);
 
-  AddQueryAndTimeout(kT0HostName, kT0Qtype,
-                     DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
-                     false /* enqueue_transaction_id */);
+  // Assume fallback period is less than timeout.
+  ASSERT_LT(resolve_context_->NextDohFallbackPeriod(0 /* doh_server_index */,
+                                                    session_.get()),
+            resolve_context_->SecureTransactionTimeout(SecureDnsMode::kSecure,
+                                                       session_.get()));
 
-  TransactionHelper helper(kT0HostName, kT0Qtype, true /* secure */,
-                           ERR_DNS_TIMED_OUT, resolve_context_.get());
-  ASSERT_FALSE(helper.Run(transaction_factory_.get()));
+  // Simulate a slow response by using an ERR_IO_PENDING read error to delay
+  // until SequencedSocketData::Resume() is called.
+  auto data = std::make_unique<DnsSocketData>(
+      0 /* id */, kT0HostName, kT0Qtype, ASYNC, Transport::HTTPS,
+      nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128);
+  data->AddReadError(ERR_IO_PENDING, ASYNC);
+  data->AddResponseData(kT0ResponseDatagram, std::size(kT0ResponseDatagram),
+                        ASYNC);
+  SequencedSocketData* sequenced_socket_data = data->GetProvider();
+  AddSocketData(std::move(data), false /* enqueue_transaction_id */);
 
-  // Only one attempt configured, so expect immediate failure after timeout
-  // period.
-  FastForwardBy(resolve_context_->NextDohTimeout(0 /* doh_server_index */,
-                                                 session_.get()));
+  TransactionHelper helper(kT0RecordCount);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+
+  helper.StartTransaction(std::move(transaction));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(helper.has_completed());
+  FastForwardBy(resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get()));
+  EXPECT_FALSE(helper.has_completed());
+
+  sequenced_socket_data->Resume();
+  helper.RunUntilComplete();
+}
+
+// Test for when a slow DoH response is delayed until after the initial fallback
+// period but fast timeout is enabled, resulting in timeout failure.
+TEST_F(DnsTransactionTestWithMockTime,
+       SlowHttpsResponse_SingleAttempt_FastTimeout) {
+  config_.doh_attempts = 1;
+  ConfigureDohServers(false /* use_post */);
+
+  AddHangingQuery(kT0HostName, kT0Qtype,
+                  DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                  false /* enqueue_transaction_id */);
+
+  TransactionHelper helper(ERR_DNS_TIMED_OUT);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          true /* fast_timeout */);
+  helper.StartTransaction(std::move(transaction));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(helper.has_completed());
+
+  // Only one attempt configured and fast timeout enabled, so expect immediate
+  // failure after fallback period.
+  FastForwardBy(resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get()));
   EXPECT_TRUE(helper.has_completed());
 }
 
-// Test for when a slow DoH response is delayed until after the initial timeout
-// but a retry is configured.
+// Test for when a slow DoH response is delayed until after the initial fallback
+// period but a retry is configured.
 TEST_F(DnsTransactionTestWithMockTime, SlowHttpsResponse_TwoAttempts) {
   config_.doh_attempts = 2;
   ConfigureDohServers(false /* use_post */);
@@ -2506,41 +2676,372 @@ TEST_F(DnsTransactionTestWithMockTime, SlowHttpsResponse_TwoAttempts) {
       0 /* id */, kT0HostName, kT0Qtype, ASYNC, Transport::HTTPS,
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128);
   data->AddReadError(ERR_IO_PENDING, ASYNC);
-  data->AddResponseData(kT0ResponseDatagram, base::size(kT0ResponseDatagram),
+  data->AddResponseData(kT0ResponseDatagram, std::size(kT0ResponseDatagram),
                         ASYNC);
   SequencedSocketData* sequenced_socket_data = data->GetProvider();
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
 
-  TransactionHelper helper(kT0HostName, kT0Qtype, true /* secure */,
-                           kT0RecordCount, resolve_context_.get());
-  ASSERT_FALSE(helper.Run(transaction_factory_.get()));
+  TransactionHelper helper(kT0RecordCount);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+
+  helper.StartTransaction(std::move(transaction));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(helper.has_completed());
   ASSERT_TRUE(sequenced_socket_data->IsPaused());
 
   // Another attempt configured, so transaction should not fail after initial
-  // timeout. Setup the second attempt to never receive a response.
-  AddQueryAndTimeout(kT0HostName, kT0Qtype,
-                     DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
-                     false /* enqueue_transaction_id */);
-  FastForwardBy(resolve_context_->NextDohTimeout(0 /* doh_server_index */,
-                                                 session_.get()));
+  // fallback period. Setup the second attempt to never receive a response.
+  AddHangingQuery(kT0HostName, kT0Qtype,
+                  DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                  false /* enqueue_transaction_id */);
+  FastForwardBy(resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get()));
   EXPECT_FALSE(helper.has_completed());
 
   // Expect first attempt to continue in parallel with retry, so expect the
   // transaction to complete when the first query is allowed to resume.
   sequenced_socket_data->Resume();
+  helper.RunUntilComplete();
+}
+
+// Test for when a slow DoH response is delayed until after the full timeout
+// period.
+TEST_F(DnsTransactionTestWithMockTime, HttpsTimeout) {
+  config_.doh_attempts = 1;
+  ConfigureDohServers(false /* use_post */);
+
+  // Assume fallback period is less than timeout.
+  ASSERT_LT(resolve_context_->NextDohFallbackPeriod(0 /* doh_server_index */,
+                                                    session_.get()),
+            resolve_context_->SecureTransactionTimeout(SecureDnsMode::kSecure,
+                                                       session_.get()));
+
+  AddHangingQuery(kT0HostName, kT0Qtype,
+                  DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                  false /* enqueue_transaction_id */);
+
+  TransactionHelper helper(ERR_DNS_TIMED_OUT);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+  helper.StartTransaction(std::move(transaction));
   base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(helper.has_completed());
+
+  // Stop a tiny bit short to ensure transaction doesn't finish early.
+  const base::TimeDelta kTimeHoldback = base::Milliseconds(5);
+  base::TimeDelta timeout = resolve_context_->SecureTransactionTimeout(
+      SecureDnsMode::kSecure, session_.get());
+  ASSERT_LT(kTimeHoldback, timeout);
+  FastForwardBy(timeout - kTimeHoldback);
+  EXPECT_FALSE(helper.has_completed());
+
+  FastForwardBy(kTimeHoldback);
   EXPECT_TRUE(helper.has_completed());
+}
+
+// Test for when two slow DoH responses are delayed until after the full timeout
+// period.
+TEST_F(DnsTransactionTestWithMockTime, HttpsTimeout2) {
+  config_.doh_attempts = 2;
+  ConfigureDohServers(false /* use_post */);
+
+  // Assume fallback period is less than timeout.
+  ASSERT_LT(resolve_context_->NextDohFallbackPeriod(0 /* doh_server_index */,
+                                                    session_.get()),
+            resolve_context_->SecureTransactionTimeout(SecureDnsMode::kSecure,
+                                                       session_.get()));
+
+  AddHangingQuery(kT0HostName, kT0Qtype,
+                  DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                  false /* enqueue_transaction_id */);
+  AddHangingQuery(kT0HostName, kT0Qtype,
+                  DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                  false /* enqueue_transaction_id */);
+
+  TransactionHelper helper(ERR_DNS_TIMED_OUT);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+  helper.StartTransaction(std::move(transaction));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(helper.has_completed());
+
+  base::TimeDelta fallback_period = resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get());
+  FastForwardBy(fallback_period);
+  EXPECT_FALSE(helper.has_completed());
+
+  // Timeout is from start of transaction, so need to keep track of the
+  // remainder after other fast forwards.
+  base::TimeDelta timeout = resolve_context_->SecureTransactionTimeout(
+      SecureDnsMode::kSecure, session_.get());
+  base::TimeDelta timeout_remainder = timeout - fallback_period;
+
+  // Fallback period for second attempt.
+  fallback_period = resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get());
+  ASSERT_LT(fallback_period, timeout_remainder);
+  FastForwardBy(fallback_period);
+  EXPECT_FALSE(helper.has_completed());
+  timeout_remainder -= fallback_period;
+
+  // Stop a tiny bit short to ensure transaction doesn't finish early.
+  const base::TimeDelta kTimeHoldback = base::Milliseconds(5);
+  ASSERT_LT(kTimeHoldback, timeout_remainder);
+  FastForwardBy(timeout_remainder - kTimeHoldback);
+  EXPECT_FALSE(helper.has_completed());
+
+  FastForwardBy(kTimeHoldback);
+  EXPECT_TRUE(helper.has_completed());
+}
+
+// Test for when attempt fallback periods go beyond the full timeout period.
+TEST_F(DnsTransactionTestWithMockTime, LongHttpsTimeouts) {
+  const int kNumAttempts = 20;
+  config_.doh_attempts = kNumAttempts;
+  ConfigureDohServers(false /* use_post */);
+
+  // Assume sum of fallback periods is greater than timeout.
+  ASSERT_GT(kNumAttempts * resolve_context_->NextDohFallbackPeriod(
+                               0 /* doh_server_index */, session_.get()),
+            resolve_context_->SecureTransactionTimeout(SecureDnsMode::kSecure,
+                                                       session_.get()));
+
+  for (int i = 0; i < kNumAttempts; ++i) {
+    AddHangingQuery(kT0HostName, kT0Qtype,
+                    DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                    false /* enqueue_transaction_id */);
+  }
+
+  TransactionHelper helper(ERR_DNS_TIMED_OUT);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+  helper.StartTransaction(std::move(transaction));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(helper.has_completed());
+
+  for (int i = 0; i < kNumAttempts - 1; ++i) {
+    FastForwardBy(resolve_context_->NextDohFallbackPeriod(
+        0 /* doh_server_index */, session_.get()));
+    EXPECT_FALSE(helper.has_completed());
+  }
+
+  // Expect transaction to time out immediately after the last fallback period.
+  FastForwardBy(resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get()));
+  EXPECT_TRUE(helper.has_completed());
+}
+
+// Test for when the last of multiple HTTPS attempts fails (SERVFAIL) before
+// a previous attempt succeeds.
+TEST_F(DnsTransactionTestWithMockTime, LastHttpsAttemptFails) {
+  config_.doh_attempts = 2;
+  ConfigureDohServers(false /* use_post */);
+
+  // Simulate a slow response by using an ERR_IO_PENDING read error to delay
+  // until SequencedSocketData::Resume() is called.
+  auto data = std::make_unique<DnsSocketData>(
+      0 /* id */, kT0HostName, kT0Qtype, ASYNC, Transport::HTTPS,
+      nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128);
+  data->AddReadError(ERR_IO_PENDING, ASYNC);
+  data->AddResponseData(kT0ResponseDatagram, std::size(kT0ResponseDatagram),
+                        ASYNC);
+  SequencedSocketData* sequenced_socket_data = data->GetProvider();
+  AddSocketData(std::move(data), false /* enqueue_transaction_id */);
+
+  AddQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL,
+                   SYNCHRONOUS, Transport::HTTPS,
+                   DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                   false /* enqueue_transaction_id */);
+
+  TransactionHelper helper(kT0RecordCount);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+  helper.StartTransaction(std::move(transaction));
+
+  // Wait for one timeout period to start (and fail) the second attempt.
+  FastForwardBy(resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get()));
+  EXPECT_FALSE(helper.has_completed());
+
+  // Complete the first attempt and expect immediate success.
+  sequenced_socket_data->Resume();
+  helper.RunUntilComplete();
+}
+
+// Test for when the last of multiple HTTPS attempts fails (SERVFAIL), and a
+// previous attempt never completes.
+TEST_F(DnsTransactionTestWithMockTime, LastHttpsAttemptFails_Timeout) {
+  config_.doh_attempts = 2;
+  ConfigureDohServers(false /* use_post */);
+
+  AddHangingQuery(kT0HostName, kT0Qtype,
+                  DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                  false /* enqueue_transaction_id */);
+  AddQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL,
+                   SYNCHRONOUS, Transport::HTTPS,
+                   DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                   false /* enqueue_transaction_id */);
+
+  TransactionHelper helper(ERR_DNS_TIMED_OUT);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+
+  helper.StartTransaction(std::move(transaction));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(helper.has_completed());
+
+  // Second attempt fails immediately after first fallback period, but because
+  // fast timeout is disabled, the transaction will attempt to wait for the
+  // first attempt.
+  base::TimeDelta fallback_period = resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get());
+  FastForwardBy(fallback_period);
+  EXPECT_FALSE(helper.has_completed());
+
+  // Timeout is from start of transaction, so need to keep track of the
+  // remainder after other fast forwards.
+  base::TimeDelta timeout = resolve_context_->SecureTransactionTimeout(
+      SecureDnsMode::kSecure, session_.get());
+  base::TimeDelta timeout_remainder = timeout - fallback_period;
+
+  // Stop a tiny bit short to ensure transaction doesn't finish early.
+  const base::TimeDelta kTimeHoldback = base::Milliseconds(5);
+  ASSERT_LT(kTimeHoldback, timeout_remainder);
+  FastForwardBy(timeout_remainder - kTimeHoldback);
+  EXPECT_FALSE(helper.has_completed());
+
+  FastForwardBy(kTimeHoldback);
+  EXPECT_TRUE(helper.has_completed());
+}
+
+// Test for when the last of multiple HTTPS attempts fails (SERVFAIL) before
+// a previous attempt can complete, but fast timeouts is enabled.
+TEST_F(DnsTransactionTestWithMockTime, LastHttpsAttemptFails_FastTimeout) {
+  config_.doh_attempts = 2;
+  ConfigureDohServers(false /* use_post */);
+
+  AddHangingQuery(kT0HostName, kT0Qtype,
+                  DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                  false /* enqueue_transaction_id */);
+  AddQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL,
+                   SYNCHRONOUS, Transport::HTTPS,
+                   DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                   false /* enqueue_transaction_id */);
+
+  TransactionHelper helper(ERR_DNS_SERVER_FAILED);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          true /* fast_timeout */);
+
+  helper.StartTransaction(std::move(transaction));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(helper.has_completed());
+
+  // With fast timeout enabled, expect the transaction to complete with failure
+  // immediately on failure of the last transaction.
+  FastForwardBy(resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get()));
+  EXPECT_TRUE(helper.has_completed());
+}
+
+// Test for when the last of multiple HTTPS attempts fails (SERVFAIL) before
+// a previous attempt later fails as well.
+TEST_F(DnsTransactionTestWithMockTime, LastHttpsAttemptFailsFirst) {
+  config_.doh_attempts = 2;
+  ConfigureDohServers(false /* use_post */);
+
+  // Simulate a slow response by using an ERR_IO_PENDING read error to delay
+  // until SequencedSocketData::Resume() is called.
+  auto data = std::make_unique<DnsSocketData>(
+      0 /* id */, kT0HostName, kT0Qtype, ASYNC, Transport::HTTPS,
+      nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128);
+  data->AddReadError(ERR_IO_PENDING, ASYNC);
+  data->AddRcode(dns_protocol::kRcodeSERVFAIL, ASYNC);
+  SequencedSocketData* sequenced_socket_data = data->GetProvider();
+  AddSocketData(std::move(data), false /* enqueue_transaction_id */);
+
+  AddQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL,
+                   SYNCHRONOUS, Transport::HTTPS,
+                   DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                   false /* enqueue_transaction_id */);
+
+  TransactionHelper helper(ERR_DNS_SERVER_FAILED);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+  helper.StartTransaction(std::move(transaction));
+
+  // Wait for one timeout period to start (and fail) the second attempt.
+  FastForwardBy(resolve_context_->NextDohFallbackPeriod(
+      0 /* doh_server_index */, session_.get()));
+  EXPECT_FALSE(helper.has_completed());
+
+  // Complete the first attempt and expect immediate completion.
+  sequenced_socket_data->Resume();
+  helper.RunUntilComplete();
+}
+
+// Test for when multiple HTTPS attempts fail (SERVFAIL) in order, making the
+// last started attempt also the last attempt to be pending.
+TEST_F(DnsTransactionTestWithMockTime, LastHttpsAttemptFailsLast) {
+  config_.doh_attempts = 2;
+  ConfigureDohServers(false /* use_post */);
+
+  AddQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL,
+                   SYNCHRONOUS, Transport::HTTPS,
+                   DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                   false /* enqueue_transaction_id */);
+  AddQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL,
+                   SYNCHRONOUS, Transport::HTTPS,
+                   DnsQuery::PaddingStrategy::BLOCK_LENGTH_128, 0 /* id */,
+                   false /* enqueue_transaction_id */);
+
+  TransactionHelper helper(ERR_DNS_SERVER_FAILED);
+  std::unique_ptr<DnsTransaction> transaction =
+      transaction_factory_->CreateTransaction(
+          kT0HostName, kT0Qtype, NetLogWithSource(), true /* secure */,
+          SecureDnsMode::kSecure, resolve_context_.get(),
+          false /* fast_timeout */);
+  helper.StartTransaction(std::move(transaction));
+
+  // Expect both attempts will run quickly without waiting for fallbacks or
+  // transaction timeout.
+  helper.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, TcpLookup_UdpRetry) {
   AddAsyncQueryAndRcode(kT0HostName, kT0Qtype,
                         dns_protocol::kRcodeNOERROR | dns_protocol::kFlagTC);
   AddQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), ASYNC, Transport::TCP);
+                      std::size(kT0ResponseDatagram), ASYNC, Transport::TCP);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, TcpLookup_LowEntropy) {
@@ -2548,23 +3049,26 @@ TEST_F(DnsTransactionTest, TcpLookup_LowEntropy) {
 
   for (int i = 0; i <= DnsUdpTracker::kPortReuseThreshold; ++i) {
     AddQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                        base::size(kT0ResponseDatagram), ASYNC, Transport::UDP);
+                        std::size(kT0ResponseDatagram), ASYNC, Transport::UDP);
   }
 
   AddQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                      base::size(kT0ResponseDatagram), ASYNC, Transport::TCP);
+                      std::size(kT0ResponseDatagram), ASYNC, Transport::TCP);
 
   for (int i = 0; i <= DnsUdpTracker::kPortReuseThreshold; ++i) {
-    TransactionHelper udp_helper(kT0HostName, kT0Qtype, false /* secure */,
-                                 kT0RecordCount, resolve_context_.get());
-    udp_helper.RunUntilDone(transaction_factory_.get());
+    TransactionHelper udp_helper(kT0RecordCount);
+    udp_helper.StartTransaction(transaction_factory_.get(), kT0HostName,
+                                kT0Qtype, false /* secure */,
+                                resolve_context_.get());
+    udp_helper.RunUntilComplete();
   }
 
   ASSERT_TRUE(session_->udp_tracker()->low_entropy());
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
   EXPECT_TRUE(session_->udp_tracker()->low_entropy());
 }
 
@@ -2574,9 +3078,10 @@ TEST_F(DnsTransactionTest, TCPFailure) {
   AddQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeSERVFAIL, ASYNC,
                    Transport::TCP);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_DNS_SERVER_FAILED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_SERVER_FAILED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
   ASSERT_NE(helper0.response(), nullptr);
   EXPECT_EQ(helper0.response()->rcode(), dns_protocol::kRcodeSERVFAIL);
 }
@@ -2593,13 +3098,14 @@ TEST_F(DnsTransactionTest, TCPMalformed) {
   data->AddResponseWithLength(
       std::make_unique<DnsResponse>(
           reinterpret_cast<const char*>(kT0ResponseDatagram),
-          base::size(kT0ResponseDatagram), 0),
+          std::size(kT0ResponseDatagram), 0),
       ASYNC, static_cast<uint16_t>(kT0QuerySize - 1));
   AddSocketData(std::move(data));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_DNS_MALFORMED_RESPONSE, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_MALFORMED_RESPONSE);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTestWithMockTime, TcpTimeout_UdpRetry) {
@@ -2609,9 +3115,11 @@ TEST_F(DnsTransactionTestWithMockTime, TcpTimeout_UdpRetry) {
   AddSocketData(std::make_unique<DnsSocketData>(
       1 /* id */, kT0HostName, kT0Qtype, ASYNC, Transport::TCP));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_DNS_TIMED_OUT, resolve_context_.get());
-  EXPECT_FALSE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_TIMED_OUT);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(helper0.has_completed());
   FastForwardUntilNoTasksRemain();
   EXPECT_TRUE(helper0.has_completed());
 }
@@ -2622,23 +3130,27 @@ TEST_F(DnsTransactionTestWithMockTime, TcpTimeout_LowEntropy) {
 
   for (int i = 0; i <= DnsUdpTracker::kPortReuseThreshold; ++i) {
     AddQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype, kT0ResponseDatagram,
-                        base::size(kT0ResponseDatagram), ASYNC, Transport::UDP);
+                        std::size(kT0ResponseDatagram), ASYNC, Transport::UDP);
   }
 
   AddSocketData(std::make_unique<DnsSocketData>(
       1 /* id */, kT0HostName, kT0Qtype, ASYNC, Transport::TCP));
 
   for (int i = 0; i <= DnsUdpTracker::kPortReuseThreshold; ++i) {
-    TransactionHelper udp_helper(kT0HostName, kT0Qtype, false /* secure */,
-                                 kT0RecordCount, resolve_context_.get());
-    udp_helper.RunUntilDone(transaction_factory_.get());
+    TransactionHelper udp_helper(kT0RecordCount);
+    udp_helper.StartTransaction(transaction_factory_.get(), kT0HostName,
+                                kT0Qtype, false /* secure */,
+                                resolve_context_.get());
+    udp_helper.RunUntilComplete();
   }
 
   ASSERT_TRUE(session_->udp_tracker()->low_entropy());
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_DNS_TIMED_OUT, resolve_context_.get());
-  EXPECT_FALSE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_DNS_TIMED_OUT);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(helper0.has_completed());
   FastForwardUntilNoTasksRemain();
   EXPECT_TRUE(helper0.has_completed());
 }
@@ -2652,15 +3164,16 @@ TEST_F(DnsTransactionTest, TCPReadReturnsZeroAsync) {
   data->AddResponseWithLength(
       std::make_unique<DnsResponse>(
           reinterpret_cast<const char*>(kT0ResponseDatagram),
-          base::size(kT0ResponseDatagram) - 1, 0),
-      ASYNC, static_cast<uint16_t>(base::size(kT0ResponseDatagram)));
+          std::size(kT0ResponseDatagram) - 1, 0),
+      ASYNC, static_cast<uint16_t>(std::size(kT0ResponseDatagram)));
   // Then return a 0-length read.
   data->AddReadError(0, ASYNC);
   AddSocketData(std::move(data));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_CONNECTION_CLOSED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_CONNECTION_CLOSED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, TCPReadReturnsZeroSynchronous) {
@@ -2672,15 +3185,16 @@ TEST_F(DnsTransactionTest, TCPReadReturnsZeroSynchronous) {
   data->AddResponseWithLength(
       std::make_unique<DnsResponse>(
           reinterpret_cast<const char*>(kT0ResponseDatagram),
-          base::size(kT0ResponseDatagram) - 1, 0),
-      SYNCHRONOUS, static_cast<uint16_t>(base::size(kT0ResponseDatagram)));
+          std::size(kT0ResponseDatagram) - 1, 0),
+      SYNCHRONOUS, static_cast<uint16_t>(std::size(kT0ResponseDatagram)));
   // Then return a 0-length read.
   data->AddReadError(0, SYNCHRONOUS);
   AddSocketData(std::move(data));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_CONNECTION_CLOSED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_CONNECTION_CLOSED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, TCPConnectionClosedAsync) {
@@ -2691,9 +3205,10 @@ TEST_F(DnsTransactionTest, TCPConnectionClosedAsync) {
   data->AddReadError(ERR_CONNECTION_CLOSED, ASYNC);
   AddSocketData(std::move(data));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_CONNECTION_CLOSED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_CONNECTION_CLOSED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, TCPConnectionClosedSynchronous) {
@@ -2704,9 +3219,10 @@ TEST_F(DnsTransactionTest, TCPConnectionClosedSynchronous) {
   data->AddReadError(ERR_CONNECTION_CLOSED, SYNCHRONOUS);
   AddSocketData(std::move(data));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_CONNECTION_CLOSED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_CONNECTION_CLOSED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, MismatchedThenNxdomainThenTCP) {
@@ -2715,7 +3231,7 @@ TEST_F(DnsTransactionTest, MismatchedThenNxdomainThenTCP) {
   std::unique_ptr<DnsSocketData> data(new DnsSocketData(
       0 /* id */, kT0HostName, kT0Qtype, SYNCHRONOUS, Transport::UDP));
   // First attempt gets a mismatched response.
-  data->AddResponseData(kT1ResponseDatagram, base::size(kT1ResponseDatagram),
+  data->AddResponseData(kT1ResponseDatagram, std::size(kT1ResponseDatagram),
                         SYNCHRONOUS);
   // Second read from first attempt gets TCP required.
   data->AddRcode(dns_protocol::kFlagTC, ASYNC);
@@ -2723,9 +3239,10 @@ TEST_F(DnsTransactionTest, MismatchedThenNxdomainThenTCP) {
   // Second attempt gets NXDOMAIN, which happens before the TCP required.
   AddSyncQueryAndRcode(kT0HostName, kT0Qtype, dns_protocol::kRcodeNXDOMAIN);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_NAME_NOT_RESOLVED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_NAME_NOT_RESOLVED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, MismatchedThenOkThenTCP) {
@@ -2734,7 +3251,7 @@ TEST_F(DnsTransactionTest, MismatchedThenOkThenTCP) {
   std::unique_ptr<DnsSocketData> data(new DnsSocketData(
       0 /* id */, kT0HostName, kT0Qtype, SYNCHRONOUS, Transport::UDP));
   // First attempt gets a mismatched response.
-  data->AddResponseData(kT1ResponseDatagram, base::size(kT1ResponseDatagram),
+  data->AddResponseData(kT1ResponseDatagram, std::size(kT1ResponseDatagram),
                         SYNCHRONOUS);
   // Second read from first attempt gets TCP required.
   data->AddRcode(dns_protocol::kFlagTC, ASYNC);
@@ -2742,11 +3259,12 @@ TEST_F(DnsTransactionTest, MismatchedThenOkThenTCP) {
   // Second attempt gets a valid response, which happens before the TCP
   // required.
   AddSyncQueryAndResponse(0 /* id */, kT0HostName, kT0Qtype,
-                          kT0ResponseDatagram, base::size(kT0ResponseDatagram));
+                          kT0ResponseDatagram, std::size(kT0ResponseDatagram));
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            kT0RecordCount, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(kT0RecordCount);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, MismatchedThenRefusedThenTCP) {
@@ -2777,7 +3295,7 @@ TEST_F(DnsTransactionTest, MismatchedThenRefusedThenTCP) {
   // Attempt 1.
   std::unique_ptr<DnsSocketData> data(new DnsSocketData(
       0 /* id */, kT0HostName, kT0Qtype, SYNCHRONOUS, Transport::UDP));
-  data->AddResponseData(kT1ResponseDatagram, base::size(kT1ResponseDatagram),
+  data->AddResponseData(kT1ResponseDatagram, std::size(kT1ResponseDatagram),
                         SYNCHRONOUS);
   data->AddRcode(dns_protocol::kFlagTC, ASYNC);
   AddSocketData(std::move(data));
@@ -2786,22 +3304,56 @@ TEST_F(DnsTransactionTest, MismatchedThenRefusedThenTCP) {
   AddQueryAndErrorResponse(0 /* id */, kT0HostName, kT0Qtype,
                            ERR_CONNECTION_REFUSED, SYNCHRONOUS, Transport::UDP);
 
-  TransactionHelper helper0(kT0HostName, kT0Qtype, false /* secure */,
-                            ERR_CONNECTION_REFUSED, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_CONNECTION_REFUSED);
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           false /* secure */, resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 TEST_F(DnsTransactionTest, InvalidQuery) {
   ConfigureFactory();
 
-  TransactionHelper helper0(".", dns_protocol::kTypeA, false /* secure */,
-                            ERR_INVALID_ARGUMENT, resolve_context_.get());
-  EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+  TransactionHelper helper0(ERR_INVALID_ARGUMENT);
+  helper0.StartTransaction(transaction_factory_.get(), ".",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
 
-  TransactionHelper helper1("foo,bar.com", dns_protocol::kTypeA,
-                            false /* secure */, ERR_INVALID_ARGUMENT,
-                            resolve_context_.get());
-  EXPECT_TRUE(helper1.Run(transaction_factory_.get()));
+  TransactionHelper helper1(ERR_INVALID_ARGUMENT);
+  helper1.StartTransaction(transaction_factory_.get(), "foo,bar.com",
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper1.RunUntilComplete();
+}
+
+TEST_F(DnsTransactionTest, CheckAsync) {
+  ConfigureDohServers(false /* use_post */);
+  AddQueryAndResponse(0, kT0HostName, kT0Qtype, kT0ResponseDatagram,
+                      std::size(kT0ResponseDatagram), SYNCHRONOUS,
+                      Transport::HTTPS, nullptr /* opt_rdata */,
+                      DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
+                      false /* enqueue_transaction_id */);
+  TransactionHelper helper0(kT0RecordCount);
+  bool started = false;
+  SetUrlRequestStartedCallback(
+      base::BindLambdaForTesting([&] { started = true; }));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  EXPECT_FALSE(started);
+  EXPECT_FALSE(helper0.has_completed());
+  helper0.RunUntilComplete();
+  EXPECT_TRUE(started);
+}
+
+TEST_F(DnsTransactionTest, EarlyCancel) {
+  ConfigureDohServers(false /* use_post */);
+  TransactionHelper helper0(0);
+  SetUrlRequestStartedCallback(base::BindRepeating([] { FAIL(); }));
+  helper0.StartTransaction(transaction_factory_.get(), kT0HostName, kT0Qtype,
+                           true /* secure */, resolve_context_.get());
+  EXPECT_FALSE(helper0.has_completed());
+  helper0.Cancel();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(DnsTransactionTestWithMockTime, ProbeUntilSuccess) {
@@ -2818,7 +3370,7 @@ TEST_F(DnsTransactionTestWithMockTime, ProbeUntilSuccess) {
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -2858,14 +3410,14 @@ TEST_F(DnsTransactionTestWithMockTime, HungProbe) {
       nullptr /* opt_rdata */, DnsQuery::PaddingStrategy::BLOCK_LENGTH_128);
   data->AddReadError(ERR_IO_PENDING, ASYNC);
   data->AddReadError(ERR_CONNECTION_REFUSED, ASYNC);
-  data->AddResponseData(kT4ResponseDatagram, base::size(kT4ResponseDatagram),
+  data->AddResponseData(kT4ResponseDatagram, std::size(kT4ResponseDatagram),
                         ASYNC);
   SequencedSocketData* sequenced_socket_data = data->GetProvider();
   AddSocketData(std::move(data), false /* enqueue_transaction_id */);
 
   // Add success for second probe.
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -2900,7 +3452,7 @@ TEST_F(DnsTransactionTestWithMockTime, ProbeMultipleServers) {
   ConfigureDohServers(true /* use_post */, 2 /* num_doh_servers */,
                       false /* make_available */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -2910,7 +3462,7 @@ TEST_F(DnsTransactionTestWithMockTime, ProbeMultipleServers) {
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -2951,12 +3503,12 @@ TEST_F(DnsTransactionTestWithMockTime, MultipleProbeRunners) {
   ConfigureDohServers(true /* use_post */, 1 /* num_doh_servers */,
                       false /* make_available */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -2996,7 +3548,7 @@ TEST_F(DnsTransactionTestWithMockTime, MultipleProbeRunners_SeparateContexts) {
   ConfigureDohServers(true /* use_post */, 1 /* num_doh_servers */,
                       false /* make_available */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -3006,13 +3558,13 @@ TEST_F(DnsTransactionTestWithMockTime, MultipleProbeRunners_SeparateContexts) {
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
 
-  TestURLRequestContext request_context2;
-  ResolveContext context2(&request_context2, false /* enable_caching */);
+  auto request_context2 = CreateTestURLRequestContextBuilder()->Build();
+  ResolveContext context2(request_context2.get(), false /* enable_caching */);
   context2.InvalidateCachesAndPerSessionData(session_.get(),
                                              false /* network_change */);
 
@@ -3058,23 +3610,23 @@ TEST_F(DnsTransactionTestWithMockTime, MultipleProbeRunners_SeparateContexts) {
   EXPECT_EQ(runner2->GetDelayUntilNextProbeForTest(0), base::TimeDelta());
 }
 
-TEST_F(DnsTransactionTestWithMockTime, CancelDohProbe) {
-  ConfigureDohServers(true /* use_post */, 1 /* num_doh_servers */,
-                      false /* make_available */);
-  AddQueryAndErrorResponse(0 /* id */, kT4HostName, kT4Qtype,
+TEST_F(DnsTransactionTestWithMockTime, CancelDohProbeOnDestruction) {
+  ConfigureDohServers(/*use_post=*/true, /*num_doh_servers=*/1,
+                      /*make_available=*/false);
+  AddQueryAndErrorResponse(/*id=*/0, kT4HostName, kT4Qtype,
                            ERR_CONNECTION_REFUSED, SYNCHRONOUS,
-                           Transport::HTTPS, nullptr /* opt_rdata */,
+                           Transport::HTTPS, /*opt_rdata=*/nullptr,
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
-                           false /* enqueue_transaction_id */);
-  AddQueryAndErrorResponse(0 /* id */, kT4HostName, kT4Qtype,
+                           /*enqueue_transaction_id=*/false);
+  AddQueryAndErrorResponse(/*id=*/0, kT4HostName, kT4Qtype,
                            ERR_CONNECTION_REFUSED, SYNCHRONOUS,
-                           Transport::HTTPS, nullptr /* opt_rdata */,
+                           Transport::HTTPS, /*opt_rdata=*/nullptr,
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
-                           false /* enqueue_transaction_id */);
+                           /* enqueue_transaction_id=*/false);
 
   std::unique_ptr<DnsProbeRunner> runner =
       transaction_factory_->CreateDohProbeRunner(resolve_context_.get());
-  runner->Start(false /* network_change */);
+  runner->Start(/*network_change=*/false);
 
   // The first probe happens without any delay.
   RunUntilIdle();
@@ -3099,6 +3651,46 @@ TEST_F(DnsTransactionTestWithMockTime, CancelDohProbe) {
   EXPECT_FALSE(doh_itr->AttemptAvailable());
 }
 
+TEST_F(DnsTransactionTestWithMockTime, CancelDohProbeOnContextDestruction) {
+  ConfigureDohServers(/*use_post=*/true, /*num_doh_servers=*/1,
+                      /*make_available=*/false);
+  AddQueryAndErrorResponse(/*id=*/0, kT4HostName, kT4Qtype,
+                           ERR_CONNECTION_REFUSED, SYNCHRONOUS,
+                           Transport::HTTPS, /*opt_rdata=*/nullptr,
+                           DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
+                           /*enqueue_transaction_id=*/false);
+  AddQueryAndErrorResponse(/*id=*/0, kT4HostName, kT4Qtype,
+                           ERR_CONNECTION_REFUSED, SYNCHRONOUS,
+                           Transport::HTTPS, /*opt_rdata=*/nullptr,
+                           DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
+                           /* enqueue_transaction_id=*/false);
+
+  std::unique_ptr<DnsProbeRunner> runner =
+      transaction_factory_->CreateDohProbeRunner(resolve_context_.get());
+  runner->Start(/*network_change=*/false);
+
+  // The first probe happens without any delay.
+  RunUntilIdle();
+  std::unique_ptr<DnsServerIterator> doh_itr = resolve_context_->GetDohIterator(
+      session_->config(), SecureDnsMode::kAutomatic, session_.get());
+
+  EXPECT_FALSE(doh_itr->AttemptAvailable());
+
+  // Expect the server to still be unavailable after the second probe.
+  FastForwardBy(runner->GetDelayUntilNextProbeForTest(0));
+
+  EXPECT_FALSE(doh_itr->AttemptAvailable());
+
+  base::TimeDelta next_delay = runner->GetDelayUntilNextProbeForTest(0);
+  resolve_context_.reset();
+
+  // The probe detects that the context no longer exists and stops running.
+  FastForwardBy(next_delay);
+
+  // There are no more probes to run.
+  EXPECT_EQ(base::TimeDelta(), runner->GetDelayUntilNextProbeForTest(0));
+}
+
 TEST_F(DnsTransactionTestWithMockTime, CancelOneOfMultipleProbeRunners) {
   ConfigureDohServers(true /* use_post */, 1 /* num_doh_servers */,
                       false /* make_available */);
@@ -3113,7 +3705,7 @@ TEST_F(DnsTransactionTestWithMockTime, CancelOneOfMultipleProbeRunners) {
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -3191,7 +3783,7 @@ TEST_F(DnsTransactionTestWithMockTime, CancelDohProbe_AfterSuccess) {
   ConfigureDohServers(true /* use_post */, 1 /* num_doh_servers */,
                       false /* make_available */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), SYNCHRONOUS,
+                      std::size(kT4ResponseDatagram), SYNCHRONOUS,
                       Transport::HTTPS, nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -3264,7 +3856,7 @@ TEST_F(DnsTransactionTestWithMockTime, StartWhileRunning) {
                            DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                            false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -3294,12 +3886,12 @@ TEST_F(DnsTransactionTestWithMockTime, RestartFinishedProbe) {
   ConfigureDohServers(true /* use_post */, 1 /* num_doh_servers */,
                       false /* make_available */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -3344,12 +3936,12 @@ TEST_F(DnsTransactionTestWithMockTime, FastProbeRestart) {
   ConfigureDohServers(true /* use_post */, 1 /* num_doh_servers */,
                       false /* make_available */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
   AddQueryAndResponse(0 /* id */, kT4HostName, kT4Qtype, kT4ResponseDatagram,
-                      base::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
+                      std::size(kT4ResponseDatagram), ASYNC, Transport::HTTPS,
                       nullptr /* opt_rdata */,
                       DnsQuery::PaddingStrategy::BLOCK_LENGTH_128,
                       false /* enqueue_transaction_id */);
@@ -3388,6 +3980,24 @@ TEST_F(DnsTransactionTestWithMockTime, FastProbeRestart) {
   FastForwardBy(scheduled_delay);
   EXPECT_TRUE(resolve_context_->GetDohServerAvailability(
       0u /* doh_server_index */, session_.get()));
+}
+
+// Test that queries cannot be sent when they contain a too-long name.
+// Tests against incorrect name length validation, which is anti-pattern #3 from
+// the "NAME:WRECK" report:
+// https://www.forescout.com/company/resources/namewreck-breaking-and-fixing-dns-implementations/
+TEST_F(DnsTransactionTestWithMockTime, RejectsQueryingLongNames) {
+  std::string long_dotted_name;
+  while (long_dotted_name.size() <= dns_protocol::kMaxNameLength) {
+    long_dotted_name.append("naaaaaamelabel.");
+  }
+  long_dotted_name.append("test");
+
+  TransactionHelper helper0(ERR_INVALID_ARGUMENT);
+  helper0.StartTransaction(transaction_factory_.get(), long_dotted_name.c_str(),
+                           dns_protocol::kTypeA, false /* secure */,
+                           resolve_context_.get());
+  helper0.RunUntilComplete();
 }
 
 }  // namespace

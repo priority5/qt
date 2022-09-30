@@ -1,63 +1,38 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*
-  config.h
-*/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef CONFIG_H
 #define CONFIG_H
 
 #include "location.h"
 #include "qdoccommandlineparser.h"
+#include "singleton.h"
 
 #include <QtCore/qmap.h>
-#include <QtCore/qpair.h>
 #include <QtCore/qset.h>
 #include <QtCore/qstack.h>
 #include <QtCore/qstringlist.h>
 
+#include <utility>
+
 QT_BEGIN_NAMESPACE
 
-template<typename T>
-class Singleton
+/*
+ Contains information about a location
+ where a ConfigVar string needs to be expanded
+ from another config variable.
+*/
+struct ExpandVar
 {
-public:
-    Singleton(const Singleton &) = delete;
-    Singleton &operator=(const Singleton &) = delete;
-    static T &instance()
-    {
-        static T instance;
-        return instance;
-    }
+    int m_valueIndex {};
+    int m_index {};
+    QString m_var {};
+    QChar m_delim {};
 
-protected:
-    Singleton() = default;
+    ExpandVar(int valueIndex, int index, QString var, const QChar &delim)
+        : m_valueIndex(valueIndex), m_index(index), m_var(std::move(var)), m_delim(delim)
+    {
+    }
 };
 
 /*
@@ -66,42 +41,78 @@ protected:
  */
 struct ConfigVar
 {
-    bool m_plus {};
     QString m_name {};
-    QStringList m_values {};
-    QString m_currentPath {};
+
+    struct ConfigValue {
+        QString m_value;
+        QString m_path;
+    };
+
+    QList<ConfigValue> m_values {};
     Location m_location {};
+    QList<ExpandVar> m_expandVars {};
 
-    ConfigVar() : m_plus(false) {}
+    ConfigVar() = default;
 
-    ConfigVar(const QString &name, const QStringList &values, const QString &dir)
-        : m_plus(true), m_name(name), m_values(values), m_currentPath(dir)
+    ConfigVar(QString name, const QStringList &values, const QString &dir,
+              const Location &loc = Location(),
+              const QList<ExpandVar> &expandVars = QList<ExpandVar>())
+        : m_name(std::move(name)), m_location(loc), m_expandVars(expandVars)
     {
+        for (const auto &v : values)
+            m_values << ConfigValue {v, dir};
     }
 
-    ConfigVar(const QString &name, const QStringList &values, const QString &dir,
-              const Location &loc)
-        : m_plus(false), m_name(name), m_values(values), m_currentPath(dir), m_location(loc)
+    /*
+      Appends values to this ConfigVar, and adjusts the ExpandVar
+      parameters so they continue to refer to the correct values.
+    */
+    void append(const ConfigVar &other)
     {
+        m_expandVars << other.m_expandVars;
+        QList<ExpandVar>::Iterator it = m_expandVars.end();
+        it -= other.m_expandVars.size();
+        std::for_each(it, m_expandVars.end(), [this](ExpandVar &v) {
+            v.m_valueIndex += m_values.size();
+        });
+        m_values << other.m_values;
+        m_location = other.m_location;
     }
 };
 
 /*
   In this multimap, the key is a config variable name.
  */
-typedef QMultiMap<QString, ConfigVar> ConfigVarMultimap;
+typedef QMap<QString, ConfigVar> ConfigVarMap;
 
 class Config : public Singleton<Config>
 {
-    Q_DECLARE_TR_FUNCTIONS(QDoc::Config)
-
 public:
     ~Config();
 
     enum QDocPass { Neither, Prepare, Generate };
 
+    enum PathFlags : unsigned char {
+        None = 0x0,
+        // TODO: [unenforced-unclear-validation]
+        // The Validate flag is used, for example, during the retrival
+        // of paths in getCanonicalPathList.
+        // It is unclear what kind of validation it performs, if any,
+        // and when this validation is required.
+        // Instead, remove this kind of flag and ensure that any
+        // amount of required validation is performed during the
+        // parsing step, if possilbe, and only once.
+        // Furthemore, ensure any such validation removes some
+        // uncertainty on dependent subsystems, moving constraints to
+        // preconditions and expressing them at the API boundaries.
+        Validate = 0x1,
+        IncludePaths = 0x2
+    };
+
     void init(const QString &programName, const QStringList &args);
-    bool getDebug() const { return m_debug; }
+    [[nodiscard]] bool getDebug() const { return m_debug; }
+    [[nodiscard]] bool getAtomsDump() const { return m_atomsDump; }
+    [[nodiscard]] bool showInternal() const { return m_showInternal; }
 
     void clear();
     void reset();
@@ -110,27 +121,28 @@ public:
     void insertStringList(const QString &var, const QStringList &values);
 
     void showHelp(int exitCode = 0) { m_parser.showHelp(exitCode); }
-    QStringList qdocFiles() const { return m_parser.positionalArguments(); }
-    const QString &programName() const { return m_prog; }
-    const Location &location() const { return m_location; }
-    const Location &lastLocation() const { return m_lastLocation; }
-    bool getBool(const QString &var) const;
-    int getInt(const QString &var) const;
+    [[nodiscard]] QStringList qdocFiles() const { return m_parser.positionalArguments(); }
+    [[nodiscard]] const QString &programName() const { return m_prog; }
+    [[nodiscard]] const Location &location() const { return m_location; }
+    [[nodiscard]] const Location &lastLocation() const { return m_lastLocation; }
+    [[nodiscard]] bool getBool(const QString &var) const;
+    [[nodiscard]] int getInt(const QString &var) const;
 
-    QString getOutputDir(const QString &format = QString("HTML")) const;
-    QSet<QString> getOutputFormats() const;
-    QString getString(const QString &var, const QString &defaultString = QString()) const;
-    QSet<QString> getStringSet(const QString &var) const;
-    QStringList getStringList(const QString &var) const;
-    QStringList getCanonicalPathList(const QString &var, bool validate = false) const;
-    QRegExp getRegExp(const QString &var) const;
-    QVector<QRegExp> getRegExpList(const QString &var) const;
-    QSet<QString> subVars(const QString &var) const;
-    void subVarsAndValues(const QString &var, ConfigVarMultimap &t) const;
+    [[nodiscard]] QString getOutputDir(const QString &format = QString("HTML")) const;
+    [[nodiscard]] QSet<QString> getOutputFormats() const;
+    [[nodiscard]] QString getString(const QString &var,
+                                    const QString &defaultString = QString()) const;
+    [[nodiscard]] QSet<QString> getStringSet(const QString &var) const;
+    [[nodiscard]] QStringList getStringList(const QString &var) const;
+    [[nodiscard]] QStringList getCanonicalPathList(const QString &var,
+                                                   PathFlags flags = None) const;
+    [[nodiscard]] QRegularExpression getRegExp(const QString &var) const;
+    [[nodiscard]] QList<QRegularExpression> getRegExpList(const QString &var) const;
+    [[nodiscard]] QSet<QString> subVars(const QString &var) const;
     QStringList getAllFiles(const QString &filesVar, const QString &dirsVar,
                             const QSet<QString> &excludedDirs = QSet<QString>(),
                             const QSet<QString> &excludedFiles = QSet<QString>());
-    QString getIncludeFilePath(const QString &fileName) const;
+    [[nodiscard]] QString getIncludeFilePath(const QString &fileName) const;
     QStringList getExampleQdocFiles(const QSet<QString> &excludedDirs,
                                     const QSet<QString> &excludedFiles);
     QStringList getExampleImageFiles(const QSet<QString> &excludedDirs,
@@ -146,15 +158,10 @@ public:
     static QString findFile(const Location &location, const QStringList &files,
                             const QStringList &dirs, const QString &fileName,
                             QString *userFriendlyFilePath = nullptr);
-    static QString findFile(const Location &location, const QStringList &files,
-                            const QStringList &dirs, const QString &fileBase,
-                            const QStringList &fileExtensions,
-                            QString *userFriendlyFilePath = nullptr);
     static QString copyFile(const Location &location, const QString &sourceFilePath,
                             const QString &userFriendlySourceFilePath,
                             const QString &targetDirPath);
     static int numParams(const QString &value);
-    static bool removeDirContents(const QString &dir);
     static void pushWorkingDir(const QString &dir);
     static QString popWorkingDir();
 
@@ -165,26 +172,31 @@ public:
     static QString overrideOutputDir;
     static QSet<QString> overrideOutputFormats;
 
-    inline bool singleExec() const;
-    inline bool dualExec() const;
+    [[nodiscard]] inline bool singleExec() const;
+    [[nodiscard]] inline bool dualExec() const;
     QStringList &defines() { return m_defines; }
     QStringList &dependModules() { return m_dependModules; }
     QStringList &includePaths() { return m_includePaths; }
     QStringList &indexDirs() { return m_indexDirs; }
-    QString currentDir() const { return m_currentDir; }
+    [[nodiscard]] QString currentDir() const { return m_currentDir; }
     void setCurrentDir(const QString &path) { m_currentDir = path; }
-    QString previousCurrentDir() const { return m_previousCurrentDir; }
+    [[nodiscard]] QString previousCurrentDir() const { return m_previousCurrentDir; }
     void setPreviousCurrentDir(const QString &path) { m_previousCurrentDir = path; }
 
-    QDocPass qdocPass() const { return m_qdocPass; }
     void setQDocPass(const QDocPass &pass) { m_qdocPass = pass; };
-    bool preparing() const { return (m_qdocPass == Prepare); }
-    bool generating() const { return (m_qdocPass == Generate); }
+    [[nodiscard]] bool preparing() const { return (m_qdocPass == Prepare); }
+    [[nodiscard]] bool generating() const { return (m_qdocPass == Generate); }
 
 private:
     void processCommandLineOptions(const QStringList &args);
     void setIncludePaths();
     void setIndexDirs();
+    void expandVariables();
+    inline void updateLocation(const ConfigVar &cv) const
+    {
+        if (!cv.m_location.isEmpty())
+            const_cast<Config *>(this)->m_lastLocation = cv.m_location;
+    }
 
     QStringList m_dependModules {};
     QStringList m_defines {};
@@ -195,16 +207,23 @@ private:
     QString m_currentDir {};
     QString m_previousCurrentDir {};
 
+    bool m_showInternal { false };
     static bool m_debug;
+
+    // An option that can be set trough a similarly named command-line option.
+    // When this is set, every time QDoc parses a block-comment, a
+    // human-readable presentation of the `Atom`s structure for that
+    // block will shown to the user.
+    static bool m_atomsDump;
+
     static bool isMetaKeyChar(QChar ch);
     void load(Location location, const QString &fileName);
 
     QString m_prog {};
     Location m_location {};
     Location m_lastLocation {};
-    ConfigVarMultimap m_configVars {};
+    ConfigVarMap m_configVars {};
 
-    static QMap<QString, QString> m_uncompressedFiles;
     static QMap<QString, QString> m_extractedDirs;
     static QStack<QString> m_workingDirs;
     static QMap<QString, QStringList> m_includeFilesMap;
@@ -250,6 +269,7 @@ struct ConfigStrings
     static QString IMAGEDIRS;
     static QString IMAGES;
     static QString INCLUDEPATHS;
+    static QString INCLUSIVE;
     static QString INDEXES;
     static QString LANDINGPAGE;
     static QString LANDINGTITLE;
@@ -262,9 +282,7 @@ struct ConfigStrings
     static QString NATURALLANGUAGE;
     static QString NAVIGATION;
     static QString NOLINKERRORS;
-    static QString OBSOLETELINKS;
     static QString OUTPUTDIR;
-    static QString OUTPUTENCODING;
     static QString OUTPUTFORMATS;
     static QString OUTPUTPREFIXES;
     static QString OUTPUTSUFFIXES;
@@ -272,7 +290,6 @@ struct ConfigStrings
     static QString REDIRECTDOCUMENTATIONTODEVNULL;
     static QString QHP;
     static QString QUOTINGINFORMATION;
-    static QString SCRIPTDIRS;
     static QString SCRIPTS;
     static QString SHOWINTERNAL;
     static QString SINGLEEXEC;
@@ -280,25 +297,21 @@ struct ConfigStrings
     static QString SOURCEENCODING;
     static QString SOURCES;
     static QString SPURIOUS;
-    static QString STYLEDIRS;
-    static QString STYLE;
-    static QString STYLES;
     static QString STYLESHEETS;
     static QString SYNTAXHIGHLIGHTING;
     static QString TABSIZE;
     static QString TAGFILE;
     static QString TIMESTAMPS;
+    static QString TOCTITLES;
     static QString TRANSLATORS;
     static QString URL;
     static QString VERSION;
     static QString VERSIONSYM;
     static QString FILEEXTENSIONS;
     static QString IMAGEEXTENSIONS;
-    static QString QMLONLY;
     static QString QMLTYPESPAGE;
     static QString QMLTYPESTITLE;
     static QString WARNINGLIMIT;
-    static QString WRITEQAPAGES;
 };
 
 #define CONFIG_ALIAS ConfigStrings::ALIAS
@@ -336,6 +349,7 @@ struct ConfigStrings
 #define CONFIG_IMAGEDIRS ConfigStrings::IMAGEDIRS
 #define CONFIG_IMAGES ConfigStrings::IMAGES
 #define CONFIG_INCLUDEPATHS ConfigStrings::INCLUDEPATHS
+#define CONFIG_INCLUSIVE ConfigStrings::INCLUSIVE
 #define CONFIG_INDEXES ConfigStrings::INDEXES
 #define CONFIG_LANDINGPAGE ConfigStrings::LANDINGPAGE
 #define CONFIG_LANDINGTITLE ConfigStrings::LANDINGTITLE
@@ -348,9 +362,7 @@ struct ConfigStrings
 #define CONFIG_NATURALLANGUAGE ConfigStrings::NATURALLANGUAGE
 #define CONFIG_NAVIGATION ConfigStrings::NAVIGATION
 #define CONFIG_NOLINKERRORS ConfigStrings::NOLINKERRORS
-#define CONFIG_OBSOLETELINKS ConfigStrings::OBSOLETELINKS
 #define CONFIG_OUTPUTDIR ConfigStrings::OUTPUTDIR
-#define CONFIG_OUTPUTENCODING ConfigStrings::OUTPUTENCODING
 #define CONFIG_OUTPUTFORMATS ConfigStrings::OUTPUTFORMATS
 #define CONFIG_OUTPUTPREFIXES ConfigStrings::OUTPUTPREFIXES
 #define CONFIG_OUTPUTSUFFIXES ConfigStrings::OUTPUTSUFFIXES
@@ -358,7 +370,6 @@ struct ConfigStrings
 #define CONFIG_REDIRECTDOCUMENTATIONTODEVNULL ConfigStrings::REDIRECTDOCUMENTATIONTODEVNULL
 #define CONFIG_QHP ConfigStrings::QHP
 #define CONFIG_QUOTINGINFORMATION ConfigStrings::QUOTINGINFORMATION
-#define CONFIG_SCRIPTDIRS ConfigStrings::SCRIPTDIRS
 #define CONFIG_SCRIPTS ConfigStrings::SCRIPTS
 #define CONFIG_SHOWINTERNAL ConfigStrings::SHOWINTERNAL
 #define CONFIG_SINGLEEXEC ConfigStrings::SINGLEEXEC
@@ -366,25 +377,21 @@ struct ConfigStrings
 #define CONFIG_SOURCEENCODING ConfigStrings::SOURCEENCODING
 #define CONFIG_SOURCES ConfigStrings::SOURCES
 #define CONFIG_SPURIOUS ConfigStrings::SPURIOUS
-#define CONFIG_STYLEDIRS ConfigStrings::STYLEDIRS
-#define CONFIG_STYLE ConfigStrings::STYLE
-#define CONFIG_STYLES ConfigStrings::STYLES
 #define CONFIG_STYLESHEETS ConfigStrings::STYLESHEETS
 #define CONFIG_SYNTAXHIGHLIGHTING ConfigStrings::SYNTAXHIGHLIGHTING
 #define CONFIG_TABSIZE ConfigStrings::TABSIZE
 #define CONFIG_TAGFILE ConfigStrings::TAGFILE
 #define CONFIG_TIMESTAMPS ConfigStrings::TIMESTAMPS
+#define CONFIG_TOCTITLES ConfigStrings::TOCTITLES
 #define CONFIG_TRANSLATORS ConfigStrings::TRANSLATORS
 #define CONFIG_URL ConfigStrings::URL
 #define CONFIG_VERSION ConfigStrings::VERSION
 #define CONFIG_VERSIONSYM ConfigStrings::VERSIONSYM
 #define CONFIG_FILEEXTENSIONS ConfigStrings::FILEEXTENSIONS
 #define CONFIG_IMAGEEXTENSIONS ConfigStrings::IMAGEEXTENSIONS
-#define CONFIG_QMLONLY ConfigStrings::QMLONLY
 #define CONFIG_QMLTYPESPAGE ConfigStrings::QMLTYPESPAGE
 #define CONFIG_QMLTYPESTITLE ConfigStrings::QMLTYPESTITLE
 #define CONFIG_WARNINGLIMIT ConfigStrings::WARNINGLIMIT
-#define CONFIG_WRITEQAPAGES ConfigStrings::WRITEQAPAGES
 
 inline bool Config::singleExec() const
 {

@@ -20,7 +20,7 @@
 
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "content/common/buildflags.h"
@@ -28,14 +28,13 @@
 #include "content/public/browser/guest_host.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
-#include "third_party/blink/public/common/page/drag_operation.h"
 #include "third_party/blink/public/mojom/choosers/popup_menu.mojom.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-forward.h"
-#include "third_party/blink/public/web/web_drag_status.h"
 #include "ui/base/ime/mojom/text_input_state.mojom.h"
 
 namespace content {
 class RenderWidgetHostViewBase;
+class WebContentsImpl;
 
 // A browser plugin guest provides functionality for WebContents to operate in
 // the guest role and implements guest-specific overrides for ViewHostMsg_*
@@ -52,9 +51,11 @@ class RenderWidgetHostViewBase;
 // dropped on the floor since we don't have a BrowserPlugin.
 // TODO(wjmaclean): Get rid of "BrowserPlugin" in the name of this class.
 // Perhaps "InnerWebContentsGuestConnector"?
-class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
-                                          public WebContentsObserver {
+class BrowserPluginGuest : public GuestHost, public WebContentsObserver {
  public:
+  BrowserPluginGuest(const BrowserPluginGuest&) = delete;
+  BrowserPluginGuest& operator=(const BrowserPluginGuest&) = delete;
+
   ~BrowserPluginGuest() override;
 
   // The WebContents passed into the factory method here has not been
@@ -70,16 +71,13 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   static void CreateInWebContents(WebContentsImpl* web_contents,
                                   BrowserPluginGuestDelegate* delegate);
 
-  // Returns whether the given WebContents is a BrowserPlugin guest.
-  static bool IsGuest(WebContentsImpl* web_contents);
-
   // BrowserPluginGuest::Init is called after the associated guest WebContents
   // initializes. If this guest cannot navigate without being attached to a
   // container, then this call is a no-op. For guest types that can be
   // navigated, this call adds the associated RenderWdigetHostViewGuest to the
   // view hierarchy and sets up the appropriate
-  // blink::mojom::RendererPreferences so that this guest can navigate and
-  // resize offscreen.
+  // blink::RendererPreferences so that this guest can navigate and resize
+  // offscreen.
   void Init();
 
   // Returns a WeakPtr to this BrowserPluginGuest.
@@ -94,11 +92,12 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   void DidStartNavigation(NavigationHandle* navigation_handle) override;
   void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 
-  void RenderProcessGone(base::TerminationStatus status) override;
-#if defined(OS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
+  void PrimaryMainFrameRenderProcessGone(
+      base::TerminationStatus status) override;
+#if BUILDFLAG(IS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
   // On MacOS X popups are painted by the browser process. We handle them here
   // so that they are positioned correctly.
-  bool ShowPopupMenu(
+  void ShowPopupMenu(
       RenderFrameHost* render_frame_host,
       mojo::PendingRemote<blink::mojom::PopupMenuClient>* popup_client,
       const gfx::Rect& bounds,
@@ -107,7 +106,7 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
       int32_t selected_item,
       std::vector<blink::mojom::MenuItemPtr>* menu_items,
       bool right_aligned,
-      bool allow_multiple_selection) override;
+      bool allow_multiple_selection);
 #endif
 
   // GuestHost implementation.
@@ -117,16 +116,6 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   WebContentsImpl* GetWebContents() const;
 
   gfx::Point GetScreenCoordinates(const gfx::Point& relative_position) const;
-
-  void DragSourceEndedAt(float client_x,
-                         float client_y,
-                         float screen_x,
-                         float screen_y,
-                         blink::DragOperation operation);
-
-  // Called when the drag started by this guest ends at an OS-level.
-  void EmbedderSystemDragEnded();
-  void EndSystemDragIfApplicable();
 
  protected:
   // BrowserPluginGuest is a WebContentsObserver of |web_contents| and
@@ -138,12 +127,9 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
  private:
   void InitInternal(WebContentsImpl* owner_web_contents);
 
-  // Sets the focus state of the current RenderWidgetHostView.
-  void SetFocus(bool focused, blink::mojom::FocusType focus_type);
-
   void SendTextInputTypeChangedToView(RenderWidgetHostViewBase* guest_rwhv);
 
-  WebContentsImpl* owner_web_contents_;
+  raw_ptr<WebContentsImpl> owner_web_contents_;
 
   // BrowserPluginGuest::Init can only be called once. This flag allows it to
   // exit early if it's already been called.
@@ -153,20 +139,7 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   // Using scoped_ptr to avoid including the header file: view_messages.h.
   ui::mojom::TextInputStatePtr last_text_input_state_;
 
-  // Last seen state of drag status update.
-  blink::WebDragStatus last_drag_status_;
-  // Whether or not our embedder has seen a SystemDragEnded() call.
-  bool seen_embedder_system_drag_ended_;
-  // Whether or not our embedder has seen a DragSourceEndedAt() call.
-  bool seen_embedder_drag_source_ended_at_;
-
-  BrowserPluginGuestDelegate* const delegate_;
-
-  // Weak pointer used to ask GeolocationPermissionContext about geolocation
-  // permission.
-  base::WeakPtrFactory<BrowserPluginGuest> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserPluginGuest);
+  const raw_ptr<BrowserPluginGuestDelegate> delegate_;
 };
 
 }  // namespace content

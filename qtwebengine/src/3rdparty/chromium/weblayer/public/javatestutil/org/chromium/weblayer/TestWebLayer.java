@@ -10,12 +10,17 @@ import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.AndroidRuntimeException;
 import android.view.View;
+import android.webkit.ValueCallback;
+import android.widget.ImageView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import org.chromium.weblayer_private.interfaces.ObjectWrapper;
 import org.chromium.weblayer_private.test_interfaces.ITestWebLayer;
+
+import java.util.ArrayList;
+import java.util.Set;
 
 /**
  * TestWebLayer is responsible for passing messages over a test only AIDL to the
@@ -35,9 +40,8 @@ public final class TestWebLayer {
 
     private TestWebLayer(@NonNull Context appContext) {
         try {
-            ClassLoader remoteClassLoader = WebLayer.getOrCreateRemoteClassLoader(appContext);
-            Class TestWebLayerClass = remoteClassLoader.loadClass(
-                    "org.chromium.weblayer_private.test.TestWebLayerImpl");
+            Class TestWebLayerClass = WebLayer.loadRemoteClass(
+                    appContext, "org.chromium.weblayer_private.test.TestWebLayerImpl");
             mITestWebLayer = ITestWebLayer.Stub.asInterface(
                     (IBinder) TestWebLayerClass.getMethod("create").invoke(null));
         } catch (PackageManager.NameNotFoundException | ReflectiveOperationException e) {
@@ -137,5 +141,80 @@ public final class TestWebLayer {
 
     public boolean didShowFullscreenToast(Tab tab) throws RemoteException {
         return mITestWebLayer.didShowFullscreenToast(tab.getITab());
+    }
+
+    public void initializeMockMediaRouteProvider(boolean closeRouteWithErrorOnSend,
+            boolean disableIsSupportsSource, @Nullable String createRouteErrorMessage,
+            @Nullable String joinRouteErrorMessage) throws RemoteException {
+        mITestWebLayer.initializeMockMediaRouteProvider(closeRouteWithErrorOnSend,
+                disableIsSupportsSource, createRouteErrorMessage, joinRouteErrorMessage);
+    }
+
+    public View getMediaRouteButton(String name) throws RemoteException {
+        return (View) ObjectWrapper.unwrap(mITestWebLayer.getMediaRouteButton(name), View.class);
+    }
+
+    public void crashTab(Tab tab) throws RemoteException {
+        mITestWebLayer.crashTab(tab.getITab());
+    }
+
+    public boolean isWindowOnSmallDevice(Browser browser) throws RemoteException {
+        return mITestWebLayer.isWindowOnSmallDevice(browser.getIBrowser());
+    }
+
+    public ImageView getSecurityButton(View urlBarView) throws RemoteException {
+        return (ImageView) ObjectWrapper.unwrap(
+                mITestWebLayer.getSecurityButton(ObjectWrapper.wrap(urlBarView)), ImageView.class);
+    }
+
+    public void fetchAccessToken(Profile profile, Set<String> scopes,
+            Callback<String> onTokenFetched) throws RemoteException {
+        ValueCallback<String> valueCallback = (String token) -> {
+            onTokenFetched.onResult(token);
+        };
+        mITestWebLayer.fetchAccessToken(profile.getIProfile(), ObjectWrapper.wrap(scopes),
+                ObjectWrapper.wrap(valueCallback));
+    }
+
+    public void addContentCaptureConsumer(Browser browser, Runnable runnable,
+            ArrayList<Integer> callbacks) throws RemoteException {
+        mITestWebLayer.addContentCaptureConsumer(
+                browser.getIBrowser(), ObjectWrapper.wrap(runnable), ObjectWrapper.wrap(callbacks));
+    }
+
+    public void notifyOfAutofillEvents(Browser browser, Runnable onNewEvent,
+            ArrayList<Integer> eventsObserved) throws RemoteException {
+        mITestWebLayer.notifyOfAutofillEvents(browser.getIBrowser(), ObjectWrapper.wrap(onNewEvent),
+                ObjectWrapper.wrap(eventsObserved));
+    }
+
+    public void activateBackgroundFetchNotification(int id) throws RemoteException {
+        mITestWebLayer.activateBackgroundFetchNotification(id);
+    }
+
+    public void expediteDownloadService() throws RemoteException {
+        mITestWebLayer.expediteDownloadService();
+    }
+
+    public void setMockWebAuthnEnabled(boolean enabled) throws RemoteException {
+        mITestWebLayer.setMockWebAuthnEnabled(enabled);
+    }
+
+    public void fireOnAccessTokenIdentifiedAsInvalid(
+            Profile profile, Set<String> scopes, String token) throws RemoteException {
+        mITestWebLayer.fireOnAccessTokenIdentifiedAsInvalid(
+                profile.getIProfile(), ObjectWrapper.wrap(scopes), ObjectWrapper.wrap(token));
+    }
+
+    public void grantLocationPermission(String url) throws RemoteException {
+        mITestWebLayer.grantLocationPermission(url);
+    }
+
+    public void setTextScaling(Profile profile, float value) throws RemoteException {
+        mITestWebLayer.setTextScaling(profile.getIProfile(), value);
+    }
+
+    public boolean getForceEnableZoom(Profile profile) throws RemoteException {
+        return mITestWebLayer.getForceEnableZoom(profile.getIProfile());
     }
 }

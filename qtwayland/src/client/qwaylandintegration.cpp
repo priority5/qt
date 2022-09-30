@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the config.tests of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qwaylandintegration_p.h"
 
@@ -43,6 +7,7 @@
 #include "qwaylandshmwindow_p.h"
 #include "qwaylandinputdevice_p.h"
 #include "qwaylandinputcontext_p.h"
+#include "qwaylandinputmethodcontext_p.h"
 #include "qwaylandshmbackingstore_p.h"
 #include "qwaylandnativeinterface_p.h"
 #if QT_CONFIG(clipboard)
@@ -51,22 +16,25 @@
 #include "qwaylanddnd_p.h"
 #include "qwaylandwindowmanagerintegration_p.h"
 #include "qwaylandscreen_p.h"
+#include "qwaylandcursor_p.h"
 
 #if defined(Q_OS_MACOS)
-#  include <QtFontDatabaseSupport/private/qcoretextfontdatabase_p.h>
-#  include <QtFontDatabaseSupport/private/qfontengine_coretext_p.h>
+#  include <QtGui/private/qcoretextfontdatabase_p.h>
+#  include <QtGui/private/qfontengine_coretext_p.h>
 #else
-#  include <QtFontDatabaseSupport/private/qgenericunixfontdatabase_p.h>
+#  include <QtGui/private/qgenericunixfontdatabase_p.h>
 #endif
-#include <QtEventDispatcherSupport/private/qgenericunixeventdispatcher_p.h>
-#include <QtThemeSupport/private/qgenericunixthemes_p.h>
+#include <QtGui/private/qgenericunixeventdispatcher_p.h>
+#include <QtGui/private/qgenericunixthemes_p.h>
 
 #include <QtGui/private/qguiapplication_p.h>
 
 #include <qpa/qwindowsysteminterface.h>
 #include <qpa/qplatformcursor.h>
 #include <QtGui/QSurfaceFormat>
+#if QT_CONFIG(opengl)
 #include <QtGui/QOpenGLContext>
+#endif // QT_CONFIG(opengl)
 #include <QSocketNotifier>
 
 #include <qpa/qplatforminputcontextfactory_p.h>
@@ -79,19 +47,21 @@
 
 #include "qwaylandserverbufferintegration_p.h"
 #include "qwaylandserverbufferintegrationfactory_p.h"
+#include "qwaylandshellsurface_p.h"
 
 #include "qwaylandshellintegration_p.h"
 #include "qwaylandshellintegrationfactory_p.h"
 
 #include "qwaylandinputdeviceintegration_p.h"
 #include "qwaylandinputdeviceintegrationfactory_p.h"
+#include "qwaylandwindow_p.h"
 
 #if QT_CONFIG(accessibility_atspi_bridge)
-#include <QtLinuxAccessibilitySupport/private/bridge_p.h>
+#include <QtGui/private/qspiaccessiblebridge_p.h>
 #endif
 
 #if QT_CONFIG(xkbcommon)
-#include <QtXkbCommonSupport/private/qxkbcommon_p.h>
+#include <QtGui/private/qxkbcommon_p.h>
 #endif
 
 #if QT_CONFIG(vulkan)
@@ -109,22 +79,28 @@ QWaylandIntegration::QWaylandIntegration()
 #else
     : mFontDb(new QGenericUnixFontDatabase())
 #endif
-    , mNativeInterface(new QWaylandNativeInterface(this))
 {
-    initializeInputDeviceIntegration();
     mDisplay.reset(new QWaylandDisplay(this));
     if (!mDisplay->isInitialized()) {
         mFailed = true;
         return;
     }
-#if QT_CONFIG(clipboard)
-    mClipboard.reset(new QWaylandClipboard(mDisplay.data()));
-#endif
-#if QT_CONFIG(draganddrop)
-    mDrag.reset(new QWaylandDrag(mDisplay.data()));
-#endif
 
-    reconfigureInputContext();
+    QWaylandWindow::fixedToplevelPositions =
+            !qEnvironmentVariableIsSet("QT_WAYLAND_DISABLE_FIXED_POSITIONS");
+
+    // ### Not ideal...
+    // We don't want to use QPlatformWindow::requestActivate here, since that gives a warning
+    // for most shells. Also, we don't want to put this into the specific shells that can use
+    // it, since we want to support more than one shell in one client.
+    // In addition, this will send a new requestActivate when the focus object changes, even if
+    // the focus window stays the same.
+    QObject::connect(qApp, &QGuiApplication::focusObjectChanged, qApp, [](){
+        QWindow *fw = QGuiApplication::focusWindow();
+        auto *w = fw ? static_cast<QWaylandWindow*>(fw->handle()) : nullptr;
+        if (w && w->shellSurface())
+            w->shellSurface()->requestActivate();
+    });
 }
 
 QWaylandIntegration::~QWaylandIntegration()
@@ -152,6 +128,8 @@ bool QWaylandIntegration::hasCapability(QPlatformIntegration::Capability cap) co
     case RasterGLSurface:
         return true;
     case WindowActivation:
+        return false;
+    case ScreenWindowGrabbing: // whether QScreen::grabWindow() is supported
         return false;
     default: return QPlatformIntegration::hasCapability(cap);
     }
@@ -190,15 +168,41 @@ QAbstractEventDispatcher *QWaylandIntegration::createEventDispatcher() const
     return createUnixEventDispatcher();
 }
 
+QPlatformNativeInterface *QWaylandIntegration::createPlatformNativeInterface()
+{
+    return new QWaylandNativeInterface(this);
+}
+
+// Support platform specific initialization
+void QWaylandIntegration::initializePlatform()
+{
+    mDisplay->initialize();
+
+    mNativeInterface.reset(createPlatformNativeInterface());
+    initializeInputDeviceIntegration();
+#if QT_CONFIG(clipboard)
+    mClipboard.reset(new QWaylandClipboard(mDisplay.data()));
+#endif
+#if QT_CONFIG(draganddrop)
+    mDrag.reset(new QWaylandDrag(mDisplay.data()));
+#endif
+
+    reconfigureInputContext();
+}
+
 void QWaylandIntegration::initialize()
 {
+    mDisplay->initEventThread();
+
+    // Call this after initializing event thread for QWaylandDisplay::forceRoundTrip()
+    initializePlatform();
+
+    // But the aboutToBlock() and awake() should be connected after initializePlatform().
+    // Otherwise the connected flushRequests() may consumes up all events before processEvents starts to wait,
+    // so that processEvents(QEventLoop::WaitForMoreEvents) may be blocked in the forceRoundTrip().
     QAbstractEventDispatcher *dispatcher = QGuiApplicationPrivate::eventDispatcher;
     QObject::connect(dispatcher, SIGNAL(aboutToBlock()), mDisplay.data(), SLOT(flushRequests()));
     QObject::connect(dispatcher, SIGNAL(awake()), mDisplay.data(), SLOT(flushRequests()));
-
-    int fd = wl_display_get_fd(mDisplay->wl_display());
-    QSocketNotifier *sn = new QSocketNotifier(fd, QSocketNotifier::Read, mDisplay.data());
-    QObject::connect(sn, SIGNAL(activated(QSocketDescriptor)), mDisplay.data(), SLOT(flushRequests()));
 
     // Qt does not support running with no screens
     mDisplay->ensureScreen();
@@ -262,6 +266,14 @@ QWaylandDisplay *QWaylandIntegration::display() const
     return mDisplay.data();
 }
 
+Qt::KeyboardModifiers QWaylandIntegration::queryKeyboardModifiers() const
+{
+    if (auto *seat = mDisplay->currentInputDevice(); seat && seat->keyboardFocus()) {
+        return seat->modifiers();
+    }
+    return Qt::NoModifier;
+}
+
 QList<int> QWaylandIntegration::possibleKeys(const QKeyEvent *event) const
 {
     if (auto *seat = mDisplay->currentInputDevice())
@@ -277,6 +289,16 @@ QStringList QWaylandIntegration::themeNames() const
 QPlatformTheme *QWaylandIntegration::createPlatformTheme(const QString &name) const
 {
     return QGenericUnixTheme::createUnixTheme(name);
+}
+
+QWaylandScreen *QWaylandIntegration::createPlatformScreen(QWaylandDisplay *waylandDisplay, int version, uint32_t id) const
+{
+   return new QWaylandScreen(waylandDisplay, version, id);
+}
+
+QWaylandCursor *QWaylandIntegration::createPlatformCursor(QWaylandDisplay *display) const
+{
+   return new QWaylandCursor(display);
 }
 
 #if QT_CONFIG(vulkan)
@@ -396,14 +418,8 @@ void QWaylandIntegration::initializeShellIntegration()
         preferredShells = targetKeys.split(QLatin1Char(';'));
     } else {
         preferredShells << QLatin1String("xdg-shell");
-        preferredShells << QLatin1String("xdg-shell-v6");
-        QString useXdgShell = QString::fromLocal8Bit(qgetenv("QT_WAYLAND_USE_XDG_SHELL"));
-        if (!useXdgShell.isEmpty() && useXdgShell != QLatin1String("0")) {
-            qWarning() << "QT_WAYLAND_USE_XDG_SHELL is deprecated, "
-                          "please specify the shell using QT_WAYLAND_SHELL_INTEGRATION instead";
-            preferredShells << QLatin1String("xdg-shell-v5");
-        }
         preferredShells << QLatin1String("wl-shell") << QLatin1String("ivi-shell");
+        preferredShells << QLatin1String("qt-shell");
     }
 
     for (const QString &preferredShell : qAsConst(preferredShells)) {
@@ -422,7 +438,7 @@ void QWaylandIntegration::initializeShellIntegration()
     QWindowSystemInterfacePrivate::TabletEvent::setPlatformSynthesizesMouse(false);
 }
 
-QWaylandInputDevice *QWaylandIntegration::createInputDevice(QWaylandDisplay *display, int version, uint32_t id)
+QWaylandInputDevice *QWaylandIntegration::createInputDevice(QWaylandDisplay *display, int version, uint32_t id) const
 {
     if (mInputDeviceIntegration) {
         return mInputDeviceIntegration->createInputDevice(display, version, id);
@@ -463,10 +479,18 @@ void QWaylandIntegration::reconfigureInputContext()
         qCWarning(lcQpaWayland) << "qtvirtualkeyboard currently is not supported at client-side,"
                                    " use QT_IM_MODULE=qtvirtualkeyboard at compositor-side.";
 
-    if (requested.isNull())
-        mInputContext.reset(new QWaylandInputContext(mDisplay.data()));
-    else
+    if (!mDisplay->isClientSideInputContextRequested()) {
+        if (mDisplay->textInputMethodManager() != nullptr)
+            mInputContext.reset(new QWaylandInputMethodContext(mDisplay.data()));
+#if QT_WAYLAND_TEXT_INPUT_V4_WIP
+        else if (mDisplay->textInputManagerv1() != nullptr || mDisplay->textInputManagerv2() != nullptr || mDisplay->textInputManagerv4() != nullptr)
+#else //  QT_WAYLAND_TEXT_INPUT_V4_WIP
+        else if (mDisplay->textInputManagerv1() != nullptr || mDisplay->textInputManagerv2() != nullptr)
+#endif // QT_WAYLAND_TEXT_INPUT_V4_WIP
+            mInputContext.reset(new QWaylandInputContext(mDisplay.data()));
+    } else {
         mInputContext.reset(QPlatformInputContextFactory::create(requested));
+    }
 
     const QString defaultInputContext(QStringLiteral("compose"));
     if ((!mInputContext || !mInputContext->isValid()) && requested != defaultInputContext)
@@ -479,7 +503,7 @@ void QWaylandIntegration::reconfigureInputContext()
     }
 #endif
 
-    qCDebug(lcQpaWayland) << "using input method:" << inputContext()->metaObject()->className();
+    qCDebug(lcQpaWayland) << "using input method:" << (inputContext() ? inputContext()->metaObject()->className() : "<none>");
 }
 
 QWaylandShellIntegration *QWaylandIntegration::createShellIntegration(const QString &integrationName)

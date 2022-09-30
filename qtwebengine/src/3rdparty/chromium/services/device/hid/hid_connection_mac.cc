@@ -9,8 +9,8 @@
 #include "base/mac/foundation_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/numerics/safe_math.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/device_event_log/device_event_log.h"
@@ -28,8 +28,10 @@ std::string HexErrorCode(IOReturn error_code) {
 }  // namespace
 
 HidConnectionMac::HidConnectionMac(base::ScopedCFTypeRef<IOHIDDeviceRef> device,
-                                   scoped_refptr<HidDeviceInfo> device_info)
-    : HidConnection(device_info),
+                                   scoped_refptr<HidDeviceInfo> device_info,
+                                   bool allow_protected_reports,
+                                   bool allow_fido_reports)
+    : HidConnection(device_info, allow_protected_reports, allow_fido_reports),
       device_(std::move(device)),
       task_runner_(base::ThreadTaskRunnerHandle::Get()),
       blocking_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(

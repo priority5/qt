@@ -7,9 +7,10 @@
 typedef [StringContext=TrustedHTML] DOMString HTMLString;
 
 [
-    Exposed=Window,
+    Exposed=(Window, Worker),
     RuntimeEnabled=TrustedDOMTypes
 ] interface TrustedHTML {
     stringifier;
+    DOMString toJSON();
 };
 

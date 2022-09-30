@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the qmake application of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qmakeglobals.h"
 
@@ -51,7 +26,7 @@
 #include <unistd.h>
 #include <sys/utsname.h>
 #else
-#include <windows.h>
+#include <qt_windows.h>
 #endif
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,6 +78,13 @@ QString QMakeGlobals::cleanSpec(QMakeCmdLineParserState &state, const QString &s
     return ret;
 }
 
+/*
+ * Return value meanings:
+ * ArgumentUnknown    The argument at *pos was not handled by this function.
+ *                    Leave it to the caller to handle this argument.
+ * ArgumentMalformed  There was an error detected.
+ * ArgumentsOk        All arguments were known. There are no arguments left to handle.
+ */
 QMakeGlobals::ArgumentReturn QMakeGlobals::addCommandLineArguments(
         QMakeCmdLineParserState &state, QStringList &args, int *pos)
 {
@@ -311,7 +293,7 @@ QString QMakeGlobals::expandEnvVars(const QString &str) const
 bool QMakeGlobals::initProperties()
 {
     QByteArray data;
-#ifndef QT_BOOTSTRAPPED
+#if QT_CONFIG(process)
     QProcess proc;
     proc.start(qmake_abslocation, QStringList() << QLatin1String("-query"));
     if (!proc.waitForFinished())

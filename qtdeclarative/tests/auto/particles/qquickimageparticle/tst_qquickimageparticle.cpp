@@ -1,49 +1,22 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QtTest/QtTest>
+#include <QtCore/QtMath>
 #include "../shared/particlestestsshared.h"
 #include <private/qquickparticlesystem_p.h>
 #include <private/qabstractanimation_p.h>
-
-#include "../../shared/util.h"
-
-const double CONV_FACTOR = 0.017453292519943295;//Degrees to radians
+#include <QtQuickTestUtils/private/qmlutils_p.h>
 
 class tst_qquickimageparticle : public QQmlDataTest
 {
     Q_OBJECT
 public:
-    tst_qquickimageparticle() {}
+    tst_qquickimageparticle() : QQmlDataTest(QT_QMLTEST_DATADIR) {}
     ~tst_qquickimageparticle();
 
 private slots:
-    void initTestCase();
+    void initTestCase() override;
     void test_basic();
     void test_colored();
     void test_colorVariance();
@@ -96,7 +69,7 @@ void tst_qquickimageparticle::test_basic()
         QCOMPARE(d->yx, 0.0f);
         QCOMPARE(d->rotation, 0.0f);
         QCOMPARE(d->rotationVelocity, 0.0f);
-        QCOMPARE(d->autoRotate, 0.0f);
+        QCOMPARE(d->autoRotate, (uchar)0);
         QCOMPARE(d->animX, 0.0f);
         QCOMPARE(d->animY, 0.0f);
         QCOMPARE(d->animWidth, 1.0f);
@@ -140,7 +113,7 @@ void tst_qquickimageparticle::test_colored()
         QCOMPARE(d->yx, 0.0f);
         QCOMPARE(d->rotation, 0.0f);
         QCOMPARE(d->rotationVelocity, 0.0f);
-        QCOMPARE(d->autoRotate, 0.0f);
+        QCOMPARE(d->autoRotate, (uchar)0);
         QCOMPARE(d->animX, 0.0f);
         QCOMPARE(d->animY, 0.0f);
         QCOMPARE(d->animWidth, 1.0f);
@@ -185,7 +158,7 @@ void tst_qquickimageparticle::test_colorVariance()
         QCOMPARE(d->yx, 0.0f);
         QCOMPARE(d->rotation, 0.0f);
         QCOMPARE(d->rotationVelocity, 0.0f);
-        QCOMPARE(d->autoRotate, 0.0f);
+        QCOMPARE(d->autoRotate, (uchar)0);
         QCOMPARE(d->animX, 0.0f);
         QCOMPARE(d->animY, 0.0f);
         QCOMPARE(d->animWidth, 1.0f);
@@ -227,9 +200,9 @@ void tst_qquickimageparticle::test_deformed()
         QCOMPARE(d->xy, 0.5f);
         QCOMPARE(d->yy, 0.5f);
         QCOMPARE(d->yx, 0.5f);
-        QCOMPARE(d->rotation, 90.0f * (float)CONV_FACTOR);
-        QCOMPARE(d->rotationVelocity, 90.0f * (float)CONV_FACTOR);
-        QCOMPARE(d->autoRotate, 1.0f);
+        QCOMPARE(d->rotation, qDegreesToRadians(90.0f));
+        QCOMPARE(d->rotationVelocity, qDegreesToRadians(90.0f));
+        QCOMPARE(d->autoRotate, (uchar)1);
         QCOMPARE(d->animX, 0.0f);
         QCOMPARE(d->animY, 0.0f);
         QCOMPARE(d->animWidth, 1.0f);
@@ -273,7 +246,7 @@ void tst_qquickimageparticle::test_tabled()
         QCOMPARE(d->yx, 0.0f);
         QCOMPARE(d->rotation, 0.0f);
         QCOMPARE(d->rotationVelocity, 0.0f);
-        QCOMPARE(d->autoRotate, 0.0f);
+        QCOMPARE(d->autoRotate, (uchar)0);
         QCOMPARE(d->animX, 0.0f);
         QCOMPARE(d->animY, 0.0f);
         QCOMPARE(d->animWidth, 1.0f);
@@ -318,7 +291,7 @@ void tst_qquickimageparticle::test_sprite()
         QCOMPARE(d->yx, 0.0f);
         QCOMPARE(d->rotation, 0.0f);
         QCOMPARE(d->rotationVelocity, 0.0f);
-        QCOMPARE(d->autoRotate, 0.0f);
+        QCOMPARE(d->autoRotate, (uchar)0);
         QVERIFY(myFuzzyCompare(d->frameDuration, 120.f));
         QCOMPARE(d->frameCount, 6.0f);
         QVERIFY(d->animT > 0.0f);

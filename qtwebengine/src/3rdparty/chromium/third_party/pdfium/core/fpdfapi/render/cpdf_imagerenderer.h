@@ -11,17 +11,16 @@
 
 #include "core/fpdfapi/render/cpdf_imageloader.h"
 #include "core/fxcrt/fx_coordinates.h"
+#include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/dib/cfx_imagerenderer.h"
-#include "core/fxge/fx_dib.h"
-#include "third_party/base/optional.h"
+#include "core/fxge/dib/fx_dib.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
-class CFX_DIBitmap;
 class CFX_DIBBase;
 class CFX_DefaultRenderDevice;
 class CFX_ImageTransformer;
 class CPDF_ImageObject;
-class CPDF_PageObject;
 class CPDF_Pattern;
 class CPDF_RenderOptions;
 class CPDF_RenderStatus;
@@ -40,11 +39,9 @@ class CPDF_ImageRenderer {
   bool Start(CPDF_RenderStatus* pStatus,
              const RetainPtr<CFX_DIBBase>& pDIBBase,
              FX_ARGB bitmap_argb,
-             int bitmap_alpha,
              const CFX_Matrix& mtImage2Device,
              const FXDIB_ResampleOptions& options,
-             bool bStdCS,
-             BlendMode blendType);
+             bool bStdCS);
 
   bool Continue(PauseIndicatorIface* pPause);
   bool GetResult() const { return m_Result; }
@@ -76,7 +73,7 @@ class CPDF_ImageRenderer {
                           const FX_RECT& rect) const;
   const CPDF_RenderOptions& GetRenderOptions() const;
   void HandleFilters();
-  Optional<FX_RECT> GetUnitRect() const;
+  absl::optional<FX_RECT> GetUnitRect() const;
   bool GetDimensionsFromUnitRect(const FX_RECT& rect,
                                  int* left,
                                  int* top,

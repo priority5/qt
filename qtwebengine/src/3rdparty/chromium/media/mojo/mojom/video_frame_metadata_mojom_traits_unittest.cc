@@ -4,8 +4,7 @@
 
 #include "media/mojo/mojom/video_frame_metadata_mojom_traits.h"
 
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
@@ -21,9 +20,14 @@ namespace {
 
 class VideoFrameMetadataStructTraitsTest
     : public testing::Test,
-      public media::mojom::VideoFrameMetadataTraitsTestService {
+      public mojom::VideoFrameMetadataTraitsTestService {
  public:
   VideoFrameMetadataStructTraitsTest() = default;
+
+  VideoFrameMetadataStructTraitsTest(
+      const VideoFrameMetadataStructTraitsTest&) = delete;
+  VideoFrameMetadataStructTraitsTest& operator=(
+      const VideoFrameMetadataStructTraitsTest&) = delete;
 
  protected:
   mojo::Remote<mojom::VideoFrameMetadataTraitsTestService>
@@ -48,8 +52,6 @@ class VideoFrameMetadataStructTraitsTest
 
   base::test::TaskEnvironment task_environment_;
   mojo::ReceiverSet<VideoFrameMetadataTraitsTestService> traits_test_receivers_;
-
-  DISALLOW_COPY_AND_ASSIGN(VideoFrameMetadataStructTraitsTest);
 };
 
 }  // namespace
@@ -62,7 +64,7 @@ TEST_F(VideoFrameMetadataStructTraitsTest, EmptyMetadata) {
 
   EXPECT_FALSE(metadata_out.capture_counter.has_value());
   EXPECT_FALSE(metadata_out.capture_update_rect.has_value());
-  EXPECT_FALSE(metadata_out.rotation.has_value());
+  EXPECT_FALSE(metadata_out.transformation.has_value());
   EXPECT_FALSE(metadata_out.allow_overlay);
   EXPECT_FALSE(metadata_out.copy_mode.has_value());
   EXPECT_FALSE(metadata_out.end_of_stream);
@@ -70,6 +72,7 @@ TEST_F(VideoFrameMetadataStructTraitsTest, EmptyMetadata) {
   EXPECT_FALSE(metadata_out.wants_promotion_hint);
   EXPECT_FALSE(metadata_out.protected_video);
   EXPECT_FALSE(metadata_out.hw_protected);
+  EXPECT_FALSE(metadata_out.is_webgpu_compatible);
   EXPECT_FALSE(metadata_out.power_efficient);
   EXPECT_FALSE(metadata_out.read_lock_fences_enabled);
   EXPECT_FALSE(metadata_out.interactive_content);
@@ -103,12 +106,11 @@ TEST_F(VideoFrameMetadataStructTraitsTest, ValidMetadata) {
   // gfx::Rects
   metadata_in.capture_update_rect = gfx::Rect(12, 34, 360, 480);
 
-  // media::VideoRotations
-  metadata_in.rotation = media::VideoRotation::VIDEO_ROTATION_90;
+  // VideoTransformation
+  metadata_in.transformation = VideoTransformation(VIDEO_ROTATION_90, true);
 
-  // media::VideoFrameMetadata::CopyMode
-  metadata_in.copy_mode =
-      media::VideoFrameMetadata::CopyMode::kCopyToNewTexture;
+  // VideoFrameMetadata::CopyMode
+  metadata_in.copy_mode = VideoFrameMetadata::CopyMode::kCopyToNewTexture;
 
   // bools
   metadata_in.allow_overlay = true;
@@ -117,6 +119,7 @@ TEST_F(VideoFrameMetadataStructTraitsTest, ValidMetadata) {
   metadata_in.wants_promotion_hint = true;
   metadata_in.protected_video = true;
   metadata_in.hw_protected = true;
+  metadata_in.is_webgpu_compatible = true;
   metadata_in.power_efficient = true;
   metadata_in.read_lock_fences_enabled = true;
   metadata_in.interactive_content = true;
@@ -135,17 +138,17 @@ TEST_F(VideoFrameMetadataStructTraitsTest, ValidMetadata) {
 
   // base::TimeTicks
   base::TimeTicks now = base::TimeTicks::Now();
-  metadata_in.receive_time = now + base::TimeDelta::FromMilliseconds(10);
-  metadata_in.capture_begin_time = now + base::TimeDelta::FromMilliseconds(20);
-  metadata_in.capture_end_time = now + base::TimeDelta::FromMilliseconds(30);
-  metadata_in.decode_begin_time = now + base::TimeDelta::FromMilliseconds(40);
-  metadata_in.decode_end_time = now + base::TimeDelta::FromMilliseconds(50);
-  metadata_in.reference_time = now + base::TimeDelta::FromMilliseconds(60);
+  metadata_in.receive_time = now + base::Milliseconds(10);
+  metadata_in.capture_begin_time = now + base::Milliseconds(20);
+  metadata_in.capture_end_time = now + base::Milliseconds(30);
+  metadata_in.decode_begin_time = now + base::Milliseconds(40);
+  metadata_in.decode_end_time = now + base::Milliseconds(50);
+  metadata_in.reference_time = now + base::Milliseconds(60);
 
   // base::TimeDeltas
-  metadata_in.processing_time = base::TimeDelta::FromMilliseconds(500);
-  metadata_in.frame_duration = base::TimeDelta::FromMilliseconds(16);
-  metadata_in.wallclock_frame_duration = base::TimeDelta::FromMilliseconds(17);
+  metadata_in.processing_time = base::Milliseconds(500);
+  metadata_in.frame_duration = base::Milliseconds(16);
+  metadata_in.wallclock_frame_duration = base::Milliseconds(17);
 
   VideoFrameMetadata metadata_out;
 
@@ -153,7 +156,7 @@ TEST_F(VideoFrameMetadataStructTraitsTest, ValidMetadata) {
 
   EXPECT_EQ(metadata_in.capture_counter, metadata_out.capture_counter);
   EXPECT_EQ(metadata_in.capture_update_rect, metadata_out.capture_update_rect);
-  EXPECT_EQ(metadata_in.rotation, metadata_out.rotation);
+  EXPECT_EQ(metadata_in.transformation, metadata_out.transformation);
   EXPECT_EQ(metadata_in.allow_overlay, metadata_out.allow_overlay);
   EXPECT_EQ(metadata_in.copy_mode, metadata_out.copy_mode);
   EXPECT_EQ(metadata_in.end_of_stream, metadata_out.end_of_stream);
@@ -162,6 +165,8 @@ TEST_F(VideoFrameMetadataStructTraitsTest, ValidMetadata) {
             metadata_out.wants_promotion_hint);
   EXPECT_EQ(metadata_in.protected_video, metadata_out.protected_video);
   EXPECT_EQ(metadata_in.hw_protected, metadata_out.hw_protected);
+  EXPECT_EQ(metadata_in.is_webgpu_compatible,
+            metadata_out.is_webgpu_compatible);
   EXPECT_EQ(metadata_in.power_efficient, metadata_out.power_efficient);
   EXPECT_EQ(metadata_in.read_lock_fences_enabled,
             metadata_out.read_lock_fences_enabled);

@@ -16,9 +16,10 @@ SocketsManifestHandler::SocketsManifestHandler() {}
 SocketsManifestHandler::~SocketsManifestHandler() {}
 
 bool SocketsManifestHandler::Parse(Extension* extension,
-                                   base::string16* error) {
-  const base::Value* sockets = NULL;
-  CHECK(extension->manifest()->Get(manifest_keys::kSockets, &sockets));
+                                   std::u16string* error) {
+  const base::Value* sockets =
+      extension->manifest()->FindPath(manifest_keys::kSockets);
+  CHECK(sockets != nullptr);
   std::unique_ptr<SocketsManifestData> data =
       SocketsManifestData::FromValue(*sockets, error);
   if (!data)
@@ -42,11 +43,7 @@ ManifestPermission* SocketsManifestHandler::CreateInitialRequiredPermission(
 
 base::span<const char* const> SocketsManifestHandler::Keys() const {
   static constexpr const char* kKeys[] = {manifest_keys::kSockets};
-#if !defined(__GNUC__) || __GNUC__ > 5
   return kKeys;
-#else
-  return base::make_span(kKeys, 1);
-#endif
 }
 
 }  // namespace extensions

@@ -17,6 +17,29 @@ class GURL;
 // This namespace provides various helpers around handling Google-related URLs.
 namespace google_util {
 
+// The Google Search mode of a page. This corresponds to the tab (e.g. web
+// result, image results, video results, etc.) the user is on. Used in UKM
+// logging so don't remove or reorder values. Update |GoogleSearchMode| in
+// //tools/metrics/histograms/enums.xml and |GoogleSearchModeFromUrl| whenever
+// this is changed.
+enum class GoogleSearchMode {
+  // Sentinel for uninitialized values in UKM.
+  kUnspecified = 0,
+  // We do not know the mode used. Either the tbm query parameter did not match
+  // any of the known Search modes or there was more than one tbm query
+  // parameter, which is not expected.
+  kUnknown = 1,
+  kWeb = 2,
+  kImages = 3,
+  kNews = 4,
+  kShopping = 5,
+  kVideos = 6,
+  kBooks = 7,
+  kLocal = 8,
+  kFlights = 9,
+  kMaxValue = kFlights,
+};
+
 extern const char kGoogleHomepageURL[];
 
 // True iff |str| contains a "q=" or "as_q=" query parameter with a non-empty
@@ -114,6 +137,24 @@ bool IsGoogleAssociatedDomainUrl(const GURL& url);
 // such as service workers discovering that signin cookies are missing and
 // unregistering themselves.
 const std::vector<std::string>& GetGoogleRegistrableDomains();
+
+// Appends the provided |key| and |value| pair to the "async" query param list,
+// according to the format used by the Google servers:
+//
+//   "async=<other key>:<other value>,<key>:<value>"
+//
+// If |url| does not have an "async" query param list it will be added.
+// Derived from net::AppendOrReplaceQueryParameter, that can't be used because
+// it escapes ":" to "%3A", but the servers requires the colon not to be
+// escaped. See: http://crbug.com/413845.
+GURL AppendToAsyncQueryParam(const GURL& url,
+                             const std::string& key,
+                             const std::string& value);
+
+// Returns Google Search mode used by the user. This corresponds to the tab
+// (e.g. web result, image results, video results, etc.) the user is on. This
+// information is extracted from the "tbm" query parameter on the Search URL.
+GoogleSearchMode GoogleSearchModeFromUrl(const GURL& url);
 
 }  // namespace google_util
 

@@ -12,22 +12,9 @@
 #ifndef SkTLogic_DEFINED
 #define SkTLogic_DEFINED
 
-#include <cstddef>
+#include <iterator>
 #include <type_traits>
-#include <utility>
-
-namespace skstd {
-
-// C++17, <variant>
-struct monostate {};
-
-// C++17, <type_traits>
-template<typename...> struct conjunction : std::true_type { };
-template<typename T> struct conjunction<T> : T { };
-template<typename T, typename... Ts>
-struct conjunction<T, Ts...> : std::conditional<bool(T::value), conjunction<Ts...>, T>::type { };
-
-}  // namespace skstd
+#include "include/private/SkTo.h"
 
 // The sknonstd namespace contains things we would like to be proposed and feel std-ish.
 namespace sknonstd {
@@ -62,5 +49,8 @@ template <typename D, typename S> using same_cv = copy_cv<std::remove_cv_t<D>, S
 template <typename D, typename S> using same_cv_t = typename same_cv<D, S>::type;
 
 }  // namespace sknonstd
+
+template <typename Container>
+constexpr int SkCount(const Container& c) { return SkTo<int>(std::size(c)); }
 
 #endif

@@ -1,41 +1,7 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+#include <AppKit/AppKit.h>
 
 #include "qcocoascreen.h"
 
@@ -106,6 +72,18 @@ void QCocoaScreen::initializeScreens()
 */
 void QCocoaScreen::updateScreens()
 {
+    // Adding, updating, or removing a screen below might trigger
+    // Qt or the application to move a window to a different screen,
+    // recursing back here via QCocoaWindow::windowDidChangeScreen.
+    // The update code is not re-entrant, so bail out if we end up
+    // in this situation. The screens will stabilize eventually.
+    static bool updatingScreens = false;
+    if (updatingScreens) {
+        qCInfo(lcQpaScreen) << "Skipping screen update, already updating";
+        return;
+    }
+    QBoolBlocker recursionGuard(updatingScreens);
+
     uint32_t displayCount = 0;
     if (CGGetOnlineDisplayList(0, nullptr, &displayCount) != kCGErrorSuccess)
         qFatal("Failed to get number of online displays");
@@ -230,13 +208,13 @@ static QString displayName(CGDirectDisplayID displayID)
         NSDictionary *info = [(__bridge NSDictionary*)IODisplayCreateInfoDictionary(
             display, kIODisplayOnlyPreferredName) autorelease];
 
-        if ([[info objectForKey:@kDisplayVendorID] longValue] != CGDisplayVendorNumber(displayID))
+        if ([[info objectForKey:@kDisplayVendorID] unsignedIntValue] != CGDisplayVendorNumber(displayID))
             continue;
 
-        if ([[info objectForKey:@kDisplayProductID] longValue] != CGDisplayModelNumber(displayID))
+        if ([[info objectForKey:@kDisplayProductID] unsignedIntValue] != CGDisplayModelNumber(displayID))
             continue;
 
-        if ([[info objectForKey:@kDisplaySerialNumber] longValue] != CGDisplaySerialNumber(displayID))
+        if ([[info objectForKey:@kDisplaySerialNumber] unsignedIntValue] != CGDisplaySerialNumber(displayID))
             continue;
 
         NSDictionary *localizedNames = [info objectForKey:@kDisplayProductName];
@@ -267,7 +245,6 @@ void QCocoaScreen::update(CGDirectDisplayID displayId)
 
     const QRect previousGeometry = m_geometry;
     const QRect previousAvailableGeometry = m_availableGeometry;
-    const QDpi previousLogicalDpi = m_logicalDpi;
     const qreal previousRefreshRate = m_refreshRate;
 
     // The reference screen for the geometry is always the primary screen
@@ -279,24 +256,28 @@ void QCocoaScreen::update(CGDirectDisplayID displayId)
 
     m_format = QImage::Format_RGB32;
     m_depth = NSBitsPerPixelFromDepth(nsScreen.depth);
+    m_colorSpace = QColorSpace::fromIccProfile(QByteArray::fromNSData(nsScreen.colorSpace.ICCProfileData));
+    if (!m_colorSpace.isValid()) {
+        qWarning() << "macOS generated a color-profile Qt couldn't parse. This shouldn't happen.";
+        m_colorSpace = QColorSpace::SRgb;
+    }
 
     CGSize size = CGDisplayScreenSize(m_displayId);
     m_physicalSize = QSizeF(size.width, size.height);
-    m_logicalDpi.first = 72;
-    m_logicalDpi.second = 72;
 
     QCFType<CGDisplayModeRef> displayMode = CGDisplayCopyDisplayMode(m_displayId);
     float refresh = CGDisplayModeGetRefreshRate(displayMode);
     m_refreshRate = refresh > 0 ? refresh : 60.0;
 
-    m_name = displayName(m_displayId);
+    if (@available(macOS 10.15, *))
+        m_name = QString::fromNSString(nsScreen.localizedName);
+    else
+        m_name = displayName(m_displayId);
 
     const bool didChangeGeometry = m_geometry != previousGeometry || m_availableGeometry != previousAvailableGeometry;
 
     if (didChangeGeometry)
         QWindowSystemInterface::handleScreenGeometryChange(screen(), geometry(), availableGeometry());
-    if (m_logicalDpi != previousLogicalDpi)
-        QWindowSystemInterface::handleScreenLogicalDotsPerInchChange(screen(), m_logicalDpi.first, m_logicalDpi.second);
     if (m_refreshRate != previousRefreshRate)
         QWindowSystemInterface::handleScreenRefreshRateChange(screen(), m_refreshRate);
 }
@@ -308,6 +289,11 @@ Q_LOGGING_CATEGORY(lcQpaScreenUpdates, "qt.qpa.screen.updates", QtCriticalMsg);
 void QCocoaScreen::requestUpdate()
 {
     Q_ASSERT(m_displayId);
+
+    if (!isOnline()) {
+        qCDebug(lcQpaScreenUpdates) << this << "is not online. Ignoring update request";
+        return;
+    }
 
     if (!m_displayLink) {
         CVDisplayLinkCreateWithCGDisplay(m_displayId, &m_displayLink);
@@ -541,70 +527,99 @@ QWindow *QCocoaScreen::topLevelAt(const QPoint &point) const
     return window;
 }
 
+/*!
+    \internal
+
+    Coordinates are in screen coordinates if \a view is 0, otherwise they are in view
+    coordinates.
+*/
 QPixmap QCocoaScreen::grabWindow(WId view, int x, int y, int width, int height) const
 {
-    // Determine the grab rect. FIXME: The rect should be bounded by the view's
-    // geometry, but note that for the pixeltool use case that window will be the
-    // desktop widget's view, which currently gets resized to fit one screen
-    // only, since its NSWindow has the NSWindowStyleMaskTitled flag set.
-    Q_UNUSED(view);
+    /*
+       Grab the grabRect section of the specified display into a pixmap that has
+       sRGB color spec. Once Qt supports a fully color-managed flow and conversions
+       that don't lose the colorspec information, we would want the image to maintain
+       the color spec of the display from which it was grabbed. Ultimately, rendering
+       the returned pixmap on the same display from which it was grabbed should produce
+       identical visual results.
+    */
+    auto grabFromDisplay = [](CGDirectDisplayID displayId, const QRect &grabRect) -> QPixmap {
+        QCFType<CGImageRef> image = CGDisplayCreateImageForRect(displayId, grabRect.toCGRect());
+        const QCFType<CGColorSpaceRef> sRGBcolorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        if (CGImageGetColorSpace(image) != sRGBcolorSpace) {
+            qCDebug(lcQpaScreen) << "applying color correction for display" << displayId;
+            image = CGImageCreateCopyWithColorSpace(image, sRGBcolorSpace);
+        }
+        QPixmap pixmap = QPixmap::fromImage(qt_mac_toQImage(image));
+        pixmap.setDevicePixelRatio(nativeScreenForDisplayId(displayId).backingScaleFactor);
+        return pixmap;
+    };
+
     QRect grabRect = QRect(x, y, width, height);
     qCDebug(lcQpaScreen) << "input grab rect" << grabRect;
 
-    // Find which displays to grab from, or all of them if the grab size is unspecified
+    if (!view) {
+        // coordinates are relative to the screen
+        if (!grabRect.isValid()) // entire screen
+            grabRect = QRect(QPoint(0, 0), geometry().size());
+        else
+            grabRect.translate(-geometry().topLeft());
+        return grabFromDisplay(displayId(), grabRect);
+    }
+
+    // grab the window; grab rect in window coordinates might span multiple screens
+    NSView *nsView = reinterpret_cast<NSView*>(view);
+    NSPoint windowPoint = [nsView convertPoint:NSMakePoint(0, 0) toView:nil];
+    NSRect screenRect = [nsView.window convertRectToScreen:NSMakeRect(windowPoint.x, windowPoint.y, 1, 1)];
+    QPoint position = mapFromNative(screenRect.origin).toPoint();
+    QSize size = QRectF::fromCGRect(NSRectToCGRect(nsView.bounds)).toRect().size();
+    QRect windowRect = QRect(position, size);
+    if (!grabRect.isValid())
+        grabRect = windowRect;
+    else
+        grabRect.translate(windowRect.topLeft());
+
+    // Find which displays to grab from
     const int maxDisplays = 128;
     CGDirectDisplayID displays[maxDisplays];
     CGDisplayCount displayCount;
-    CGRect cgRect = (width < 0 || height < 0) ? CGRectInfinite : grabRect.toCGRect();
+    CGRect cgRect = grabRect.isValid() ? grabRect.toCGRect() : CGRectInfinite;
     const CGDisplayErr err = CGGetDisplaysWithRect(cgRect, maxDisplays, displays, &displayCount);
     if (err || displayCount == 0)
         return QPixmap();
 
-    // If the grab size is not specified, set it to be the bounding box of all screens,
-    if (width < 0 || height < 0) {
-        QRect windowRect;
-        for (uint i = 0; i < displayCount; ++i) {
-            QRect displayBounds = QRectF::fromCGRect(CGDisplayBounds(displays[i])).toRect();
-            // Only include the screen if it is positioned past the x/y position
-            if ((displayBounds.x() >= x || displayBounds.right() > x) &&
-                (displayBounds.y() >= y || displayBounds.bottom() > y)) {
-                windowRect = windowRect.united(displayBounds);
-            }
-        }
-        if (grabRect.width() < 0)
-            grabRect.setWidth(windowRect.width());
-        if (grabRect.height() < 0)
-            grabRect.setHeight(windowRect.height());
-    }
-
     qCDebug(lcQpaScreen) << "final grab rect" << grabRect << "from" << displayCount << "displays";
 
     // Grab images from each display
-    QVector<QImage> images;
+    QVector<QPixmap> pixmaps;
     QVector<QRect> destinations;
     for (uint i = 0; i < displayCount; ++i) {
         auto display = displays[i];
-        QRect displayBounds = QRectF::fromCGRect(CGDisplayBounds(display)).toRect();
-        QRect grabBounds = displayBounds.intersected(grabRect);
+        const QRect displayBounds = QRectF::fromCGRect(CGDisplayBounds(display)).toRect();
+        const QRect grabBounds = displayBounds.intersected(grabRect);
         if (grabBounds.isNull()) {
             destinations.append(QRect());
-            images.append(QImage());
+            pixmaps.append(QPixmap());
             continue;
         }
-        QRect displayLocalGrabBounds = QRect(QPoint(grabBounds.topLeft() - displayBounds.topLeft()), grabBounds.size());
-        QImage displayImage = qt_mac_toQImage(QCFType<CGImageRef>(CGDisplayCreateImageForRect(display, displayLocalGrabBounds.toCGRect())));
-        displayImage.setDevicePixelRatio(displayImage.size().width() / displayLocalGrabBounds.size().width());
-        images.append(displayImage);
-        QRect destBounds = QRect(QPoint(grabBounds.topLeft() - grabRect.topLeft()), grabBounds.size());
+        const QRect displayLocalGrabBounds = QRect(QPoint(grabBounds.topLeft() - displayBounds.topLeft()), grabBounds.size());
+
+        qCDebug(lcQpaScreen) << "grab display" << i << "global" << grabBounds << "local" << displayLocalGrabBounds;
+        QPixmap displayPixmap = grabFromDisplay(display, displayLocalGrabBounds);
+        // Fast path for when grabbing from a single screen only
+        if (displayCount == 1)
+            return displayPixmap;
+
+        qCDebug(lcQpaScreen) << "grab sub-image size" << displayPixmap.size() << "devicePixelRatio" << displayPixmap.devicePixelRatio();
+        pixmaps.append(displayPixmap);
+        const QRect destBounds = QRect(QPoint(grabBounds.topLeft() - grabRect.topLeft()), grabBounds.size());
         destinations.append(destBounds);
-        qCDebug(lcQpaScreen) << "grab display" << i << "global" << grabBounds << "local" << displayLocalGrabBounds
-                             << "grab image size" << displayImage.size() << "devicePixelRatio" << displayImage.devicePixelRatio();
     }
 
     // Determine the highest dpr, which becomes the dpr for the returned pixmap.
     qreal dpr = 1.0;
     for (uint i = 0; i < displayCount; ++i)
-        dpr = qMax(dpr, images.at(i).devicePixelRatio());
+        dpr = qMax(dpr, pixmaps.at(i).devicePixelRatio());
 
     // Allocate target pixmap and draw each screen's content
     qCDebug(lcQpaScreen) << "Create grap pixmap" << grabRect.size() << "at devicePixelRatio" << dpr;
@@ -613,7 +628,7 @@ QPixmap QCocoaScreen::grabWindow(WId view, int x, int y, int width, int height) 
     windowPixmap.fill(Qt::transparent);
     QPainter painter(&windowPixmap);
     for (uint i = 0; i < displayCount; ++i)
-        painter.drawImage(destinations.at(i), images.at(i));
+        painter.drawPixmap(destinations.at(i), pixmaps.at(i));
 
     return windowPixmap;
 }
@@ -625,8 +640,8 @@ bool QCocoaScreen::isOnline() const
     // returning -1 to signal that the displayId is invalid. Some functions
     // will also assert or even crash in this case, so it's important that
     // we double check if a display is online before calling other functions.
-    auto isOnline = CGDisplayIsOnline(m_displayId);
-    static const uint32_t kCGDisplayIsDisconnected = int32_t(-1);
+    int isOnline = CGDisplayIsOnline(m_displayId);
+    static const int kCGDisplayIsDisconnected = 0xffffffff;
     return isOnline != kCGDisplayIsDisconnected && isOnline;
 }
 
@@ -707,17 +722,21 @@ QCocoaScreen *QCocoaScreen::get(CFUUIDRef uuid)
     return nullptr;
 }
 
+NSScreen *QCocoaScreen::nativeScreenForDisplayId(CGDirectDisplayID displayId)
+{
+    for (NSScreen *screen in NSScreen.screens) {
+        if (screen.qt_displayId == displayId)
+            return screen;
+    }
+    return nil;
+}
+
 NSScreen *QCocoaScreen::nativeScreen() const
 {
     if (!m_displayId)
         return nil; // The display has been disconnected
 
-    for (NSScreen *screen in NSScreen.screens) {
-        if (screen.qt_displayId == m_displayId)
-            return screen;
-    }
-
-    return nil;
+    return nativeScreenForDisplayId(m_displayId);
 }
 
 CGPoint QCocoaScreen::mapToNative(const QPointF &pos, QCocoaScreen *screen)
@@ -772,9 +791,9 @@ QDebug operator<<(QDebug debug, const QCocoaScreen *screen)
 }
 #endif // !QT_NO_DEBUG_STREAM
 
-#include "qcocoascreen.moc"
-
 QT_END_NAMESPACE
+
+#include "qcocoascreen.moc"
 
 @implementation NSScreen (QtExtras)
 

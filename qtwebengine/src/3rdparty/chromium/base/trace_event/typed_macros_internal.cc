@@ -4,7 +4,7 @@
 
 #include "base/trace_event/typed_macros_internal.h"
 
-#include "base/optional.h"
+#include "base/notreached.h"
 #include "base/time/time.h"
 #include "base/trace_event/thread_instruction_count.h"
 #include "base/trace_event/trace_event.h"
@@ -26,21 +26,53 @@ base::trace_event::ThreadInstructionCount ThreadInstructionNow() {
 
 base::trace_event::PrepareTrackEventFunction g_typed_event_callback = nullptr;
 base::trace_event::PrepareTracePacketFunction g_trace_packet_callback = nullptr;
+base::trace_event::EmitEmptyTracePacketFunction g_empty_packet_callback =
+    nullptr;
+
+std::pair<char /*phase*/, unsigned long long /*id*/>
+GetPhaseAndIdForTraceLog(bool explicit_track, uint64_t track_uuid, char phase) {
+  if (!explicit_track)
+    return std::make_pair(phase, trace_event_internal::kNoId);
+
+  switch (phase) {
+    case TRACE_EVENT_PHASE_BEGIN:
+      phase = TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN;
+      break;
+    case TRACE_EVENT_PHASE_END:
+      phase = TRACE_EVENT_PHASE_NESTABLE_ASYNC_END;
+      break;
+    case TRACE_EVENT_PHASE_INSTANT:
+      phase = TRACE_EVENT_PHASE_NESTABLE_ASYNC_INSTANT;
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+  return std::make_pair(phase, static_cast<unsigned long long>(track_uuid));
+}
 
 }  // namespace
+
+namespace trace_event_internal {
+const perfetto::Track kDefaultTrack{};
+}  // namespace trace_event_internal
 
 namespace base {
 namespace trace_event {
 
-void EnableTypedTraceEvents(PrepareTrackEventFunction typed_event_callback,
-                            PrepareTracePacketFunction trace_packet_callback) {
+void EnableTypedTraceEvents(
+    PrepareTrackEventFunction typed_event_callback,
+    PrepareTracePacketFunction trace_packet_callback,
+    EmitEmptyTracePacketFunction empty_packet_callback) {
   g_typed_event_callback = typed_event_callback;
   g_trace_packet_callback = trace_packet_callback;
+  g_empty_packet_callback = empty_packet_callback;
 }
 
 void ResetTypedTraceEventsForTesting() {
   g_typed_event_callback = nullptr;
   g_trace_packet_callback = nullptr;
+  g_empty_packet_callback = nullptr;
 }
 
 TrackEventHandle::TrackEventHandle(TrackEvent* event,
@@ -92,9 +124,9 @@ namespace trace_event_internal {
 base::trace_event::TrackEventHandle CreateTrackEvent(
     char phase,
     const unsigned char* category_group_enabled,
-    const char* name,
-    unsigned int flags,
+    perfetto::StaticString name,
     base::TimeTicks ts,
+    uint64_t track_uuid,
     bool explicit_track) {
   DCHECK(phase == TRACE_EVENT_PHASE_BEGIN || phase == TRACE_EVENT_PHASE_END ||
          phase == TRACE_EVENT_PHASE_INSTANT);
@@ -106,16 +138,28 @@ base::trace_event::TrackEventHandle CreateTrackEvent(
   const int thread_id = static_cast<int>(base::PlatformThread::CurrentId());
   auto* trace_log = base::trace_event::TraceLog::GetInstance();
   DCHECK(trace_log);
-  if (!trace_log->ShouldAddAfterUpdatingState(phase, category_group_enabled,
-                                              name, trace_event_internal::kNoId,
-                                              thread_id, nullptr)) {
+
+  // Provide events emitted onto different tracks as NESTABLE_ASYNC events to
+  // TraceLog, so that e.g. ETW export is aware of them not being a sync event
+  // for the current thread.
+  auto phase_and_id_for_trace_log =
+      GetPhaseAndIdForTraceLog(explicit_track, track_uuid, phase);
+
+  if (!trace_log->ShouldAddAfterUpdatingState(
+          phase_and_id_for_trace_log.first, category_group_enabled, name.value,
+          phase_and_id_for_trace_log.second, thread_id, nullptr)) {
     return base::trace_event::TrackEventHandle();
   }
 
+  unsigned int flags = TRACE_EVENT_FLAG_NONE;
   if (ts.is_null()) {
     ts = TRACE_TIME_TICKS_NOW();
   } else {
     flags |= TRACE_EVENT_FLAG_EXPLICIT_TIMESTAMP;
+  }
+
+  if (phase == TRACE_EVENT_PHASE_INSTANT && !explicit_track) {
+    flags |= TRACE_EVENT_SCOPE_THREAD;
   }
 
   // Only emit thread time / instruction count for events on the default track
@@ -129,7 +173,7 @@ base::trace_event::TrackEventHandle CreateTrackEvent(
 
   base::trace_event::TraceEvent event(
       thread_id, ts, thread_now, thread_instruction_now, phase,
-      category_group_enabled, name, trace_event_internal::kGlobalScope,
+      category_group_enabled, name.value, trace_event_internal::kGlobalScope,
       trace_event_internal::kNoId, trace_event_internal::kNoId, nullptr, flags);
 
   return g_typed_event_callback(&event);
@@ -141,6 +185,11 @@ base::trace_event::TracePacketHandle CreateTracePacket() {
   // g_trace_packet_callback.
   DCHECK(g_trace_packet_callback);
   return g_trace_packet_callback();
+}
+
+void AddEmptyPacket() {
+  if (g_empty_packet_callback)
+    g_empty_packet_callback();
 }
 
 bool ShouldEmitTrackDescriptor(

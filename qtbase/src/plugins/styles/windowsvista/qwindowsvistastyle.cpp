@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWidgets module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qwindowsvistastyle_p.h"
 #include "qwindowsvistastyle_p_p.h"
@@ -84,6 +48,22 @@ static const int windowsRightBorder      = 15; // right border on windows
 bool QWindowsVistaStylePrivate::useVista()
 {
     return QWindowsVistaStylePrivate::useXP();
+}
+
+/*!
+    \internal
+
+    Animations are started at a frame that is based on the current time,
+    which makes it impossible to run baseline tests with this style. Allow
+    overriding through a dynamic property.
+*/
+QTime QWindowsVistaStylePrivate::animationTime() const
+{
+    Q_Q(const QWindowsVistaStyle);
+    static bool animationTimeOverride = q->dynamicPropertyNames().contains("_qt_animation_time");
+    if (animationTimeOverride)
+        return q->property("_qt_animation_time").toTime();
+    return QTime::currentTime();
 }
 
 /* \internal
@@ -391,7 +371,7 @@ void QWindowsVistaStyle::drawPrimitive(PrimitiveElement element, const QStyleOpt
                                                                 TMT_TRANSITIONDURATIONS, &duration))) {
                         t->setDuration(int(duration));
                     }
-                    t->setStartTime(QTime::currentTime());
+                    t->setStartTime(d->animationTime());
 
                     deleteClonedAnimationStyleOption(styleOption);
                     d->startAnimation(t);
@@ -486,7 +466,7 @@ void QWindowsVistaStyle::drawPrimitive(PrimitiveElement element, const QStyleOpt
         }
         break;
     case PE_Frame: {
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
         if (QStyleHelper::isInstanceOf(option->styleObject, QAccessible::EditableText)
                 || QStyleHelper::isInstanceOf(option->styleObject, QAccessible::StaticText) ||
 #else
@@ -542,7 +522,7 @@ void QWindowsVistaStyle::drawPrimitive(PrimitiveElement element, const QStyleOpt
                 }
                 int bgType;
                 GetThemeEnumValue(theme.handle(), partId, stateId, TMT_BGTYPE, &bgType);
-                if( bgType == BT_IMAGEFILE ) {
+                if ( bgType == BT_IMAGEFILE ) {
                     d->drawBackground(theme);
                 } else {
                     QBrush fillColor = option->palette.brush(QPalette::Base);
@@ -659,7 +639,7 @@ void QWindowsVistaStyle::drawPrimitive(PrimitiveElement element, const QStyleOpt
                 newStyle = !qobject_cast<const QTableView*>(view);
                 selectionBehavior = view->selectionBehavior();
                 selectionMode = view->selectionMode();
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
             } else if (!widget) {
                 newStyle = !QStyleHelper::hasAncestor(option->styleObject, QAccessible::MenuItem) ;
 #endif
@@ -899,7 +879,7 @@ void QWindowsVistaStyle::drawControl(ControlElement element, const QStyleOption 
                     t->setDuration(int(duration));
                 else
                     t->setDuration(0);
-                t->setStartTime(QTime::currentTime());
+                t->setStartTime(d->animationTime());
                 styleObject->setProperty("_q_no_animation", false);
 
                 deleteClonedAnimationStyleOption(styleOption);
@@ -961,7 +941,7 @@ void QWindowsVistaStyle::drawControl(ControlElement element, const QStyleOption 
                         d->drawBackground(theme);
                         pulse->setStartImage(startImage);
                         pulse->setEndImage(alternateImage);
-                        pulse->setStartTime(QTime::currentTime());
+                        pulse->setStartTime(d->animationTime());
                         pulse->setDuration(2000);
                         d->startAnimation(pulse);
                         anim = pulse;
@@ -1007,7 +987,7 @@ void QWindowsVistaStyle::drawControl(ControlElement element, const QStyleOption 
         if (const QStyleOptionProgressBar *bar
                 = qstyleoption_cast<const QStyleOptionProgressBar *>(option)) {
             bool isIndeterminate = (bar->minimum == 0 && bar->maximum == 0);
-            const bool vertical = bar->orientation == Qt::Vertical;
+            const bool vertical = !(bar->state & QStyle::State_Horizontal);
             const bool inverted = bar->invertedAppearance;
 
             if (isIndeterminate || (bar->progress > 0 && (bar->progress < bar->maximum) && d->transitionsEnabled())) {
@@ -1022,7 +1002,7 @@ void QWindowsVistaStyle::drawControl(ControlElement element, const QStyleOption 
                               vertical ? PP_FILLVERT : PP_FILL);
             theme.rect = option->rect;
             bool reverse = (bar->direction == Qt::LeftToRight && inverted) || (bar->direction == Qt::RightToLeft && !inverted);
-            QTime current = QTime::currentTime();
+            QTime current = d->animationTime();
 
             if (isIndeterminate) {
                 if (QProgressStyleAnimation *a = qobject_cast<QProgressStyleAnimation *>(d->animation(styleObject(option)))) {
@@ -1030,7 +1010,7 @@ void QWindowsVistaStyle::drawControl(ControlElement element, const QStyleOption 
                     int animationWidth = glowSize * 2 + (vertical ? theme.rect.height() : theme.rect.width());
                     int animOffset = a->startTime().msecsTo(current) / 4;
                     if (animOffset > animationWidth)
-                        a->setStartTime(QTime::currentTime());
+                        a->setStartTime(d->animationTime());
                     painter->save();
                     painter->setClipRect(theme.rect);
                     QRect animRect;
@@ -1102,7 +1082,7 @@ void QWindowsVistaStyle::drawControl(ControlElement element, const QStyleOption 
                     theme.partId = vertical ? PP_MOVEOVERLAYVERT : PP_MOVEOVERLAY;
                     if (animOffset > animationWidth) {
                         if (bar->progress < bar->maximum)
-                            a->setStartTime(QTime::currentTime());
+                            a->setStartTime(d->animationTime());
                         else
                             d->stopAnimation(styleObject(option)); //we stop the glow motion only after it has
                                                                    //moved out of view
@@ -1199,7 +1179,7 @@ void QWindowsVistaStyle::drawControl(ControlElement element, const QStyleOption 
 
             int x, y, w, h;
             menuitem->rect.getRect(&x, &y, &w, &h);
-            int tab = menuitem->tabWidth;
+            int tab = menuitem->reservedShortcutWidth;
             bool dis = !(menuitem->state & State_Enabled);
             bool checked = menuitem->checkType != QStyleOptionMenuItem::NotCheckable
                             ? menuitem->checked : false;
@@ -1273,9 +1253,7 @@ void QWindowsVistaStyle::drawControl(ControlElement element, const QStyleOption 
                     pixmap = menuitem->icon.pixmap(proxy()->pixelMetric(PM_SmallIconSize, option, widget), mode, QIcon::On);
                 else
                     pixmap = menuitem->icon.pixmap(proxy()->pixelMetric(PM_SmallIconSize, option, widget), mode);
-                const int pixw = pixmap.width() / pixmap.devicePixelRatio();
-                const int pixh = pixmap.height() / pixmap.devicePixelRatio();
-                QRect pmr(0, 0, pixw, pixh);
+                QRect pmr(QPoint(0, 0), pixmap.deviceIndependentSize().toSize());
                 pmr.moveCenter(vCheckRect.center());
                 painter->setPen(menuitem->palette.text().color());
                 painter->drawPixmap(pmr.topLeft(), pixmap);
@@ -1579,7 +1557,7 @@ void QWindowsVistaStyle::drawComplexControl(ComplexControl control, const QStyle
                 styleObject->setProperty("_q_no_animation", false);
 
                 t->setEndImage(endImage);
-                t->setStartTime(QTime::currentTime());
+                t->setStartTime(d->animationTime());
 
                 if (option->state & State_MouseOver || option->state & State_Sunken)
                     t->setDuration(150);
@@ -1773,21 +1751,6 @@ void QWindowsVistaStyle::drawComplexControl(ComplexControl control, const QStyle
                     theme.partId = flags & State_Horizontal ? SBP_THUMBBTNHORZ : SBP_THUMBBTNVERT;
                     theme.stateId = stateId;
                     d->drawBackground(theme);
-
-                    if (QOperatingSystemVersion::current() < QOperatingSystemVersion::Windows8) {
-                        const QRect gripperBounds = QWindowsXPStylePrivate::scrollBarGripperBounds(flags, widget, &theme);
-                        // Draw gripper if there is enough space
-                        if (!gripperBounds.isEmpty() && flags & State_Enabled) {
-                            painter->save();
-                            XPThemeData grippBackground = theme;
-                            grippBackground.partId = flags & State_Horizontal ? SBP_LOWERTRACKHORZ : SBP_LOWERTRACKVERT;
-                            theme.rect = gripperBounds;
-                            painter->setClipRegion(d->region(theme));// Only change inside the region of the gripper
-                            d->drawBackground(grippBackground);// The gutter is the grippers background
-                            d->drawBackground(theme);          // Transparent gripper ontop of background
-                            painter->restore();
-                        }
-                    }
                 }
             }
         }
@@ -2288,22 +2251,6 @@ int QWindowsVistaStyle::pixelMetric(PixelMetric metric, const QStyleOption *opti
 /*!
  \internal
  */
-QPalette QWindowsVistaStyle::standardPalette() const
-{
-    return QWindowsXPStyle::standardPalette();
-}
-
-/*!
- \internal
- */
-void QWindowsVistaStyle::polish(QApplication *app)
-{
-    QWindowsXPStyle::polish(app);
-}
-
-/*!
- \internal
- */
 void QWindowsVistaStyle::polish(QWidget *widget)
 {
     QWindowsXPStyle::polish(widget);
@@ -2316,9 +2263,14 @@ void QWindowsVistaStyle::polish(QWidget *widget)
         widget->setAttribute(Qt::WA_Hover);
 #if QT_CONFIG(commandlinkbutton)
     else if (qobject_cast<QCommandLinkButton*>(widget)) {
+        widget->setProperty("_qt_usingVistaStyle", true);
         QFont buttonFont = widget->font();
-        buttonFont.setFamily(QLatin1String("Segoe UI"));
+        buttonFont.setFamilies(QStringList{QLatin1String("Segoe UI")});
         widget->setFont(buttonFont);
+        QPalette pal = widget->palette();
+        pal.setColor(QPalette::ButtonText, QColor(21, 28, 85));
+        pal.setColor(QPalette::BrightText, QColor(7, 64, 229));
+        widget->setPalette(pal);
     }
 #endif // QT_CONFIG(commandlinkbutton)
     else if (widget->inherits("QTipLabel")){
@@ -2402,19 +2354,10 @@ void QWindowsVistaStyle::unpolish(QWidget *widget)
     else if (qobject_cast<QCommandLinkButton*>(widget)) {
         QFont font = QApplication::font("QCommandLinkButton");
         QFont widgetFont = widget->font();
-        widgetFont.setFamily(font.family()); //Only family set by polish
+        widgetFont.setFamilies(font.families()); //Only family set by polish
         widget->setFont(widgetFont);
     }
 #endif // QT_CONFIG(commandlinkbutton)
-}
-
-
-/*!
- \internal
- */
-void QWindowsVistaStyle::unpolish(QApplication *app)
-{
-    QWindowsXPStyle::unpolish(app);
 }
 
 /*!
@@ -2436,11 +2379,6 @@ QPixmap QWindowsVistaStyle::standardPixmap(StandardPixmap standardPixmap, const 
         return QWindowsStyle::standardPixmap(standardPixmap, option, widget);
     }
     return QWindowsXPStyle::standardPixmap(standardPixmap, option, widget);
-}
-
-QWindowsVistaStylePrivate::QWindowsVistaStylePrivate() :
-    QWindowsXPStylePrivate()
-{
 }
 
 bool QWindowsVistaStylePrivate::transitionsEnabled() const

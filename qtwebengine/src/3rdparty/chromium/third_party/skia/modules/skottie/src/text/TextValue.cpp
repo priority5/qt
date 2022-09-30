@@ -11,8 +11,7 @@
 #include "modules/skottie/src/SkottiePriv.h"
 #include "modules/skottie/src/SkottieValue.h"
 
-namespace skottie {
-namespace internal {
+namespace skottie::internal {
 
 bool Parse(const skjson::Value& jv, const internal::AnimationBuilder& abuilder, TextValue* v) {
     const skjson::ObjectValue* jtxt = jv;
@@ -47,7 +46,7 @@ bool Parse(const skjson::Value& jv, const internal::AnimationBuilder& abuilder, 
         SkTextUtils::kCenter_Align // 'j': 2
     };
     v->fHAlign = gAlignMap[std::min<size_t>(ParseDefault<size_t>((*jtxt)["j"], 0),
-                                          SK_ARRAY_COUNT(gAlignMap))];
+                                            SK_ARRAY_COUNT(gAlignMap) - 1)];
 
     // Optional text box size.
     if (const skjson::ArrayValue* jsz = (*jtxt)["sz"]) {
@@ -73,7 +72,35 @@ bool Parse(const skjson::Value& jv, const internal::AnimationBuilder& abuilder, 
     // TODO: remove "sk_rs" support after migrating clients.
     v->fResize = gResizeMap[std::min(std::max(ParseDefault<size_t>((*jtxt)[   "rs"], 0),
                                               ParseDefault<size_t>((*jtxt)["sk_rs"], 0)),
-                                     SK_ARRAY_COUNT(gResizeMap))];
+                                     SK_ARRAY_COUNT(gResizeMap) - 1)];
+
+    // Optional min/max font size and line count (used when aute-resizing)
+    v->fMinTextSize = ParseDefault<SkScalar>((*jtxt)["mf"], 0.0f);
+    v->fMaxTextSize = ParseDefault<SkScalar>((*jtxt)["xf"], std::numeric_limits<float>::max());
+    v->fMaxLines    = ParseDefault<size_t>  ((*jtxt)["xl"], 0);
+
+    // At the moment, BM uses the paragraph box to discriminate point mode vs. paragraph mode.
+    v->fLineBreak = v->fBox.isEmpty()
+            ? Shaper::LinebreakPolicy::kExplicit
+            : Shaper::LinebreakPolicy::kParagraph;
+
+    // Optional explicit text mode.
+    // N.b.: this is not being exported by BM, only used for testing.
+    auto text_mode = ParseDefault((*jtxt)["m"], -1);
+    if (text_mode >= 0) {
+        // Explicit text mode.
+        v->fLineBreak = (text_mode == 0)
+                ? Shaper::LinebreakPolicy::kExplicit   // 'm': 0 -> point text
+                : Shaper::LinebreakPolicy::kParagraph; // 'm': 1 -> paragraph text
+    }
+
+    // Optional capitalization.
+    static constexpr Shaper::Capitalization gCapMap[] = {
+        Shaper::Capitalization::kNone,      // 'ca': 0
+        Shaper::Capitalization::kUpperCase, // 'ca': 1
+    };
+    v->fCapitalization = gCapMap[std::min<size_t>(ParseDefault<size_t>((*jtxt)["ca"], 0),
+                                                  SK_ARRAY_COUNT(gCapMap) - 1)];
 
     // In point mode, the text is baseline-aligned.
     v->fVAlign = v->fBox.isEmpty() ? Shaper::VAlign::kTopBaseline
@@ -111,11 +138,6 @@ bool Parse(const skjson::Value& jv, const internal::AnimationBuilder& abuilder, 
         }
     }
 
-    if (v->fResize != Shaper::ResizePolicy::kNone && v->fBox.isEmpty()) {
-        abuilder.log(Logger::Level::kWarning, jtxt, "Auto-scaled text requires a paragraph box.");
-        v->fResize = Shaper::ResizePolicy::kNone;
-    }
-
     const auto& parse_color = [] (const skjson::ArrayValue* jcolor,
                                   SkColor* c) {
         if (!jcolor) {
@@ -139,9 +161,17 @@ bool Parse(const skjson::Value& jv, const internal::AnimationBuilder& abuilder, 
         v->fPaintOrder  = ParseDefault((*jtxt)["of"], true)
                 ? TextPaintOrder::kFillStroke
                 : TextPaintOrder::kStrokeFill;
+
+        static constexpr SkPaint::Join gJoins[] = {
+            SkPaint::kMiter_Join,  // lj: 1
+            SkPaint::kRound_Join,  // lj: 2
+            SkPaint::kBevel_Join,  // lj: 3
+        };
+        v->fStrokeJoin = gJoins[std::min<size_t>(ParseDefault<size_t>((*jtxt)["lj"], 1) - 1,
+                                                 SK_ARRAY_COUNT(gJoins) - 1)];
     }
 
     return true;
 }
 
-}}  // namespace skottie::internal
+}  // namespace skottie::internal

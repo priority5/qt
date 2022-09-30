@@ -359,8 +359,6 @@ struct _xmlXPathContext {
     unsigned long opLimit;
     unsigned long opCount;
     int depth;
-    int maxDepth;
-    int maxParserDepth;
 };
 
 /*
@@ -551,6 +549,7 @@ XMLPUBFUN void XMLCALL
 		    xmlXPathFreeCompExpr	(xmlXPathCompExprPtr comp);
 #endif /* LIBXML_XPATH_ENABLED */
 #if defined(LIBXML_XPATH_ENABLED) || defined(LIBXML_SCHEMAS_ENABLED)
+XML_DEPRECATED
 XMLPUBFUN void XMLCALL
 		    xmlXPathInit		(void);
 XMLPUBFUN int XMLCALL

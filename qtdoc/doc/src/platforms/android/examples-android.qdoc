@@ -1,34 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \page examples-android.html
     \title Qt for Android Examples
     \brief A list of selected Qt Examples for Android.
+    \ingroup androidplatform
+    \previouspage porting-to-android.html
+    \nextpage deployment-android.html
 
     This page lists Qt examples that have been tested to run on
     \l{Qt for Android}{Android}. However, most \l{Qt Examples and Tutorials}
@@ -56,24 +35,6 @@
         \li \l{Adding OpenSSL Support for Android}
         \li \l{Qt for Android - Building from Source}
     \endlist
-
-    \l {Qt Android Extras} is an Android specific module used to integrate Qt
-    API with Java API by enabling communication between Qt code (C++ and QML)
-    and Java code. The following examples demonstrate some of the features of
-    the module:
-
-    \list
-        \li \l{Qt Notifier} demonstrates how to call Java code from an
-            Android application.
-        \li \l{Qt JNI Messenger} demonstrates communication between Java code
-            and QML or C++ using JNI calls.
-        \li \l{Android Custom Activity} demonstrates working with custom Android activities.
-        \li \l{Qt JNI Music List} demonstrates how to exchange data from complex Java objects.
-        \li \l{Android Service with Qt Remote Objects} demonstrates how to run an Android service,
-            and how to communicate between the service and the app using Qt Remote Objects.
-    \endlist
-
-    For the full list examples, see \l {Qt Android Extras Examples}.
 
     \section1 Qt Quick and QML Examples for Android
 
@@ -109,7 +70,6 @@
         \li \l{Scene Graph - OpenGL Under QML}{OpenGL Under QML}
         \li \l{Scene Graph - Painted Item}{Painted Item}
         \li \l{Scene Graph - Rendering FBOs}{Rendering FBOs}
-        \li \l{Scene Graph - Simple Material}{Simple Material}
         \endlist
     \enddiv
     \div {class="doc-column"}
@@ -134,17 +94,26 @@
     \div {class="doc-column"}
         \b{Multimedia}
         \list
-        \li \l{QML Video Shader Effects Example}{Video Shader Effects Example}
-        \li \l{QML Video Example}{Video Example}
-        \li \l{QML Camera Example}{Camera Example}
+        \li \l{Media Player Example}
+        \li \l{Camera Example}
+        \li \l{QML Media Player Example}
+        \li \l{QML Recorder Example}
         \endlist
     \enddiv
+    \omit \\! Not part of Qt 6.0
     \div {class="doc-column"}
         \b{Location}
         \list
         \li \l{Map Viewer (QML)}{Map Viewer Example}
         \li \l{Places Map (QML)}{Places Map Example}
         \li \l{Plane Spotter (QML)}{Plane Spotter Example}
+        \endlist
+    \enddiv
+    \endomit
+    \div {class="doc-column"}
+        \b{In-App Purchasing}
+        \list
+        \li \l{In-App purchasing demo}{Qt Hangman (In-App Purchasing)}
         \endlist
     \enddiv
     \enddiv

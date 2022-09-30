@@ -7,23 +7,23 @@
 #include <string>
 
 #include "base/values.h"
+#include "chrome/browser/ash/login/help_app_launcher.h"
+#include "chrome/browser/ash/login/oobe_screen.h"
+#include "chrome/browser/ash/login/screens/reset_screen.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/login/help_app_launcher.h"
-#include "chrome/browser/chromeos/login/oobe_screen.h"
-#include "chrome/browser/chromeos/login/screens/reset_screen.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
 #include "components/login/localized_values_builder.h"
 #include "components/strings/grit/components_strings.h"
+#include "ui/chromeos/devicetype_utils.h"
 
 namespace chromeos {
 
 constexpr StaticOobeScreenId ResetView::kScreenId;
 
-ResetScreenHandler::ResetScreenHandler(JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(kScreenId, js_calls_container) {
-  set_user_acted_method_path("login.ResetScreen.userActed");
+ResetScreenHandler::ResetScreenHandler() : BaseScreenHandler(kScreenId) {
+  set_user_acted_method_path_deprecated("login.ResetScreen.userActed");
 }
 
 ResetScreenHandler::~ResetScreenHandler() {
@@ -33,20 +33,20 @@ ResetScreenHandler::~ResetScreenHandler() {
 
 void ResetScreenHandler::Bind(ResetScreen* screen) {
   screen_ = screen;
-  BaseScreenHandler::SetBaseScreen(screen_);
+  BaseScreenHandler::SetBaseScreenDeprecated(screen_);
 }
 
 void ResetScreenHandler::Unbind() {
   screen_ = nullptr;
-  BaseScreenHandler::SetBaseScreen(nullptr);
+  BaseScreenHandler::SetBaseScreenDeprecated(nullptr);
 }
 
 void ResetScreenHandler::Show() {
-  if (!page_is_ready()) {
+  if (!IsJavascriptAllowed()) {
     show_on_init_ = true;
     return;
   }
-  ShowScreen(kScreenId);
+  ShowInWebUI();
 }
 
 void ResetScreenHandler::Hide() {
@@ -56,8 +56,6 @@ void ResetScreenHandler::DeclareLocalizedValues(
     ::login::LocalizedValuesBuilder* builder) {
   builder->Add("resetScreenAccessibleTitle", IDS_RESET_SCREEN_TITLE);
   builder->Add("resetScreenIconTitle", IDS_RESET_SCREEN_ICON_TITLE);
-  builder->Add("resetScreenIllustrationTitle",
-               IDS_RESET_SCREEN_ILLUSTRATION_TITLE);
   builder->Add("cancelButton", IDS_CANCEL);
 
   builder->Add("resetButtonRestart", IDS_RELAUNCH_BUTTON);
@@ -79,17 +77,16 @@ void ResetScreenHandler::DeclareLocalizedValues(
                IDS_RESET_SCREEN_TPM_FIRMWARE_UPDATE_OPTION);
 
   // Variants for screen title.
-  builder->AddF("resetWarningTitle",
-                IDS_RESET_SCREEN_WARNING_MSG,
-                IDS_SHORT_PRODUCT_NAME);
+  builder->AddF("resetWarningTitle", IDS_RESET_SCREEN_WARNING_MSG,
+                ui::GetChromeOSDeviceName());
 
   // Variants for screen message.
   builder->AddF("resetPowerwashWarningDetails",
                 IDS_RESET_SCREEN_WARNING_POWERWASH_MSG,
-                IDS_SHORT_PRODUCT_NAME);
+                ui::GetChromeOSDeviceName());
   builder->AddF("resetPowerwashRollbackWarningDetails",
                 IDS_RESET_SCREEN_WARNING_POWERWASH_AND_ROLLBACK_MSG,
-                IDS_SHORT_PRODUCT_NAME);
+                ui::GetChromeOSDeviceName());
 
   builder->Add("confirmPowerwashTitle", IDS_RESET_SCREEN_POPUP_POWERWASH_TITLE);
   builder->Add("confirmRollbackTitle", IDS_RESET_SCREEN_POPUP_ROLLBACK_TITLE);
@@ -104,8 +101,8 @@ void ResetScreenHandler::DeclareJSCallbacks() {
               &ResetScreenHandler::HandleSetTpmFirmwareUpdateChecked);
 }
 
-void ResetScreenHandler::Initialize() {
-  if (!page_is_ready())
+void ResetScreenHandler::InitializeDeprecated() {
+  if (!IsJavascriptAllowed())
     return;
 
   if (show_on_init_) {

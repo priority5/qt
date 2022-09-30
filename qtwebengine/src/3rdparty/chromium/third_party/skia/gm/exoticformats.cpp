@@ -13,11 +13,12 @@
 #include "include/gpu/GrRecordingContext.h"
 #include "src/core/SkCompressedDataUtils.h"
 #include "src/core/SkMipmap.h"
-#include "src/gpu/GrImageContextPriv.h"
-#include "src/gpu/GrRecordingContextPriv.h"
-#include "src/gpu/gl/GrGLDefines.h"
+#include "src/gpu/ganesh/GrImageContextPriv.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/gl/GrGLDefines_impl.h"
 #include "src/image/SkImage_Base.h"
 #include "src/image/SkImage_GpuBase.h"
+#include "tools/gpu/ProxyUtils.h"
 
 #include "tools/Resources.h"
 
@@ -382,8 +383,8 @@ protected:
         bool isCompressed = false;
         if (image->isTextureBacked()) {
             const GrCaps* caps = as_IB(image)->context()->priv().caps();
-
-            GrTextureProxy* proxy = as_IB(image)->peekProxy();
+            GrTextureProxy* proxy = sk_gpu_test::GetTextureImageProxy(image,
+                                                                      canvas->recordingContext());
             isCompressed = caps->isFormatCompressed(proxy->backendFormat());
         }
 

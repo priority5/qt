@@ -18,6 +18,8 @@
 #define INCLUDE_PERFETTO_EXT_BASE_CIRCULAR_QUEUE_H_
 
 #include <stdint.h>
+#include <stdlib.h>
+
 #include <iterator>
 
 #include "perfetto/base/logging.h"
@@ -67,25 +69,21 @@ class CircularQueue {
       ignore_result(generation);
     }
 
-    T* operator->() {
+    Iterator(const Iterator&) noexcept = default;
+    Iterator& operator=(const Iterator&) noexcept = default;
+    Iterator(Iterator&&) noexcept = default;
+    Iterator& operator=(Iterator&&) noexcept = default;
+
+    T* operator->() const {
 #if PERFETTO_DCHECK_IS_ON()
       PERFETTO_DCHECK(generation_ == queue_->generation());
 #endif
       return queue_->Get(pos_);
     }
 
-    const T* operator->() const {
-      return const_cast<CircularQueue<T>::Iterator*>(this)->operator->();
-    }
-
-    T& operator*() { return *(operator->()); }
-    const T& operator*() const { return *(operator->()); }
+    T& operator*() const { return *(operator->()); }
 
     value_type& operator[](difference_type i) { return *(*this + i); }
-
-    const value_type& operator[](difference_type i) const {
-      return const_cast<CircularQueue<T>::Iterator&>(*this)[i];
-    }
 
     Iterator& operator++() {
       Add(1);
@@ -174,16 +172,20 @@ class CircularQueue {
 #endif
   };
 
-  CircularQueue(size_t initial_capacity = 1024) { Grow(initial_capacity); }
+  explicit CircularQueue(size_t initial_capacity = 1024) {
+    Grow(initial_capacity);
+  }
 
-  CircularQueue(CircularQueue&& other) noexcept {
-    // Copy all fields using the (private) default copy assignment operator.
-    *this = other;
+  CircularQueue(CircularQueue&& other) noexcept
+      : entries_(std::move(other.entries_)),
+        capacity_(other.capacity_),
+        begin_(other.begin_),
+        end_(other.end_) {
     increment_generation();
     new (&other) CircularQueue();  // Reset the old queue so it's still usable.
   }
 
-  CircularQueue& operator=(CircularQueue&& other) {
+  CircularQueue& operator=(CircularQueue&& other) noexcept {
     this->~CircularQueue();                      // Destroy the current state.
     new (this) CircularQueue(std::move(other));  // Use the move ctor above.
     return *this;
@@ -196,7 +198,6 @@ class CircularQueue {
     }
     clear();  // Invoke destructors on all alive entries.
     PERFETTO_DCHECK(empty());
-    free(entries_);
   }
 
   template <typename... Args>
@@ -249,7 +250,7 @@ class CircularQueue {
 
  private:
   CircularQueue(const CircularQueue&) = delete;
-  CircularQueue& operator=(const CircularQueue&) = default;
+  CircularQueue& operator=(const CircularQueue&) = delete;
 
   void Grow(size_t new_capacity = 0) {
     // Capacity must be always a power of two. This allows Get() to use a simple
@@ -260,9 +261,8 @@ class CircularQueue {
     // On 32-bit systems this might hit the 4GB wall and overflow. We can't do
     // anything other than crash in this case.
     PERFETTO_CHECK(new_capacity > capacity_);
-    size_t malloc_size = new_capacity * sizeof(T);
-    PERFETTO_CHECK(malloc_size > new_capacity);
-    auto* new_vec = static_cast<T*>(malloc(malloc_size));
+
+    AlignedUniquePtr<T[]> new_vec = AlignedAllocTyped<T[]>(new_capacity);
 
     // Move all elements in the expanded array.
     size_t new_size = 0;
@@ -273,12 +273,11 @@ class CircularQueue {
     // required to call the dtor for them.
     for (uint64_t i = begin_; i < end_; i++)
       Get(i)->~T();
-    free(entries_);  // It's fine to free(nullptr) (for the ctor call case).
 
     begin_ = 0;
     end_ = new_size;
     capacity_ = new_capacity;
-    entries_ = new_vec;
+    entries_ = std::move(new_vec);
   }
 
   inline T* Get(uint64_t pos) {
@@ -290,7 +289,7 @@ class CircularQueue {
 
   // Underlying storage. It's raw malloc-ed rather than being a unique_ptr<T[]>
   // to allow having uninitialized entries inside it.
-  T* entries_ = nullptr;
+  AlignedUniquePtr<T[]> entries_;
   size_t capacity_ = 0;  // Number of allocated slots (NOT bytes) in |entries_|.
 
   // The |begin_| and |end_| indexes are monotonic and never wrap. Modular arith

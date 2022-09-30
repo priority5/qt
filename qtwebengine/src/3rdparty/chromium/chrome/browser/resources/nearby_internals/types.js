@@ -125,3 +125,24 @@ export const ShareTargetDiscoveryChange = {
  *            value: string}}
  */
 export let ShareTargetSelectOption;
+
+/**
+ * Dictionary for Nearby Share State booleans
+ * @typedef {{isScanning: boolean,
+ *            isTransferring: boolean,
+ *            isSending: boolean,
+ *            isReceiving: boolean,
+ *            isConnecting: boolean,
+ *            isInHighVisibility: boolean,
+ *            time: number}}
+ */
+export let NearbyShareStates;
+
+/**
+ * Object used by the logging tab to retrieve feature specific logs.
+ * @typedef {{messageAddedEventName: string,
+ *            bufferClearedEventName: string,
+ *            logFilePrefix: string,
+ *            getLogMessages: function(): Promise<!Array<!LogMessage>> }}
+ */
+export let LogProvider;

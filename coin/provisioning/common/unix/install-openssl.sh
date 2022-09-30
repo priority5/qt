@@ -2,32 +2,38 @@
 
 #############################################################################
 ##
-## Copyright (C) 2021 The Qt Company Ltd.
-## Contact: http://www.qt.io/licensing/
+## Copyright (C) 2022 The Qt Company Ltd.
+## Contact: https://www.qt.io/licensing/
 ##
 ## This file is part of the provisioning scripts of the Qt Toolkit.
 ##
-## $QT_BEGIN_LICENSE:LGPL21$
+## $QT_BEGIN_LICENSE:LGPL$
 ## Commercial License Usage
 ## Licensees holding valid commercial Qt licenses may use this file in
 ## accordance with the commercial license agreement provided with the
 ## Software or, alternatively, in accordance with the terms contained in
 ## a written agreement between you and The Qt Company. For licensing terms
-## and conditions see http://www.qt.io/terms-conditions. For further
-## information use the contact form at http://www.qt.io/contact-us.
+## and conditions see https://www.qt.io/terms-conditions. For further
+## information use the contact form at https://www.qt.io/contact-us.
 ##
 ## GNU Lesser General Public License Usage
 ## Alternatively, this file may be used under the terms of the GNU Lesser
-## General Public License version 2.1 or version 3 as published by the Free
-## Software Foundation and appearing in the file LICENSE.LGPLv21 and
-## LICENSE.LGPLv3 included in the packaging of this file. Please review the
-## following information to ensure the GNU Lesser General Public License
-## requirements will be met: https://www.gnu.org/licenses/lgpl.html and
-## http://www.gnu.org/licenses/old-licenses/lgpl-2.1.html.
+## General Public License version 3 as published by the Free Software
+## Foundation and appearing in the file LICENSE.LGPL3 included in the
+## packaging of this file. Please review the following information to
+## ensure the GNU Lesser General Public License version 3 requirements
+## will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
 ##
-## As a special exception, The Qt Company gives you certain additional
-## rights. These rights are described in The Qt Company LGPL Exception
-## version 1.1, included in the file LGPL_EXCEPTION.txt in this package.
+## GNU General Public License Usage
+## Alternatively, this file may be used under the terms of the GNU
+## General Public License version 2.0 or (at your option) the GNU General
+## Public license version 3 or any later version approved by the KDE Free
+## Qt Foundation. The licenses are as published by the Free Software
+## Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
+## included in the packaging of this file. Please review the following
+## information to ensure the GNU General Public License requirements will
+## be met: https://www.gnu.org/licenses/gpl-2.0.html and
+## https://www.gnu.org/licenses/gpl-3.0.html.
 ##
 ## $QT_END_LICENSE$
 ##
@@ -37,21 +43,21 @@
 # Requires GCC and Perl to be in PATH.
 set -ex
 os="$1"
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # shellcheck source=../unix/DownloadURL.sh
 source "${BASH_SOURCE%/*}/../unix/DownloadURL.sh"
 # shellcheck source=../unix/SetEnvVar.sh
 source "${BASH_SOURCE%/*}/../unix/SetEnvVar.sh"
-
-version="1.1.1k"
+version="1.1.1m"
 officialUrl="https://www.openssl.org/source/openssl-$version.tar.gz"
 cachedUrl="http://ci-files01-hki.intra.qt.io/input/openssl/openssl-$version.tar.gz"
 targetFile="/tmp/openssl-$version.tar.gz"
-sha="bad9dc4ae6dcc1855085463099b5dacb0ec6130b"
+sha="39d424c4411e45f1570073d7a71b1830b96007ca"
 opensslHome="${HOME}/openssl-${version}"
 opensslSource="${opensslHome}-src"
 DownloadURL "$cachedUrl" "$officialUrl" "$sha" "$targetFile"
-tar -xzf "$targetFile" -C "$HOME"
-mv "$opensslHome" "$opensslSource"
+mkdir -p "$opensslSource"
+tar -xzf "$targetFile" --strip 1 -C "$opensslSource"
 cd "$opensslSource"
 pwd
 
@@ -65,18 +71,55 @@ if [[ "$os" == "linux" ]]; then
         echo "export LD_LIBRARY_PATH=$opensslHome/lib:$LD_LIBRARY_PATH" >> ~/.bashrc
     fi
 
-elif [ "$os" == "macos" ]; then
+elif [ "$os" == "macos" -o "$os" == "macos-universal" ]; then
     # Below target location has been hard coded into Coin.
     # QTQAINFRA-1195
-    openssl_install_dir=/usr/local/openssl-$version
-    opensslTargetLocation="/usr/local/opt/openssl"
-    sudo ./Configure --prefix=$openssl_install_dir shared no-ssl3-method enable-ec_nistp_64_gcc_128 darwin64-x86_64-cc "-Wa,--noexecstack"
-    echo "Running 'make' for OpenSSL"
-    # shellcheck disable=SC2024
-    sudo make --silent > /tmp/openssl_make.log 2>&1
-    echo "Running 'make install' for OpenSSL"
-    # shellcheck disable=SC2024
-    sudo make --silent install > /tmp/openssl_make_install.log 2>&1
+    echo "prefix=$prefix"
+    if [[ -z "$prefix" ]]; then
+        prefix="/usr/local"
+    fi
+    openssl_install_dir="$prefix/openssl-$version"
+    opensslTargetLocation="$prefix/opt/openssl"
+
+    commonFlags="no-tests shared no-ssl3-method enable-ec_nistp_64_gcc_128 -Wa,--noexecstack"
+
+    export MACOSX_DEPLOYMENT_TARGET=10.14
+
+    opensslBuild="${opensslHome}-build"
+    opensslDestdir="${opensslHome}-destdir"
+    mkdir -p $opensslBuild
+
+    if [ "$os" == "macos-universal" ]; then
+        archs="x86_64 arm64"
+    else
+        archs="$(uname -m)"
+    fi
+
+    for arch in $archs; do
+        cd $opensslBuild
+        echo "Configuring OpenSSL for $arch"
+        mkdir -p $arch && cd $arch
+        $opensslSource/Configure --prefix=$openssl_install_dir $commonFlags darwin64-$arch-cc
+
+        echo "Building OpenSSL for $arch in $PWD"
+        make >> /tmp/openssl_make.log 2>&1
+
+        echo "Installing OpenSSL for $arch"
+        if [ "$os" == "macos-universal" ]; then
+            destdir="$opensslDestdir/$arch"
+        else
+            destdir=""
+        fi
+        # shellcheck disable=SC2024
+        sudo make install_sw install_ssldirs DESTDIR=$destdir >> /tmp/openssl_make_install.log 2>&1
+    done
+
+    if [ "$os" == "macos-universal" ]; then
+        echo "Making universal OpenSSL package"
+        # shellcheck disable=SC2024
+        sudo rm -Rf "$openssl_install_dir"
+        sudo ${SCRIPT_DIR}/../macos/makeuniversal.sh "$opensslDestdir/x86_64" $opensslDestdir/arm64
+    fi
 
     path=$(echo "$opensslTargetLocation" | sed -E 's/(.*)\/.*$/\1/')
     sudo mkdir -p "$path"

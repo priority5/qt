@@ -15,7 +15,13 @@
 
   data: [
     {
+      name: "additive-symbols",
+    },
+    {
       name: "ascent-override",
+    },
+    {
+      name: "base-palette",
     },
     {
       name: "descent-override",
@@ -55,7 +61,7 @@
       name: "initial-value"
     },
     {
-      name: "advance-override"
+      name: "fallback",
     },
     {
       name: "line-gap-override",
@@ -79,10 +85,31 @@
       name: "min-zoom",
     },
     {
+      name: "negative",
+    },
+    {
       name: "orientation",
     },
     {
+      name: "override-colors",
+    },
+    {
+      name: "pad",
+    },
+    {
+      name: "prefix",
+    },
+    {
+      name: "range",
+    },
+    {
+      name: "size-adjust",
+    },
+    {
       name: "source",
+    },
+    {
+      name: "speak-as",
     },
     {
       name: "src",
@@ -91,10 +118,16 @@
       name: "start",
     },
     {
+      name: "suffix",
+    },
+    {
+      name: "symbols",
+    },
+    {
       name: "syntax"
     },
     {
-      name: "time-range",
+      name: "system",
     },
     {
       name: "unicode-range",

@@ -9,16 +9,15 @@
 #include <string>
 #include <utility>
 
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
+#include "base/containers/cxx20_erase.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/bookmarks/bookmarks_message_handler.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/managed_ui_handler.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/plural_string_handler.h"
 #include "chrome/browser/ui/webui/webui_util.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/bookmarks_resources.h"
 #include "chrome/grit/bookmarks_resources_map.h"
@@ -36,15 +35,10 @@
 
 namespace {
 
-#if !BUILDFLAG(OPTIMIZE_WEBUI)
-constexpr char kGeneratedPath[] =
-    "@out_folder@/gen/chrome/browser/resources/bookmarks/";
-#endif
-
 void AddLocalizedString(content::WebUIDataSource* source,
                         const std::string& message,
                         int id) {
-  base::string16 str = l10n_util::GetStringUTF16(id);
+  std::u16string str = l10n_util::GetStringUTF16(id);
   base::Erase(str, '&');
   source->AddString(message, str);
 }
@@ -52,16 +46,9 @@ void AddLocalizedString(content::WebUIDataSource* source,
 content::WebUIDataSource* CreateBookmarksUIHTMLSource(Profile* profile) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIBookmarksHost);
-
-#if BUILDFLAG(OPTIMIZE_WEBUI)
-  webui::SetupBundledWebUIDataSource(source, "bookmarks.js",
-                                     IDR_BOOKMARKS_BOOKMARKS_ROLLUP_JS,
-                                     IDR_BOOKMARKS_BOOKMARKS_HTML);
-#else
   webui::SetupWebUIDataSource(
       source, base::make_span(kBookmarksResources, kBookmarksResourcesSize),
-      kGeneratedPath, IDR_BOOKMARKS_BOOKMARKS_HTML);
-#endif
+      IDR_BOOKMARKS_BOOKMARKS_HTML);
 
   // Build an Accelerator to describe undo shortcut
   // NOTE: the undo shortcut is also defined in bookmarks/command_manager.js
@@ -86,14 +73,16 @@ content::WebUIDataSource* CreateBookmarksUIHTMLSource(Profile* profile) {
       {"emptyList", IDS_BOOKMARK_MANAGER_EMPTY_LIST},
       {"emptyUnmodifiableList", IDS_BOOKMARK_MANAGER_EMPTY_UNMODIFIABLE_LIST},
       {"folderLabel", IDS_BOOKMARK_MANAGER_FOLDER_LABEL},
+      {"importBegan", IDS_BOOKMARK_MANAGER_MENU_IMPORT_BEGAN},
+      {"importEnded", IDS_BOOKMARK_MANAGER_MENU_IMPORT_ENDED},
       {"itemsSelected", IDS_BOOKMARK_MANAGER_ITEMS_SELECTED},
+      {"itemsUnselected", IDS_BOOKMARK_MANAGER_ITEMS_UNSELECTED},
       {"listAxLabel", IDS_BOOKMARK_MANAGER_LIST_AX_LABEL},
       {"menu", IDS_MENU},
       {"menuAddBookmark", IDS_BOOKMARK_MANAGER_MENU_ADD_BOOKMARK},
       {"menuAddFolder", IDS_BOOKMARK_MANAGER_MENU_ADD_FOLDER},
       {"menuCut", IDS_BOOKMARK_MANAGER_MENU_CUT},
       {"menuCopy", IDS_BOOKMARK_MANAGER_MENU_COPY},
-      {"menuCopyURL", IDS_BOOKMARK_MANAGER_MENU_COPY_URL},
       {"menuPaste", IDS_BOOKMARK_MANAGER_MENU_PASTE},
       {"menuDelete", IDS_DELETE},
       {"menuEdit", IDS_EDIT},
@@ -134,7 +123,6 @@ content::WebUIDataSource* CreateBookmarksUIHTMLSource(Profile* profile) {
       {"toastFolderSorted", IDS_BOOKMARK_MANAGER_TOAST_FOLDER_SORTED},
       {"toastItemCopied", IDS_BOOKMARK_MANAGER_TOAST_ITEM_COPIED},
       {"toastItemDeleted", IDS_BOOKMARK_MANAGER_TOAST_ITEM_DELETED},
-      {"toastUrlCopied", IDS_BOOKMARK_MANAGER_TOAST_URL_COPIED},
       {"undo", IDS_BOOKMARK_BAR_UNDO},
   };
   for (const auto& str : kStrings)
@@ -171,7 +159,7 @@ BookmarksUI::BookmarksUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
 // static
 base::RefCountedMemory* BookmarksUI::GetFaviconResourceBytes(
-    ui::ScaleFactor scale_factor) {
+    ui::ResourceScaleFactor scale_factor) {
   return ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
       IDR_BOOKMARKS_FAVICON, scale_factor);
 }

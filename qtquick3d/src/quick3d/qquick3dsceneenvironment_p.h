@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of Qt Quick 3D.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #ifndef QSSGSCENEENVIRONMENT_H
 #define QSSGSCENEENVIRONMENT_H
@@ -51,10 +25,12 @@
 #include <QtQml/QQmlListProperty>
 
 #include <QtQuick3D/private/qquick3deffect_p.h>
+#include <QtQuick3D/private/qquick3dlightmapper_p.h>
 
 QT_BEGIN_NAMESPACE
 
 class QQuick3DTexture;
+class QQuick3DCubeMapTexture;
 class Q_QUICK3D_EXPORT QQuick3DSceneEnvironment : public QQuick3DObject
 {
     Q_OBJECT
@@ -76,11 +52,22 @@ class Q_QUICK3D_EXPORT QQuick3DSceneEnvironment : public QQuick3DObject
     Q_PROPERTY(float aoBias READ aoBias WRITE setAoBias NOTIFY aoBiasChanged)
 
     Q_PROPERTY(QQuick3DTexture *lightProbe READ lightProbe WRITE setLightProbe NOTIFY lightProbeChanged)
-    Q_PROPERTY(float probeBrightness READ probeBrightness WRITE setProbeBrightness NOTIFY probeBrightnessChanged)
-    Q_PROPERTY(bool fastImageBasedLightingEnabled READ fastImageBasedLightingEnabled WRITE setFastImageBasedLightingEnabled NOTIFY fastImageBasedLightingEnabledChanged)
+    Q_PROPERTY(float probeExposure READ probeExposure WRITE setProbeExposure NOTIFY probeExposureChanged)
     Q_PROPERTY(float probeHorizon READ probeHorizon WRITE setProbeHorizon NOTIFY probeHorizonChanged)
-    Q_PROPERTY(float probeFieldOfView READ probeFieldOfView WRITE setProbeFieldOfView NOTIFY probeFieldOfViewChanged)
-    Q_PROPERTY(QQmlListProperty<QQuick3DEffect> effects READ effects REVISION 1)
+    Q_PROPERTY(QVector3D probeOrientation READ probeOrientation WRITE setProbeOrientation NOTIFY probeOrientationChanged)
+
+    Q_PROPERTY(QQuick3DCubeMapTexture *skyBoxCubeMap READ skyBoxCubeMap WRITE setSkyBoxCubeMap NOTIFY skyBoxCubeMapChanged REVISION(6, 4))
+
+    Q_PROPERTY(QQuick3DEnvironmentTonemapModes tonemapMode READ tonemapMode WRITE setTonemapMode NOTIFY tonemapModeChanged)
+
+    Q_PROPERTY(QQmlListProperty<QQuick3DEffect> effects READ effects)
+
+    Q_PROPERTY(float skyboxBlurAmount READ skyboxBlurAmount WRITE setSkyboxBlurAmount NOTIFY skyboxBlurAmountChanged REVISION(6, 4))
+    Q_PROPERTY(bool specularAAEnabled READ specularAAEnabled WRITE setSpecularAAEnabled NOTIFY specularAAEnabledChanged REVISION(6, 4))
+
+    Q_PROPERTY(QQuick3DLightmapper *lightmapper READ lightmapper WRITE setLightmapper NOTIFY lightmapperChanged REVISION(6, 4))
+
+    QML_NAMED_ELEMENT(SceneEnvironment)
 
 public:
 
@@ -103,9 +90,19 @@ public:
         Transparent = 0,
         Unspecified,
         Color,
-        SkyBox
+        SkyBox,
+        SkyBoxCubeMap
     };
     Q_ENUM(QQuick3DEnvironmentBackgroundTypes)
+
+    enum QQuick3DEnvironmentTonemapModes {
+        TonemapModeNone = 0,
+        TonemapModeLinear,
+        TonemapModeAces,
+        TonemapModeHejlDawson,
+        TonemapModeFilmic
+    };
+    Q_ENUM(QQuick3DEnvironmentTonemapModes)
 
     explicit QQuick3DSceneEnvironment(QQuick3DObject *parent = nullptr);
     ~QQuick3DSceneEnvironment() override;
@@ -126,23 +123,29 @@ public:
     float aoBias() const;
 
     QQuick3DTexture *lightProbe() const;
-    float probeBrightness() const;
-    bool fastImageBasedLightingEnabled() const;
+    float probeExposure() const;
     float probeHorizon() const;
-    float probeFieldOfView() const;
+    QVector3D probeOrientation() const;
 
     bool depthTestEnabled() const;
     bool depthPrePassEnabled() const;
 
+    QQuick3DEnvironmentTonemapModes tonemapMode() const;
+
     QQmlListProperty<QQuick3DEffect> effects();
 
+    Q_REVISION(6, 4) float skyboxBlurAmount() const;
+    Q_REVISION(6, 4) bool specularAAEnabled() const;
+    Q_REVISION(6, 4) QQuick3DLightmapper *lightmapper() const;
+    Q_REVISION(6, 4) QQuick3DCubeMapTexture *skyBoxCubeMap() const;
+
 public Q_SLOTS:
-    void setAntialiasingMode(QQuick3DEnvironmentAAModeValues antialiasingMode);
-    void setAntialiasingQuality(QQuick3DEnvironmentAAQualityValues antialiasingQuality);
+    void setAntialiasingMode(QQuick3DSceneEnvironment::QQuick3DEnvironmentAAModeValues antialiasingMode);
+    void setAntialiasingQuality(QQuick3DSceneEnvironment::QQuick3DEnvironmentAAQualityValues antialiasingQuality);
     void setTemporalAAEnabled(bool temporalAAEnabled);
     void setTemporalAAStrength(float strength);
 
-    void setBackgroundMode(QQuick3DEnvironmentBackgroundTypes backgroundMode);
+    void setBackgroundMode(QQuick3DSceneEnvironment::QQuick3DEnvironmentBackgroundTypes backgroundMode);
     void setClearColor(const QColor &clearColor);
 
     void setAoStrength(float aoStrength);
@@ -153,13 +156,20 @@ public Q_SLOTS:
     void setAoBias(float aoBias);
 
     void setLightProbe(QQuick3DTexture *lightProbe);
-    void setProbeBrightness(float probeBrightness);
-    void setFastImageBasedLightingEnabled(bool fastImageBasedLightingEnabled);
+    void setProbeExposure(float probeExposure);
     void setProbeHorizon(float probeHorizon);
-    void setProbeFieldOfView(float probeFieldOfView);
+    void setProbeOrientation(const QVector3D &orientation);
 
     void setDepthTestEnabled(bool depthTestEnabled);
     void setDepthPrePassEnabled(bool depthPrePassEnabled);
+
+    void setTonemapMode(QQuick3DSceneEnvironment::QQuick3DEnvironmentTonemapModes tonemapMode);
+
+    Q_REVISION(6, 4) void setSkyboxBlurAmount(float newSkyboxBlurAmount);
+    Q_REVISION(6, 4) void setSpecularAAEnabled(bool enabled);
+    Q_REVISION(6, 4) void setSkyBoxCubeMap(QQuick3DCubeMapTexture *newSkyBoxCubeMap);
+
+    Q_REVISION(6, 4) void setLightmapper(QQuick3DLightmapper *lightmapper);
 
 Q_SIGNALS:
     void antialiasingModeChanged();
@@ -178,13 +188,19 @@ Q_SIGNALS:
     void aoBiasChanged();
 
     void lightProbeChanged();
-    void probeBrightnessChanged();
-    void fastImageBasedLightingEnabledChanged();
+    void probeExposureChanged();
     void probeHorizonChanged();
-    void probeFieldOfViewChanged();
+    void probeOrientationChanged();
 
     void depthTestEnabledChanged();
     void depthPrePassEnabledChanged();
+
+    void tonemapModeChanged();
+
+    Q_REVISION(6, 4) void skyboxBlurAmountChanged();
+    Q_REVISION(6, 4) void specularAAEnabledChanged();
+    Q_REVISION(6, 4) void lightmapperChanged();
+    Q_REVISION(6, 4) void skyBoxCubeMapChanged();
 
 protected:
     QSSGRenderGraphObject *updateSpatialNode(QSSGRenderGraphObject *node) override;
@@ -196,16 +212,17 @@ private:
     QVector<QQuick3DEffect *> m_effects;
 
     static void qmlAppendEffect(QQmlListProperty<QQuick3DEffect> *list, QQuick3DEffect *effect);
-    static QQuick3DEffect *qmlEffectAt(QQmlListProperty<QQuick3DEffect> *list, int index);
-    static int qmlEffectsCount(QQmlListProperty<QQuick3DEffect> *list);
+    static QQuick3DEffect *qmlEffectAt(QQmlListProperty<QQuick3DEffect> *list, qsizetype index);
+    static qsizetype qmlEffectsCount(QQmlListProperty<QQuick3DEffect> *list);
     static void qmlClearEffects(QQmlListProperty<QQuick3DEffect> *list);
 
-    void updateSceneManager(const QSharedPointer<QQuick3DSceneManager> &manager);
+    void updateSceneManager(QQuick3DSceneManager *manager);
 
     QQuick3DEnvironmentAAModeValues m_antialiasingMode = NoAA;
     QQuick3DEnvironmentAAQualityValues m_antialiasingQuality = High;
     bool m_temporalAAEnabled = false;
     float m_temporalAAStrength = 0.3f;
+    bool m_specularAAEnabled = false;
 
     QQuick3DEnvironmentBackgroundTypes m_backgroundMode = Transparent;
     QColor m_clearColor = Qt::black;
@@ -217,14 +234,18 @@ private:
     int m_aoSampleRate = 2;
     float m_aoBias = 0.0f;
     QQuick3DTexture *m_lightProbe = nullptr;
-    float m_probeBrightness = 100.0f;
-    bool m_fastImageBasedLightingEnabled = false;
-    float m_probeHorizon = -1.0f;
-    float m_probeFieldOfView = 180.0f;
+    float m_probeExposure = 1.0f;
+    float m_probeHorizon = 0.0f;
+    QVector3D m_probeOrientation;
 
-    ConnectionMap m_connections;
+    QHash<QByteArray, QMetaObject::Connection> m_connections;
     bool m_depthTestEnabled = true;
     bool m_depthPrePassEnabled = false;
+    QQuick3DEnvironmentTonemapModes m_tonemapMode = QQuick3DEnvironmentTonemapModes::TonemapModeLinear;
+    float m_skyboxBlurAmount = 0.0f;
+    QQuick3DLightmapper *m_lightmapper = nullptr;
+    QMetaObject::Connection m_lightmapperSignalConnection;
+    QQuick3DCubeMapTexture *m_skyBoxCubeMap = nullptr;
 };
 
 QT_END_NAMESPACE

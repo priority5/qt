@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qdocgenerator.h"
 
@@ -66,12 +41,23 @@ static QString languageJoin(const QStringList &list)
     return result;
 }
 
+// Embed source code between \badcode ... \endbadcode
+// Also, avoid '*/' breaking qdoc by passing the star as argument
+static void sourceCode(QTextStream &out, const QString &src)
+{
+    out << "\\badcode *\n";
+    out << QString(src).replace(QStringLiteral("*/"), QStringLiteral("\\1/"));
+    out << "\n\\endcode\n\n";
+}
+
 static void generate(QTextStream &out, const Package &package, const QDir &baseDir,
                      LogLevel logLevel)
 {
     out << "/*!\n\n";
-    for (const QString &part: package.qtParts)
+    for (const QString &part : package.qtParts) {
+        out << "\\ingroup attributions-" << package.qdocModule << "-" << part << "\n";
         out << "\\ingroup attributions-" << part << "\n";
+    }
 
     if (package.qtParts.contains(QLatin1String("libs"))) {
         // show up in xxx-index.html page of module
@@ -127,8 +113,29 @@ static void generate(QTextStream &out, const Package &package, const QDir &baseD
 
     out << "\n\n";
 
+    QString copyright;
     if (!package.copyright.isEmpty())
-        out << "\n\\badcode\n" << package.copyright << "\n\\endcode\n\n";
+        copyright = package.copyright;
+
+    if (!package.copyrightFile.isEmpty()) {
+        const QDir packageDir(package.path);
+        QFile file(QDir(package.path).absoluteFilePath(package.copyrightFile));
+        if (!file.open(QIODevice::ReadOnly)) {
+            if (logLevel != SilentLog) {
+                std::cerr << qPrintable(
+                        tr("Path %1 : cannot open copyright file %2.\n")
+                                .arg(QDir::toNativeSeparators(package.path))
+                                .arg(QDir::toNativeSeparators(package.copyrightFile)));
+            }
+        } else {
+            copyright = QString::fromUtf8(file.readAll());
+        }
+    }
+
+    if (!copyright.isEmpty()) {
+        out << "\n";
+        sourceCode(out, copyright);
+    }
 
     if (isSpdxLicenseId(package.licenseId) && package.licenseId != QLatin1String("NONE")) {
         out << "\\l{https://spdx.org/licenses/" << package.licenseId << ".html}"
@@ -140,25 +147,23 @@ static void generate(QTextStream &out, const Package &package, const QDir &baseD
         out << package.license << ".\n\n";
     }
 
-    if (!package.licenseFile.isEmpty()) {
-        QFile file(package.licenseFile);
+    foreach (const QString &licenseFile, package.licenseFiles) {
+        QFile file(licenseFile);
         if (!file.open(QIODevice::ReadOnly)) {
-            if (logLevel != SilentLog)
-                std::cerr << qPrintable(
-                    tr("Path %1 : cannot open license file %2.")
-                        .arg(QDir::toNativeSeparators(package.path))
-                        .arg(QDir::toNativeSeparators(package.licenseFile))
-                ) << "*/\n";
+            if (logLevel != SilentLog) {
+                std::cerr << qPrintable(tr("Path %1 : cannot open license file %2.\n")
+                                                .arg(QDir::toNativeSeparators(package.path))
+                                                .arg(QDir::toNativeSeparators(licenseFile)));
+                out << "*/\n";
+            }
             return;
         }
-        out << "\\badcode\n";
-        out << QString::fromUtf8(file.readAll()).trimmed();
-        out << "\n\\endcode\n";
+        sourceCode(out, QString::fromUtf8(file.readAll()).trimmed());
     }
     out << "*/\n";
 }
 
-void generate(QTextStream &out, const QVector<Package> &packages, const QString &baseDirectory,
+void generate(QTextStream &out, const QList<Package> &packages, const QString &baseDirectory,
               LogLevel logLevel)
 {
     if (logLevel == VerboseLog)

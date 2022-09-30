@@ -29,8 +29,8 @@ OriginPolicyFetcher::OriginPolicyFetcher(
   DCHECK(callback_);
   DCHECK(!isolation_info.IsEmpty());
   // Policy requests shouldn't update frame origins on redirect.
-  DCHECK_EQ(net::IsolationInfo::RedirectMode::kUpdateNothing,
-            isolation_info.redirect_mode());
+  DCHECK_EQ(net::IsolationInfo::RequestType::kOther,
+            isolation_info.request_type());
   // While they use CredentialsMode::kOmit, so it shouldn't matter, policy
   // requests should have a null SiteForCookies.
   DCHECK(isolation_info.site_for_cookies().IsNull());
@@ -76,7 +76,7 @@ void OriginPolicyFetcher::FetchPolicy(mojom::URLLoaderFactory* factory) {
   std::unique_ptr<ResourceRequest> policy_request =
       std::make_unique<ResourceRequest>();
   policy_request->url = fetch_url_;
-  policy_request->request_initiator = isolation_info_.frame_origin().value();
+  policy_request->request_initiator = url::Origin::Create(fetch_url_);
   policy_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   policy_request->redirect_mode = network::mojom::RedirectMode::kError;
 

@@ -10,10 +10,8 @@
 #include <map>
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
 #include "components/domain_reliability/beacon.h"
 #include "components/domain_reliability/clear_mode.h"
 #include "components/domain_reliability/config.h"
@@ -28,6 +26,7 @@
 #include "net/base/load_timing_info.h"
 #include "net/base/net_error_details.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/network_isolation_key.h"
 #include "net/http/http_response_info.h"
 #include "net/socket/connection_attempts.h"
 
@@ -58,6 +57,7 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor
     static bool ShouldReportRequest(const RequestInfo& request);
 
     GURL url;
+    net::NetworkIsolationKey network_isolation_key;
     int net_error;
     net::HttpResponseInfo response_info;
     bool allow_credentials;
@@ -82,6 +82,9 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor
       const DomainReliabilityContext::UploadAllowedCallback&
           upload_allowed_callback,
       std::unique_ptr<MockableTime> time);
+
+  DomainReliabilityMonitor(const DomainReliabilityMonitor&) = delete;
+  DomainReliabilityMonitor& operator=(const DomainReliabilityMonitor&) = delete;
 
   ~DomainReliabilityMonitor() override;
 
@@ -120,11 +123,11 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor
   // as an always-true filter, indicating complete deletion.
   void ClearBrowsingData(
       DomainReliabilityClearMode mode,
-      const base::RepeatingCallback<bool(const GURL&)>& origin_filter);
+      const base::RepeatingCallback<bool(const url::Origin&)>& origin_filter);
 
   // Gets a Value containing data that can be formatted into a web page for
   // debugging purposes.
-  std::unique_ptr<base::Value> GetWebUIData() const;
+  base::Value GetWebUIData() const;
 
   // Returns pointer to the added context.
   const DomainReliabilityContext* AddContextForTesting(
@@ -153,8 +156,6 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor
   DomainReliabilityContextManager context_manager_;
 
   bool discard_uploads_set_;
-
-  DISALLOW_COPY_AND_ASSIGN(DomainReliabilityMonitor);
 };
 
 }  // namespace domain_reliability

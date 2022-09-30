@@ -4,7 +4,9 @@
 
 #include "third_party/blink/public/common/manifest/manifest_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/manifest/capture_links.mojom.h"
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom.h"
+#include "third_party/blink/public/mojom/manifest/handle_links.mojom.h"
 #include "url/gurl.h"
 
 namespace blink {
@@ -19,6 +21,9 @@ TEST(ManifestUtilTest, DisplayModeConversions) {
       {blink::mojom::DisplayMode::kMinimalUi, "minimal-ui"},
       {blink::mojom::DisplayMode::kStandalone, "standalone"},
       {blink::mojom::DisplayMode::kFullscreen, "fullscreen"},
+      {blink::mojom::DisplayMode::kWindowControlsOverlay,
+       "window-controls-overlay"},
+      {blink::mojom::DisplayMode::kTabbed, "tabbed"},
   };
 
   for (const ReversibleConversion& conversion : reversible_conversions) {
@@ -75,6 +80,62 @@ TEST(ManifestUtilTest, WebScreenOrientationLockTypeConversions) {
   // blink::WebScreenOrientationLockDefault if the string isn't known.
   EXPECT_EQ(device::mojom::ScreenOrientationLockType::DEFAULT,
             WebScreenOrientationLockTypeFromString("random"));
+}
+
+TEST(ManifestUtilTest, CaptureLinksFromString) {
+  EXPECT_EQ(blink::mojom::CaptureLinks::kUndefined, CaptureLinksFromString(""));
+  EXPECT_EQ(blink::mojom::CaptureLinks::kNone, CaptureLinksFromString("none"));
+  EXPECT_EQ(blink::mojom::CaptureLinks::kNewClient,
+            CaptureLinksFromString("new-client"));
+  EXPECT_EQ(blink::mojom::CaptureLinks::kExistingClientNavigate,
+            CaptureLinksFromString("existing-client-navigate"));
+
+  // CaptureLinksFromString() should work with non-lowercase strings.
+  EXPECT_EQ(blink::mojom::CaptureLinks::kNewClient,
+            CaptureLinksFromString("NEW-CLIENT"));
+
+  // CaptureLinksFromString() should return CaptureLinks::kUndefined if the
+  // string isn't known.
+  EXPECT_EQ(blink::mojom::CaptureLinks::kUndefined,
+            CaptureLinksFromString("unknown-value"));
+}
+
+TEST(ManifestUtilTest, HandleLinksFromString) {
+  EXPECT_EQ(blink::mojom::HandleLinks::kUndefined, HandleLinksFromString(""));
+  EXPECT_EQ(blink::mojom::HandleLinks::kAuto, HandleLinksFromString("auto"));
+  EXPECT_EQ(blink::mojom::HandleLinks::kPreferred,
+            HandleLinksFromString("preferred"));
+  EXPECT_EQ(blink::mojom::HandleLinks::kNotPreferred,
+            HandleLinksFromString("not-preferred"));
+
+  // HandleLinksFromString() should work with non-lowercase strings.
+  EXPECT_EQ(blink::mojom::HandleLinks::kAuto, HandleLinksFromString("AUTO"));
+
+  // HandleLinksFromString() should return HandleLinks::kUndefined if the string
+  // isn't known.
+  EXPECT_EQ(blink::mojom::HandleLinks::kUndefined,
+            HandleLinksFromString("unknown-value"));
+}
+
+TEST(ManifestUtilTest, RouteToFromString) {
+  using RouteTo = Manifest::LaunchHandler::RouteTo;
+  EXPECT_EQ(absl::nullopt, RouteToFromString(""));
+  EXPECT_EQ((ParsedRouteTo{RouteTo::kAuto}), RouteToFromString("auto"));
+  EXPECT_EQ((ParsedRouteTo{RouteTo::kNewClient}),
+            RouteToFromString("new-client"));
+  EXPECT_EQ((ParsedRouteTo{RouteTo::kExistingClientNavigate}),
+            RouteToFromString("existing-client-navigate"));
+  EXPECT_EQ((ParsedRouteTo{RouteTo::kExistingClientRetain}),
+            RouteToFromString("existing-client-retain"));
+  EXPECT_EQ((ParsedRouteTo{RouteTo::kAuto, true}),
+            RouteToFromString("existing-client"));
+
+  // Uppercase spelling.
+  EXPECT_EQ((ParsedRouteTo{RouteTo::kNewClient}),
+            RouteToFromString("NEW-CLIENT"));
+
+  // Unknown value.
+  EXPECT_EQ(absl::nullopt, RouteToFromString("unknown-value"));
 }
 
 }  // namespace blink

@@ -51,8 +51,8 @@ private:
     std::vector<float>  fAdvances;
     SkFontMetrics       fMetrics;
 
-    SkScalerContext* onCreateScalerContext(const SkScalerContextEffects&,
-                                           const SkDescriptor* desc) const override;
+    std::unique_ptr<SkScalerContext> onCreateScalerContext(const SkScalerContextEffects&,
+                                                           const SkDescriptor* desc) const override;
     void onFilterRec(SkScalerContextRec* rec) const override;
     void getGlyphToUnicodeMap(SkUnichar* glyphToUnicode) const override;
     std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override;
@@ -82,6 +82,7 @@ private:
     // noops
 
     void getPostScriptGlyphNames(SkString*) const override {}
+    bool onGlyphMaskNeedsCurrentColor() const override { return false; }
     int onGetVariationDesignPosition(SkFontArguments::VariationPosition::Coordinate[],
                                      int) const override { return 0; }
     int onGetVariationDesignParameters(SkFontParameters::Variation::Axis[],
@@ -201,10 +202,6 @@ public:
     }
 
 protected:
-    unsigned generateGlyphCount() override {
-        return this->userTF()->glyphCount();
-    }
-
     bool generateAdvance(SkGlyph* glyph) override {
         const SkUserTypeface* tf = this->userTF();
         auto advance = fMatrix.mapXY(tf->fAdvances[glyph->getGlyphID()], 0);
@@ -214,31 +211,33 @@ protected:
         return true;
     }
 
-    void generateMetrics(SkGlyph* glyph) override {
+    void generateMetrics(SkGlyph* glyph, SkArenaAlloc*) override {
         glyph->zeroMetrics();
         this->generateAdvance(glyph);
-        // Always generates from paths, so SkScalerContext::getMetrics will figure the bounds.
+        // Always generates from paths, so SkScalerContext::makeGlyph will figure the bounds.
     }
 
     void generateImage(const SkGlyph&) override { SK_ABORT("Should have generated from path."); }
 
-    bool generatePath(SkGlyphID glyph, SkPath* path) override {
-        this->userTF()->fPaths[glyph].transform(fMatrix, path);
+    bool generatePath(const SkGlyph& glyph, SkPath* path) override {
+        this->userTF()->fPaths[glyph.getGlyphID()].transform(fMatrix, path);
         return true;
     }
 
     void generateFontMetrics(SkFontMetrics* metrics) override {
-        auto s = fMatrix.mapXY(1, 1);
-        *metrics = scale_fontmetrics(this->userTF()->fMetrics, s.x(), s.y());
+        auto [sx, sy] = fMatrix.mapXY(1, 1);
+        *metrics = scale_fontmetrics(this->userTF()->fMetrics, sx, sy);
     }
 
 private:
     SkMatrix fMatrix;
 };
 
-SkScalerContext* SkUserTypeface::onCreateScalerContext(const SkScalerContextEffects& effects,
-                                                       const SkDescriptor*           desc) const {
-    return new SkUserScalerContext(sk_ref_sp(const_cast<SkUserTypeface*>(this)), effects, desc);
+std::unique_ptr<SkScalerContext> SkUserTypeface::onCreateScalerContext(
+    const SkScalerContextEffects& effects, const SkDescriptor* desc) const
+{
+    return std::make_unique<SkUserScalerContext>(
+            sk_ref_sp(const_cast<SkUserTypeface*>(this)), effects, desc);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -261,10 +260,7 @@ enum PVerb {
 static void compress_write(SkWStream* stream, const SkPath& path, int upem) {
     int pCount = 0;
     std::vector<PVerb> verbs;
-    for (auto t : SkPathPriv::Iterate(path)) {
-        auto v = std::get<0>(t);
-        auto p = std::get<1>(t);
-        auto w = std::get<2>(t);
+    for (auto [v, p, w] : SkPathPriv::Iterate(path)) {
         switch (v) {
             default: break;
             case SkPathVerb::kMove: verbs.push_back(kMove); pCount += 1; break;
@@ -303,9 +299,7 @@ static void compress_write(SkWStream* stream, const SkPath& path, int upem) {
         }
     };
 
-    for (auto t : SkPathPriv::Iterate(path)) {
-        auto v = std::get<0>(t);
-        auto p = std::get<1>(t);
+    for (auto [v, p, w] : SkPathPriv::Iterate(path)) {
         switch (v) {
             default: break;
             case SkPathVerb::kMove: write_pts(&p[0], 1); break;

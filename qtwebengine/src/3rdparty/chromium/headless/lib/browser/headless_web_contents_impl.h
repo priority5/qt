@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/observer_list.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
@@ -43,6 +44,9 @@ class HEADLESS_EXPORT HeadlessWebContentsImpl
       public content::RenderProcessHostObserver,
       public content::WebContentsObserver {
  public:
+  HeadlessWebContentsImpl(const HeadlessWebContentsImpl&) = delete;
+  HeadlessWebContentsImpl& operator=(const HeadlessWebContentsImpl&) = delete;
+
   ~HeadlessWebContentsImpl() override;
 
   static HeadlessWebContentsImpl* From(HeadlessWebContents* web_contents);
@@ -141,6 +145,11 @@ class HEADLESS_EXPORT HeadlessWebContentsImpl
       viz::BeginFrameArgs::kStartingFrameNumber;
   bool begin_frame_control_enabled_ = false;
 
+  raw_ptr<HeadlessBrowserContextImpl> browser_context_;  // Not owned.
+  // TODO(alexclarke): With OOPIF there may be more than one renderer, we need
+  // to fix this. See crbug.com/715924
+  raw_ptr<content::RenderProcessHost> render_process_host_;  // Not owned.
+
   class Delegate;
   std::unique_ptr<Delegate> web_contents_delegate_;
   std::unique_ptr<HeadlessWindowTreeHost> window_tree_host_;
@@ -151,17 +160,10 @@ class HEADLESS_EXPORT HeadlessWebContentsImpl
   bool devtools_target_ready_notification_sent_ = false;
   bool render_process_exited_ = false;
 
-  HeadlessBrowserContextImpl* browser_context_;      // Not owned.
-  // TODO(alexclarke): With OOPIF there may be more than one renderer, we need
-  // to fix this. See crbug.com/715924
-  content::RenderProcessHost* render_process_host_;  // Not owned.
-
   base::ObserverList<HeadlessWebContents::Observer>::Unchecked observers_;
 
   class PendingFrame;
   base::WeakPtr<PendingFrame> pending_frame_;
-
-  DISALLOW_COPY_AND_ASSIGN(HeadlessWebContentsImpl);
 };
 
 }  // namespace headless

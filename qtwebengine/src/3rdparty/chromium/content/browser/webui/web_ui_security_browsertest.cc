@@ -9,8 +9,9 @@
 #include "base/path_service.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
-#include "build/build_config.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -23,11 +24,13 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_paths.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/scoped_web_ui_controller_factory_registration.h"
 #include "content/public/test/test_frame_navigation_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -35,49 +38,36 @@
 #include "content/shell/browser/shell.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/base/url_util.h"
+#include "ui/webui/untrusted_web_ui_browsertest_util.h"
 #include "url/gurl.h"
 
 namespace content {
 
-namespace {
-
-// Loads a given module script. The promise resolves to true if the script loads
-// successfully, and false otherwise.
-const char kAddScriptModuleScript[] =
-    "new Promise((resolve, reject) => {\n"
-    "  const script = document.createElement('script');\n"
-    "  script.src = $1;\n"
-    "  script.type = 'module';\n"
-    "  script.onload = () => resolve(true);\n"
-    "  script.onerror = () => resolve(false);\n"
-    "  document.body.appendChild(script);\n"
-    "});\n";
-
-// Path to an existing chrome-untrusted://resources script.
-const char kSharedResourcesModuleJsPath[] = "resources/js/assert.m.js";
-
-}  // namespace
-
 class WebUISecurityTest : public ContentBrowserTest {
  public:
-  WebUISecurityTest() { WebUIControllerFactory::RegisterFactory(&factory_); }
+  WebUISecurityTest() = default;
 
-  ~WebUISecurityTest() override {
-    WebUIControllerFactory::UnregisterFactoryForTesting(&factory_);
-  }
+  WebUISecurityTest(const WebUISecurityTest&) = delete;
+  WebUISecurityTest& operator=(const WebUISecurityTest&) = delete;
 
   TestWebUIControllerFactory* factory() { return &factory_; }
+  ui::TestUntrustedWebUIControllerFactory& untrusted_factory() {
+    return untrusted_factory_;
+  }
 
  private:
   TestWebUIControllerFactory factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebUISecurityTest);
+  ScopedWebUIControllerFactoryRegistration factory_registration_{&factory_};
+  ui::TestUntrustedWebUIControllerFactory untrusted_factory_;
+  ScopedWebUIControllerFactoryRegistration untrusted_factory_registration_{
+      &untrusted_factory_};
 };
 
 // Verify chrome-untrusted:// have no bindings.
 IN_PROC_BROWSER_TEST_F(WebUISecurityTest, UntrustedNoBindings) {
   auto* web_contents = shell()->web_contents();
-  AddUntrustedDataSource(web_contents->GetBrowserContext(), "test-host");
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>("test-host"));
 
   const GURL untrusted_url(GetChromeUntrustedUIURL("test-host/title1.html"));
   EXPECT_TRUE(NavigateToURL(web_contents, untrusted_url));
@@ -142,8 +132,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest, WebUIReuse) {
   EXPECT_TRUE(NavigateToURL(shell(), test_url));
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   // Capture the SiteInstance and WebUI used in the first navigation to compare
   // with the ones used after the reload.
@@ -178,8 +168,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest, WebUISameSiteSubframe) {
   EXPECT_TRUE(NavigateToURL(shell(), test_url));
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
   EXPECT_EQ(1U, root->child_count());
 
   TestFrameNavigationObserver observer(root->child_at(0));
@@ -210,8 +200,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest, WebUICrossSiteSubframe) {
   EXPECT_TRUE(NavigateToURL(shell(), main_frame_url));
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
   EXPECT_EQ(1U, root->child_count());
   FrameTreeNode* child = root->child_at(0);
 
@@ -294,8 +284,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest, WebUIReuseInSubframe) {
   EXPECT_TRUE(NavigateToURL(shell(), main_frame_url));
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
   EXPECT_EQ(1U, root->child_count());
   FrameTreeNode* child = root->child_at(0);
 
@@ -304,8 +294,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest, WebUIReuseInSubframe) {
   scoped_refptr<SiteInstance> initial_site_instance =
       child->current_frame_host()->GetSiteInstance();
   WebUI* initial_web_ui = child->current_frame_host()->web_ui();
-  GlobalFrameRoutingId initial_rfh_id =
-      child->current_frame_host()->GetGlobalFrameRoutingId();
+  GlobalRenderFrameHostId initial_rfh_id =
+      child->current_frame_host()->GetGlobalId();
 
   GURL subframe_same_site_url(GetWebUIURL("web-ui/title2.html"));
   {
@@ -378,8 +368,7 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest, WebUIReuseInSubframe) {
   // is not possible to check the web_ui() for inequality, since in some runs
   // the memory in which two different WebUI instances of the same type are
   // placed is the same.
-  EXPECT_NE(initial_rfh_id,
-            child->current_frame_host()->GetGlobalFrameRoutingId());
+  EXPECT_NE(initial_rfh_id, child->current_frame_host()->GetGlobalId());
 }
 
 // Verify that if one WebUI does a window.open() to another WebUI, then the two
@@ -437,8 +426,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest, WebUIFailedNavigation) {
             shell()->web_contents()->GetMainFrame()->GetEnabledBindings());
 
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   GURL webui_error_url(GetWebUIURL("web-ui/error"));
   EXPECT_FALSE(NavigateToURL(shell(), webui_error_url));
@@ -463,8 +452,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
                        DisallowResourceRequestToChromeUntrusted) {
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL web_url(embedded_test_server()->GetURL("/title2.html"));
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         "test-host");
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>("test-host"));
 
   EXPECT_TRUE(NavigateToURL(shell(), web_url));
   EXPECT_EQ(web_url, shell()->web_contents()->GetLastCommittedURL());
@@ -492,50 +481,46 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
   }
 }
 
-#if defined(OS_ANDROID)
-// TODO(https://crbug.com/1085196): This sometimes fails on Android bots.
-#define MAYBE_ChromeUntrustedFramesCanUseChromeUntrustedResources \
-  DISABLED_ChromeUntrustedFramesCanUseChromeUntrustedResources
-#else
-#define MAYBE_ChromeUntrustedFramesCanUseChromeUntrustedResources \
-  ChromeUntrustedFramesCanUseChromeUntrustedResources
-#endif  // defined(OS_ANDROID)
-IN_PROC_BROWSER_TEST_F(
-    WebUISecurityTest,
-    MAYBE_ChromeUntrustedFramesCanUseChromeUntrustedResources) {
-  // Add a DataSource whose CSP allows chrome-untrusted://resources scripts.
-  TestUntrustedDataSourceCSP csp;
-  csp.script_src = "script-src chrome-untrusted://resources;";
-  csp.no_trusted_types = true;
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         "test-host", csp);
-  GURL main_frame_url(GetChromeUntrustedUIURL("test-host/title1.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_frame_url));
-
-  // A chrome-untrusted://resources resources should load successfully.
-  GURL script_url = GetChromeUntrustedUIURL(kSharedResourcesModuleJsPath);
-  EXPECT_TRUE(EvalJs(shell(), JsReplace(kAddScriptModuleScript, script_url),
-                     EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1 /* world_id */)
-                  .ExtractBool());
-}
-
-// Verify that websites cannot access chrome-untrusted://resources scripts.
-IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
-                       DisallowChromeUntrustedResourcesFromWebFrame) {
+// Verify chrome-untrusted://resources can't be loaded from the Web.
+IN_PROC_BROWSER_TEST_F(WebUISecurityTest, DisallowWebRequestToSharedResources) {
   ASSERT_TRUE(embedded_test_server()->Start());
-  GURL main_frame_url(embedded_test_server()->GetURL("/title1.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_frame_url));
+  ASSERT_TRUE(
+      NavigateToURL(shell(), embedded_test_server()->GetURL("/title2.html")));
 
-  // A chrome-untrusted://resources resources should fail to load.
-  GURL script_url = GetChromeUntrustedUIURL(kSharedResourcesModuleJsPath);
-  EXPECT_FALSE(EvalJs(shell(), JsReplace(kAddScriptModuleScript, script_url),
-                      EXECUTE_SCRIPT_DEFAULT_OPTIONS, 1 /* world_id */)
-                   .ExtractBool());
+  const char kLoadResourceScript[] =
+      "new Promise((resolve) => {"
+      "  const script = document.createElement('script');"
+      "  script.onload = () => {"
+      "    resolve('Script load should have failed');"
+      "  };"
+      "  script.onerror = (e) => {"
+      "    resolve('Load failed');"
+      "  };"
+      "  script.src = $1;"
+      "  document.body.appendChild(script);"
+      "});";
+
+  GURL shared_resource_url =
+      GURL("chrome-untrusted://resources/mojo/mojo/public/js/bindings.js");
+  EXPECT_EQ("Load failed", EvalJs(shell(), JsReplace(kLoadResourceScript,
+                                                     shared_resource_url)));
 }
 
-// Verify that Trusted Types will block assignment to a dangerous sink
-// on WebUI by default.
-IN_PROC_BROWSER_TEST_F(WebUISecurityTest, BlockSinkAssignmentWithTrustedTypes) {
+class WebUISecurityTestWithWebUIReportOnlyTrustedTypesEnabled
+    : public WebUISecurityTest {
+ public:
+  WebUISecurityTestWithWebUIReportOnlyTrustedTypesEnabled() {
+    feature_list_.InitAndEnableFeature(features::kWebUIReportOnlyTrustedTypes);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Verify Report-Only Trusted Types won't block assignment to a dangerous sink,
+// but logs warning
+IN_PROC_BROWSER_TEST_F(WebUISecurityTestWithWebUIReportOnlyTrustedTypesEnabled,
+                       DoNotBlockSinkAssignmentOnReportOnlyTrustedTypes) {
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL test_url(GetWebUIURL("web-ui/title1.html"));
 
@@ -637,8 +622,8 @@ EvalJsResult PerformFetch(Shell* shell,
 IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
                        DisallowWebPageFetchRequestToChromeUntrusted) {
   const GURL untrusted_url = GURL("chrome-untrusted://test/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url.host());
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url.host()));
   ASSERT_TRUE(embedded_test_server()->Start());
 
   const GURL web_url = embedded_test_server()->GetURL("/title2.html");
@@ -668,8 +653,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
 // Verify a chrome-untrusted:// document can fetch itself.
 IN_PROC_BROWSER_TEST_F(WebUISecurityTest, ChromeUntrustedFetchRequestToSelf) {
   const GURL untrusted_url = GURL("chrome-untrusted://test/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url.host());
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url.host()));
 
   EXPECT_TRUE(NavigateToURL(shell(), untrusted_url));
   EXPECT_EQ("success",
@@ -683,8 +668,9 @@ IN_PROC_BROWSER_TEST_F(
     WebUISecurityTest,
     DisallowCrossOriginFetchRequestToChromeUntrustedByDefault) {
   const GURL untrusted_url1 = GURL("chrome-untrusted://test1/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url1.host());
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url1.host()));
+
   const GURL untrusted_url2 = GURL("chrome-untrusted://test2/title2.html");
   URLDataSource::Add(
       shell()->web_contents()->GetBrowserContext(),
@@ -725,11 +711,12 @@ IN_PROC_BROWSER_TEST_F(
 // chrome-untrusted:// page succeeds if Content Security Policy allows it.
 IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
                        CrossOriginFetchRequestToChromeUntrusted) {
-  TestUntrustedDataSourceCSP csp;
-  csp.default_src = "default-src chrome-untrusted://test2;";
+  TestUntrustedDataSourceHeaders headers;
+  headers.default_src = "default-src chrome-untrusted://test2;";
   const GURL untrusted_url1 = GURL("chrome-untrusted://test1/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url1.host(), csp);
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url1.host(),
+                                                     headers));
 
   const GURL untrusted_url2 = GURL("chrome-untrusted://test2/title2.html");
   URLDataSource::Add(
@@ -747,11 +734,12 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
 // for chrome:// scheme, even if CSP allows this.
 IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
                        DisallowChromeUntrustedFetchRequestToChrome) {
-  TestUntrustedDataSourceCSP csp;
-  csp.default_src = "default-src chrome://webui;";
+  TestUntrustedDataSourceHeaders headers;
+  headers.default_src = "default-src chrome://webui;";
   const GURL untrusted_url = GURL("chrome-untrusted://test1/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url.host(), csp);
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url.host(),
+                                                     headers));
 
   const GURL chrome_url = GURL("chrome://webui/title2.html");
 
@@ -762,10 +750,11 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
     EXPECT_EQ("Failed to fetch",
               PerformFetch(shell(), chrome_url, FetchMode::CORS));
     console_observer.Wait();
-    EXPECT_EQ(console_observer.GetMessageAt(0),
-              base::StringPrintf("Fetch API cannot load %s. URL scheme must be "
-                                 "\"http\" or \"https\" for CORS request.",
-                                 chrome_url.spec().c_str()));
+    EXPECT_EQ(
+        console_observer.GetMessageAt(0),
+        base::StringPrintf(
+            "Fetch API cannot load %s. URL scheme \"chrome\" is not supported.",
+            chrome_url.spec().c_str()));
   }
 
   {
@@ -803,8 +792,8 @@ EvalJsResult PerformXHRRequest(Shell* shell, const GURL& xhr_url) {
 IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
                        DisallowWebPageXHRRequestToChromeUntrusted) {
   const GURL untrusted_url = GURL("chrome-untrusted://test/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url.host());
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url.host()));
   ASSERT_TRUE(embedded_test_server()->Start());
   const GURL web_url = embedded_test_server()->GetURL("/title2.html");
 
@@ -822,8 +811,8 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
 IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
                        AllowChromeUntrustedXHRRequestToSelf) {
   const GURL untrusted_url = GURL("chrome-untrusted://test/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url.host());
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url.host()));
 
   EXPECT_TRUE(NavigateToURL(shell(), untrusted_url));
   EXPECT_EQ("success", PerformXHRRequest(shell(), untrusted_url));
@@ -836,8 +825,9 @@ IN_PROC_BROWSER_TEST_F(
     WebUISecurityTest,
     DisallowCrossOriginXHRRequestToChromeUntrustedByDefault) {
   const GURL untrusted_url1 = GURL("chrome-untrusted://test1/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url1.host());
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url1.host()));
+
   const GURL untrusted_url2 = GURL("chrome-untrusted://test2/");
   URLDataSource::Add(
       shell()->web_contents()->GetBrowserContext(),
@@ -863,11 +853,13 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(
     WebUISecurityTest,
     CrossOriginXHRRequestToChromeUntrustedIfContenSecurityPolicyAllowsIt) {
-  TestUntrustedDataSourceCSP csp;
-  csp.default_src = "default-src chrome-untrusted://test2;";
+  TestUntrustedDataSourceHeaders headers;
+  headers.default_src = "default-src chrome-untrusted://test2;";
   const GURL untrusted_url1 = GURL("chrome-untrusted://test1/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url1.host(), csp);
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url1.host(),
+                                                     headers));
+
   const GURL untrusted_url2 = GURL("chrome-untrusted://test2/");
   URLDataSource::Add(
       shell()->web_contents()->GetBrowserContext(),
@@ -881,11 +873,12 @@ IN_PROC_BROWSER_TEST_F(
 // blocked, even if CSP allows this.
 IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
                        DisallowChromeUntrustedXHRRequestToChrome) {
-  TestUntrustedDataSourceCSP csp;
-  csp.default_src = "default-src chrome://webui;";
+  TestUntrustedDataSourceHeaders headers;
+  headers.default_src = "default-src chrome://webui;";
   const GURL untrusted_url = GURL("chrome-untrusted://test1/title1.html");
-  AddUntrustedDataSource(shell()->web_contents()->GetBrowserContext(),
-                         untrusted_url.host(), csp);
+  untrusted_factory().add_web_ui_config(
+      std::make_unique<ui::TestUntrustedWebUIConfig>(untrusted_url.host(),
+                                                     headers));
 
   const GURL chrome_url = GURL("chrome://webui/title2.html");
 
@@ -897,6 +890,49 @@ IN_PROC_BROWSER_TEST_F(WebUISecurityTest,
   EXPECT_EQ(console_observer.GetMessageAt(0),
             base::StringPrintf("Not allowed to load local resource: %s",
                                chrome_url.spec().c_str()));
+}
+
+class WebUIBrowserSideSecurityTest : public WebUISecurityTest {
+ public:
+  WebUIBrowserSideSecurityTest() = default;
+
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    // Disable Web Security to skip renderer-side checks so that we can test
+    // browser-side checks.
+    command_line->AppendSwitch(switches::kDisableWebSecurity);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WebUIBrowserSideSecurityTest,
+                       DenyWebAccessToSharedResources) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  ASSERT_TRUE(
+      NavigateToURL(shell(), embedded_test_server()->GetURL("/title2.html")));
+
+  const char kLoadResourceScript[] =
+      "new Promise((resolve) => {"
+      "  const script = document.createElement('script');"
+      "  script.onload = () => {"
+      "    resolve('Script load should have failed');"
+      "  };"
+      "  script.onerror = (e) => {"
+      "    resolve('Load failed');"
+      "  };"
+      "  script.src = $1;"
+      "  document.body.appendChild(script);"
+      "});";
+
+  DevToolsInspectorLogWatcher log_watcher(shell()->web_contents());
+
+  GURL shared_resource_url =
+      GURL("chrome-untrusted://resources/mojo/mojo/public/js/bindings.js");
+  EXPECT_EQ("Load failed", EvalJs(shell(), JsReplace(kLoadResourceScript,
+                                                     shared_resource_url)));
+  log_watcher.FlushAndStopWatching();
+
+  EXPECT_EQ(log_watcher.last_message(),
+            "Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME");
 }
 
 }  // namespace content

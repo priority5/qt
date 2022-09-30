@@ -10,18 +10,15 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/values.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
 #include "components/services/storage/public/mojom/indexed_db_control.mojom.h"
 #include "content/public/browser/web_ui_controller.h"
+#include "content/public/browser/web_ui_message_handler.h"
 
-namespace base {
-class ListValue;
-}
-
-namespace url {
-class Origin;
+namespace blink {
+class StorageKey;
 }
 
 namespace download {
@@ -34,41 +31,60 @@ namespace content {
 class IndexedDBInternalsUI : public WebUIController {
  public:
   explicit IndexedDBInternalsUI(WebUI* web_ui);
+
+  IndexedDBInternalsUI(const IndexedDBInternalsUI&) = delete;
+  IndexedDBInternalsUI& operator=(const IndexedDBInternalsUI&) = delete;
+
   ~IndexedDBInternalsUI() override;
 
  private:
-  void GetAllOrigins(const base::ListValue* args);
-  void OnOriginsReady(const base::Value& origins, const base::FilePath& path);
+  base::WeakPtrFactory<IndexedDBInternalsUI> weak_factory_{this};
+};
 
-  void DownloadOriginData(const base::ListValue* args);
-  void OnDownloadDataReady(const base::FilePath& partition_path,
-                           const url::Origin& origin,
+class IndexedDBInternalsHandler : public WebUIMessageHandler {
+ public:
+  IndexedDBInternalsHandler();
+
+  IndexedDBInternalsHandler(const IndexedDBInternalsHandler&) = delete;
+  IndexedDBInternalsHandler& operator=(const IndexedDBInternalsHandler&) =
+      delete;
+
+  ~IndexedDBInternalsHandler() override;
+
+  // WebUIMessageHandler implementation.
+  void RegisterMessages() override;
+  void OnJavascriptDisallowed() override;
+
+ private:
+  void GetAllStorageKeys(const base::Value::List& args);
+  void OnStorageKeysReady(const base::Value& storage_keys,
+                          const base::FilePath& path);
+
+  void DownloadStorageKeyData(const base::Value::List& args);
+  void OnDownloadDataReady(const std::string& callback_id,
                            uint64_t connection_count,
                            bool success,
                            const base::FilePath& temp_path,
                            const base::FilePath& zip_path);
-  void OnDownloadStarted(const base::FilePath& partition_path,
-                         const url::Origin& origin,
-                         const base::FilePath& temp_path,
+  void OnDownloadStarted(const base::FilePath& temp_path,
+                         const std::string& callback_id,
                          size_t connection_count,
                          download::DownloadItem* item,
                          download::DownloadInterruptReason interrupt_reason);
 
-  void ForceCloseOrigin(const base::ListValue* args);
-  void OnForcedClose(const base::FilePath& partition_path,
-                     const url::Origin& origin,
-                     uint64_t connection_count);
+  void ForceCloseStorageKey(const base::Value::List& args);
+  void OnForcedClose(const std::string& callback_id, uint64_t connection_count);
 
-  bool GetOriginControl(const base::FilePath& path,
-                        const url::Origin& origin,
-                        storage::mojom::IndexedDBControl** control);
-  bool GetOriginData(const base::ListValue* args,
-                     base::FilePath* path,
-                     url::Origin* origin,
-                     storage::mojom::IndexedDBControl** control);
+  bool GetStorageKeyControl(const base::FilePath& path,
+                            const blink::StorageKey& storage_key,
+                            storage::mojom::IndexedDBControl** control);
+  bool GetStorageKeyData(const base::Value::List& args,
+                         std::string* callback_id,
+                         base::FilePath* path,
+                         blink::StorageKey* storage_key,
+                         storage::mojom::IndexedDBControl** control);
 
-  base::WeakPtrFactory<IndexedDBInternalsUI> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBInternalsUI);
+  base::WeakPtrFactory<IndexedDBInternalsHandler> weak_factory_{this};
 };
 
 }  // namespace content

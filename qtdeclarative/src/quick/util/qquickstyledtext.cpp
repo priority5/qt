@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <QStack>
 #include <QVector>
@@ -45,6 +9,7 @@
 #include <qmath.h>
 #include "qquickstyledtext_p.h"
 #include <QQmlContext>
+#include <QtGui/private/qtexthtmlparser_p.h>
 
 Q_LOGGING_CATEGORY(lcStyledText, "qt.quick.styledtext")
 
@@ -106,8 +71,8 @@ public:
     bool parseUnorderedListAttributes(const QChar *&ch, const QString &textIn);
     bool parseAnchorAttributes(const QChar *&ch, const QString &textIn, QTextCharFormat &format);
     void parseImageAttributes(const QChar *&ch, const QString &textIn, QString &textOut);
-    QPair<QStringRef,QStringRef> parseAttribute(const QChar *&ch, const QString &textIn);
-    QStringRef parseValue(const QChar *&ch, const QString &textIn);
+    QPair<QStringView,QStringView> parseAttribute(const QChar *&ch, const QString &textIn);
+    QStringView parseValue(const QChar *&ch, const QString &textIn);
     void setFontSize(int size, QTextCharFormat &format);
 
     inline void skipSpace(const QChar *&ch) {
@@ -196,7 +161,7 @@ void QQuickStyledTextPrivate::parse()
     QStack<QTextCharFormat> formatStack;
 
     QString drawText;
-    drawText.reserve(text.count());
+    drawText.reserve(text.size());
 
     updateImagePositions = !imgTags->isEmpty();
 
@@ -300,7 +265,7 @@ void QQuickStyledTextPrivate::appendText(const QString &textIn, int start, int l
 {
     if (prependSpace)
         textOut.append(space);
-    textOut.append(QStringRef(&textIn, start, length));
+    textOut.append(QStringView(textIn).mid(start, length));
     prependSpace = false;
     hasSpace = false;
     hasNewLine = false;
@@ -330,7 +295,7 @@ bool QQuickStyledTextPrivate::parseTag(const QChar *&ch, const QString &textIn, 
         if (*ch == greaterThan) {
             if (tagLength == 0)
                 return false;
-            QStringRef tag(&textIn, tagStart, tagLength);
+            auto tag = QStringView(textIn).mid(tagStart, tagLength);
             const QChar char0 = tag.at(0);
             if (char0 == QLatin1Char('b')) {
                 if (tagLength == 1) {
@@ -357,7 +322,7 @@ bool QQuickStyledTextPrivate::parseTag(const QChar *&ch, const QString &textIn, 
                     preFormat = true;
                     if (!hasNewLine)
                         textOut.append(QChar::LineSeparator);
-                    format.setFontFamily(QString::fromLatin1("Courier New,courier"));
+                    format.setFontFamilies(QStringList {QString::fromLatin1("Courier New"), QString::fromLatin1("courier")});
                     format.setFontFixedPitch(true);
                     return true;
                 }
@@ -439,7 +404,7 @@ bool QQuickStyledTextPrivate::parseTag(const QChar *&ch, const QString &textIn, 
             return false;
         } else if (ch->isSpace()) {
             // may have params.
-            QStringRef tag(&textIn, tagStart, tagLength);
+            auto tag = QStringView(textIn).mid(tagStart, tagLength);
             if (tag == QLatin1String("font"))
                 return parseFontAttributes(ch, textIn, format);
             if (tag == QLatin1String("ol")) {
@@ -477,7 +442,7 @@ bool QQuickStyledTextPrivate::parseCloseTag(const QChar *&ch, const QString &tex
         if (*ch == greaterThan) {
             if (tagLength == 0)
                 return false;
-            QStringRef tag(&textIn, tagStart, tagLength);
+            auto tag = QStringView(textIn).mid(tagStart, tagLength);
             const QChar char0 = tag.at(0);
             hasNewLine = false;
             if (char0 == QLatin1Char('b')) {
@@ -557,22 +522,15 @@ void QQuickStyledTextPrivate::parseEntity(const QChar *&ch, const QString &textI
     int entityLength = 0;
     while (!ch->isNull()) {
         if (*ch == QLatin1Char(';')) {
-            QStringRef entity(&textIn, entityStart, entityLength);
-            if (entity == QLatin1String("gt"))
-                textOut += QChar(62);
-            else if (entity == QLatin1String("lt"))
-                textOut += QChar(60);
-            else if (entity == QLatin1String("amp"))
-                textOut += QChar(38);
-            else if (entity == QLatin1String("quot"))
-                textOut += QChar(34);
-            else if (entity == QLatin1String("nbsp"))
-                textOut += QChar(QChar::Nbsp);
+            auto entity = QStringView(textIn).mid(entityStart, entityLength);
+            const QString parsedEntity = QTextHtmlParser::parseEntity(entity);
+            if (!parsedEntity.isNull())
+                textOut += parsedEntity;
             else
                 qCWarning(lcStyledText) << "StyledText doesn't support entity" << entity;
             return;
         } else if (*ch == QLatin1Char(' ')) {
-            QStringRef entity(&textIn, entityStart - 1, entityLength + 1);
+            auto entity = QStringView(textIn).mid(entityStart - 1, entityLength + 1);
             textOut += entity + *ch;
             return;
         }
@@ -584,15 +542,15 @@ void QQuickStyledTextPrivate::parseEntity(const QChar *&ch, const QString &textI
 bool QQuickStyledTextPrivate::parseFontAttributes(const QChar *&ch, const QString &textIn, QTextCharFormat &format)
 {
     bool valid = false;
-    QPair<QStringRef,QStringRef> attr;
+    QPair<QStringView,QStringView> attr;
     do {
         attr = parseAttribute(ch, textIn);
         if (attr.first == QLatin1String("color")) {
             valid = true;
-            format.setForeground(QColor(attr.second.toString()));
+            format.setForeground(QColor::fromString(attr.second));
         } else if (attr.first == QLatin1String("size")) {
             valid = true;
-            int size = attr.second.toString().toInt();
+            int size = attr.second.toInt();
             if (attr.second.at(0) == QLatin1Char('-') || attr.second.at(0) == QLatin1Char('+'))
                 size += 3;
             if (size >= 1 && size <= 7)
@@ -612,7 +570,7 @@ bool QQuickStyledTextPrivate::parseOrderedListAttributes(const QChar *&ch, const
     listItem.type = Ordered;
     listItem.format = Decimal;
 
-    QPair<QStringRef,QStringRef> attr;
+    QPair<QStringView,QStringView> attr;
     do {
         attr = parseAttribute(ch, textIn);
         if (attr.first == QLatin1String("type")) {
@@ -641,7 +599,7 @@ bool QQuickStyledTextPrivate::parseUnorderedListAttributes(const QChar *&ch, con
     listItem.type = Unordered;
     listItem.format = Bullet;
 
-    QPair<QStringRef,QStringRef> attr;
+    QPair<QStringView,QStringView> attr;
     do {
         attr = parseAttribute(ch, textIn);
         if (attr.first == QLatin1String("type")) {
@@ -661,7 +619,7 @@ bool QQuickStyledTextPrivate::parseAnchorAttributes(const QChar *&ch, const QStr
 {
     bool valid = false;
 
-    QPair<QStringRef,QStringRef> attr;
+    QPair<QStringView,QStringView> attr;
     do {
         attr = parseAttribute(ch, textIn);
         if (attr.first == QLatin1String("href")) {
@@ -686,7 +644,7 @@ void QQuickStyledTextPrivate::parseImageAttributes(const QChar *&ch, const QStri
         QQuickStyledTextImgTag *image = new QQuickStyledTextImgTag;
         image->position = textOut.length() + (trailingSpace ? 0 : 1);
 
-        QPair<QStringRef,QStringRef> attr;
+        QPair<QStringView,QStringView> attr;
         do {
             attr = parseAttribute(ch, textIn);
             if (attr.first == QLatin1String("src")) {
@@ -731,7 +689,7 @@ void QQuickStyledTextPrivate::parseImageAttributes(const QChar *&ch, const QStri
         image->position = textOut.length() + (trailingSpace ? 0 : 1);
         imgWidth = image->size.width();
         image->offset = -std::fmod(imgWidth, spaceWidth) / 2.0;
-        QPair<QStringRef,QStringRef> attr;
+        QPair<QStringView,QStringView> attr;
         do {
             attr = parseAttribute(ch, textIn);
         } while (!ch->isNull() && !attr.first.isEmpty());
@@ -744,7 +702,7 @@ void QQuickStyledTextPrivate::parseImageAttributes(const QChar *&ch, const QStri
     textOut += padding + QLatin1Char(' ');
 }
 
-QPair<QStringRef,QStringRef> QQuickStyledTextPrivate::parseAttribute(const QChar *&ch, const QString &textIn)
+QPair<QStringView,QStringView> QQuickStyledTextPrivate::parseAttribute(const QChar *&ch, const QString &textIn)
 {
     skipSpace(ch);
 
@@ -763,10 +721,10 @@ QPair<QStringRef,QStringRef> QQuickStyledTextPrivate::parseAttribute(const QChar
             ++ch;
             if (!attrLength)
                 break;
-            QStringRef attr(&textIn, attrStart, attrLength);
-            QStringRef val = parseValue(ch, textIn);
+            auto attr = QStringView(textIn).mid(attrStart, attrLength);
+            QStringView val = parseValue(ch, textIn);
             if (!val.isEmpty())
-                return QPair<QStringRef,QStringRef>(attr,val);
+                return QPair<QStringView,QStringView>(attr,val);
             break;
         } else {
             ++attrLength;
@@ -774,10 +732,10 @@ QPair<QStringRef,QStringRef> QQuickStyledTextPrivate::parseAttribute(const QChar
         ++ch;
     }
 
-    return QPair<QStringRef,QStringRef>();
+    return QPair<QStringView,QStringView>();
 }
 
-QStringRef QQuickStyledTextPrivate::parseValue(const QChar *&ch, const QString &textIn)
+QStringView QQuickStyledTextPrivate::parseValue(const QChar *&ch, const QString &textIn)
 {
     int valStart = ch - textIn.constData();
     int valLength = 0;
@@ -786,10 +744,10 @@ QStringRef QQuickStyledTextPrivate::parseValue(const QChar *&ch, const QString &
         ++ch;
     }
     if (ch->isNull())
-        return QStringRef();
+        return QStringView();
     ++ch; // skip quote
 
-    return QStringRef(&textIn, valStart, valLength);
+    return QStringView(textIn).mid(valStart, valLength);
 }
 
 QString QQuickStyledTextPrivate::toAlpha(int value, bool upper)

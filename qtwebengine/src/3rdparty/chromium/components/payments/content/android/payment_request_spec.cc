@@ -85,6 +85,10 @@ void PaymentRequestSpec::RecomputeSpecForDetails(JNIEnv* env) {
   spec_->RecomputeSpecForDetails();
 }
 
+bool PaymentRequestSpec::IsSecurePaymentConfirmationRequested(JNIEnv* env) {
+  return spec_->IsSecurePaymentConfirmationRequested();
+}
+
 base::android::ScopedJavaLocalRef<jstring>
 PaymentRequestSpec::SelectedShippingOptionError(JNIEnv* env) {
   return base::android::ConvertUTF16ToJavaString(
@@ -95,6 +99,12 @@ base::android::ScopedJavaLocalRef<jbyteArray>
 PaymentRequestSpec::GetPaymentDetails(JNIEnv* env) {
   return base::android::ToJavaByteArray(
       env, mojom::PaymentDetails::Serialize(&spec_->details_ptr()));
+}
+
+base::android::ScopedJavaLocalRef<jbyteArray>
+PaymentRequestSpec::GetPaymentOptions(JNIEnv* env) {
+  return base::android::ToJavaByteArray(
+      env, mojom::PaymentOptions::Serialize(&spec_->payment_options()));
 }
 
 base::android::ScopedJavaLocalRef<jobjectArray>

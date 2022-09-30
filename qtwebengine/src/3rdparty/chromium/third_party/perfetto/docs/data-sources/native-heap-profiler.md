@@ -70,7 +70,7 @@ For the full arguments list see the
 
 #### Using the Recording page of Perfetto UI
 
-You can also use the [Perfetto UI](https://ui.perfetto.dev/#!/record?p=memory)
+You can also use the [Perfetto UI](https://ui.perfetto.dev/#!/record/memory)
 to record heapprofd profiles. Tick "Heap profiling" in the trace configuration,
 enter the processes you want to target, click "Add Device" to pair your phone,
 and record profiles straight from your browser. This is also possible on
@@ -116,6 +116,8 @@ probability of being selected as a sample, and the corresponding callstack
 gets attributed the complete n bytes. For more accuracy, allocations larger than
 the sampling interval bypass the sampling logic and are recorded with their true
 size.
+See the [heapprofd Sampling](/docs/design-docs/heapprofd-sampling) document for
+details.
 
 ## Startup profiling
 
@@ -142,9 +144,13 @@ message. This is not surfaced in the converted pprof compatible proto.
 ## Runtime profiling
 
 When a profiling session is started, all matching processes (by name or PID)
-are enumerated and profiling is enabled. The resulting profile will contain
-all allocations done between the beginning and the end of the profiling
-session.
+are enumerated and are signalled to request profiling. Profiling isn't actually
+enabled until a few hundred milliseconds after the next allocation that is
+done by the application. If the application is idle when profiling is
+requested, and then does a burst of allocations, these may be missed.
+
+The resulting profile will contain all allocations done between when profiling
+is enabled, and the end of the profiling session.
 
 The resulting [ProfilePacket] will have `from_startup` set to false in the
 corresponding `ProcessHeapSamples` message. This does not get surfaced in the
@@ -233,8 +239,6 @@ enumerated in the output directory.
 
 ## Symbolization
 
-NOTE: Symbolization is currently only available on Linux and MacOS.
-
 ### Set up llvm-symbolizer
 
 You only need to do this once.
@@ -295,6 +299,26 @@ to `index`, and the symbolizer will recursively search the given directory for
 an ELF file with the given build id. This way, you will not have to worry
 about correct filenames.
 
+## Deobfuscation
+
+If your profile contains obfuscated Java methods (like `fsd.a`), you can
+provide a deobfuscation map to turn them back into human readable.
+To do so, use the `PERFETTO_PROGUARD_MAP` environment variable, using the
+format `packagename=filename[:packagename=filename...]`, e.g.
+`PERFETTO_PROGUARD_MAP=com.example.pkg1=foo.txt:com.example.pkg2=bar.txt`.
+All tools
+(traceconv, trace_processor_shell, the heap_profile script) support specifying
+the `PERFETTO_PROGUARD_MAP` as an environment variable.
+
+You can get a deobfuscation map for your trace using
+`tools/traceconv deobfuscate`. Then concatenate the resulting file to your
+trace to get a deobfuscated version of it.
+
+```
+PERFETTO_PROGUARD_MAP=com.example.pkg tools/traceconv deobfuscate ${TRACE} > deobfuscation_map
+cat ${TRACE} deobfuscation_map > deobfuscated_trace
+```
+
 ## Troubleshooting
 
 ### Buffer overrun
@@ -309,7 +333,7 @@ accuracy in the resulting profile) by passing `--interval=16000` or higher.
 ### Profile is empty
 
 Check whether your target process is eligible to be profiled by consulting
-[Target processes](#target-processes) above.
+[Target processes](#heapprofd-targets) above.
 
 Also check the [Known Issues](#known-issues).
 
@@ -363,20 +387,76 @@ $ readelf -S file.so | grep "gnu_debugdata\|eh_frame\|debug_frame"
 If this does not show one or more of the sections, change your build system
 to not strip them.
 
+## (non-Android) Linux support
+
+NOTE: Do not use this for production purposes.
+
+You can use a standalone library to profile memory allocations on Linux.
+First [build Perfetto](/docs/contributing/build-instructions.md). You only need
+to do this once.
+
+```
+tools/build_all_configs.py
+ninja -C out/linux_clang_release
+```
+
+Then, run traced
+
+```
+out/linux_clang_release/traced
+```
+
+Start the profile (e.g. targeting trace_processor_shell)
+
+```
+tools/heap_profile -n trace_processor_shell --print-config  | \
+out/linux_clang_release/perfetto \
+  -c - --txt \
+  -o ~/heapprofd-trace
+```
+
+Finally, run your target (e.g. trace_processor_shell) with LD_PRELOAD
+
+```
+LD_PRELOAD=out/linux_clang_release/libheapprofd_glibc_preload.so out/linux_clang_release/trace_processor_shell <trace>
+```
+
+Then, Ctrl-C the Perfetto invocation and upload ~/heapprofd-trace to the
+[Perfetto UI](https://ui.perfetto.dev).
+
+NOTE: by default, heapprofd lazily initalizes to avoid blocking your program's
+main thread. However, if your program makes memory allocations on startup,
+these can be missed. To avoid this from happening, set the enironment variable
+`PERFETTO_HEAPPROFD_BLOCKING_INIT=1`; on the first malloc, your program will
+be blocked until heapprofd initializes fully but means every allocation will
+be correctly tracked.
+
 ## Known Issues
 
-### Android 11
+### {#known-issues-android11} Android 11
 
 * 32-bit programs cannot be targeted on 64-bit devices.
 * Setting `sampling_interval_bytes` to 0 crashes the target process.
   This is an invalid config that should be rejected instead.
+* For startup profiles, some frame names might be missing. This will be
+  resolved in Android 12.
+* `Failed to send control socket byte.` is displayed in logcat at the end of
+  every profile. This is benign.
+* The object count may be incorrect in `dump_at_max` profiles.
+* Choosing a low shared memory buffer size and `block_client` mode might
+  lock up the target process.
 
-### Android 10
-
+### {#known-issues-android10} Android 10
+* Function names in libraries with load bias might be incorrect. Use
+  [offline symbolization](#symbolization) to resolve this issue.
+* For startup profiles, some frame names might be missing. This will be
+  resolved in Android 12.
+* 32-bit programs cannot be targeted on 64-bit devices.
+* x86 / x86_64 platforms are not supported. This includes the Android
+_Cuttlefish_.
+  emulator.
 * On ARM32, the bottom-most frame is always `ERROR 2`. This is harmless and
   the callstacks are still complete.
-* x86 platforms are not supported. This includes the Android _Cuttlefish_
-  emulator.
 * If heapprofd is run standalone (by running `heapprofd` in a root shell, rather
   than through init), `/dev/socket/heapprofd` get assigned an incorrect SELinux
   domain. You will not be able to profile any processes unless you disable
@@ -386,9 +466,13 @@ to not strip them.
   memory in the child process will prematurely end the profile.
   `java.lang.Runtime.exec` does this, calling it will prematurely end
   the profile. Note that this is in violation of the POSIX standard.
-* 32-bit programs cannot be targeted on 64-bit devices.
 * Setting `sampling_interval_bytes` to 0 crashes the target process.
   This is an invalid config that should be rejected instead.
+* `Failed to send control socket byte.` is displayed in logcat at the end of
+  every profile. This is benign.
+* The object count may be incorrect in `dump_at_max` profiles.
+* Choosing a low shared memory buffer size and `block_client` mode might
+  lock up the target process.
 
 ## Heapprofd vs malloc_info() vs RSS
 
@@ -427,7 +511,7 @@ the memory of the process get swapped out onto ZRAM.
 | fragmentation       |                   |              |  x  |
 
 If you observe high RSS or malloc\_info metrics but heapprofd does not match,
-you might be hitting some patological fragmentation problem in the allocator.
+you might be hitting some pathological fragmentation problem in the allocator.
 
 ## Convert to pprof
 
@@ -489,9 +573,12 @@ subject to change**.
 
 ```sql
 select name, map_name, cumulative_size
-       from experimental_flamegraph(8300973884377,1,'native')
+       from experimental_flamegraph
+       where ts = 8300973884377
+            and upid = 1
+            and profile_type = 'native'
        order by abs(cumulative_size) desc;
-``` 
+```
 
 | name | map_name | cumulative_size |
 |------|----------|----------------|

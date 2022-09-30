@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qsharedmemory.h"
 #include "qsharedmemory_p.h"
@@ -47,7 +11,20 @@
 #  include <qt_windows.h>
 #endif
 
+#if defined(Q_OS_DARWIN)
+#  include "qcore_mac_p.h"
+#  if !defined(SHM_NAME_MAX)
+     // Based on PSEMNAMLEN in XNU's posix_sem.c, which would
+     // indicate the max length is 31, _excluding_ the zero
+     // terminator. But in practice (possibly due to an off-
+     // by-one bug in the kernel) the usable bytes are only 30.
+#    define SHM_NAME_MAX 30
+#  endif
+#endif
+
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 #if !(defined(QT_NO_SHAREDMEMORY) && defined(QT_NO_SYSTEMSEMAPHORE))
 /*!
@@ -65,22 +42,38 @@ QSharedMemoryPrivate::makePlatformSafeKey(const QString &key,
     if (key.isEmpty())
         return QString();
 
-    QString result = prefix;
+    QByteArray hex = QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha1).toHex();
 
+#if defined(Q_OS_DARWIN) && defined(QT_POSIX_IPC)
+    if (qt_apple_isSandboxed()) {
+        // Sandboxed applications on Apple platforms require the shared memory name
+        // to be in the form <application group identifier>/<custom identifier>.
+        // Since we don't know which application group identifier the user wants
+        // to apply, we instead document that requirement, and use the key directly.
+        return key;
+    } else {
+        // The shared memory name limit on Apple platforms is very low (30 characters),
+        // so we can't use the logic below of combining the prefix, key, and a hash,
+        // to ensure a unique and valid name. Instead we use the first part of the
+        // hash, which should still long enough to avoid collisions in practice.
+        return u'/' + hex.left(SHM_NAME_MAX - 1);
+    }
+#endif
+
+    QString result = prefix;
     for (QChar ch : key) {
-        if ((ch >= QLatin1Char('a') && ch <= QLatin1Char('z')) ||
-           (ch >= QLatin1Char('A') && ch <= QLatin1Char('Z')))
+        if ((ch >= u'a' && ch <= u'z') ||
+           (ch >= u'A' && ch <= u'Z'))
            result += ch;
     }
+    result.append(QLatin1StringView(hex));
 
-    QByteArray hex = QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha1).toHex();
-    result.append(QLatin1String(hex));
 #ifdef Q_OS_WIN
     return result;
 #elif defined(QT_POSIX_IPC)
-    return QLatin1Char('/') + result;
+    return u'/' + result;
 #else
-    return QDir::tempPath() + QLatin1Char('/') + result;
+    return QDir::tempPath() + u'/' + result;
 #endif
 }
 #endif // QT_NO_SHAREDMEMORY && QT_NO_SHAREDMEMORY
@@ -120,6 +113,36 @@ QSharedMemoryPrivate::makePlatformSafeKey(const QString &key,
   \li HP-UX: Only one attach to a shared memory segment is allowed per
   process. This means that QSharedMemory should not be used across
   multiple threads in the same process in HP-UX.
+
+  \li Apple platforms: Sandboxed applications (including apps
+  shipped through the Apple App Store) require the use of POSIX
+  shared memory (instead of System V shared memory), which adds
+  a number of limitations, including:
+
+    \list
+
+    \li The key must be in the form \c {<application group identifier>/<custom identifier>},
+    as documented \l {https://developer.apple.com/library/archive/documentation/Security/Conceptual/AppSandboxDesignGuide/AppSandboxInDepth/AppSandboxInDepth.html#//apple_ref/doc/uid/TP40011183-CH3-SW24}
+    {here} and \l {https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_security_application-groups}
+    {here}.
+
+    \li The key length is limited to 30 characters.
+
+    \li On process exit, the named shared memory entries are not
+    cleaned up, so restarting the application and re-creating the
+    shared memory under the same name will fail. To work around this,
+    fall back to attaching to the existing shared memory entry:
+
+    \code
+
+        QSharedMemory shm("DEVTEAMID.app-group/shared");
+        if (!shm.create(42) && shm.error() == QSharedMemory::AlreadyExists)
+            shm.attach();
+
+    \endcode
+
+
+    \endlist
 
   \endlist
 
@@ -264,7 +287,7 @@ bool QSharedMemoryPrivate::initKey()
     systemSemaphore.setKey(QString(), 1);
     systemSemaphore.setKey(key, 1);
     if (systemSemaphore.error() != QSystemSemaphore::NoError) {
-        QString function = QLatin1String("QSharedMemoryPrivate::initKey");
+        QString function = "QSharedMemoryPrivate::initKey"_L1;
         errorString = QSharedMemory::tr("%1: unable to set key on lock").arg(function);
         switch(systemSemaphore.error()) {
         case QSystemSemaphore::PermissionDenied:
@@ -340,7 +363,7 @@ QString QSharedMemory::nativeKey() const
 
   \sa error()
  */
-bool QSharedMemory::create(int size, AccessMode mode)
+bool QSharedMemory::create(qsizetype size, AccessMode mode)
 {
     Q_D(QSharedMemory);
 
@@ -355,7 +378,7 @@ bool QSharedMemory::create(int size, AccessMode mode)
 #endif
 #endif
 
-    QString function = QLatin1String("QSharedMemory::create");
+    QString function = "QSharedMemory::create"_L1;
 #ifndef QT_NO_SYSTEMSEMAPHORE
     QSharedMemoryLocker lock(this);
     if (!d->key.isNull() && !d->tryLocker(&lock, function))
@@ -384,7 +407,7 @@ bool QSharedMemory::create(int size, AccessMode mode)
 
   \sa create(), attach()
  */
-int QSharedMemory::size() const
+qsizetype QSharedMemory::size() const
 {
     Q_D(const QSharedMemory);
     return d->size;
@@ -422,7 +445,7 @@ bool QSharedMemory::attach(AccessMode mode)
         return false;
 #ifndef QT_NO_SYSTEMSEMAPHORE
     QSharedMemoryLocker lock(this);
-    if (!d->key.isNull() && !d->tryLocker(&lock, QLatin1String("QSharedMemory::attach")))
+    if (!d->key.isNull() && !d->tryLocker(&lock, "QSharedMemory::attach"_L1))
         return false;
 #endif
 
@@ -462,7 +485,7 @@ bool QSharedMemory::detach()
 
 #ifndef QT_NO_SYSTEMSEMAPHORE
     QSharedMemoryLocker lock(this);
-    if (!d->key.isNull() && !d->tryLocker(&lock, QLatin1String("QSharedMemory::detach")))
+    if (!d->key.isNull() && !d->tryLocker(&lock, "QSharedMemory::detach"_L1))
         return false;
 #endif
 
@@ -493,7 +516,7 @@ void *QSharedMemory::data()
 
   \sa attach(), create()
  */
-const void* QSharedMemory::constData() const
+const void *QSharedMemory::constData() const
 {
     Q_D(const QSharedMemory);
     return d->memory;
@@ -531,7 +554,7 @@ bool QSharedMemory::lock()
         d->lockedByMe = true;
         return true;
     }
-    QString function = QLatin1String("QSharedMemory::lock");
+    const auto function = "QSharedMemory::lock"_L1;
     d->errorString = QSharedMemory::tr("%1: unable to lock").arg(function);
     d->error = QSharedMemory::LockError;
     return false;
@@ -553,7 +576,7 @@ bool QSharedMemory::unlock()
     d->lockedByMe = false;
     if (d->systemSemaphore.release())
         return true;
-    QString function = QLatin1String("QSharedMemory::unlock");
+    const auto function = "QSharedMemory::unlock"_L1;
     d->errorString = QSharedMemory::tr("%1: unable to unlock").arg(function);
     d->error = QSharedMemory::LockError;
     return false;

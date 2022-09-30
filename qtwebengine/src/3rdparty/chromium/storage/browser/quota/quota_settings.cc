@@ -10,9 +10,9 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/no_destructor.h"
 #include "base/rand_util.h"
 #include "base/system/sys_info.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
@@ -27,7 +27,8 @@ namespace {
 const int64_t _kMBytes = 1024 * 1024;
 const int kRandomizedPercentage = 10;
 const double kDefaultPerHostRatio = 0.75;
-const double kDefaultPoolSizeRatio = 0.8;
+const double kIncognitoQuotaRatioLowerBound = 0.15;
+const double kIncognitoQuotaRatioUpperBound = 0.2;
 
 // Skews |value| by +/- |percent|.
 int64_t MyRandomizeByPercent(int64_t value, int percent) {
@@ -37,32 +38,22 @@ int64_t MyRandomizeByPercent(int64_t value, int percent) {
 
 QuotaSettings CalculateIncognitoDynamicSettings(
     int64_t physical_memory_amount) {
-  // The incognito pool size is a fraction of the amount of system memory,
-  // and the amount is capped to a hard limit.
-  double incognito_pool_size_ratio = 0.1;  // 10%
-  int64_t max_incognito_pool_size = 300 * _kMBytes;
-  if (base::FeatureList::IsEnabled(features::kIncognitoDynamicQuota)) {
-    const double lower_bound = features::kIncognitoQuotaRatioLowerBound.Get();
-    const double upper_bound = features::kIncognitoQuotaRatioUpperBound.Get();
-    incognito_pool_size_ratio =
-        lower_bound + (base::RandDouble() * (upper_bound - lower_bound));
-    max_incognito_pool_size = std::numeric_limits<int64_t>::max();
-  } else {
-    max_incognito_pool_size =
-        MyRandomizeByPercent(max_incognito_pool_size, kRandomizedPercentage);
-  }
+  // The incognito pool size is a fraction of the amount of system memory.
+  double incognito_pool_size_ratio =
+      kIncognitoQuotaRatioLowerBound +
+      (base::RandDouble() *
+       (kIncognitoQuotaRatioUpperBound - kIncognitoQuotaRatioLowerBound));
 
   QuotaSettings settings;
-  settings.pool_size = std::min(
-      max_incognito_pool_size,
-      static_cast<int64_t>(physical_memory_amount * incognito_pool_size_ratio));
+  settings.pool_size =
+      static_cast<int64_t>(physical_memory_amount * incognito_pool_size_ratio);
   settings.per_host_quota = settings.pool_size / 3;
   settings.session_only_per_host_quota = settings.per_host_quota;
   settings.refresh_interval = base::TimeDelta::Max();
   return settings;
 }
 
-base::Optional<QuotaSettings> CalculateNominalDynamicSettings(
+absl::optional<QuotaSettings> CalculateNominalDynamicSettings(
     const base::FilePath& partition_path,
     bool is_incognito,
     QuotaDeviceInfoHelper* device_info_helper) {
@@ -76,7 +67,13 @@ base::Optional<QuotaSettings> CalculateNominalDynamicSettings(
 
   // The fraction of the device's storage the browser is willing to use for
   // temporary storage.
-  const double kTemporaryPoolSizeRatio = kDefaultPoolSizeRatio;
+  const double kTemporaryPoolSizeRatio = features::kPoolSizeRatio.Get();
+
+  // The fixed size in bytes the browser is willing to use for temporary
+  // storage. If both the ratio and the absolute size are set, the lower value
+  // will be honored.
+  const int64_t kTemporaryPoolSizeFixed =
+      static_cast<int64_t>(features::kPoolSizeBytes.Get());
 
   // The amount of the device's storage the browser attempts to
   // keep free. If there is less than this amount of storage free
@@ -91,8 +88,10 @@ base::Optional<QuotaSettings> CalculateNominalDynamicSettings(
   // *  64GB storage -- min(6GB,2GB) = 2GB
   // *  16GB storage -- min(1.6GB,2GB) = 1.6GB
   // *   8GB storage -- min(800MB,2GB) = 800MB
-  const int64_t kShouldRemainAvailableFixed = 2048 * _kMBytes;  // 2GB
-  const double kShouldRemainAvailableRatio = 0.1;              // 10%
+  const int64_t kShouldRemainAvailableFixed =
+      static_cast<int64_t>(features::kShouldRemainAvailableBytes.Get());
+  const double kShouldRemainAvailableRatio =
+      features::kShouldRemainAvailableRatio.Get();
 
   // The amount of the device's storage the browser attempts to
   // keep free at all costs. Data will be aggressively evicted.
@@ -106,8 +105,10 @@ base::Optional<QuotaSettings> CalculateNominalDynamicSettings(
   // *  64GB storage -- min(640MB,1GB) = 640MB
   // *  16GB storage -- min(160MB,1GB) = 160MB
   // *   8GB storage -- min(80MB,1GB) = 80MB
-  const int64_t kMustRemainAvailableFixed = 1024 * _kMBytes;  // 1GB
-  const double kMustRemainAvailableRatio = 0.01;             // 1%
+  const int64_t kMustRemainAvailableFixed =
+      static_cast<int64_t>(features::kMustRemainAvailableBytes.Get());
+  const double kMustRemainAvailableRatio =
+      features::kMustRemainAvailableRatio.Get();
 
   // The fraction of the temporary pool that can be utilized by a single host.
   const double kPerHostTemporaryRatio = kDefaultPerHostRatio;
@@ -122,10 +123,16 @@ base::Optional<QuotaSettings> CalculateNominalDynamicSettings(
   int64_t total = device_info_helper->AmountOfTotalDiskSpace(partition_path);
   if (total == -1) {
     LOG(ERROR) << "Unable to compute QuotaSettings.";
-    return base::nullopt;
+    return absl::nullopt;
   }
 
-  int64_t pool_size = total * kTemporaryPoolSizeRatio;
+  // Pool size calculated by ratio.
+  int64_t pool_size_by_ratio = total * kTemporaryPoolSizeRatio;
+
+  int64_t pool_size =
+      kTemporaryPoolSizeFixed > 0
+          ? std::min(kTemporaryPoolSizeFixed, pool_size_by_ratio)
+          : pool_size_by_ratio;
 
   settings.pool_size = pool_size;
   settings.should_remain_available =
@@ -139,7 +146,7 @@ base::Optional<QuotaSettings> CalculateNominalDynamicSettings(
       MyRandomizeByPercent(kMaxSessionOnlyHostQuota, kRandomizedPercentage),
       static_cast<int64_t>(settings.per_host_quota *
                            kSessionOnlyHostQuotaRatio));
-  settings.refresh_interval = base::TimeDelta::FromSeconds(60);
+  settings.refresh_interval = base::Seconds(60);
   return settings;
 }
 
@@ -161,6 +168,13 @@ void GetNominalDynamicSettings(const base::FilePath& partition_path,
 QuotaDeviceInfoHelper* GetDefaultDeviceInfoHelper() {
   static base::NoDestructor<QuotaDeviceInfoHelper> singleton;
   return singleton.get();
+}
+
+double GetIncognitoQuotaRatioLowerBound_ForTesting() {
+  return kIncognitoQuotaRatioLowerBound;
+}
+double GetIncognitoQuotaRatioUpperBound_ForTesting() {
+  return kIncognitoQuotaRatioUpperBound;
 }
 
 }  // namespace storage

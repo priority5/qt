@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
 #include <QtTest/QtTest>
@@ -32,7 +7,6 @@
 #include <private/qqmldata_p.h>
 #include <qjsengine.h>
 #include <qjsvalueiterator.h>
-#include <qgraphicsitem.h>
 #include <qstandarditemmodel.h>
 #include <QtCore/qnumeric.h>
 #include <qqmlengine.h>
@@ -41,12 +15,16 @@
 #include <private/qv4alloca_p.h>
 #include <private/qjsvalue_p.h>
 #include <QScopeGuard>
+#include <QUrl>
+#include <QModelIndex>
 
 #ifdef Q_CC_MSVC
 #define NO_INLINE __declspec(noinline)
 #else
 #define NO_INLINE __attribute__((noinline))
 #endif
+
+using namespace Qt::StringLiterals;
 
 Q_DECLARE_METATYPE(QList<int>)
 Q_DECLARE_METATYPE(QObjectList)
@@ -66,8 +44,12 @@ private slots:
     void newArray();
     void newArray_HooliganTask218092();
     void newArray_HooliganTask233836();
-    void toScriptValue_data();
-    void toScriptValue();
+    void toScriptValueBuiltin_data();
+    void toScriptValueBuiltin();
+    void toScriptValueQmlBuiltin_data();
+    void toScriptValueQmlBuiltin();
+    void toScriptValueQtQml_data();
+    void toScriptValueQtQml();
     void toScriptValuenotroundtripped_data();
     void toScriptValuenotroundtripped();
     void newVariant();
@@ -98,10 +80,10 @@ private slots:
     void valueConversion_QVariant();
     void valueConversion_basic2();
     void valueConversion_dateTime();
-    void valueConversion_regExp();
     void valueConversion_RegularExpression();
     void castWithMultipleInheritance();
     void collectGarbage();
+    void collectGarbageNestedWrappersTwoEngines();
     void gcWithNestedDataStructure();
     void stacktrace();
     void numberParsing_data();
@@ -139,10 +121,10 @@ private slots:
     void arrayConcat();
     void recursiveBoundFunctions();
 
-    void qRegExpInport_data();
-    void qRegExpInport();
     void qRegularExpressionImport_data();
     void qRegularExpressionImport();
+    void qRegularExpressionExport_data();
+    void qRegularExpressionExport();
     void dateRoundtripJSQtJS();
     void dateRoundtripQtJSQt();
     void dateConversionJSQt();
@@ -194,6 +176,8 @@ private slots:
     void asserts();
     void exceptions();
 
+    void exceptionReporting();
+
     void installGarbageCollectionFunctions();
 
     void installAllExtensions();
@@ -238,12 +222,17 @@ private slots:
     void throwError();
     void throwErrorObject();
     void returnError();
+    void catchError();
     void mathMinMax();
 
     void importModule();
     void importModuleRelative();
     void importModuleWithLexicallyScopedVars();
     void importExportErrors();
+
+    void registerModule();
+    void registerModuleQObject();
+    void registerModuleNamedError();
 
     void equality();
     void aggressiveGc();
@@ -254,6 +243,7 @@ private slots:
 
     void triggerBackwardJumpWithDestructuring();
     void arrayConcatOnSparseArray();
+    void concatAfterUnshift();
     void sortSparseArray();
     void compileBrokenRegexp();
     void sortNonStringArray();
@@ -267,6 +257,10 @@ private slots:
     void dataViewCtor();
 
     void uiLanguage();
+    void urlObject();
+    void thisInConstructor();
+    void forOfAndGc();
+    void staticInNestedClasses();
 
 public:
     Q_INVOKABLE QJSValue throwingCppMethod1();
@@ -511,12 +505,12 @@ void tst_QJSEngine::newArray_HooliganTask233836()
     }
 }
 
-void tst_QJSEngine::toScriptValue_data()
+void tst_QJSEngine::toScriptValueBuiltin_data()
 {
     QTest::addColumn<QVariant>("input");
 
-    QTest::newRow("UnknownType") << QVariant(int(QMetaType::UnknownType), nullptr);
-    QTest::newRow("Nullptr") << QVariant(int(QMetaType::Nullptr), nullptr);
+    QTest::newRow("UnknownType") << QVariant(QMetaType(QMetaType::UnknownType), nullptr);
+    QTest::newRow("Nullptr") << QVariant(QMetaType(QMetaType::Nullptr), nullptr);
     QTest::newRow("true") << QVariant(true);
     QTest::newRow("false") << QVariant(false);
     QTest::newRow("int") << QVariant(int(42));
@@ -538,13 +532,11 @@ void tst_QJSEngine::toScriptValue_data()
     QTest::newRow("qpointf") << QVariant(QPointF(42, 24));
     QTest::newRow("qvariantlist") << QVariant(QVariantList() << 42.24 << 5 << "hello");
     QTest::newRow("qvariantlist_point") << QVariant(QVariantList() << 42.24 << QPointF(42.24, 24.42) << QPointF(24.42, 42.24));
-    QVariantMap vm; vm.insert("test", 55); vm.insert("abc", 42.42);;
+    QVariantMap vm; vm.insert("test", 55); vm.insert("abc", 42.42);
     QTest::newRow("qvariantmap") << QVariant(vm);
     vm.clear(); vm.insert("point1", QPointF(42.24, 24.42)); vm.insert("point2", QPointF(42.24, 24.42));
     QTest::newRow("qvariantmap_point") << QVariant(vm);
     QTest::newRow("qvariant") << QVariant(QVariant(42));
-    QTest::newRow("QList<int>") << QVariant::fromValue(QList<int>() << 1 << 2 << 3 << 4);
-    QTest::newRow("QVector<int>") << QVariant::fromValue(QVector<int>() << 1 << 2 << 3 << 4);
     QTest::newRow("QList<QString>") << QVariant::fromValue(QVector<QString>() << "1" << "2" << "3" << "4");
     QTest::newRow("QStringList") << QVariant::fromValue(QStringList() << "1" << "2" << "3" << "4");
     QTest::newRow("QMap<QString, QString>") << QVariant::fromValue(QMap<QString, QString>{{ "1", "2" }, { "3", "4" }});
@@ -553,7 +545,7 @@ void tst_QJSEngine::toScriptValue_data()
     QTest::newRow("QHash<QString, QPointF>") << QVariant::fromValue(QHash<QString, QPointF>{{ "1", { 42.24, 24.42 } }, { "3", { 24.42, 42.24 } }});
 }
 
-void tst_QJSEngine::toScriptValue()
+void tst_QJSEngine::toScriptValueBuiltin()
 {
     QFETCH(QVariant, input);
 
@@ -561,6 +553,94 @@ void tst_QJSEngine::toScriptValue()
     QJSValue outputJS = engine.toScriptValue(input);
     QVariant output = engine.fromScriptValue<QVariant>(outputJS);
 
+    if (input.metaType().id() == QMetaType::QChar) {
+        if (!input.convert(QMetaType(QMetaType::QString)))
+            QFAIL("cannot convert to the original value");
+    } else if (!output.convert(input.metaType()) && input.isValid())
+        QFAIL("cannot convert to the original value");
+    QCOMPARE(input, output);
+}
+
+void tst_QJSEngine::toScriptValueQmlBuiltin_data()
+{
+    QTest::addColumn<QVariant>("input");
+
+    QTest::newRow("QList<QVariant>") << QVariant(QList<QVariant>{true, 5, 13.2f, 42.24, QString("world"), QUrl("htt://a.com"), QDateTime::currentDateTime(), QRegularExpression("a*b*c"), QByteArray("hello")});
+    QTest::newRow("QList<bool>") << QVariant::fromValue(QList<bool>{true, false, true, false});
+    QTest::newRow("QList<int>") << QVariant::fromValue(QList<int>{1, 2, 3, 4});
+    QTest::newRow("QList<float>") << QVariant::fromValue(QList<float>{1.1f, 2.2f, 3.3f, 4.4f});
+    QTest::newRow("QList<double>") << QVariant::fromValue(QList<double>{1.1, 2.2, 3.3, 4.4});
+    QTest::newRow("QList<QString>") << QVariant::fromValue(QList<QString>{"a", "b", "c", "d"});
+    QTest::newRow("QList<QUrl>") << QVariant::fromValue(QList<QUrl>{QUrl("htt://a.com"), QUrl("file:///tmp/b/"), QUrl("c.foo"), QUrl("/some/d")});
+    QTest::newRow("QList<QDateTime>") << QVariant::fromValue(QList<QDateTime>{QDateTime::currentDateTime(), QDateTime::fromMSecsSinceEpoch(300), QDateTime()});
+    QTest::newRow("QList<QRegularExpression>") << QVariant::fromValue(QList<QRegularExpression>{QRegularExpression("abcd"), QRegularExpression("a[b|c]d$"), QRegularExpression("a*b*d")});
+    QTest::newRow("QList<QByteArray>") << QVariant::fromValue(QList<QByteArray>{QByteArray("aaa"), QByteArray("bbb"), QByteArray("ccc")});
+}
+
+void tst_QJSEngine::toScriptValueQmlBuiltin()
+{
+    QFETCH(QVariant, input);
+
+    // We need the type registrations in QQmlEngine::init() for this.
+    QQmlEngine engine;
+
+    QJSValue outputJS = engine.toScriptValue(input);
+    QVariant output = engine.fromScriptValue<QVariant>(outputJS);
+
+    QVERIFY(output.convert(input.metaType()));
+    QCOMPARE(input, output);
+}
+
+void tst_QJSEngine::toScriptValueQtQml_data()
+{
+    QTest::addColumn<QVariant>("input");
+
+    QTest::newRow("std::vector<qreal>") << QVariant::fromValue(std::vector<qreal>{.1, .2, .3, .4});
+    QTest::newRow("QList<qreal>") << QVariant::fromValue(QList<qreal>{.1, .2, .3, .4});
+
+    QTest::newRow("std::vector<int>") << QVariant::fromValue(std::vector<int>{1, 2, 3, 4});
+    QTest::newRow("std::vector<bool>") << QVariant::fromValue(std::vector<bool>{true, false, true, false});
+    QTest::newRow("std::vector<QString>") << QVariant::fromValue(std::vector<QString>{"a", "b", "c", "d"});
+    QTest::newRow("std::vector<QUrl>") << QVariant::fromValue(std::vector<QUrl>{QUrl("htt://a.com"), QUrl("file:///tmp/b/"), QUrl("c.foo"), QUrl("/some/d")});
+
+    QTest::newRow("QList<QPoint>") << QVariant::fromValue(QList<QPointF>() << QPointF(42.24, 24.42) << QPointF(42.24, 24.42));
+
+    static const QStandardItemModel model(4, 4);
+    QTest::newRow("QModelIndexList") << QVariant::fromValue(QModelIndexList{ model.index(1, 2), model.index(2, 3), model.index(3, 1), model.index(3, 2)});
+    QTest::newRow("std::vector<QModelIndex>") << QVariant::fromValue(std::vector<QModelIndex>{ model.index(1, 2), model.index(2, 3), model.index(3, 1), model.index(3, 2)});
+
+    // QVariant wants to implicitly convert this to a QList<QItemSelectionRange>. Prevent that by
+    // keeping the instance on the stack, and explicitly instantiating the template below.
+    QItemSelection selection;
+
+    // It doesn't have an initializer list ctor ...
+    selection << QItemSelectionRange(model.index(1, 2), model.index(2, 3))
+              << QItemSelectionRange(model.index(3, 1), model.index(3, 2))
+              << QItemSelectionRange(model.index(2, 2), model.index(3, 3))
+              << QItemSelectionRange(model.index(1, 1), model.index(2, 2));
+
+    QTest::newRow("QItemSelection") << QVariant::fromValue<QItemSelection>(selection);
+}
+
+void tst_QJSEngine::toScriptValueQtQml()
+{
+    QFETCH(QVariant, input);
+
+    // Import QtQml, to enable the sequential containers defined there.
+    QQmlEngine engine;
+    QQmlComponent c(&engine);
+    c.setData("import QtQml\nQtObject{}", QUrl());
+    QScopedPointer<QObject> obj(c.create());
+    QVERIFY(!obj.isNull());
+
+    QJSValue outputJS = engine.toScriptValue(input);
+    QVariant output = engine.fromScriptValue<QVariant>(outputJS);
+
+    if (input.metaType().id() == QMetaType::QChar) {
+        if (!input.convert(QMetaType(QMetaType::QString)))
+            QFAIL("cannot convert to the original value");
+    } else if (!output.convert(input.metaType()) && input.isValid())
+        QFAIL("cannot convert to the original value");
     QCOMPARE(input, output);
 }
 
@@ -569,12 +649,9 @@ void tst_QJSEngine::toScriptValuenotroundtripped_data()
     QTest::addColumn<QVariant>("input");
     QTest::addColumn<QVariant>("output");
 
-    QTest::newRow("QList<QObject*>") << QVariant::fromValue(QList<QObject*>() << this) << QVariant(QVariantList() << QVariant::fromValue(this));
-    QTest::newRow("QObjectList") << QVariant::fromValue(QObjectList() << this) << QVariant(QVariantList() << QVariant::fromValue(this));
-    QTest::newRow("QList<QPoint>") << QVariant::fromValue(QList<QPointF>() << QPointF(42.24, 24.42) << QPointF(42.24, 24.42)) << QVariant(QVariantList() << QPointF(42.24, 24.42) << QPointF(42.24, 24.42));
-    QTest::newRow("QVector<QPoint>") << QVariant::fromValue(QVector<QPointF>() << QPointF(42.24, 24.42) << QPointF(42.24, 24.42)) << QVariant(QVariantList() << QPointF(42.24, 24.42) << QPointF(42.24, 24.42));
-    QTest::newRow("VoidStar") << QVariant(int(QMetaType::VoidStar), nullptr) << QVariant(int(QMetaType::Nullptr), nullptr);
-    QTest::newRow("qregex") << QVariant(QRegExp(".*", Qt::CaseSensitive, QRegExp::RegExp2)) << QVariant(QRegularExpression(".*"));
+    QTest::newRow("QList<QObject*>") << QVariant::fromValue(QList<QObject*>() << this) << QVariant(QVariantList() << QVariant::fromValue<QObject *>(this));
+    QTest::newRow("QObjectList") << QVariant::fromValue(QObjectList() << this) << QVariant(QVariantList() << QVariant::fromValue<QObject *>(this));
+    QTest::newRow("VoidStar") << QVariant(QMetaType(QMetaType::VoidStar), nullptr) << QVariant(QMetaType(QMetaType::Nullptr), nullptr);
 }
 
 // This is almost the same as toScriptValue, but the inputs don't roundtrip to
@@ -623,8 +700,8 @@ void tst_QJSEngine::newVariant_valueOfEnum()
 {
     QJSEngine eng;
     {
-        QJSValue object = eng.toScriptValue(QVariant::fromValue(Qt::ControlModifier));
-        QJSValue value = object.property("valueOf").callWithInstance(object);
+        QJSManagedValue object = eng.toManagedValue(QVariant::fromValue(Qt::ControlModifier));
+        QJSValue value = object.property("valueOf").callWithInstance(object.toJSValue());
         QVERIFY(value.isNumber());
         QCOMPARE(value.toInt(), static_cast<qint32>(Qt::ControlModifier));
     }
@@ -633,27 +710,22 @@ void tst_QJSEngine::newVariant_valueOfEnum()
 void tst_QJSEngine::newRegExp()
 {
     QJSEngine eng;
-    QJSValue rexps[] = {
-        eng.toScriptValue(QRegularExpression("foo")),
-        eng.toScriptValue(QRegExp("foo"))
-    };
-    for (const auto &rexp : rexps) {
-        QVERIFY(!rexp.isUndefined());
-        QCOMPARE(rexp.isRegExp(), true);
-        QCOMPARE(rexp.isObject(), true);
-        QCOMPARE(rexp.isCallable(), false);
-        // prototype should be RegExp.prototype
-        QVERIFY(!rexp.prototype().isUndefined());
-        QCOMPARE(rexp.prototype().isObject(), true);
-        // Get [[Class]] internal property of RegExp Prototype Object.
-        // See ECMA-262 Section 8.6.2, "Object Internal Properties and Methods".
-        // See ECMA-262 Section 15.10.6, "Properties of the RegExp Prototype Object".
-        QJSValue r = eng.evaluate("Object.prototype.toString.call(RegExp.prototype)");
-        QCOMPARE(r.toString(), QString::fromLatin1("[object Object]"));
-        QCOMPARE(rexp.prototype().strictlyEquals(eng.evaluate("RegExp.prototype")), true);
+    QJSValue rexp = eng.toScriptValue(QRegularExpression("foo"));
+    QVERIFY(!rexp.isUndefined());
+    QCOMPARE(rexp.isRegExp(), true);
+    QCOMPARE(rexp.isObject(), true);
+    QCOMPARE(rexp.isCallable(), false);
+    // prototype should be RegExp.prototype
+    QVERIFY(!rexp.prototype().isUndefined());
+    QCOMPARE(rexp.prototype().isObject(), true);
+    // Get [[Class]] internal property of RegExp Prototype Object.
+    // See ECMA-262 Section 8.6.2, "Object Internal Properties and Methods".
+    // See ECMA-262 Section 15.10.6, "Properties of the RegExp Prototype Object".
+    QJSValue r = eng.evaluate("Object.prototype.toString.call(RegExp.prototype)");
+    QCOMPARE(r.toString(), QString::fromLatin1("[object Object]"));
+    QCOMPARE(rexp.prototype().strictlyEquals(eng.evaluate("RegExp.prototype")), true);
 
-        QCOMPARE(qjsvalue_cast<QRegExp>(rexp).pattern(), QRegExp("foo").pattern());
-    }
+    QCOMPARE(qjsvalue_cast<QRegularExpression>(rexp).pattern(), QRegularExpression("foo").pattern());
 }
 
 void tst_QJSEngine::jsRegExp()
@@ -791,7 +863,11 @@ void tst_QJSEngine::newQObjectRace()
     {
         void run() override
         {
-            for (int i=0;i<100;++i)
+            int newObjectCount = 1000;
+#if defined(Q_OS_QNX)
+            newObjectCount = 256;
+#endif
+            for (int i=0;i<newObjectCount;++i)
             {
                 QJSEngine e;
                 auto obj = e.newQObject(new QObject);
@@ -1136,6 +1212,8 @@ void tst_QJSEngine::globalObjectProperties_enumerate()
         << "Proxy"
         << "Atomics"
         << "Promise"
+        << "URL"
+        << "URLSearchParams"
         ;
     QSet<QString> actualNames;
     {
@@ -1568,22 +1646,20 @@ void tst_QJSEngine::valueConversion_QVariant()
     // Checking nested QVariants
     {
         QVariant tmp1;
-        QVariant tmp2(QMetaType::QVariant, &tmp1);
+        QVariant tmp2(QMetaType::fromType<QVariant>(), &tmp1);
         QCOMPARE(QMetaType::Type(tmp2.userType()), QMetaType::QVariant);
 
         QJSValue val1 = eng.toScriptValue(tmp1);
         QJSValue val2 = eng.toScriptValue(tmp2);
         QVERIFY(val1.isUndefined());
-        QEXPECT_FAIL("", "Variant are unrwapped, maybe we should not...", Continue);
         QVERIFY(!val2.isUndefined());
         QVERIFY(!val1.isVariant());
-        QEXPECT_FAIL("", "Variant are unrwapped, maybe we should not...", Continue);
         QVERIFY(val2.isVariant());
     }
     {
         QVariant tmp1(123);
-        QVariant tmp2(QMetaType::QVariant, &tmp1);
-        QVariant tmp3(QMetaType::QVariant, &tmp2);
+        QVariant tmp2(QMetaType::fromType<QVariant>(), &tmp1);
+        QVariant tmp3(QMetaType::fromType<QVariant>(), &tmp2);
         QCOMPARE(QMetaType::Type(tmp1.userType()), QMetaType::Int);
         QCOMPARE(QMetaType::Type(tmp2.userType()), QMetaType::QVariant);
         QCOMPARE(QMetaType::Type(tmp3.userType()), QMetaType::QVariant);
@@ -1592,12 +1668,10 @@ void tst_QJSEngine::valueConversion_QVariant()
         QJSValue val2 = eng.toScriptValue(tmp3);
         QVERIFY(!val1.isUndefined());
         QVERIFY(!val2.isUndefined());
-        QEXPECT_FAIL("", "Variant are unrwapped, maybe we should not...", Continue);
         QVERIFY(val1.isVariant());
-        QEXPECT_FAIL("", "Variant are unrwapped, maybe we should not...", Continue);
         QVERIFY(val2.isVariant());
-        QCOMPARE(val1.toVariant().toInt(), 123);
-        QCOMPARE(eng.toScriptValue(val2.toVariant()).toVariant().toInt(), 123);
+        QCOMPARE(val1.toVariant(), tmp2);
+        QCOMPARE(val2.toVariant(), tmp3);
     }
     {
         QJSValue val = eng.toScriptValue(QVariant(true));
@@ -1639,7 +1713,7 @@ void tst_QJSEngine::valueConversion_QVariant()
 
     QCOMPARE(qjsvalue_cast<QVariant>(QJSValue(123)), QVariant(123));
 
-    QVERIFY(eng.toScriptValue(QVariant(QMetaType::VoidStar, nullptr)).isNull());
+    QVERIFY(eng.toScriptValue(QVariant(QMetaType::fromType<void *>(), nullptr)).isNull());
     QVERIFY(eng.toScriptValue(QVariant::fromValue(nullptr)).isNull());
 
     {
@@ -1709,36 +1783,6 @@ void tst_QJSEngine::valueConversion_dateTime()
     }
 }
 
-void tst_QJSEngine::valueConversion_regExp()
-{
-    QJSEngine eng;
-    {
-        QRegExp in = QRegExp("foo");
-        QJSValue val = eng.toScriptValue(in);
-        QVERIFY(val.isRegExp());
-        QRegExp out = qjsvalue_cast<QRegExp>(val);
-        QEXPECT_FAIL("", "QTBUG-6136: JSC-based back-end doesn't preserve QRegExp::patternSyntax (always uses RegExp2)", Continue);
-        QCOMPARE(out.patternSyntax(), in.patternSyntax());
-        QCOMPARE(out.pattern(), in.pattern());
-        QCOMPARE(out.caseSensitivity(), in.caseSensitivity());
-        QCOMPARE(out.isMinimal(), in.isMinimal());
-    }
-    {
-        QRegExp in = QRegExp("foo", Qt::CaseSensitive, QRegExp::RegExp2);
-        QJSValue val = eng.toScriptValue(in);
-        QVERIFY(val.isRegExp());
-        QCOMPARE(qjsvalue_cast<QRegExp>(val), in);
-    }
-    {
-        QRegExp in = QRegExp("foo");
-        in.setMinimal(true);
-        QJSValue val = eng.toScriptValue(in);
-        QVERIFY(val.isRegExp());
-        QEXPECT_FAIL("", "QTBUG-6136: JSC-based back-end doesn't preserve QRegExp::minimal (always false)", Continue);
-        QCOMPARE(qjsvalue_cast<QRegExp>(val).isMinimal(), in.isMinimal());
-    }
-}
-
 void tst_QJSEngine::valueConversion_RegularExpression()
 {
     QJSEngine eng;
@@ -1761,20 +1805,16 @@ void tst_QJSEngine::valueConversion_RegularExpression()
     }
 }
 
-Q_DECLARE_METATYPE(QGradient)
-Q_DECLARE_METATYPE(QGradient*)
-Q_DECLARE_METATYPE(QLinearGradient)
-
-class Klazz : public QWidget,
+class Klazz : public QObject,
               public QStandardItem,
-              public QGraphicsItem
+              public QQmlParserStatus
 {
-    Q_INTERFACES(QGraphicsItem)
+    Q_INTERFACES(QQmlParserStatus)
     Q_OBJECT
 public:
-    Klazz(QWidget *parent = nullptr) : QWidget(parent) { }
-    virtual QRectF boundingRect() const { return QRectF(); }
-    virtual void paint(QPainter*, const QStyleOptionGraphicsItem*, QWidget*) { }
+    Klazz(QObject *parent = nullptr) : QObject(parent) { }
+    void classBegin() override {}
+    void componentComplete() override {}
 };
 
 Q_DECLARE_METATYPE(Klazz*)
@@ -1787,11 +1827,11 @@ void tst_QJSEngine::castWithMultipleInheritance()
     QJSValue v = eng.newQObject(&klz);
 
     QCOMPARE(qjsvalue_cast<Klazz*>(v), &klz);
-    QCOMPARE(qjsvalue_cast<QWidget*>(v), (QWidget *)&klz);
+    QCOMPARE(qjsvalue_cast<QQmlParserStatus*>(v), (QQmlParserStatus *)&klz);
     QCOMPARE(qjsvalue_cast<QObject*>(v), (QObject *)&klz);
     QCOMPARE(qjsvalue_cast<QStandardItem*>(v), (QStandardItem *)&klz);
-    QCOMPARE(qjsvalue_cast<QGraphicsItem*>(v), (QGraphicsItem *)&klz);
 }
+
 
 void tst_QJSEngine::collectGarbage()
 {
@@ -1807,6 +1847,44 @@ void tst_QJSEngine::collectGarbage()
     if (ptr)
         QGuiApplication::sendPostedEvents(ptr, QEvent::DeferredDelete);
     QVERIFY(ptr.isNull());
+}
+
+class TestObjectContainer : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QObject *dummy MEMBER m_dummy CONSTANT)
+
+public:
+    TestObjectContainer() : m_dummy(new QObject(this)) {}
+
+private:
+    QObject *m_dummy;
+};
+
+void tst_QJSEngine::collectGarbageNestedWrappersTwoEngines()
+{
+    QJSEngine engine1;
+    QJSEngine engine2;
+
+    TestObjectContainer container;
+    QQmlEngine::setObjectOwnership(&container, QQmlEngine::CppOwnership);
+
+    engine1.globalObject().setProperty("foobar", engine1.newQObject(&container));
+    engine2.globalObject().setProperty("foobar", engine2.newQObject(&container));
+
+    engine1.evaluate("foobar.dummy.baz = 42");
+    engine2.evaluate("foobar.dummy.baz = 43");
+
+    QCOMPARE(engine1.evaluate("foobar.dummy.baz").toInt(), 42);
+    QCOMPARE(engine2.evaluate("foobar.dummy.baz").toInt(), 43);
+
+    engine1.collectGarbage();
+    engine2.collectGarbage();
+
+    // The GC should not collect dummy object wrappers neither in engine1 nor engine2, we
+    // verify that by checking whether the baz property still has its previous value.
+    QCOMPARE(engine1.evaluate("foobar.dummy.baz").toInt(), 42);
+    QCOMPARE(engine2.evaluate("foobar.dummy.baz").toInt(), 43);
 }
 
 void tst_QJSEngine::gcWithNestedDataStructure()
@@ -3108,8 +3186,6 @@ void tst_QJSEngine::reentrancy_objectCreation()
     {
         QJSValue r1 = eng1.evaluate("new RegExp('foo', 'gim')");
         QJSValue r2 = eng2.evaluate("new RegExp('foo', 'gim')");
-        QCOMPARE(qjsvalue_cast<QRegExp>(r1), qjsvalue_cast<QRegExp>(r2));
-        QCOMPARE(qjsvalue_cast<QRegExp>(r2), qjsvalue_cast<QRegExp>(r1));
         QCOMPARE(qjsvalue_cast<QRegularExpression>(r1), qjsvalue_cast<QRegularExpression>(r2));
         QCOMPARE(qjsvalue_cast<QRegularExpression>(r2), qjsvalue_cast<QRegularExpression>(r1));
     }
@@ -3254,64 +3330,10 @@ void tst_QJSEngine::recursiveBoundFunctions()
     QCOMPARE(v.toInt(), 59);
 }
 
-static QRegExp minimal(QRegExp r) { r.setMinimal(true); return r; }
-
-void tst_QJSEngine::qRegExpInport_data()
-{
-    QTest::addColumn<QRegExp>("rx");
-    QTest::addColumn<QString>("string");
-    QTest::addColumn<QString>("matched");
-
-    QTest::newRow("normal")  << QRegExp("(test|foo)") << "test _ foo _ test _ Foo";
-    QTest::newRow("normal2")  << QRegExp("(Test|Foo)") << "test _ foo _ test _ Foo";
-    QTest::newRow("case insensitive)")  << QRegExp("(test|foo)", Qt::CaseInsensitive) << "test _ foo _ test _ Foo";
-    QTest::newRow("case insensitive2)")  << QRegExp("(Test|Foo)", Qt::CaseInsensitive) << "test _ foo _ test _ Foo";
-    QTest::newRow("b(a*)(b*)")  << QRegExp("b(a*)(b*)", Qt::CaseInsensitive) << "aaabbBbaAabaAaababaaabbaaab";
-    QTest::newRow("greedy")  << QRegExp("a*(a*)", Qt::CaseInsensitive, QRegExp::RegExp2) << "aaaabaaba";
-    QTest::newRow("willcard")  << QRegExp("*.txt", Qt::CaseSensitive, QRegExp::Wildcard) << "file.txt";
-    QTest::newRow("willcard 2")  << QRegExp("a?b.txt", Qt::CaseSensitive, QRegExp::Wildcard) << "ab.txt abb.rtc acb.txt";
-    QTest::newRow("slash")  << QRegExp("g/.*/s", Qt::CaseInsensitive, QRegExp::RegExp2) << "string/string/string";
-    QTest::newRow("slash2")  << QRegExp("g / .* / s", Qt::CaseInsensitive, QRegExp::RegExp2) << "string / string / string";
-    QTest::newRow("fixed")  << QRegExp("a*aa.a(ba)*a\\ba", Qt::CaseInsensitive, QRegExp::FixedString) << "aa*aa.a(ba)*a\\ba";
-    QTest::newRow("fixed insensitive")  << QRegExp("A*A", Qt::CaseInsensitive, QRegExp::FixedString) << "a*A A*a A*A a*a";
-    QTest::newRow("fixed sensitive")  << QRegExp("A*A", Qt::CaseSensitive, QRegExp::FixedString) << "a*A A*a A*A a*a";
-    QTest::newRow("html")  << QRegExp("<b>(.*)</b>", Qt::CaseSensitive, QRegExp::RegExp2) << "<b>bold</b><i>italic</i><b>bold</b>";
-    QTest::newRow("html minimal")  << minimal(QRegExp("<b>(.*)</b>", Qt::CaseSensitive, QRegExp::RegExp2)) << "<b>bold</b><i>italic</i><b>bold</b>";
-    QTest::newRow("aaa")  << QRegExp("a{2,5}") << "aAaAaaaaaAa";
-    QTest::newRow("aaa minimal")  << minimal(QRegExp("a{2,5}")) << "aAaAaaaaaAa";
-    QTest::newRow("minimal")  << minimal(QRegExp(".*\\} [*8]")) << "}?} ?} *";
-    QTest::newRow(".? minimal")  << minimal(QRegExp(".?")) << ".?";
-    QTest::newRow(".+ minimal")  << minimal(QRegExp(".+")) << ".+";
-    QTest::newRow("[.?] minimal")  << minimal(QRegExp("[.?]")) << ".?";
-    QTest::newRow("[.+] minimal")  << minimal(QRegExp("[.+]")) << ".+";
-}
-
-void tst_QJSEngine::qRegExpInport()
-{
-    QFETCH(QRegExp, rx);
-    QFETCH(QString, string);
-
-    QJSEngine eng;
-    QJSValue rexp;
-    rexp = eng.toScriptValue(rx);
-
-    QCOMPARE(rexp.isRegExp(), true);
-    QCOMPARE(rexp.isCallable(), false);
-
-    QJSValue func = eng.evaluate("(function(string, regexp) { return string.match(regexp); })");
-    QJSValue result = func.call(QJSValueList() << string << rexp);
-
-    rx.indexIn(string);
-    for (int i = 0; i <= rx.captureCount(); i++)  {
-        QCOMPARE(result.property(i).toString(), rx.cap(i));
-    }
-}
-
 void tst_QJSEngine::qRegularExpressionImport_data()
 {
     QTest::addColumn<QRegularExpression>("rx");
     QTest::addColumn<QString>("string");
-    QTest::addColumn<QString>("matched");
 
     QTest::newRow("normal")            << QRegularExpression("(test|foo)") << "test _ foo _ test _ Foo";
     QTest::newRow("normal2")           << QRegularExpression("(Test|Foo)") << "test _ foo _ test _ Foo";
@@ -3335,6 +3357,14 @@ void tst_QJSEngine::qRegularExpressionImport_data()
     QTest::newRow(".+ minimal")        << QRegularExpression("^.+$") << ".+";
     QTest::newRow("[.?] minimal")      << QRegularExpression("^[.?]$") << ".?";
     QTest::newRow("[.+] minimal")      << QRegularExpression("^[.+]$") << ".+";
+    QTest::newRow("aaa inverted greedyness")  << QRegularExpression("a{2,5}", QRegularExpression::InvertedGreedinessOption) << "aAaAaaaaaAa";
+    QTest::newRow("inverted greedyness")  << QRegularExpression(".*\\} [*8]", QRegularExpression::InvertedGreedinessOption) << "}?} ?} *";
+    QTest::newRow(".? inverted greedyness")  << QRegularExpression(".?", QRegularExpression::InvertedGreedinessOption) << ".?";
+    QTest::newRow(".+ inverted greedyness")  << QRegularExpression(".+", QRegularExpression::InvertedGreedinessOption) << ".+";
+    QTest::newRow("[.?] inverted greedyness")  << QRegularExpression("[.?]", QRegularExpression::InvertedGreedinessOption) << ".?";
+    QTest::newRow("[.+] inverted greedyness")  << QRegularExpression("[.+]", QRegularExpression::InvertedGreedinessOption) << ".+";
+    QTest::newRow("two lines")  << QRegularExpression("^.*$") << "abc\ndef";
+    QTest::newRow("multiline")  << QRegularExpression("^.*$", QRegularExpression::MultilineOption) << "abc\ndef";
 }
 
 void tst_QJSEngine::qRegularExpressionImport()
@@ -3355,6 +3385,52 @@ void tst_QJSEngine::qRegularExpressionImport()
     const QRegularExpressionMatch match = rx.match(string);
     for (int i = 0; i <= match.lastCapturedIndex(); i++)
         QCOMPARE(result.property(i).toString(), match.captured(i));
+}
+
+void tst_QJSEngine::qRegularExpressionExport_data()
+{
+    QTest::addColumn<QString>("js");
+    QTest::addColumn<QRegularExpression>("regularexpression");
+
+    QTest::newRow("normal")            << "/(test|foo)/" << QRegularExpression("(test|foo)");
+    QTest::newRow("normal2")           << "/(Test|Foo)/" << QRegularExpression("(Test|Foo)");
+    QTest::newRow("case insensitive")  << "/(test|foo)/i" << QRegularExpression("(test|foo)", QRegularExpression::CaseInsensitiveOption);
+    QTest::newRow("case insensitive2") << "/(Test|Foo)/i" << QRegularExpression("(Test|Foo)", QRegularExpression::CaseInsensitiveOption);
+    QTest::newRow("b(a*)(b*)")         << "/b(a*)(b*)/i" << QRegularExpression("b(a*)(b*)", QRegularExpression::CaseInsensitiveOption);
+    QTest::newRow("greedy")            << "/a*(a*)/i" << QRegularExpression("a*(a*)", QRegularExpression::CaseInsensitiveOption);
+    QTest::newRow("wildcard")          << "/.*\\.txt/" << QRegularExpression(".*\\.txt");
+    QTest::newRow("wildcard 2")        << "/a.b\\.txt/" << QRegularExpression("a.b\\.txt");
+    QTest::newRow("slash")             << "/g\\/.*\\/s/i" << QRegularExpression("g\\/.*\\/s", QRegularExpression::CaseInsensitiveOption);
+    QTest::newRow("slash2")            << "/g \\/ .* \\/ s/i" << QRegularExpression("g \\/ .* \\/ s", QRegularExpression::CaseInsensitiveOption);
+    QTest::newRow("fixed")             << "/a\\*aa\\.a\\(ba\\)\\*a\\\\ba/i" << QRegularExpression("a\\*aa\\.a\\(ba\\)\\*a\\\\ba", QRegularExpression::CaseInsensitiveOption);
+    QTest::newRow("fixed insensitive") << "/A\\*A/i" << QRegularExpression("A\\*A", QRegularExpression::CaseInsensitiveOption);
+    QTest::newRow("fixed sensitive")   << "/A\\*A/" << QRegularExpression("A\\*A");
+    QTest::newRow("html")              << "/<b>(.*)<\\/b>/" << QRegularExpression("<b>(.*)<\\/b>");
+    QTest::newRow("html minimal")      << "/^<b>(.*)<\\/b>$/" << QRegularExpression("^<b>(.*)<\\/b>$");
+    QTest::newRow("aaa")               << "/a{2,5}/" << QRegularExpression("a{2,5}");
+    QTest::newRow("aaa minimal")       << "/^a{2,5}$/" << QRegularExpression("^a{2,5}$");
+    QTest::newRow("minimal")           << "/^.*\\} [*8]$/" << QRegularExpression("^.*\\} [*8]$");
+    QTest::newRow(".? minimal")        << "/^.?$/" << QRegularExpression("^.?$");
+    QTest::newRow(".+ minimal")        << "/^.+$/" << QRegularExpression("^.+$");
+    QTest::newRow("[.?] minimal")      << "/^[.?]$/" << QRegularExpression("^[.?]$");
+    QTest::newRow("[.+] minimal")      << "/^[.+]$/" << QRegularExpression("^[.+]$");
+    QTest::newRow("multiline")  << "/^.*$/m" << QRegularExpression("^.*$", QRegularExpression::MultilineOption);
+}
+
+void tst_QJSEngine::qRegularExpressionExport()
+{
+    QFETCH(QString, js);
+    QFETCH(QRegularExpression, regularexpression);
+
+    QJSEngine eng;
+    QJSValue rexp;
+    rexp = eng.evaluate(js);
+
+    QCOMPARE(rexp.isRegExp(), true);
+    QCOMPARE(rexp.isCallable(), false);
+
+    QRegularExpression rx = qjsvalue_cast<QRegularExpression>(rexp);
+    QCOMPARE(rx, regularexpression);
 }
 
 // QScriptValue::toDateTime() returns a local time, whereas JS dates
@@ -3451,7 +3527,7 @@ public:
 
     ThreadedTestEngine() {}
 
-    void run() {
+    void run() override {
         QJSEngine firstEngine;
         QJSEngine secondEngine;
         QJSValue value = firstEngine.evaluate("1");
@@ -3649,21 +3725,21 @@ void tst_QJSEngine::dynamicProperties()
 {
     {
         QJSEngine engine;
-        QObject *obj = new QObject;
-        QJSValue wrapper = engine.newQObject(obj);
+        QScopedPointer<QObject> obj(new QObject);
+        QJSValue wrapper = engine.newQObject(obj.data());
         wrapper.setProperty("someRandomProperty", 42);
         QCOMPARE(wrapper.property("someRandomProperty").toInt(), 42);
-        QVERIFY(!qmlContext(obj));
+        QVERIFY(!qmlContext(obj.data()));
     }
     {
         QQmlEngine qmlEngine;
         QQmlComponent component(&qmlEngine);
         component.setData("import QtQml 2.0; QtObject { property QtObject subObject: QtObject {} }", QUrl());
-        QObject *root = component.create(nullptr);
+        QScopedPointer<QObject> root(component.create(nullptr));
         QVERIFY(root);
-        QVERIFY(qmlContext(root));
+        QVERIFY(qmlContext(root.data()));
 
-        QJSValue wrapper = qmlEngine.newQObject(root);
+        QJSValue wrapper = qmlEngine.newQObject(root.data());
         wrapper.setProperty("someRandomProperty", 42);
         QVERIFY(!wrapper.hasProperty("someRandomProperty"));
 
@@ -3788,7 +3864,8 @@ class TranslationScope
 public:
     TranslationScope(const QString &fileName)
     {
-        translator.load(fileName);
+        if (!translator.load(fileName))
+            QFAIL("failed to load translation");
         QCoreApplication::instance()->installTranslator(&translator);
     }
     ~TranslationScope()
@@ -4292,6 +4369,25 @@ void tst_QJSEngine::exceptions()
     engine.evaluate("console.exception('Exception 1')");
 }
 
+void tst_QJSEngine::exceptionReporting()
+{
+    QJSEngine engine;
+    QStringList stackTrace;
+    QJSValue result = engine.evaluate(R"(
+    function f() {throw 'an exception'}
+    function g() {f()}
+    g() )", QString("tesfile.js"), 1, &stackTrace);
+    QVERIFY2(!result.isError(), qPrintable(result.toString()));
+    QCOMPARE(stackTrace.count(), 3);
+    QCOMPARE(stackTrace.at(0), "f:2:-1:file:tesfile.js");
+    QCOMPARE(stackTrace.at(1), "g:3:-1:file:tesfile.js");
+    QCOMPARE(stackTrace.at(2), "%entry:4:-1:file:tesfile.js");
+
+    result = engine.evaluate("42", QString(), 1, &stackTrace);
+    QVERIFY2(!result.isError(), qPrintable(result.toString()));
+    QVERIFY(stackTrace.isEmpty());
+}
+
 void tst_QJSEngine::installGarbageCollectionFunctions()
 {
     QJSEngine engine;
@@ -4363,9 +4459,6 @@ void tst_QJSEngine::engineForObject()
         QJSValue wrapper = engine.newQObject(&object);
         QQmlEngine::setObjectOwnership(&object, QQmlEngine::CppOwnership);
         QVERIFY(qjsEngine(&object));
-#ifdef QT_DEPRECATED
-        QCOMPARE(qjsEngine(&object), wrapper.engine());
-#endif
     }
     QVERIFY(!qjsEngine(&object));
 }
@@ -4765,9 +4858,22 @@ void tst_QJSEngine::returnError()
     QVERIFY(!result.property("stack").isUndefined());
 }
 
+void tst_QJSEngine::catchError()
+{
+    QJSEngine engine;
+    QVERIFY(!engine.hasError());
+    engine.throwError(QJSValue::GenericError, "some error");
+    QVERIFY(engine.hasError());
+    const QJSValue error = engine.catchError();
+    QVERIFY(error.isError());
+    QCOMPARE(error.errorType(), QJSValue::GenericError);
+    QCOMPARE(error.property("message").toString(), "some error");
+    QVERIFY(!engine.hasError());
+}
+
 QJSValue tst_QJSEngine::throwingCppMethod1()
 {
-    qjsEngine(this)->throwError("blub");
+    qjsEngine(this)->throwError(QStringLiteral("blub"));
     return QJSValue(47);
 }
 
@@ -4778,7 +4884,9 @@ void tst_QJSEngine::throwingCppMethod2()
 
 QJSValue tst_QJSEngine::throwingCppMethod3()
 {
-    return qjsEngine(this)->newErrorObject(QJSValue::EvalError, "Something is wrong");
+    QJSEngine *engine = qjsEngine(this);
+    engine->throwError(engine->newErrorObject(QJSValue::EvalError, "Something is wrong"));
+    return QJSValue(31);
 }
 
 void tst_QJSEngine::mathMinMax()
@@ -4787,13 +4895,11 @@ void tst_QJSEngine::mathMinMax()
 
     QJSValue result = engine.evaluate("var a = .5; Math.min(1, 2, 3.5 + a, '5')");
     QCOMPARE(result.toNumber(), 1.0);
-    QVERIFY(QJSValuePrivate::getValue(&result) != nullptr);
-    QVERIFY(QJSValuePrivate::getValue(&result)->isInteger());
+    QVERIFY(QV4::Value(QJSValuePrivate::asReturnedValue(&result)).isInteger());
 
     result = engine.evaluate("var a = .5; Math.max('0', 1, 2, 3.5 + a)");
     QCOMPARE(result.toNumber(), 4.0);
-    QVERIFY(QJSValuePrivate::getValue(&result) != nullptr);
-    QVERIFY(QJSValuePrivate::getValue(&result)->isInteger());
+    QVERIFY(QV4::Value(QJSValuePrivate::asReturnedValue(&result)).isInteger());
 }
 
 void tst_QJSEngine::importModule()
@@ -4865,6 +4971,76 @@ void tst_QJSEngine::importExportErrors()
         QVERIFY(result.isError());
         QCOMPARE(result.property("lineNumber").toInt(), 2);
     }
+}
+
+void tst_QJSEngine::registerModule()
+{
+    QJSEngine engine;
+    QJSValue magic(63);
+    QJSValue name("Qt6");
+    QJSValue version("6.1.3");
+    QJSValue obj = engine.newObject();
+    bool ret = false;
+
+    obj.setProperty("name", name);
+    obj.setProperty("version", version);
+
+    ret = engine.registerModule("magic", magic);
+    QVERIFY2(ret, "Error registering magic");
+    ret = engine.registerModule("qt_info", obj);
+    QVERIFY2(ret, "Error registering qt_info");
+    QJSValue result = engine.importModule(QStringLiteral(":/testregister.mjs"));
+    QVERIFY(!result.isError());
+
+    QJSValue nameVal = result.property("getName").call();
+    QJSValue magicVal = result.property("getMagic").call();
+    QCOMPARE(nameVal.toString(), QLatin1String("Qt6"));
+    QCOMPARE(magicVal.toInt(), 63);
+
+    // Verify that "name" doesn't change in JS even if the object is changed.
+    QJSValue replacement("Bad");
+    obj.setProperty("name", replacement);
+    QJSValue newNameVal = result.property("getName").call();
+    QCOMPARE(nameVal.toString(), "Qt6");
+}
+
+class TestRegisterObject : public QObject
+{
+    Q_OBJECT
+public:
+    TestRegisterObject() {}
+
+    Q_INVOKABLE int add(int a, int b) {
+        return a + b;
+    }
+};
+
+void tst_QJSEngine::registerModuleQObject()
+{
+    QJSEngine engine;
+    TestRegisterObject obj;
+    QJSValue wrapper = engine.newQObject(&obj);
+    auto args = QJSValueList() << 1 << 2;
+
+    bool ret = engine.registerModule("math", wrapper);
+    QVERIFY(ret);
+
+    QJSValue result = engine.importModule(QStringLiteral(":/testregister2.mjs"));
+    QVERIFY(!result.isError());
+
+    QJSValue value = result.property("addAndDouble").call(args);
+    QCOMPARE(value.toInt(), 6);
+}
+
+void tst_QJSEngine::registerModuleNamedError() {
+    QJSEngine engine;
+    QJSValue notanobject(666);
+
+    bool ret = engine.registerModule("notanobject", notanobject);
+    QVERIFY(ret);
+
+    QJSValue result = engine.importModule(QStringLiteral(":/testregister3.mjs"));
+    QCOMPARE(result.toString(), QString("ReferenceError: Unable to resolve import reference subval because notanobject is not an object"));
 }
 
 void tst_QJSEngine::equality()
@@ -4963,7 +5139,7 @@ void tst_QJSEngine::interrupt()
     Q_UNUSED(threshold);
 
     QJSEngine *engineInThread = nullptr;
-    QScopedPointer<QThread> worker(QThread::create([&engineInThread, &code, jitThreshold](){
+    QScopedPointer<QThread> worker(QThread::create([&engineInThread, &code](){
         QJSEngine jsEngine;
         engineInThread = &jsEngine;
         QJSValue result = jsEngine.evaluate(code);
@@ -5016,6 +5192,23 @@ void tst_QJSEngine::arrayConcatOnSparseArray()
         QCOMPARE(value.property(i).toInt(), i + 1);
     for (int i = 5; i < 1340; ++i)
         QVERIFY(value.property(i).isUndefined());
+}
+
+void tst_QJSEngine::concatAfterUnshift()
+{
+    QJSEngine engine;
+    const auto value = engine.evaluate(uR"(
+            (function() {
+            let test = ['val2']
+            test.unshift('val1')
+            test = test.concat([])
+            return test
+            })()
+    )"_s);
+    QVERIFY2(!value.isError(), qPrintable(value.toString()));
+    QVERIFY(value.isArray());
+    QCOMPARE(value.property(0).toString(), u"val1"_s);
+    QCOMPARE(value.property(1).toString(), u"val2"_s);
 }
 
 void tst_QJSEngine::sortSparseArray()
@@ -5139,7 +5332,7 @@ void tst_QJSEngine::typedArraySet()
     QJSEngine engine;
     const auto value = engine.evaluate(
         "(function() {"
-        "   var length = 0xffffffe;"
+        "   var length = 0xfffffe0;"
         "   var offset = 0xfffffff0;"
         "   var e1;"
         "   var e2;"
@@ -5209,6 +5402,190 @@ void tst_QJSEngine::uiLanguage()
         qmlEngine.setUiLanguage("Blah");
         QCOMPARE(qmlEngine.globalObject().property("Qt").property("uiLanguage").toString(), "Blah");
     }
+}
+
+void tst_QJSEngine::urlObject()
+{
+    QJSEngine engine;
+
+    const QString href = QStringLiteral(
+                "http://uuu:ppp@example.com:777/foo/bar?search=stuff&other=where#hhh");
+    const QUrl url(href);
+
+    QJSManagedValue v(engine.evaluate(QStringLiteral("new URL('%1')").arg(href)), &engine);
+    QVERIFY(v.isObject());
+    QJSManagedValue proto(v.prototype());
+
+    auto check = [&](const QString &prop, const QString &expected) {
+        QCOMPARE(v.property(prop).toString(), expected);
+        QVERIFY(proto.property(prop).isUndefined());
+        QVERIFY(engine.hasError());
+        QCOMPARE(engine.catchError().toString(),
+                 QStringLiteral("TypeError: Value of \"this\" must be of type URL"));
+    };
+
+    check(QStringLiteral("href"), url.toString());
+    check(QStringLiteral("origin"), QStringLiteral("http://example.com:777"));
+    check(QStringLiteral("protocol"), url.scheme());
+    check(QStringLiteral("username"), url.userName());
+    check(QStringLiteral("password"), url.password());
+    check(QStringLiteral("host"), url.host() + u':' + QString::number(url.port()));
+    check(QStringLiteral("hostname"), url.host());
+    check(QStringLiteral("port"), QString::number(url.port()));
+    check(QStringLiteral("pathname"), url.path());
+    check(QStringLiteral("search"), QStringLiteral("?search=stuff&other=where"));
+    check(QStringLiteral("hash"), u'#' + url.fragment());
+
+    QJSManagedValue s(v.property("searchParams"), &engine);
+    QVERIFY(s.isObject());
+
+    const QStringList searchParamsMethods = {
+        QStringLiteral("append"),
+        QStringLiteral("delete"),
+        QStringLiteral("get"),
+        QStringLiteral("getAll"),
+        QStringLiteral("has"),
+        QStringLiteral("set"),
+        QStringLiteral("sort"),
+        QStringLiteral("entries"),
+        QStringLiteral("forEach"),
+        QStringLiteral("keys"),
+        QStringLiteral("values"),
+        QStringLiteral("toString")
+    };
+
+    for (const QString &method : searchParamsMethods) {
+        QJSManagedValue get(s.property(method), &engine);
+
+        // Shoudn't crash.
+        // We get different error messages depending on parameters, though.
+        QJSValue undef = get.call({});
+        QVERIFY(undef.isUndefined());
+        QVERIFY(engine.hasError());
+        engine.catchError();
+    }
+
+    QVariant urlVariant(url);
+    QV4::Scope scope(engine.handle());
+    QV4::ScopedValue urlValue(scope, scope.engine->fromVariant(urlVariant));
+    QVERIFY(urlValue->isObject());
+
+    QUrl result1;
+    QVERIFY(scope.engine->metaTypeFromJS(urlValue, QMetaType::fromType<QUrl>(), &result1));
+    QCOMPARE(result1, url);
+
+    QV4::ScopedValue urlVariantValue(scope, scope.engine->newVariantObject(urlVariant));
+    QVERIFY(urlVariantValue->isObject());
+    QUrl result2;
+    QVERIFY(scope.engine->metaTypeFromJS(urlVariantValue, QMetaType::fromType<QUrl>(), &result2));
+    QCOMPARE(result2, url);
+}
+
+void tst_QJSEngine::thisInConstructor()
+{
+    QJSEngine engine;
+    const QJSValue result = engine.evaluate(R"((function() {
+        let a = undefined;
+        class Bugtest {
+            constructor() {
+                (() => {
+                    if (true) {
+                        a = this;
+                    }
+                })();
+            }
+        };
+        new Bugtest();
+        return a;
+    })())");
+    QVERIFY(!result.isUndefined());
+    QVERIFY(result.isObject());
+}
+
+void tst_QJSEngine::forOfAndGc()
+{
+    // We want to guard against the iterator of a for..of loop leaving the result unprotected from
+    // garbage collection. It should be possible to construct a pure JS test case, but due to the
+    // vaguaries of garbage collection it's hard to reliably trigger the crash. This test is the
+    // best I could come up with.
+
+    QQmlEngine engine;
+    QQmlComponent c(&engine);
+    c.setData(R"(
+        import QtQml
+
+        QtObject {
+            id: counter
+            property int count: 0
+
+            property DelegateModel model: DelegateModel {
+                id: filesModel
+
+                model: ListModel {
+                    Component.onCompleted: {
+                        for (let idx = 0; idx < 50; idx++)
+                            append({"i" : idx})
+                    }
+                }
+
+                groups: [
+                    DelegateModelGroup {
+                        name: "selected"
+                    }
+                ]
+
+                function getSelected() {
+                    for (let i = 0; i < items.count; ++i) {
+                        var item = items.get(i)
+                        for (let el of item.groups) {
+                            if (el === "selected")
+                                ++counter.count
+                        }
+                    }
+                }
+
+                property bool bSelect: true
+                function selectAll() {
+                    for (let i = 0; i < items.count; ++i) {
+                        if (bSelect && !items.get(i).inSelected)
+                            items.addGroups(i, 1, ["selected"])
+                        else
+                            items.removeGroups(i, 1, ["selected"])
+                        getSelected()
+                    }
+                    bSelect = !bSelect
+                }
+            }
+
+            property Timer timer: Timer {
+                running: true
+                interval: 1
+                repeat: true
+                onTriggered: filesModel.selectAll()
+            }
+        }
+    )", QUrl());
+
+    QVERIFY2(c.isReady(), qPrintable(c.errorString()));
+    QScopedPointer<QObject> o(c.create());
+
+    QTRY_VERIFY(o->property("count").toInt() > 32768);
+}
+
+void tst_QJSEngine::staticInNestedClasses()
+{
+    QJSEngine engine;
+    const QString program = uR"(
+        class Tester {
+            constructor() {
+                new (class {})();
+            }
+            static get test() { return "a" }
+        }
+        Tester.test
+    )"_s;
+
+    QCOMPARE(engine.evaluate(program).toString(), u"a"_s);
 }
 
 QTEST_MAIN(tst_QJSEngine)

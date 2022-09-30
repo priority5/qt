@@ -4,7 +4,11 @@
 
 #include "ui/gl/gl_switches.h"
 
-#include "base/stl_util.h"
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "base/android/build_info.h"
+#endif
 
 namespace gl {
 
@@ -13,8 +17,6 @@ const char kGLImplementationCoreProfileName[] = "core_profile";
 const char kGLImplementationAppleName[] = "apple";
 const char kGLImplementationEGLName[] = "egl";
 const char kGLImplementationANGLEName[] = "angle";
-const char kGLImplementationSwiftShaderName[] = "swiftshader";
-const char kGLImplementationSwiftShaderForWebGLName[] = "swiftshader-webgl";
 const char kGLImplementationMockName[] = "mock";
 const char kGLImplementationStubName[] = "stub";
 const char kGLImplementationDisabledName[] = "disabled";
@@ -30,7 +32,9 @@ const char kANGLEImplementationOpenGLESEGLName[] = "gles-egl";
 const char kANGLEImplementationNullName[] = "null";
 const char kANGLEImplementationVulkanName[] = "vulkan";
 const char kANGLEImplementationSwiftShaderName[] = "swiftshader";
+const char kANGLEImplementationSwiftShaderForWebGLName[] = "swiftshader-webgl";
 const char kANGLEImplementationMetalName[] = "metal";
+const char kANGLEImplementationNoneName[] = "";
 
 // Special switches for "NULL"/stub driver implementations.
 const char kANGLEImplementationD3D11NULLName[] = "d3d11-null";
@@ -42,6 +46,11 @@ const char kANGLEImplementationMetalNULLName[] = "metal-null";
 // The command decoder names that can be passed to --use-cmd-decoder.
 const char kCmdDecoderValidatingName[] = "validating";
 const char kCmdDecoderPassthroughName[] = "passthrough";
+
+// Swap chain formats for direct composition SDR video overlays.
+const char kSwapChainFormatNV12[] = "nv12";
+const char kSwapChainFormatYUY2[] = "yuy2";
+const char kSwapChainFormatBGRA[] = "bgra";
 
 }  // namespace gl
 
@@ -121,7 +130,7 @@ const char kEnableSgiVideoSync[] = "enable-sgi-video-sync";
 // the GL output will not be correct but tests will run faster.
 const char kDisableGLDrawingForTests[] = "disable-gl-drawing-for-tests";
 
-// Forces the use of software GL instead of hardware gpu.
+// Forces the use of software GL instead of hardware gpu for tests.
 const char kOverrideUseSoftwareGLForTests[] =
     "override-use-software-gl-for-tests";
 
@@ -153,6 +162,11 @@ const char kUseAdapterLuid[] = "use-adapter-luid";
 const char kDirectCompositionForceFullDamageForTesting[] =
     "direct-composition-force-full-damage-for-testing";
 
+// Used for overriding the swap chain format for direct composition SDR video
+// overlays.
+const char kDirectCompositionVideoSwapChainFormat[] =
+    "direct-composition-video-swap-chain-format";
+
 // This is the list of switches passed from this file that are passed from the
 // GpuProcessHost to the GPU Process. Add your switch to this list if you need
 // to read it in the GPU process, else don't add it.
@@ -174,15 +188,24 @@ const char* const kGLSwitchesCopiedFromGpuProcessHost[] = {
     kEnableDirectCompositionVideoOverlays,
     kDisableDirectCompositionVideoOverlays,
     kDirectCompositionForceFullDamageForTesting,
+    kDirectCompositionVideoSwapChainFormat,
 };
 const int kGLSwitchesCopiedFromGpuProcessHostNumSwitches =
-    base::size(kGLSwitchesCopiedFromGpuProcessHost);
+    std::size(kGLSwitchesCopiedFromGpuProcessHost);
 
 const char kCreateDefaultGLContext[] = "create-default-gl-context";
 
 }  // namespace switches
 
 namespace features {
+
+// Use BufferCount of 3 for the direct composition root swap chain.
+const base::Feature kDCompTripleBufferRootSwapChain{
+    "DCompTripleBufferRootSwapChain", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Use BufferCount of 3 for direct composition video swap chains.
+const base::Feature kDCompTripleBufferVideoSwapChain{
+    "DCompTripleBufferVideoSwapChain", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Forces Chrome's main backbuffer to full damage if the actual damage
 // is large enough and allows DWM to consider the main backbuffer as an
@@ -195,25 +218,21 @@ const base::Feature kDirectCompositionLowLatencyPresentation{
     "DirectCompositionLowLatencyPresentation",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Overrides preferred overlay format to NV12 instead of YUY2.
-const base::Feature kDirectCompositionPreferNV12Overlays{
-    "DirectCompositionPreferNV12Overlays", base::FEATURE_ENABLED_BY_DEFAULT};
-
 // Allow overlay swapchain to present on all GPUs even if they only support
-// software overlays.
+// software overlays. GPU deny lists limit it to NVIDIA only at the moment.
 const base::Feature kDirectCompositionSoftwareOverlays{
-    "DirectCompositionSoftwareOverlays", base::FEATURE_DISABLED_BY_DEFAULT};
+    "DirectCompositionSoftwareOverlays", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Allow putting a video swapchain underneath the main swapchain, so overlays
-// can be used even if there are controls on top of the video. It can be
-// enabled only when overlay is supported.
-const base::Feature kDirectCompositionUnderlays{
-    "DirectCompositionUnderlays", base::FEATURE_ENABLED_BY_DEFAULT};
+// TODO(crbug.com/1269749): This is used temporarily for verifying
+// the draw offset bug. The code should be removed once the bug is fixed.
+const base::Feature kDirectCompositionVerifyDrawOffset{
+    "DirectCompositionVerifyDrawOffset", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Use decode swap chain created from compatible video decoder buffers.
-const base::Feature kDirectCompositionUseNV12DecodeSwapChain{
-    "DirectCompositionUseNV12DecodeSwapChain",
-    base::FEATURE_ENABLED_BY_DEFAULT};
+const base::FeatureParam<int> kVerifyDrawOffsetX{
+    &kDirectCompositionVerifyDrawOffset, "verify_draw_offset_x", 0};
+
+const base::FeatureParam<int> kVerifyDrawOffsetY{
+    &kDirectCompositionVerifyDrawOffset, "verify_draw_offset_y", 0};
 
 // Default to using ANGLE's OpenGL backend
 const base::Feature kDefaultANGLEOpenGL{"DefaultANGLEOpenGL",
@@ -223,10 +242,29 @@ const base::Feature kDefaultANGLEOpenGL{"DefaultANGLEOpenGL",
 const base::Feature kDefaultANGLEMetal{"DefaultANGLEMetal",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Default to using ANGLE's Vulkan backend.
+const base::Feature kDefaultANGLEVulkan{"DefaultANGLEVulkan",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Track current program's shaders at glUseProgram() call for crash report
 // purpose. Only effective on Windows because the attached shaders may only
 // be reliably retrieved with ANGLE backend.
 const base::Feature kTrackCurrentShaders{"TrackCurrentShaders",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enable sharing Vulkan device queue with ANGLE's Vulkan backend.
+const base::Feature kVulkanFromANGLE{"VulkanFromANGLE",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
+bool IsDefaultANGLEVulkan() {
+#if BUILDFLAG(IS_ANDROID)
+  // No support for devices before Q -- exit before checking feature flags
+  // so that devices are not counted in finch trials.
+  if (base::android::BuildInfo::GetInstance()->sdk_int() <
+      base::android::SDK_VERSION_Q)
+    return false;
+#endif  // BUILDFLAG(IS_ANDROID)
+  return base::FeatureList::IsEnabled(kDefaultANGLEVulkan);
+}
 
 }  // namespace features

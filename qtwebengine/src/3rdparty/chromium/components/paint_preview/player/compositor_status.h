@@ -26,6 +26,10 @@ enum class CompositorStatus : int {
   CAPTURE_EXPIRED,
   NO_CAPTURE,
   TIMED_OUT,
+  STOPPED_DUE_TO_MEMORY_PRESSURE,
+  SKIPPED_DUE_TO_MEMORY_PRESSURE,
+  // Used by long screenshots code only when call to requestBitmap fails.
+  REQUEST_BITMAP_FAILURE,
   COUNT,
 };
 

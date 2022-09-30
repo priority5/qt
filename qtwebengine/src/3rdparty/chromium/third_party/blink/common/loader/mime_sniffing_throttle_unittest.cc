@@ -88,7 +88,8 @@ class MockDelegate : public blink::URLLoaderThrottle::Delegate {
     is_resumed_ = true;
     // Resume from OnReceiveResponse() with a customized response header.
     destination_loader_client()->OnReceiveResponse(
-        std::move(updated_response_head_));
+        std::move(updated_response_head_),
+        mojo::ScopedDataPipeConsumerHandle());
   }
 
   void SetPriority(net::RequestPriority priority) override { NOTIMPLEMENTED(); }
@@ -104,7 +105,8 @@ class MockDelegate : public blink::URLLoaderThrottle::Delegate {
           new_client_receiver,
       mojo::PendingRemote<network::mojom::URLLoader>* original_loader,
       mojo::PendingReceiver<network::mojom::URLLoaderClient>*
-          original_client_receiver) override {
+          original_client_receiver,
+      mojo::ScopedDataPipeConsumerHandle* body) override {
     is_intercepted_ = true;
 
     destination_loader_remote_.Bind(std::move(new_loader));
@@ -123,7 +125,7 @@ class MockDelegate : public blink::URLLoaderThrottle::Delegate {
       // Send OnStartLoadingResponseBody() if it's the first call.
       mojo::ScopedDataPipeConsumerHandle consumer;
       EXPECT_EQ(MOJO_RESULT_OK,
-                mojo::CreateDataPipe(nullptr, &source_body_handle_, &consumer));
+                mojo::CreateDataPipe(nullptr, source_body_handle_, consumer));
       source_loader_client_remote()->OnStartLoadingResponseBody(
           std::move(consumer));
     }
@@ -338,7 +340,7 @@ TEST_F(MimeSniffingThrottleTest, EmptyBody) {
 
   mojo::ScopedDataPipeProducerHandle producer;
   mojo::ScopedDataPipeConsumerHandle consumer;
-  CHECK_EQ(MOJO_RESULT_OK, mojo::CreateDataPipe(nullptr, &producer, &consumer));
+  CHECK_EQ(MOJO_RESULT_OK, mojo::CreateDataPipe(nullptr, producer, consumer));
   delegate->source_loader_client_remote()->OnStartLoadingResponseBody(
       std::move(consumer));
   producer.reset();  // The pipe is empty.

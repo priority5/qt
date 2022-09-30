@@ -20,6 +20,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_string_list.h"
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/svg/svg_parser_utilities.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -73,7 +74,7 @@ SVGParsingError SVGStringListBase::SetValueAsStringWithDelimiter(
     return SVGParseStatus::kNoError;
 
   WTF::VisitCharacters(data, [&](const auto* chars, unsigned length) {
-    this->ParseInternal(chars, chars + length, list_delimiter);
+    ParseInternal(chars, chars + length, list_delimiter);
   });
   return SVGParseStatus::kNoError;
 }

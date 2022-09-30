@@ -34,6 +34,7 @@ SensorProxyImpl::~SensorProxyImpl() {}
 void SensorProxyImpl::Trace(Visitor* visitor) const {
   visitor->Trace(sensor_remote_);
   visitor->Trace(client_receiver_);
+  visitor->Trace(polling_timer_);
   SensorProxy::Trace(visitor);
 }
 
@@ -138,8 +139,6 @@ void SensorProxyImpl::ReportError(DOMExceptionCode code,
   reading_ = device::SensorReading();
   UpdatePollingStatus();
 
-  // The m_sensor.reset() will release all callbacks and its bound parameters,
-  // therefore, handleSensorError accepts messages by value.
   sensor_remote_.reset();
   shared_buffer_reader_.reset();
   default_frequency_ = 0.0;
@@ -227,9 +226,8 @@ void SensorProxyImpl::UpdatePollingStatus() {
   if (ShouldProcessReadings()) {
     // TODO(crbug/721297) : We need to find out an algorithm for resulting
     // polling frequency.
-    polling_timer_.StartRepeating(
-        base::TimeDelta::FromSecondsD(1 / active_frequencies_.back()),
-        FROM_HERE);
+    polling_timer_.StartRepeating(base::Seconds(1 / active_frequencies_.back()),
+                                  FROM_HERE);
   } else {
     polling_timer_.Stop();
   }

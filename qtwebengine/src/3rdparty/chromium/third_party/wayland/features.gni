@@ -4,13 +4,13 @@
 
 import("//build/config/chromecast_build.gni")
 import("//build/config/chromeos/ui_mode.gni")
+import("//build/config/sanitizers/sanitizers.gni")
 
 declare_args() {
   # Controls whether the build should use the version of Wayland
   # library shipped with the system or Chromium third_party.
-  use_system_libwayland =
-      is_desktop_linux && !is_chromecast && !chromeos_is_browser_only &&
-      default_toolchain != "//build/toolchain/cros:target"
+  use_system_libwayland = is_linux && !is_chromecast && !is_chromeos_lacros &&
+                          default_toolchain != "//build/toolchain/cros:target"
 
   # Path to wayland-scanner. Has effect only when the system libwayland is used.
   assert(host_os == "linux")
@@ -18,5 +18,5 @@ declare_args() {
 
   # This may be set by Chromium packagers who do not wish to use the bundled
   # wayland scanner.
-  use_system_wayland_scanner = false
+  use_system_wayland_scanner = host_toolchain == default_toolchain && is_msan
 }

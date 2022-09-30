@@ -17,7 +17,6 @@
 #include "base/mac/scoped_mach_port.h"
 #include "base/notreached.h"
 #include "base/process/process_metrics.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 
@@ -29,7 +28,7 @@ namespace {
 // system or the empty string on failure.
 std::string GetSysctlValue(const char* key_name) {
   char value[256];
-  size_t len = base::size(value);
+  size_t len = std::size(value);
   if (sysctlbyname(key_name, &value, &len, nullptr, 0) == 0) {
     DCHECK_GE(len, 1u);
     DCHECK_EQ('\0', value[len - 1]);
@@ -61,18 +60,16 @@ void SysInfo::OperatingSystemVersionNumbers(int32_t* major_version,
   *major_version = version.majorVersion;
   *minor_version = version.minorVersion;
   *bugfix_version = version.patchVersion;
+}
 
-  // TODO(https://crbug.com/1108832): If an app is built against a pre-macOS
-  // 11.0 SDK, macOS will lie as to what version it is, saying that it is macOS
-  // "10.16" rather than "11.0". The problem is that the "IsOS/IsAtLeastOS/
-  // IsAtMostOS" functions are driven from the Darwin version number, which
-  // isn't lied about, and therefore the values returned by this function and
-  // those functions are inconsistent. Therefore, unlie about these values.
-
-  if (*major_version == 10 && *minor_version >= 16) {
-    *major_version = *minor_version - 5;
-    *minor_version = *bugfix_version;
-    *bugfix_version = 0;
+// static
+std::string SysInfo::OperatingSystemArchitecture() {
+  switch (mac::GetCPUType()) {
+    case mac::CPUType::kIntel:
+      return "x86_64";
+    case mac::CPUType::kTranslatedIntel:
+    case mac::CPUType::kArm:
+      return "arm64";
   }
 }
 

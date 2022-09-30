@@ -7,24 +7,16 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/feature_list.h"
 #include "build/build_config.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/prefs/pref_service.h"
-#include "components/sync/driver/sync_auth_util.h"
+#include "components/sync/base/features.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_user_settings.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-
-namespace {
-
-#if defined(OS_ANDROID)
-constexpr base::Feature kWalletRequiresFirstSyncSetupComplete{
-    "WalletRequiresFirstSyncSetupComplete", base::FEATURE_ENABLED_BY_DEFAULT};
-#endif
-
-}  // namespace
 
 namespace browser_sync {
 
@@ -41,8 +33,6 @@ AutofillWalletModelTypeController::AutofillWalletModelTypeController(
          type == syncer::AUTOFILL_WALLET_METADATA ||
          type == syncer::AUTOFILL_WALLET_OFFER);
   SubscribeToPrefChanges();
-  // TODO(crbug.com/906995): remove this observing mechanism once all sync
-  // datatypes are stopped by ProfileSyncService, when sync is paused.
   sync_service_->AddObserver(this);
 }
 
@@ -63,8 +53,6 @@ AutofillWalletModelTypeController::AutofillWalletModelTypeController(
          type == syncer::AUTOFILL_WALLET_METADATA ||
          type == syncer::AUTOFILL_WALLET_OFFER);
   SubscribeToPrefChanges();
-  // TODO(crbug.com/906995): remove this observing mechanism once all sync
-  // datatypes are stopped by ProfileSyncService, when sync is paused.
   sync_service_->AddObserver(this);
 }
 
@@ -77,13 +65,13 @@ void AutofillWalletModelTypeController::Stop(
     StopCallback callback) {
   DCHECK(CalledOnValidThread());
   switch (shutdown_reason) {
-    case syncer::STOP_SYNC:
+    case syncer::ShutdownReason::STOP_SYNC_AND_KEEP_DATA:
       // Special case: For Wallet-related data types, we want to clear all data
       // even when Sync is stopped temporarily.
-      shutdown_reason = syncer::DISABLE_SYNC;
+      shutdown_reason = syncer::ShutdownReason::DISABLE_SYNC_AND_CLEAR_DATA;
       break;
-    case syncer::DISABLE_SYNC:
-    case syncer::BROWSER_SHUTDOWN:
+    case syncer::ShutdownReason::DISABLE_SYNC_AND_CLEAR_DATA:
+    case syncer::ShutdownReason::BROWSER_SHUTDOWN_AND_KEEP_DATA:
       break;
   }
   ModelTypeController::Stop(shutdown_reason, std::move(callback));
@@ -92,26 +80,29 @@ void AutofillWalletModelTypeController::Stop(
 syncer::DataTypeController::PreconditionState
 AutofillWalletModelTypeController::GetPreconditionState() const {
   DCHECK(CalledOnValidThread());
-  // Not being in a persistent error state implies not being in a web signout
-  // state.
-  // TODO(https://crbug.com/819729): Add integration tests for web signout and
-  // other persistent auth errors.
   bool preconditions_met =
       pref_service_->GetBoolean(
           autofill::prefs::kAutofillWalletImportEnabled) &&
       pref_service_->GetBoolean(autofill::prefs::kAutofillCreditCardEnabled) &&
       !sync_service_->GetAuthError().IsPersistentError();
-#if defined(OS_ANDROID)
-  if (base::FeatureList::IsEnabled(kWalletRequiresFirstSyncSetupComplete)) {
-    // On Android, it's also required that the initial Sync setup is complete
-    // (i.e. the user has previously opted in to Sync-the-feature, even if it's
-    // not enabled right now).
-    preconditions_met &=
-        sync_service_->GetUserSettings()->IsFirstSetupComplete();
-  }
-#endif
   return preconditions_met ? PreconditionState::kPreconditionsMet
                            : PreconditionState::kMustStopAndClearData;
+}
+
+bool AutofillWalletModelTypeController::ShouldRunInTransportOnlyMode() const {
+  if (type() != syncer::AUTOFILL_WALLET_DATA) {
+    return false;
+  }
+  if (!base::FeatureList::IsEnabled(
+          autofill::features::kAutofillEnableAccountWalletStorage)) {
+    return false;
+  }
+  if (sync_service_->GetUserSettings()->IsUsingExplicitPassphrase() &&
+      !base::FeatureList::IsEnabled(
+          syncer::kSyncAllowWalletDataInTransportModeWithCustomPassphrase)) {
+    return false;
+  }
+  return true;
 }
 
 void AutofillWalletModelTypeController::OnUserPrefChanged() {

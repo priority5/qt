@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Linguist of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qmakeevaluator.h"
 #include "qmakeevaluator_p.h"
@@ -41,7 +16,7 @@
 #include <qfile.h>
 #include <qfileinfo.h>
 #include <qlist.h>
-#include <qregexp.h>
+#include <qregularexpression.h>
 #include <qset.h>
 #include <qstack.h>
 #include <qstring.h>
@@ -107,7 +82,7 @@ QMakeBaseKey::QMakeBaseKey(const QString &_root, const QString &_stash, bool _ho
 {
 }
 
-uint qHash(const QMakeBaseKey &key)
+size_t qHash(const QMakeBaseKey &key)
 {
     return qHash(key.root) ^ qHash(key.stash) ^ (uint)key.hostBuild;
 }
@@ -272,7 +247,7 @@ void QMakeEvaluator::skipHashStr(const ushort *&tokPtr)
 
 // FIXME: this should not build new strings for direct sections.
 // Note that the E_SPRINTF and E_LIST implementations rely on the deep copy.
-ProStringList QMakeEvaluator::split_value_list(const QStringRef &vals, int source)
+ProStringList QMakeEvaluator::split_value_list(QStringView vals, int source)
 {
     QString build;
     ProStringList ret;
@@ -334,7 +309,7 @@ ProStringList QMakeEvaluator::split_value_list(const QStringRef &vals, int sourc
 }
 
 static void replaceInList(ProStringList *varlist,
-        const QRegExp &regexp, const QString &replace, bool global, QString &tmp)
+        const QRegularExpression &regexp, const QString &replace, bool global, QString &tmp)
 {
     for (ProStringList::Iterator varit = varlist->begin(); varit != varlist->end(); ) {
         ProStringRoUser u1(*varit, tmp);
@@ -653,7 +628,7 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::visitProBlock(
                         evalError(fL1S("Conditional must expand to exactly one word."));
                     okey = false;
                 } else {
-                    okey = isActiveConfig(curr.at(0).toQStringRef(), true);
+                    okey = isActiveConfig(curr.at(0).toQStringView(), true);
                     traceMsg("condition %s is %s", dbgStr(curr.at(0)), dbgBool(okey));
                     okey ^= invert;
                 }
@@ -780,7 +755,7 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::visitProLoop(
             }
             infinite = true;
         } else {
-            const QStringRef &itl = it_list.toQStringRef();
+            QStringView itl = it_list.toQStringView();
             int dotdot = itl.indexOf(statics.strDotDot);
             if (dotdot != -1) {
                 bool ok;
@@ -877,7 +852,7 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::visitProVariable(
         ProStringList varVal;
         if (expandVariableReferences(tokPtr, sizeHint, &varVal, true) == ReturnError)
             return ReturnError;
-        const QStringRef &val = varVal.at(0).toQStringRef();
+        QStringView val = varVal.at(0).toQStringView();
         if (val.length() < 4 || val.at(0) != QLatin1Char('s')) {
             evalError(fL1S("The ~= operator can handle only the s/// function."));
             return ReturnTrue;
@@ -898,9 +873,11 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::visitProVariable(
         QString pattern = func[1].toString();
         QString replace = func[2].toString();
         if (quote)
-            pattern = QRegExp::escape(pattern);
+            pattern = QRegularExpression::escape(pattern);
 
-        QRegExp regexp(pattern, case_sense ? Qt::CaseSensitive : Qt::CaseInsensitive);
+        QRegularExpression regexp(pattern, case_sense ?
+                                      QRegularExpression::NoPatternOption :
+                                      QRegularExpression::CaseInsensitiveOption);
 
         // We could make a union of modified and unmodified values,
         // but this will break just as much as it fixes, so leave it as is.
@@ -1314,7 +1291,7 @@ void QMakeEvaluator::setupProject()
 void QMakeEvaluator::evaluateCommand(const QString &cmds, const QString &where)
 {
     if (!cmds.isEmpty()) {
-        ProFile *pro = m_parser->parsedProBlock(QStringRef(&cmds), 0, where, -1);
+        ProFile *pro = m_parser->parsedProBlock(QStringView(cmds), 0, where, -1);
         if (pro->isOk()) {
             m_locationStack.push(m_current);
             visitProBlock(pro, pro->tokPtr());
@@ -1623,7 +1600,7 @@ QString QMakeEvaluator::currentDirectory() const
     return QString();
 }
 
-bool QMakeEvaluator::isActiveConfig(const QStringRef &config, bool regex)
+bool QMakeEvaluator::isActiveConfig(QStringView config, bool regex)
 {
     // magic types for easy flipping
     if (config == statics.strtrue)
@@ -1635,17 +1612,17 @@ bool QMakeEvaluator::isActiveConfig(const QStringRef &config, bool regex)
         return m_hostBuild;
 
     if (regex && (config.contains(QLatin1Char('*')) || config.contains(QLatin1Char('?')))) {
-        QRegExp re(config.toString(), Qt::CaseSensitive, QRegExp::Wildcard);
+        QRegularExpression re(QRegularExpression::wildcardToRegularExpression(config.toString()));
 
         // mkspecs
-        if (re.exactMatch(m_qmakespecName))
+        if (re.match(m_qmakespecName).hasMatch())
             return true;
 
         // CONFIG variable
         const auto configValues = values(statics.strCONFIG);
         for (const ProString &configValue : configValues) {
             ProStringRoUser u1(configValue, m_tmp[m_toggle ^= 1]);
-            if (re.exactMatch(u1.str()))
+            if (re.match(u1.str()).hasMatch())
                 return true;
         }
     } else {
@@ -1819,7 +1796,7 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::evaluateExpandFunction(
 }
 
 QMakeEvaluator::VisitReturn QMakeEvaluator::evaluateConditional(
-        const QStringRef &cond, const QString &where, int line)
+        QStringView cond, const QString &where, int line)
 {
     VisitReturn ret = ReturnFalse;
     ProFile *pro = m_parser->parsedProBlock(cond, 0, where, line, QMakeParser::TestGrammar);
@@ -1837,7 +1814,7 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::checkRequirements(const ProStringLis
 {
     ProStringList &failed = valuesRef(ProKey("QMAKE_FAILED_REQUIREMENTS"));
     for (const ProString &dep : deps) {
-        VisitReturn vr = evaluateConditional(dep.toQStringRef(), m_current.pro->fileName(), m_current.line);
+        VisitReturn vr = evaluateConditional(dep.toQStringView(), m_current.pro->fileName(), m_current.line);
         if (vr == ReturnError)
             return ReturnError;
         if (vr != ReturnTrue)
@@ -2003,7 +1980,7 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::evaluateFeatureFile(
             int start_root = 0;
             const QStringList &paths = m_featureRoots->paths;
             if (!currFn.isEmpty()) {
-                QStringRef currPath = IoUtils::pathName(currFn);
+                QStringView currPath = IoUtils::pathName(currFn);
                 for (int root = 0; root < paths.size(); ++root)
                     if (currPath == paths.at(root)) {
                         start_root = root + 1;

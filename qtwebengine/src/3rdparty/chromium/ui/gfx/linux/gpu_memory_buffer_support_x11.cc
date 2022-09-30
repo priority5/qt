@@ -9,9 +9,11 @@
 
 #include <memory>
 
+#include "base/containers/contains.h"
 #include "base/debug/crash_logging.h"
+#include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/stl_util.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/buffer_usage_util.h"
@@ -22,8 +24,7 @@
 #include "ui/gfx/linux/gbm_wrapper.h"
 #include "ui/gfx/x/connection.h"
 #include "ui/gfx/x/dri3.h"
-#include "ui/gfx/x/x11.h"
-#include "ui/gfx/x/x11_types.h"
+#include "ui/gfx/x/future.h"
 
 namespace ui {
 
@@ -33,12 +34,16 @@ namespace {
 std::unique_ptr<ui::GbmDevice> CreateX11GbmDevice() {
   auto* connection = x11::Connection::Get();
   // |connection| may be nullptr in headless mode.
-  if (!connection)
+  if (!connection) {
+    LOG(ERROR) << "Could not create x11 connection.";
     return nullptr;
+  }
 
   auto& dri3 = connection->dri3();
-  if (!dri3.present())
+  if (!dri3.present()) {
+    LOG(ERROR) << "dri3 extension not supported.";
     return nullptr;
+  }
 
   // Let the X11 server know the DRI3 client version. This is required to use
   // the DRI3 extension. We don't care about the returned server version because
@@ -50,13 +55,13 @@ std::unique_ptr<ui::GbmDevice> CreateX11GbmDevice() {
   if (!reply)
     return nullptr;
 
-  int fd = reply->device_fd.release();
-  if (fd < 0)
+  base::ScopedFD fd(HANDLE_EINTR(dup(reply->device_fd.get())));
+  if (!fd.is_valid())
     return nullptr;
-  if (HANDLE_EINTR(fcntl(fd, F_SETFD, FD_CLOEXEC)) == -1)
+  if (HANDLE_EINTR(fcntl(fd.get(), F_SETFD, FD_CLOEXEC)) == -1)
     return nullptr;
 
-  return ui::CreateGbmDevice(fd);
+  return ui::CreateGbmDevice(fd.release());
 }
 
 std::vector<gfx::BufferUsageAndFormat> CreateSupportedConfigList(
@@ -70,6 +75,7 @@ std::vector<gfx::BufferUsageAndFormat> CreateSupportedConfigList(
            gfx::BufferUsage::SCANOUT,
            gfx::BufferUsage::SCANOUT_CPU_READ_WRITE,
            gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
+           gfx::BufferUsage::SCANOUT_VDA_WRITE,
        }) {
     for (gfx::BufferFormat format : {
              gfx::BufferFormat::R_8,
@@ -119,9 +125,17 @@ std::unique_ptr<GbmBuffer> GpuMemoryBufferSupportX11::CreateBuffer(
     gfx::BufferFormat format,
     const gfx::Size& size,
     gfx::BufferUsage usage) {
-  DCHECK(device_);
-  DCHECK(base::Contains(supported_configs_,
-                        gfx::BufferUsageAndFormat(usage, format)));
+  if (!device_) {
+    LOG(ERROR) << "Can't create buffer -- gbm  device is missing.";
+    return nullptr;
+  }
+  if (!base::Contains(supported_configs_,
+                      gfx::BufferUsageAndFormat(usage, format))) {
+    LOG(ERROR) << "Can't create buffer -- unsupported config: usage="
+               << gfx::BufferUsageToString(usage)
+               << ", format=" << gfx::BufferFormatToString(format);
+    return nullptr;
+  }
 
   static base::debug::CrashKeyString* crash_key_string =
       base::debug::AllocateCrashKeyString("buffer_usage_and_format",
@@ -134,6 +148,26 @@ std::unique_ptr<GbmBuffer> GpuMemoryBufferSupportX11::CreateBuffer(
 
   return device_->CreateBuffer(GetFourCCFormatFromBufferFormat(format), size,
                                BufferUsageToGbmFlags(usage));
+}
+
+std::unique_ptr<GbmBuffer> GpuMemoryBufferSupportX11::CreateBufferFromHandle(
+    const gfx::Size& size,
+    gfx::BufferFormat format,
+    gfx::NativePixmapHandle handle) {
+  if (!device_) {
+    LOG(ERROR) << "Can't create buffer from handle -- gbm  device is missing.";
+    return nullptr;
+  }
+
+  static base::debug::CrashKeyString* crash_key_string =
+      base::debug::AllocateCrashKeyString("buffer_from_handle_format",
+                                          base::debug::CrashKeySize::Size64);
+  std::string buffer_from_handle_format = gfx::BufferFormatToString(format);
+  base::debug::ScopedCrashKeyString scoped_crash_key(
+      crash_key_string, buffer_from_handle_format.c_str());
+
+  return device_->CreateBufferFromHandle(
+      GetFourCCFormatFromBufferFormat(format), size, std::move(handle));
 }
 
 }  // namespace ui

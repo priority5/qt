@@ -1,5 +1,5 @@
 //
-// Copyright 2020 The ANGLE Project Authors. All rights reserved.
+// Copyright (c) 2020 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -98,6 +98,7 @@ class QueryMtl : public QueryImpl
     const mtl::BufferRef &getVisibilityResultBuffer() const { return mVisibilityResultBuffer; }
     // Reset the occlusion query result stored in buffer to zero
     void resetVisibilityResult(ContextMtl *contextMtl);
+    void onTransformFeedbackEnd(const gl::Context *context);
 
   private:
     template <typename T>
@@ -106,6 +107,8 @@ class QueryMtl : public QueryImpl
     // List of offsets in the render pass's occlusion query pool buffer allocated for this query
     VisibilityBufferOffsetsMtl mVisibilityBufferOffsets;
     mtl::BufferRef mVisibilityResultBuffer;
+
+    size_t mTransformFeedbackPrimitivesDrawn;
 };
 
 }  // namespace rx

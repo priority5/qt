@@ -4,7 +4,7 @@
 
 #include "gpu/command_buffer/service/external_vk_image_dawn_representation.h"
 
-#include <dawn_native/VulkanBackend.h>
+#include <dawn/native/VulkanBackend.h>
 
 #include <utility>
 #include <vector>
@@ -25,7 +25,7 @@ ExternalVkImageDawnRepresentation::ExternalVkImageDawnRepresentation(
       device_(device),
       wgpu_format_(wgpu_format),
       memory_fd_(std::move(memory_fd)),
-      dawn_procs_(dawn_native::GetProcs()) {
+      dawn_procs_(dawn::native::GetProcs()) {
   DCHECK(device_);
 
   // Keep a reference to the device so that it stays valid (it might become
@@ -47,37 +47,50 @@ WGPUTexture ExternalVkImageDawnRepresentation::BeginAccess(
   }
 
   WGPUTextureDescriptor texture_descriptor = {};
-  texture_descriptor.nextInChain = nullptr;
   texture_descriptor.format = wgpu_format_;
   texture_descriptor.usage = usage;
   texture_descriptor.dimension = WGPUTextureDimension_2D;
-  texture_descriptor.size = {size().width(), size().height(), 1};
+  texture_descriptor.size = {static_cast<uint32_t>(size().width()),
+                             static_cast<uint32_t>(size().height()), 1};
   texture_descriptor.mipLevelCount = 1;
   texture_descriptor.sampleCount = 1;
 
-  dawn_native::vulkan::ExternalImageDescriptorOpaqueFD descriptor = {};
+  // We need to have internal usages of CopySrc for copies and
+  // RenderAttachment for clears.
+  WGPUDawnTextureInternalUsageDescriptor internalDesc = {};
+  internalDesc.chain.sType = WGPUSType_DawnTextureInternalUsageDescriptor;
+  internalDesc.internalUsage =
+      WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment;
+  texture_descriptor.nextInChain =
+      reinterpret_cast<WGPUChainedStruct*>(&internalDesc);
+
+  dawn::native::vulkan::ExternalImageDescriptorOpaqueFD descriptor = {};
   descriptor.cTextureDescriptor = &texture_descriptor;
-  descriptor.isCleared = IsCleared();
+  descriptor.isInitialized = IsCleared();
   descriptor.allocationSize = backing_impl()->image()->device_size();
   descriptor.memoryTypeIndex = backing_impl()->image()->memory_type_index();
   descriptor.memoryFD = dup(memory_fd_.get());
 
-  // TODO(http://crbug.com/dawn/200): We may not be obeying all of the rules
-  // specified by Vulkan for external queue transfer barriers. Investigate this.
+  const GrBackendTexture& backend_texture = backing_impl()->backend_texture();
+  GrVkImageInfo image_info;
+  backend_texture.getVkImageInfo(&image_info);
+  // We should either be importing the image from the external queue, or it
+  // was just created with no queue ownership.
+  DCHECK(image_info.fCurrentQueueFamily == VK_QUEUE_FAMILY_IGNORED ||
+         image_info.fCurrentQueueFamily == VK_QUEUE_FAMILY_EXTERNAL);
+
+  // Note: This assumes the previous owner of the shared image did not do a
+  // layout transition on EndAccess, and saved the exported layout on the
+  // GrBackendTexture.
+  descriptor.releasedOldLayout = image_info.fImageLayout;
+  descriptor.releasedNewLayout = image_info.fImageLayout;
 
   for (auto& external_semaphore : begin_access_semaphores_) {
     descriptor.waitFDs.push_back(
         external_semaphore.handle().TakeHandle().release());
   }
 
-  texture_ = dawn_native::vulkan::WrapVulkanImage(device_, &descriptor);
-
-  if (texture_) {
-    // Keep a reference to the texture so that it stays valid (its content
-    // might be destroyed).
-    dawn_procs_.textureReference(texture_);
-  }
-
+  texture_ = dawn::native::vulkan::WrapVulkanImage(device_, &descriptor);
   return texture_;
 }
 
@@ -87,21 +100,37 @@ void ExternalVkImageDawnRepresentation::EndAccess() {
   }
 
   // Grab the signal semaphore from dawn
-  int signal_semaphore_fd =
-      dawn_native::vulkan::ExportSignalSemaphoreOpaqueFD(device_, texture_);
+  dawn::native::vulkan::ExternalImageExportInfoOpaqueFD export_info;
+  if (!dawn::native::vulkan::ExportVulkanImage(
+          texture_, VK_IMAGE_LAYOUT_UNDEFINED, &export_info)) {
+    DLOG(ERROR) << "Failed to export Dawn Vulkan image.";
+  } else {
+    if (export_info.isInitialized) {
+      SetCleared();
+    }
 
-  if (dawn_native::IsTextureSubresourceInitialized(texture_, 0, 1, 0, 1)) {
-    SetCleared();
+    // Exporting to VK_IMAGE_LAYOUT_UNDEFINED means no transition should be
+    // done. The old/new layouts are the same.
+    DCHECK_EQ(export_info.releasedOldLayout, export_info.releasedNewLayout);
+
+    // Save the layout on the GrBackendTexture. Other shared image
+    // representations read it from here.
+    GrBackendTexture backend_texture = backing_impl()->backend_texture();
+    backend_texture.setMutableState(GrBackendSurfaceMutableState(
+        export_info.releasedNewLayout, VK_QUEUE_FAMILY_EXTERNAL));
+
+    // TODO(enga): Handle waiting on multiple semaphores from dawn
+    DCHECK(export_info.semaphoreHandles.size() == 1);
+
+    // Wrap file descriptor in a handle
+    SemaphoreHandle handle(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
+                           base::ScopedFD(export_info.semaphoreHandles[0]));
+
+    auto semaphore = ExternalSemaphore::CreateFromHandle(
+        backing_impl()->context_provider(), std::move(handle));
+
+    backing_impl()->EndAccess(false, std::move(semaphore), false /* is_gl */);
   }
-
-  // Wrap file descriptor in a handle
-  SemaphoreHandle handle(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
-                         base::ScopedFD(signal_semaphore_fd));
-
-  auto semaphore = ExternalSemaphore::CreateFromHandle(
-      backing_impl()->context_provider(), std::move(handle));
-
-  backing_impl()->EndAccess(false, std::move(semaphore), false /* is_gl */);
 
   // Destroy the texture, signaling the semaphore in dawn
   dawn_procs_.textureDestroy(texture_);

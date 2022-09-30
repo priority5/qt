@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qqmladaptormodel_p.h"
 
@@ -72,7 +36,7 @@ static QV4::ReturnedValue get_index(const QV4::FunctionObject *f, const QV4::Val
 
 template <typename T, typename M> static void setModelDataType(QMetaObjectBuilder *builder, M *metaType)
 {
-    builder->setFlags(QMetaObjectBuilder::DynamicMetaObject);
+    builder->setFlags(MetaObjectFlag::DynamicMetaObject);
     builder->setClassName(T::staticMetaObject.className());
     builder->setSuperClass(&T::staticMetaObject);
     metaType->propertyOffset = T::staticMetaObject.propertyCount();
@@ -369,10 +333,10 @@ QV4::ReturnedValue QQmlDMCachedModelData::set_property(const QV4::FunctionObject
         QQmlDMCachedModelData *modelData = static_cast<QQmlDMCachedModelData *>(o->d()->item);
         if (!modelData->cachedData.isEmpty()) {
             if (modelData->cachedData.count() > 1) {
-                modelData->cachedData[propertyId] = scope.engine->toVariant(argv[0], QMetaType::UnknownType);
+                modelData->cachedData[propertyId] = scope.engine->toVariant(argv[0], QMetaType {});
                 QMetaObject::activate(o->d()->item, o->d()->item->metaObject(), propertyId, nullptr);
             } else if (modelData->cachedData.count() == 1) {
-                modelData->cachedData[0] = scope.engine->toVariant(argv[0], QMetaType::UnknownType);
+                modelData->cachedData[0] = scope.engine->toVariant(argv[0], QMetaType {});
                 QMetaObject::activate(o->d()->item, o->d()->item->metaObject(), 0, nullptr);
                 QMetaObject::activate(o->d()->item, o->d()->item->metaObject(), 1, nullptr);
             }
@@ -549,7 +513,8 @@ public:
 
         metaObject.reset(builder.toMetaObject());
         *static_cast<QMetaObject *>(this) = *metaObject;
-        propertyCache.adopt(new QQmlPropertyCache(metaObject.data(), model.modelItemRevision));
+        propertyCache = QQmlPropertyCache::createStandalone(
+                    metaObject.data(), model.modelItemRevision);
     }
 };
 
@@ -603,7 +568,7 @@ public:
         if (!argc)
             return v4->throwTypeError();
 
-        static_cast<QQmlDMListAccessorData *>(o->d()->item)->setModelData(v4->toVariant(argv[0], QMetaType::UnknownType));
+        static_cast<QQmlDMListAccessorData *>(o->d()->item)->setModelData(v4->toVariant(argv[0], QMetaType {}));
         return QV4::Encode::undefined();
     }
 
@@ -671,9 +636,33 @@ public:
 
     QVariant value(const QQmlAdaptorModel &model, int index, const QString &role) const override
     {
-        return role == QLatin1String("modelData")
-                ? model.list.at(index)
-                : QVariant();
+        const QVariant entry = model.list.at(index);
+        if (role == QLatin1String("modelData"))
+            return entry;
+
+        const QMetaType type = entry.metaType();
+        if (type == QMetaType::fromType<QVariantMap>())
+            return entry.toMap().value(role);
+
+        if (type == QMetaType::fromType<QVariantHash>())
+            return entry.toHash().value(role);
+
+        const QMetaType::TypeFlags typeFlags = type.flags();
+        if (typeFlags & QMetaType::PointerToQObject)
+            return entry.value<QObject *>()->property(role.toUtf8());
+
+        const QMetaObject *metaObject = type.metaObject();
+        if (!metaObject) {
+            // NB: This acquires the lock on QQmlMetaTypeData. If we had a QQmlEngine here,
+            //     we could use QQmlGadgetPtrWrapper::instance() to avoid this.
+            if (const QQmlValueType *valueType = QQmlMetaType::valueType(type))
+                metaObject = valueType->metaObject();
+            else
+                return QVariant();
+        }
+
+        const int propertyIndex = metaObject->indexOfProperty(role.toUtf8());
+        return metaObject->property(propertyIndex).readOnGadget(entry.constData());
     }
 
     QQmlDelegateModelItem *createItem(
@@ -683,8 +672,8 @@ public:
     {
         VDMListDelegateDataType *dataType = const_cast<VDMListDelegateDataType *>(this);
         if (!propertyCache) {
-            dataType->propertyCache.adopt(new QQmlPropertyCache(
-                        &QQmlDMListAccessorData::staticMetaObject, model.modelItemRevision));
+            dataType->propertyCache = QQmlPropertyCache::createStandalone(
+                        &QQmlDMListAccessorData::staticMetaObject, model.modelItemRevision);
         }
 
         return new QQmlDMListAccessorData(
@@ -770,7 +759,7 @@ public:
                 | QMetaObjectBuilder::SuperClass
                 | QMetaObjectBuilder::ClassName)
     {
-        builder.setFlags(QMetaObjectBuilder::DynamicMetaObject);
+        builder.setFlags(MetaObjectFlag::DynamicMetaObject);
     }
 
     int rowCount(const QQmlAdaptorModel &model) const override
@@ -953,7 +942,8 @@ QQmlAdaptorModel::Accessors::~Accessors()
 }
 
 QQmlAdaptorModel::QQmlAdaptorModel()
-    : accessors(&qt_vdm_null_accessors)
+    : QQmlGuard<QObject>(QQmlAdaptorModel::objectDestroyedImpl, nullptr)
+    , accessors(&qt_vdm_null_accessors)
 {
 }
 
@@ -962,30 +952,38 @@ QQmlAdaptorModel::~QQmlAdaptorModel()
     accessors->cleanup(*this);
 }
 
-void QQmlAdaptorModel::setModel(const QVariant &variant, QObject *parent, QQmlEngine *engine)
+void QQmlAdaptorModel::setModel(const QVariant &variant)
 {
     accessors->cleanup(*this);
 
-    list.setList(variant, engine);
+    // Don't use variant anymore after this. list may transform it.
+    list.setList(variant);
+
+    modelStrongReference.clear();
 
     if (QObject *object = qvariant_cast<QObject *>(list.list())) {
-        setObject(object, parent);
+        if (QQmlData *ddata = QQmlData::get(object))
+            modelStrongReference = ddata->jsWrapper;
+        setObject(object);
         if (qobject_cast<QAbstractItemModel *>(object))
             accessors = new VDMAbstractItemModelDataType(this);
         else
             accessors = new VDMObjectDelegateDataType;
     } else if (list.type() == QQmlListAccessor::ListProperty) {
-        setObject(static_cast<const QQmlListReference *>(variant.constData())->object(), parent);
+        auto object = static_cast<const QQmlListReference *>(list.list().constData())->object();
+        if (QQmlData *ddata = QQmlData::get(object))
+            modelStrongReference = ddata->jsWrapper;
+        setObject(object);
         accessors = new VDMObjectDelegateDataType;
     } else if (list.type() == QQmlListAccessor::ObjectList) {
-        setObject(nullptr, parent);
+        setObject(nullptr);
         accessors = new VDMObjectDelegateDataType;
     } else if (list.type() != QQmlListAccessor::Invalid
             && list.type() != QQmlListAccessor::Instance) { // Null QObject
-        setObject(nullptr, parent);
+        setObject(nullptr);
         accessors = new VDMListDelegateDataType;
     } else {
-        setObject(nullptr, parent);
+        setObject(nullptr);
         accessors = &qt_vdm_null_accessors;
     }
 }
@@ -1035,14 +1033,15 @@ int QQmlAdaptorModel::indexAt(int row, int column) const
     return column * rowCount() + row;
 }
 
-void QQmlAdaptorModel::useImportVersion(int minorVersion)
+void QQmlAdaptorModel::useImportVersion(QTypeRevision revision)
 {
-    modelItemRevision = minorVersion;
+    modelItemRevision = revision;
 }
 
-void QQmlAdaptorModel::objectDestroyed(QObject *)
+void QQmlAdaptorModel::objectDestroyedImpl(QQmlGuardImpl *guard)
 {
-    setModel(QVariant(), nullptr, nullptr);
+    auto This = static_cast<QQmlAdaptorModel *>(guard);
+    This->setModel(QVariant());
 }
 
 QQmlAdaptorModelEngineData::QQmlAdaptorModelEngineData(QV4::ExecutionEngine *v4)

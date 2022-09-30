@@ -21,13 +21,18 @@ BASE_EXPORT void EnableTerminationOnHeapCorruption();
 BASE_EXPORT void EnableTerminationOnOutOfMemory();
 
 // Terminates process. Should be called only for out of memory errors.
+// |size| is the size of the failed allocation, or 0 if not known.
 // Crash reporting classifies such crashes as OOM.
+// Must be allocation-safe.
 BASE_EXPORT void TerminateBecauseOutOfMemory(size_t size);
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID) || \
-    defined(OS_AIX)
+// Records the size of the allocation that caused the current OOM crash, for
+// consumption by Breakpad.
+// TODO: this can be removed when Breakpad is no longer supported.
 BASE_EXPORT extern size_t g_oom_size;
 
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
+    BUILDFLAG(IS_AIX)
 // The maximum allowed value for the OOM score.
 const int kMaxOomScore = 1000;
 
@@ -47,7 +52,7 @@ namespace internal {
 bool ReleaseAddressSpaceReservation();
 }  // namespace internal
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 namespace win {
 
 // Custom Windows exception code chosen to indicate an out of memory error.
@@ -61,16 +66,6 @@ const DWORD kOomExceptionCode = 0xe0000008;
 }  // namespace win
 #endif
 
-namespace internal {
-
-// Handles out of memory, with the failed allocation |size|, or 0 when it is not
-// known.
-//
-// Must be allocation-safe.
-BASE_EXPORT NOINLINE void OnNoMemoryInternal(size_t size);
-
-}  // namespace internal
-
 // Special allocator functions for callers that want to check for OOM.
 // These will not abort if the allocation fails even if
 // EnableTerminationOnOutOfMemory has been called.
@@ -81,11 +76,19 @@ BASE_EXPORT NOINLINE void OnNoMemoryInternal(size_t size);
 // specifically ASan and other sanitizers.
 // Return value tells whether the allocation succeeded. If it fails |result| is
 // set to NULL, otherwise it holds the memory address.
-BASE_EXPORT WARN_UNUSED_RESULT bool UncheckedMalloc(size_t size,
-                                                    void** result);
-BASE_EXPORT WARN_UNUSED_RESULT bool UncheckedCalloc(size_t num_items,
-                                                    size_t size,
-                                                    void** result);
+//
+// Note: You *must* use UncheckedFree() to free() the memory allocated, not
+// regular free(). This also means that this a pointer allocated below cannot be
+// passed to realloc().
+[[nodiscard]] BASE_EXPORT bool UncheckedMalloc(size_t size, void** result);
+[[nodiscard]] BASE_EXPORT bool UncheckedCalloc(size_t num_items,
+                                               size_t size,
+                                               void** result);
+
+// *Must* be used to free memory allocated with base::UncheckedMalloc() and
+// base::UncheckedCalloc().
+// TODO(crbug.com/1279371): Enforce it, when all callers are converted.
+BASE_EXPORT void UncheckedFree(void* ptr);
 
 }  // namespace base
 

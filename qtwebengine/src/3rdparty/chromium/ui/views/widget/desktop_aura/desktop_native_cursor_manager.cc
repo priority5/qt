@@ -7,24 +7,16 @@
 #include <utility>
 
 #include "base/trace_event/trace_event.h"
+#include "ui/aura/cursor/cursor_loader.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
-#include "ui/base/cursor/cursor_loader.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 
 namespace views {
 
-DesktopNativeCursorManager::DesktopNativeCursorManager()
-    : cursor_loader_(ui::CursorLoader::Create()) {}
+DesktopNativeCursorManager::DesktopNativeCursorManager() = default;
 
 DesktopNativeCursorManager::~DesktopNativeCursorManager() = default;
-
-gfx::NativeCursor DesktopNativeCursorManager::GetInitializedCursor(
-    ui::mojom::CursorType type) {
-  gfx::NativeCursor cursor(type);
-  cursor_loader_->SetPlatformCursor(&cursor);
-  return cursor;
-}
 
 void DesktopNativeCursorManager::AddHost(aura::WindowTreeHost* host) {
   hosts_.insert(host);
@@ -37,9 +29,8 @@ void DesktopNativeCursorManager::RemoveHost(aura::WindowTreeHost* host) {
 void DesktopNativeCursorManager::SetDisplay(
     const display::Display& display,
     wm::NativeCursorManagerDelegate* delegate) {
-  cursor_loader_->UnloadAll();
-  cursor_loader_->set_rotation(display.rotation());
-  cursor_loader_->set_scale(display.device_scale_factor());
+  cursor_loader_.SetDisplayData(display.rotation(),
+                                display.device_scale_factor());
 
   SetCursor(delegate->GetCursor(), delegate);
 }
@@ -48,7 +39,7 @@ void DesktopNativeCursorManager::SetCursor(
     gfx::NativeCursor cursor,
     wm::NativeCursorManagerDelegate* delegate) {
   gfx::NativeCursor new_cursor = cursor;
-  cursor_loader_->SetPlatformCursor(&new_cursor);
+  cursor_loader_.SetPlatformCursor(&new_cursor);
   delegate->CommitCursor(new_cursor);
 
   if (delegate->IsCursorVisible()) {
@@ -68,7 +59,7 @@ void DesktopNativeCursorManager::SetVisibility(
     SetCursor(delegate->GetCursor(), delegate);
   } else {
     gfx::NativeCursor invisible_cursor(ui::mojom::CursorType::kNone);
-    cursor_loader_->SetPlatformCursor(&invisible_cursor);
+    cursor_loader_.SetPlatformCursor(&invisible_cursor);
     for (auto* host : hosts_)
       host->SetCursor(invisible_cursor);
   }
@@ -96,6 +87,11 @@ void DesktopNativeCursorManager::SetMouseEventsEnabled(
 
   for (auto* host : hosts_)
     host->dispatcher()->OnMouseEventsEnableStateChanged(enabled);
+}
+
+void DesktopNativeCursorManager::InitCursorSizeObserver(
+    wm::NativeCursorManagerDelegate* delegate) {
+  NOTREACHED();
 }
 
 }  // namespace views

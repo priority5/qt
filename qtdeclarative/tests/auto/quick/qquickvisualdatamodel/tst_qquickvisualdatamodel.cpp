@@ -1,33 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-#include "../../shared/util.h"
-#include "../shared/visualtestutil.h"
-#include "../shared/viewtestutil.h"
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include <QtQuickTestUtils/private/visualtestutils_p.h>
+#include <QtQuickTestUtils/private/viewtestutils_p.h>
 
 #include <qtest.h>
 #include <QtCore/qregularexpression.h>
@@ -47,8 +22,8 @@
 #include <math.h>
 #include <QtGui/qstandarditemmodel.h>
 
-using namespace QQuickVisualTestUtil;
-using namespace QQuickViewTestUtil;
+using namespace QQuickVisualTestUtils;
+using namespace QQuickViewTestUtils;
 
 template <typename T, int N> int lengthOf(const T (&)[N]) { return N; }
 
@@ -105,7 +80,7 @@ public:
     }
     ~SingleRoleModel() {}
 
-    QHash<int,QByteArray> roleNames() const
+    QHash<int,QByteArray> roleNames() const override
     {
         QHash<int,QByteArray> roles;
         roles.insert(Qt::DisplayRole, m_role);
@@ -130,7 +105,7 @@ public:
         }
     }
 
-    QModelIndex index(int row, int column, const QModelIndex &parent = QModelIndex()) const {
+    QModelIndex index(int row, int column, const QModelIndex &parent = QModelIndex()) const override {
         if (row < 0 || column != 0)
             return QModelIndex();
         Branch * const branch = branchForIndex(parent);
@@ -139,24 +114,24 @@ public:
                 : QModelIndex();
     }
 
-    QModelIndex parent(const QModelIndex &child) const {
+    QModelIndex parent(const QModelIndex &child) const override {
         Branch * const branch = static_cast<Branch *>(child.internalPointer());
         return branch->parent
                 ? createIndex(branch->parent->indexOf(branch), 0, branch->parent)
                 : QModelIndex();
     }
 
-    int rowCount(const QModelIndex &parent) const {
+    int rowCount(const QModelIndex &parent) const override {
         Branch * const branch = branchForIndex(parent);
         return branch ? branch->children.count() : 0;
     }
 
-    int columnCount(const QModelIndex &parent) const {
+    int columnCount(const QModelIndex &parent) const override {
         Branch * const branch = branchForIndex(parent);
         return branch ? 1 : 0;
     }
 
-    QVariant data(const QModelIndex &index, int role) const {
+    QVariant data(const QModelIndex &index, int role) const override {
         return index.isValid() && role == Qt::DisplayRole
                 ? static_cast<Branch *>(index.internalPointer())->children.at(index.row()).display
                 : QVariant();
@@ -384,7 +359,7 @@ public:
     tst_qquickvisualdatamodel();
 
 private slots:
-    void initTestCase();
+    void initTestCase() override;
     void cleanupTestCase();
     void rootIndex();
     void updateLayout_data();
@@ -424,6 +399,7 @@ private slots:
     void warnings_data();
     void warnings();
     void invalidAttachment();
+    void declarativeAssignViaAttached();
     void asynchronousInsert_data();
     void asynchronousInsert();
     void asynchronousRemove_data();
@@ -434,8 +410,10 @@ private slots:
     void invalidContext();
     void externalManagedModel();
     void delegateModelChangeDelegate();
+    void noDoubleDelegateUpdate();
     void checkFilterGroupForDelegate();
     void readFromProxyObject();
+    void noWarningOnObjectDeletion();
 
 private:
     template <int N> void groups_verify(
@@ -502,6 +480,7 @@ void tst_qquickvisualdatamodel::cleanupTestCase()
 }
 
 tst_qquickvisualdatamodel::tst_qquickvisualdatamodel()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
 {
 }
 
@@ -968,7 +947,7 @@ void tst_qquickvisualdatamodel::packagesDestroyed()
 {
     QStringList list;
     for (int i=0; i<30; i++)
-        list << (QLatin1String("item ") + i);
+        list << (QLatin1String("item ") + QString::number(i));
     SingleRoleModel model(list);
 
     QQuickView view;
@@ -1052,7 +1031,7 @@ void tst_qquickvisualdatamodel::qaimRowsMoved()
 
     QStringList list;
     for (int i=0; i<30; i++)
-        list << (QLatin1String("item ") + i);
+        list << (QLatin1String("item ") + QString::number(i));
     SingleRoleModel model(list);
     engine.rootContext()->setContextProperty("myModel", &model);
 
@@ -3975,7 +3954,19 @@ void tst_qquickvisualdatamodel::invalidAttachment()
 
     property = item->property("invalidVdm");
     QCOMPARE(property.userType(), qMetaTypeId<QQmlDelegateModel *>());
-    QVERIFY(!property.value<QQmlDelegateModel *>());
+    // has been explicitly requested by specifying the attached property
+    QVERIFY(property.value<QQmlDelegateModel *>());
+}
+
+void tst_qquickvisualdatamodel::declarativeAssignViaAttached()
+{
+    QQmlComponent component(&engine);
+    component.loadUrl(testFileUrl("attachedDeclarativelySet.qml"));
+
+    QScopedPointer<QObject> root(component.create());
+    QCOMPARE(root->property("count").toInt(), 6); // 1 (from instantiator + 5 from model)
+    root->setProperty("includeAll", true);
+    QCOMPARE(root->property("count").toInt(), 11); // 1 (from instantiator + 10 from model)
 }
 
 void tst_qquickvisualdatamodel::asynchronousInsert_data()
@@ -4220,18 +4211,22 @@ void tst_qquickvisualdatamodel::invalidContext()
     engine.rootContext()->setContextProperty("myModel", &model);
 
     QScopedPointer<QQmlContext> context(new QQmlContext(engine.rootContext()));
+    QScopedPointer<QObject> obj;
+    {
+        // The component keeps a reference to the root context as long as the engine lives.
+        // In order to drop the root context we need to drop the component first.
+        QQmlComponent c(&engine, testFileUrl("visualdatamodel.qml"));
+        obj.reset(c.create(context.data()));
+    }
 
-    QQmlComponent c(&engine, testFileUrl("visualdatamodel.qml"));
-
-
-    QQmlDelegateModel *visualModel = qobject_cast<QQmlDelegateModel*>(c.create(context.data()));
+    QQmlDelegateModel *visualModel = qobject_cast<QQmlDelegateModel *>(obj.get());
     QVERIFY(visualModel);
 
     QQuickItem *item = qobject_cast<QQuickItem*>(visualModel->object(4));
     QVERIFY(item);
     visualModel->release(item);
 
-    delete context.take();
+    context.reset();
 
     model.insertItem(4, "new item", "");
 
@@ -4270,13 +4265,13 @@ public:
                                          &ObjectsProvider::listAt);
     }
 
-    static int listLength(QQmlListProperty<QObject> *property)
+    static qsizetype listLength(QQmlListProperty<QObject> *property)
     {
         auto objectsProvider = qobject_cast<ObjectsProvider*>(property->object);
         return objectsProvider ? objectsProvider->m_objects.length() : 0;
     }
 
-    static QObject* listAt(QQmlListProperty<QObject> *property, int index)
+    static QObject* listAt(QQmlListProperty<QObject> *property, qsizetype index)
     {
         auto objectsProvider = qobject_cast<ObjectsProvider*>(property->object);
         return objectsProvider ? objectsProvider->m_objects.at(index) : nullptr;
@@ -4345,6 +4340,20 @@ void tst_qquickvisualdatamodel::delegateModelChangeDelegate()
     QCOMPARE(visualModel->count(), 3);
 }
 
+void tst_qquickvisualdatamodel::noDoubleDelegateUpdate()
+{
+    // changing a delegate only refreshes its instances once
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("setDelegateNoDoubleChange.qml"));
+
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY(root);
+
+    bool ok = root->setProperty("testStarted", true);
+    QVERIFY(ok);
+    QCOMPARE(root->property("creationCount").toInt(), 1);
+}
+
 void tst_qquickvisualdatamodel::checkFilterGroupForDelegate()
 {
     QQuickView view;
@@ -4369,8 +4378,108 @@ void tst_qquickvisualdatamodel::readFromProxyObject()
     auto *window = qobject_cast<QQuickWindow *>(obj.get());
     QVERIFY(window);
 
-    QCOMPARE(window->property("name").type(), QMetaType::QString);
+    QCOMPARE(window->property("name").metaType(), QMetaType(QMetaType::QString));
     QTRY_VERIFY(window->property("name").toString() != QLatin1String("wrong"));
+}
+
+
+class ComponentEntity : public QObject
+{
+    Q_OBJECT
+
+public:
+    ComponentEntity(QObject *parent = nullptr) : QObject(parent)
+    {
+        QQmlEngine::setObjectOwnership(this, QQmlEngine::CppOwnership);
+    }
+};
+
+class InventoryModel : public QAbstractListModel
+{
+    Q_OBJECT
+
+public:
+    InventoryModel() {
+        for (int i = 0; i < 10; ++i) {
+            QSharedPointer<ComponentEntity> entity(new ComponentEntity());
+            entity->setObjectName(QString::fromLatin1("Item %1").arg(i));
+            mContents.append(entity);
+        }
+    }
+
+    int rowCount(const QModelIndex &) const override { return mContents.size(); }
+
+    QVariant data(const QModelIndex &index, int role) const override
+    {
+        if (!checkIndex(index, CheckIndexOption::IndexIsValid))
+            return {};
+
+        auto entity = mContents.at(index.row()).data();
+        switch (role) {
+        case ItemNameRole: return entity->objectName();
+        case EntityRole: return QVariant::fromValue(entity);
+        }
+
+        return {};
+    }
+
+    Q_INVOKABLE void removeLast() {
+        const int index = rowCount(QModelIndex()) - 1;
+        if (index < 0)
+            return;
+
+        const auto item = mContents.at(index);
+        beginRemoveRows(QModelIndex(), index, index);
+        mContents.takeLast();
+        endRemoveRows();
+    }
+
+    enum InventoryModelRoles {
+        ItemNameRole = Qt::UserRole,
+        EntityRole
+    };
+
+    virtual QHash<int, QByteArray> roleNames() const override {
+        QHash<int, QByteArray> names;
+        names.insert(ItemNameRole, "itemName");
+        names.insert(EntityRole, "entity");
+        return names;
+    }
+
+private:
+    QVector<QSharedPointer<ComponentEntity>> mContents;
+};
+
+
+static QString lastWarning;
+static QtMessageHandler oldHandler;
+static void warningsHandler(QtMsgType type, const QMessageLogContext &ctxt, const QString &msg)
+{
+    if (type == QtWarningMsg)
+        lastWarning = msg;
+    else
+        oldHandler(type, ctxt, msg);
+}
+
+void tst_qquickvisualdatamodel::noWarningOnObjectDeletion()
+{
+    qmlRegisterType<InventoryModel>("TestTypes", 1, 0, "InventoryModel");
+    qmlRegisterUncreatableType<ComponentEntity>("TestTypes", 1, 0, "ComponentEntity", "no");
+
+    oldHandler = qInstallMessageHandler(warningsHandler);
+    const auto guard = qScopeGuard([&]() { qInstallMessageHandler(oldHandler); });
+
+    {
+        QQmlEngine engine;
+        QQmlComponent component(&engine, testFileUrl("objectDeletion.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> o(component.create());
+        QVERIFY(!o.isNull());
+        for (int i = 0; i < 5; ++i)
+            o->metaObject()->invokeMethod(o.data(), "removeLast");
+    }
+
+    QVERIFY2(lastWarning.isEmpty(), qPrintable(lastWarning));
 }
 
 QTEST_MAIN(tst_qquickvisualdatamodel)

@@ -24,9 +24,11 @@
 
 #include <vector>
 
+class SkAndroidCodec;
 class SkColorSpace;
 class SkData;
 class SkFrameHolder;
+class SkImage;
 class SkPngChunkReader;
 class SkSampler;
 
@@ -381,6 +383,13 @@ public:
     }
 
     /**
+     *  Return an image containing the pixels.
+     */
+    std::tuple<sk_sp<SkImage>, SkCodec::Result> getImage(const SkImageInfo& info,
+                                                         const Options* opts = nullptr);
+    std::tuple<sk_sp<SkImage>, SkCodec::Result> getImage();
+
+    /**
      *  If decoding to YUV is supported, this returns true. Otherwise, this
      *  returns false and the caller will ignore output parameter yuvaPixmapInfo.
      *
@@ -644,17 +653,52 @@ public:
         SkAlphaType fAlphaType;
 
         /**
+         *  Whether the updated rectangle contains alpha.
+         *
+         *  This is conservative; it will still be set to true if e.g. a color
+         *  index-based frame has a color with alpha but does not use it. In
+         *  addition, it may be set to true, even if the final frame, after
+         *  blending, is opaque.
+         */
+        bool fHasAlphaWithinBounds;
+
+        /**
          *  How this frame should be modified before decoding the next one.
          */
         SkCodecAnimation::DisposalMethod fDisposalMethod;
+
+        /**
+         *  How this frame should blend with the prior frame.
+         */
+        SkCodecAnimation::Blend fBlend;
+
+        /**
+         *  The rectangle updated by this frame.
+         *
+         *  It may be empty, if the frame does not change the image. It will
+         *  always be contained by SkCodec::dimensions().
+         */
+        SkIRect fFrameRect;
     };
 
     /**
      *  Return info about a single frame.
      *
-     *  Only supported by multi-frame images. Does not read through the stream,
-     *  so it should be called after getFrameCount() to parse any frames that
-     *  have not already been parsed.
+     *  Does not read through the stream, so it should be called after
+     *  getFrameCount() to parse any frames that have not already been parsed.
+     *
+     *  Only supported by animated (multi-frame) codecs. Note that this is a
+     *  property of the codec (the SkCodec subclass), not the image.
+     *
+     *  To elaborate, some codecs support animation (e.g. GIF). Others do not
+     *  (e.g. BMP). Animated codecs can still represent single frame images.
+     *  Calling getFrameInfo(0, etc) will return true for a single frame GIF
+     *  even if the overall image is not animated (in that the pixels on screen
+     *  do not change over time). When incrementally decoding a GIF image, we
+     *  might only know that there's a single frame *so far*.
+     *
+     *  For non-animated SkCodec subclasses, it's sufficient but not necessary
+     *  for this method to always return false.
      */
     bool getFrameInfo(int index, FrameInfo* info) const {
         if (index < 0) {
@@ -671,7 +715,8 @@ public:
      *
      *  As such, future decoding calls may require a rewind.
      *
-     *  For still (non-animated) image codecs, this will return an empty vector.
+     *  This may return an empty vector for non-animated codecs. See the
+     *  getFrameInfo(int, FrameInfo*) comment.
      */
     std::vector<FrameInfo> getFrameInfo();
 
@@ -712,6 +757,12 @@ protected:
             XformFormat srcFormat,
             std::unique_ptr<SkStream>,
             SkEncodedOrigin = kTopLeft_SkEncodedOrigin);
+
+    void setSrcXformFormat(XformFormat pixelFormat);
+
+    XformFormat getSrcXformFormat() const {
+        return fSrcXformFormat;
+    }
 
     virtual SkISize onGetScaledDimensions(float /*desiredScale*/) const {
         // By default, scaling is not supported.
@@ -831,7 +882,7 @@ protected:
 
 private:
     const SkEncodedInfo                fEncodedInfo;
-    const XformFormat                  fSrcXformFormat;
+    XformFormat                        fSrcXformFormat;
     std::unique_ptr<SkStream>          fStream;
     bool                               fNeedsRewind;
     const SkEncodedOrigin              fOrigin;
@@ -853,6 +904,10 @@ private:
     int                                fCurrScanline;
 
     bool                               fStartedIncrementalDecode;
+
+    // Allows SkAndroidCodec to call handleFrameIndex (potentially decoding a prior frame and
+    // clearing to transparent) without SkCodec calling it, too.
+    bool                               fAndroidCodecHandlesFrameIndex;
 
     bool initializeColorXform(const SkImageInfo& dstInfo, SkEncodedInfo::Alpha, bool srcIsOpaque);
 
@@ -878,8 +933,15 @@ private:
 
     /**
      *  Check for a valid Options.fFrameIndex, and decode prior frames if necessary.
+     *
+     *  If androidCodec is not null, that means this SkCodec is owned by an SkAndroidCodec. In that
+     *  case, the Options will be treated as an AndroidOptions, and SkAndroidCodec will be used to
+     *  decode a prior frame, if a prior frame is needed. When such an owned SkCodec calls
+     *  handleFrameIndex, it will immediately return kSuccess, since SkAndroidCodec already handled
+     *  it.
      */
-    Result handleFrameIndex(const SkImageInfo&, void* pixels, size_t rowBytes, const Options&);
+    Result handleFrameIndex(const SkImageInfo&, void* pixels, size_t rowBytes, const Options&,
+            SkAndroidCodec* androidCodec = nullptr);
 
     // Methods for scanline decoding.
     virtual Result onStartScanlineDecode(const SkImageInfo& /*dstInfo*/,

@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/events/pointer_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
@@ -41,22 +42,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
-
-static bool IsEventTypeScopedInV0(const AtomicString& event_type) {
-  // WebKit never allowed selectstart event to cross the the shadow DOM
-  // boundary.  Changing this breaks existing sites.
-  // See https://bugs.webkit.org/show_bug.cgi?id=52195 for details.
-  return event_type == event_type_names::kAbort ||
-         event_type == event_type_names::kChange ||
-         event_type == event_type_names::kError ||
-         event_type == event_type_names::kLoad ||
-         event_type == event_type_names::kReset ||
-         event_type == event_type_names::kResize ||
-         event_type == event_type_names::kScroll ||
-         event_type == event_type_names::kSelect ||
-         event_type == event_type_names::kSelectstart ||
-         event_type == event_type_names::kSlotchange;
-}
 
 Event::Event() : Event("", Bubbles::kNo, Cancelable::kNo) {
   was_initialized_ = false;
@@ -91,7 +76,6 @@ Event::Event(const AtomicString& event_type,
       bubbles_(bubbles == Bubbles::kYes),
       cancelable_(cancelable == Cancelable::kYes),
       composed_(composed_mode == ComposedMode::kComposed),
-      is_event_type_scoped_in_v0_(IsEventTypeScopedInV0(event_type)),
       propagation_stopped_(false),
       immediate_propagation_stopped_(false),
       default_prevented_(false),
@@ -119,10 +103,6 @@ Event::Event(const AtomicString& event_type,
             platform_time_stamp) {}
 
 Event::~Event() = default;
-
-bool Event::IsScopedInV0() const {
-  return isTrusted() && is_event_type_scoped_in_v0_;
-}
 
 void Event::initEvent(const AtomicString& event_type_arg,
                       bool bubbles_arg,
@@ -306,6 +286,8 @@ void Event::InitEventPath(Node& node) {
 }
 
 ScriptValue Event::path(ScriptState* script_state) const {
+  Deprecation::CountDeprecation(ExecutionContext::From(script_state),
+                                WebFeature::kEventPath);
   return ScriptValue(
       script_state->GetIsolate(),
       ToV8(PathInternal(script_state, kNonEmptyAfterDispatch), script_state));

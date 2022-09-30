@@ -4,10 +4,10 @@
 
 #include "chrome/browser/ui/webui/chromeos/multidevice_internals/multidevice_internals_logs_handler.h"
 
+#include "ash/components/multidevice/logging/log_buffer.h"
 #include "base/bind.h"
 #include "base/i18n/time_formatting.h"
 #include "base/values.h"
-#include "chromeos/components/multidevice/logging/logging.h"
 
 namespace chromeos {
 
@@ -24,8 +24,7 @@ const char kLogMessageSeverityKey[] = "severity";
 
 // Converts |log_message| to a raw dictionary value used as a JSON argument to
 // JavaScript functions.
-base::Value LogMessageToDictionary(
-    const chromeos::multidevice::LogBuffer::LogMessage& log_message) {
+base::Value LogMessageToDictionary(const LogBuffer::LogMessage& log_message) {
   base::Value dictionary(base::Value::Type::DICTIONARY);
   dictionary.SetStringKey(kLogMessageTextKey, log_message.text);
   dictionary.SetStringKey(
@@ -39,31 +38,30 @@ base::Value LogMessageToDictionary(
 
 }  // namespace
 
-MultideviceLogsHandler::MultideviceLogsHandler() : observer_(this) {}
+MultideviceLogsHandler::MultideviceLogsHandler() {}
 
 MultideviceLogsHandler::~MultideviceLogsHandler() = default;
 
 void MultideviceLogsHandler::RegisterMessages() {
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "getMultideviceLogMessages",
       base::BindRepeating(&MultideviceLogsHandler::HandleGetLogMessages,
                           base::Unretained(this)));
 }
 
 void MultideviceLogsHandler::OnJavascriptAllowed() {
-  observer_.Add(multidevice::LogBuffer::GetInstance());
+  observation_.Observe(LogBuffer::GetInstance());
 }
 
 void MultideviceLogsHandler::OnJavascriptDisallowed() {
-  observer_.RemoveAll();
+  observation_.Reset();
 }
 
 void MultideviceLogsHandler::HandleGetLogMessages(const base::ListValue* args) {
   AllowJavascript();
-  const base::Value& callback_id = args->GetList()[0];
+  const base::Value& callback_id = args->GetListDeprecated()[0];
   base::Value list(base::Value::Type::LIST);
-  for (const auto& log :
-       *chromeos::multidevice::LogBuffer::GetInstance()->logs()) {
+  for (const auto& log : *LogBuffer::GetInstance()->logs()) {
     list.Append(LogMessageToDictionary(log));
   }
   ResolveJavascriptCallback(callback_id, list);
@@ -74,7 +72,7 @@ void MultideviceLogsHandler::OnLogBufferCleared() {
 }
 
 void MultideviceLogsHandler::OnLogMessageAdded(
-    const chromeos::multidevice::LogBuffer::LogMessage& log_message) {
+    const LogBuffer::LogMessage& log_message) {
   FireWebUIListener("multidevice-log-message-added",
                     LogMessageToDictionary(log_message));
 }

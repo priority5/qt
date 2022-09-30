@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QJSENGINE_H
 #define QJSENGINE_H
@@ -46,7 +10,7 @@
 #include <QtCore/qsharedpointer.h>
 #include <QtCore/qobject.h>
 #include <QtQml/qjsvalue.h>
-
+#include <QtQml/qjsmanagedvalue.h>
 #include <QtQml/qqmldebug.h>
 
 QT_BEGIN_NAMESPACE
@@ -68,11 +32,13 @@ public:
 
     QJSValue globalObject() const;
 
-    QJSValue evaluate(const QString &program, const QString &fileName = QString(), int lineNumber = 1);
+    QJSValue evaluate(const QString &program, const QString &fileName = QString(), int lineNumber = 1, QStringList *exceptionStackTrace = nullptr);
 
     QJSValue importModule(const QString &fileName);
+    bool registerModule(const QString &moduleName, const QJSValue &value);
 
     QJSValue newObject();
+    QJSValue newSymbol(const QString &name);
     QJSValue newArray(uint length = 0);
 
     QJSValue newQObject(QObject *object);
@@ -90,19 +56,59 @@ public:
     template <typename T>
     inline QJSValue toScriptValue(const T &value)
     {
-        return create(qMetaTypeId<T>(), &value);
+        return create(QMetaType::fromType<T>(), &value);
     }
+
+    template <typename T>
+    inline QJSManagedValue toManagedValue(const T &value)
+    {
+        return createManaged(QMetaType::fromType<T>(), &value);
+    }
+
     template <typename T>
     inline T fromScriptValue(const QJSValue &value)
     {
         return qjsvalue_cast<T>(value);
     }
 
+    template <typename T>
+    inline T fromManagedValue(const QJSManagedValue &value)
+    {
+        return qjsvalue_cast<T>(value);
+    }
+
+    template <typename T>
+    inline T fromVariant(const QVariant &value)
+    {
+        if constexpr (std::is_same_v<T, QVariant>)
+            return value;
+
+        const QMetaType targetType = QMetaType::fromType<T>();
+        if (value.metaType() == targetType)
+            return *reinterpret_cast<const T *>(value.constData());
+
+        if constexpr (std::is_same_v<T,std::remove_const_t<std::remove_pointer_t<T>> const *>) {
+            using nonConstT = std::remove_const_t<std::remove_pointer_t<T>> *;
+            const QMetaType nonConstTargetType = QMetaType::fromType<nonConstT>();
+            if (value.metaType() == nonConstTargetType)
+                return *reinterpret_cast<const nonConstT *>(value.constData());
+        }
+
+        {
+            T t{};
+            if (convertVariant(value, targetType, &t))
+                return t;
+
+            QMetaType::convert(value.metaType(), value.constData(), targetType, &t);
+            return t;
+        }
+    }
+
     void collectGarbage();
 
-#if QT_DEPRECATED_SINCE(5, 6)
-    QT_DEPRECATED void installTranslatorFunctions(const QJSValue &object = QJSValue());
-#endif
+    enum ObjectOwnership { CppOwnership, JavaScriptOwnership };
+    static void setObjectOwnership(QObject *, ObjectOwnership);
+    static ObjectOwnership objectOwnership(QObject *);
 
     enum Extension {
         TranslationExtension = 0x1,
@@ -121,6 +127,9 @@ public:
 
     void throwError(const QString &message);
     void throwError(QJSValue::ErrorType errorType, const QString &message = QString());
+    void throwError(const QJSValue &error);
+    bool hasError() const;
+    QJSValue catchError();
 
     QString uiLanguage() const;
     void setUiLanguage(const QString &language);
@@ -129,11 +138,23 @@ Q_SIGNALS:
     void uiLanguageChanged();
 
 private:
-    QJSValue create(int type, const void *ptr);
+    QJSManagedValue createManaged(QMetaType type, const void *ptr);
+    QJSValue create(QMetaType type, const void *ptr);
+#if QT_VERSION < QT_VERSION_CHECK(7,0,0)
+    QJSValue create(int id, const void *ptr); // only there for BC reasons
+#endif
 
+    static bool convertManaged(const QJSManagedValue &value, int type, void *ptr);
+    static bool convertManaged(const QJSManagedValue &value, QMetaType type, void *ptr);
     static bool convertV2(const QJSValue &value, int type, void *ptr);
+    static bool convertV2(const QJSValue &value, QMetaType metaType, void *ptr);
+    bool convertVariant(const QVariant &value, QMetaType metaType, void *ptr);
 
-    friend inline bool qjsvalue_cast_helper(const QJSValue &, int, void *);
+    template<typename T>
+    friend inline T qjsvalue_cast(const QJSValue &);
+
+    template<typename T>
+    friend inline T qjsvalue_cast(const QJSManagedValue &);
 
 protected:
     QJSEngine(QJSEnginePrivate &dd, QObject *parent = nullptr);
@@ -146,18 +167,11 @@ private:
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(QJSEngine::Extensions)
 
-inline bool qjsvalue_cast_helper(const QJSValue &value, int type, void *ptr)
-{
-    return QJSEngine::convertV2(value, type, ptr);
-}
-
 template<typename T>
 T qjsvalue_cast(const QJSValue &value)
 {
     T t;
-    const int id = qMetaTypeId<T>();
-
-    if (qjsvalue_cast_helper(value, id, &t))
+    if (QJSEngine::convertV2(value, QMetaType::fromType<T>(), &t))
         return t;
     else if (value.isVariant())
         return qvariant_cast<T>(value.toVariant());
@@ -165,8 +179,26 @@ T qjsvalue_cast(const QJSValue &value)
     return T();
 }
 
+template<typename T>
+T qjsvalue_cast(const QJSManagedValue &value)
+{
+    {
+        T t;
+        if (QJSEngine::convertManaged(value, QMetaType::fromType<T>(), &t))
+            return t;
+    }
+
+    return qvariant_cast<T>(value.toVariant());
+}
+
 template <>
 inline QVariant qjsvalue_cast<QVariant>(const QJSValue &value)
+{
+    return value.toVariant();
+}
+
+template <>
+inline QVariant qjsvalue_cast<QVariant>(const QJSManagedValue &value)
 {
     return value.toVariant();
 }

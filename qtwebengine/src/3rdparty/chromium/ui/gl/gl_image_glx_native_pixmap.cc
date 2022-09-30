@@ -4,11 +4,14 @@
 
 #include "ui/gl/gl_image_glx_native_pixmap.h"
 
+#include <unistd.h>
+
 #include "base/posix/eintr_wrapper.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/linux/native_pixmap_dmabuf.h"
+#include "ui/gfx/x/connection.h"
 #include "ui/gfx/x/dri3.h"
-#include "ui/gfx/x/x11.h"
+#include "ui/gfx/x/future.h"
 #include "ui/gfx/x/xproto_types.h"
 #include "ui/gl/buffer_format_utils.h"
 #include "ui/gl/gl_bindings.h"
@@ -48,30 +51,38 @@ int Bpp(gfx::BufferFormat format) {
   }
 }
 
-XID XPixmapFromNativePixmap(const gfx::NativePixmapDmaBuf& native_pixmap,
-                            int depth,
-                            int bpp) {
+x11::Pixmap XPixmapFromNativePixmap(
+    const gfx::NativePixmapDmaBuf& native_pixmap,
+    int depth,
+    int bpp) {
   auto fd = HANDLE_EINTR(dup(native_pixmap.GetDmaBufFd(0)));
   if (fd < 0)
-    return 0;
-  base::ScopedFD scoped_fd(fd);
+    return x11::Pixmap::None;
+  x11::RefCountedFD ref_counted_fd(fd);
 
   auto* connection = x11::Connection::Get();
   x11::Pixmap pixmap_id = connection->GenerateId<x11::Pixmap>();
-  connection->dri3().PixmapFromBuffer({pixmap_id, connection->default_root(),
-                                       native_pixmap.GetDmaBufPlaneSize(0),
-                                       native_pixmap.GetBufferSize().width(),
-                                       native_pixmap.GetBufferSize().height(),
-                                       native_pixmap.GetDmaBufPitch(0), depth,
-                                       bpp, std::move(scoped_fd)});
-  return static_cast<uint32_t>(pixmap_id);
+  // This should be synced. Otherwise, glXCreatePixmap may fail on ChromeOS
+  // with "failed to create a drawable" error.
+  connection->dri3()
+      .PixmapFromBuffer(pixmap_id, connection->default_root(),
+                        native_pixmap.GetDmaBufPlaneSize(0),
+                        native_pixmap.GetBufferSize().width(),
+                        native_pixmap.GetBufferSize().height(),
+                        native_pixmap.GetDmaBufPitch(0), depth, bpp,
+                        ref_counted_fd)
+      .Sync();
+  return pixmap_id;
 }
 
 }  // namespace
 
 GLImageGLXNativePixmap::GLImageGLXNativePixmap(const gfx::Size& size,
-                                               gfx::BufferFormat format)
-    : GLImageGLX(size, format) {}
+                                               gfx::BufferFormat format,
+                                               gfx::BufferPlane plane)
+    : GLImageGLX(size, format) {
+  DCHECK_EQ(plane, gfx::BufferPlane::DEFAULT);
+}
 
 GLImageGLXNativePixmap::~GLImageGLXNativePixmap() = default;
 

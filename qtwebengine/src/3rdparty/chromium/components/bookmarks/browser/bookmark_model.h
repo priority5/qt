@@ -16,16 +16,16 @@
 
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
-#include "base/strings/string16.h"
 #include "components/bookmarks/browser/bookmark_client.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/browser/bookmark_undo_provider.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
 
@@ -33,6 +33,7 @@ class PrefService;
 
 namespace base {
 class FilePath;
+class GUID;
 }
 
 namespace favicon_base {
@@ -74,6 +75,10 @@ class BookmarkModel : public BookmarkUndoProvider,
                       public KeyedService {
  public:
   explicit BookmarkModel(std::unique_ptr<BookmarkClient> client);
+
+  BookmarkModel(const BookmarkModel&) = delete;
+  BookmarkModel& operator=(const BookmarkModel&) = delete;
+
   ~BookmarkModel() override;
 
   // Triggers the loading of bookmarks, which is an asynchronous operation with
@@ -172,7 +177,7 @@ class BookmarkModel : public BookmarkUndoProvider,
   const gfx::Image& GetFavicon(const BookmarkNode* node);
 
   // Sets the title of |node|.
-  void SetTitle(const BookmarkNode* node, const base::string16& title);
+  void SetTitle(const BookmarkNode* node, const std::u16string& title);
 
   // Sets the URL of |node|.
   void SetURL(const BookmarkNode* node, const GURL& url);
@@ -203,27 +208,29 @@ class BookmarkModel : public BookmarkUndoProvider,
   // same or not.
   void GetBookmarks(std::vector<UrlAndTitle>* urls);
 
-  // Adds a new folder node at the specified position with the given |guid| and
-  // |meta_info|. If a GUID is provided, it must be a valid version 4 GUID,
-  // otherwise a new one is generated to replace it.
+  // Adds a new folder node at the specified position with the given
+  // |creation_time|, |guid| and |meta_info|. If no GUID is provided (i.e.
+  // nullopt), then a random one will be generated. If a GUID is provided, it
+  // must be valid.
   const BookmarkNode* AddFolder(
       const BookmarkNode* parent,
       size_t index,
-      const base::string16& title,
+      const std::u16string& title,
       const BookmarkNode::MetaInfoMap* meta_info = nullptr,
-      base::Optional<std::string> guid = base::nullopt);
+      absl::optional<base::Time> creation_time = absl::nullopt,
+      absl::optional<base::GUID> guid = absl::nullopt);
 
   // Adds a url at the specified position with the given |creation_time|,
-  // |meta_info| and |guid|. If a GUID is provided, it must be a valid version 4
-  // GUID, otherwise a new one is generated to replace it.
+  // |meta_info| and |guid|. If no GUID is provided (i.e. nullopt), then a
+  // random one will be generated. If a GUID is provided, it must be valid.
   const BookmarkNode* AddURL(
       const BookmarkNode* parent,
       size_t index,
-      const base::string16& title,
+      const std::u16string& title,
       const GURL& url,
       const BookmarkNode::MetaInfoMap* meta_info = nullptr,
-      base::Optional<base::Time> creation_time = base::nullopt,
-      base::Optional<std::string> guid = base::nullopt);
+      absl::optional<base::Time> creation_time = absl::nullopt,
+      absl::optional<base::GUID> guid = absl::nullopt);
 
   // Sorts the children of |parent|, notifying observers by way of the
   // BookmarkNodeChildrenReordered method.
@@ -244,18 +251,15 @@ class BookmarkModel : public BookmarkUndoProvider,
   // combobox of most recently modified folders.
   void ResetDateFolderModified(const BookmarkNode* node);
 
-  // Returns up to |max_count| of bookmarks containing each term from |text|
-  // in either the title or the URL. It uses default matching algorithm.
-  void GetBookmarksMatching(const base::string16& text,
-                            size_t max_count,
-                            std::vector<TitledUrlMatch>* matches);
-
-  // Returns up to |max_count| of bookmarks containing each term from |text|
-  // in either the title or the URL.
-  void GetBookmarksMatching(const base::string16& text,
-                            size_t max_count,
-                            query_parser::MatchingAlgorithm matching_algorithm,
-                            std::vector<TitledUrlMatch>* matches);
+  // Returns up to |max_count| bookmarks containing each term from |query| in
+  // either the title, URL, or, if |match_ancestor_titles| is true, the titles
+  // of ancestors. |matching_algorithm| determines the algorithm used by
+  // QueryParser internally to parse |query|.
+  std::vector<TitledUrlMatch> GetBookmarksMatching(
+      const std::u16string& query,
+      size_t max_count,
+      query_parser::MatchingAlgorithm matching_algorithm,
+      bool match_ancestor_titles = false);
 
   // Sets the store to NULL, making it so the BookmarkModel does not persist
   // any changes to disk. This is only useful during testing to speed up
@@ -319,8 +323,8 @@ class BookmarkModel : public BookmarkUndoProvider,
                           size_t index,
                           std::unique_ptr<BookmarkNode> node) override;
 
-  // Notifies the observers for adding every descedent of |node|.
-  void NotifyNodeAddedForAllDescendents(const BookmarkNode* node);
+  // Notifies the observers for adding every descendant of |node|.
+  void NotifyNodeAddedForAllDescendants(const BookmarkNode* node);
 
   // Removes the node from internal maps and recurses through all children. If
   // the node is a url, its url is added to removed_urls.
@@ -337,8 +341,8 @@ class BookmarkModel : public BookmarkUndoProvider,
                         size_t index,
                         std::unique_ptr<BookmarkNode> node);
 
-  // Adds |node| to |index_| and recursisvely invokes this for all children.
-  void AddNodeToIndexRecursive(BookmarkNode* node);
+  // Adds |node| to |index_| and recursively invokes this for all children.
+  void AddNodeToIndexRecursive(const BookmarkNode* node);
 
   // Returns true if the parent and index are valid.
   bool IsValidIndex(const BookmarkNode* parent, size_t index, bool allow_end);
@@ -387,11 +391,11 @@ class BookmarkModel : public BookmarkUndoProvider,
   // |owned_root_|. Once loading has completed, |owned_root_| is destroyed and
   // this is set to url_index_->root(). |owned_root_| is done as lots of
   // existing code assumes the root is non-null while loading.
-  BookmarkNode* root_ = nullptr;
+  raw_ptr<BookmarkNode> root_ = nullptr;
 
-  BookmarkPermanentNode* bookmark_bar_node_ = nullptr;
-  BookmarkPermanentNode* other_node_ = nullptr;
-  BookmarkPermanentNode* mobile_node_ = nullptr;
+  raw_ptr<BookmarkPermanentNode> bookmark_bar_node_ = nullptr;
+  raw_ptr<BookmarkPermanentNode> other_node_ = nullptr;
+  raw_ptr<BookmarkPermanentNode> mobile_node_ = nullptr;
 
   // The maximum ID assigned to the bookmark nodes in the model.
   int64_t next_node_id_ = 1;
@@ -407,11 +411,6 @@ class BookmarkModel : public BookmarkUndoProvider,
 
   std::unique_ptr<TitledUrlIndex> titled_url_index_;
 
-#if DCHECK_IS_ON()
-  // GUID index used to verify uniqueness in DCHECK-enabled builds.
-  std::set<std::string> guid_index_;
-#endif  // DCHECK_IS_ON()
-
   // Owned by |model_loader_|.
   // WARNING: in some tests this does *not* refer to
   // |ModelLoader::history_bookmark_model_|. This is because some tests
@@ -426,7 +425,7 @@ class BookmarkModel : public BookmarkUndoProvider,
 
   std::set<std::string> non_cloned_keys_;
 
-  BookmarkUndoDelegate* undo_delegate_ = nullptr;
+  raw_ptr<BookmarkUndoDelegate> undo_delegate_ = nullptr;
   std::unique_ptr<BookmarkUndoDelegate> empty_undo_delegate_;
 
   scoped_refptr<ModelLoader> model_loader_;
@@ -434,8 +433,6 @@ class BookmarkModel : public BookmarkUndoProvider,
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<BookmarkModel> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BookmarkModel);
 };
 
 }  // namespace bookmarks

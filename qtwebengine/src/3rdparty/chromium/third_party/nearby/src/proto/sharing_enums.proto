@@ -127,7 +127,7 @@ enum EventType {
   CANCEL_CONNECTION = 30;
 
   // User starts a chimera activity (e.g. ConsentsChimeraActivity,
-  // ContactSelectChimeraActivity...)
+  // DeviceVisibilityChimeraActivity...)
   LAUNCH_ACTIVITY = 31;
 
   // Receiver dismisses a privacy notification.
@@ -153,6 +153,38 @@ enum EventType {
 
   // Receiver taps quick settings tile.
   TAP_QUICK_SETTINGS_TILE = 39;
+
+  // Receiver Installation of APKs status.
+  INSTALL_APK = 40;
+
+  // Receiver verification of APKs status.
+  VERIFY_APK = 41;
+
+  // User starts a consent.
+  LAUNCH_CONSENT = 42;
+
+  // After receiving payloads, Nearby Share still needs to transfer the payloads
+  // to correct attachment formats and move files attachments from temporary
+  // directory to final destination.
+  PROCESS_RECEIVED_ATTACHMENTS_END = 43;
+
+  // Toggle Show Notification setting item in Nearby Share setting.
+  TOGGLE_SHOW_NOTIFICATION = 44;
+
+  // Set device name
+  SET_DEVICE_NAME = 45;
+
+  // users dropped off opt-in page.
+  DECLINE_AGREEMENTS = 46;
+
+  // Request setting permissions (Wifi/BT/location/airplane mode).
+  REQUEST_SETTING_PERMISSIONS = 47;
+
+  // Set up a connection with the remote device.
+  ESTABLISH_CONNECTION = 48;
+
+  // Track device states in Nearby Share setting.
+  DEVICE_SETTINGS = 49;
 }
 
 // Event category to differentiate whether this comes from sender or receiver,
@@ -179,6 +211,7 @@ enum Visibility {
   EVERYONE = 2;
   SELECTED_CONTACTS_ONLY = 3;
   HIDDEN = 4;
+  SELF_SHARE = 5;
 }
 
 enum DataUsage {
@@ -189,6 +222,15 @@ enum DataUsage {
   OFFLINE = 3;
 }
 
+// The status of establishing a connection. Used by ESTABLISH_CONNECTION.
+enum EstablishConnectionStatus {
+  CONNECTION_STATUS_UNKNOWN = 0;
+
+  CONNECTION_STATUS_SUCCESS = 1;
+  CONNECTION_STATUS_FAILURE = 2;
+  CONNECTION_STATUS_CANCELLATION = 3;
+}
+
 // The status of sending and receiving attachments. Used by SEND_ATTACHMENTS.
 enum AttachmentTransmissionStatus {
   UNKNOWN_ATTACHMENT_TRANSMISSION_STATUS = 0;
@@ -196,9 +238,10 @@ enum AttachmentTransmissionStatus {
   COMPLETE_ATTACHMENT_TRANSMISSION_STATUS = 1;
   CANCELED_ATTACHMENT_TRANSMISSION_STATUS = 2;
   FAILED_ATTACHMENT_TRANSMISSION_STATUS = 3;
+
   REJECTED_ATTACHMENT = 4;
   TIMED_OUT_ATTACHMENT = 5;
-  AWAITING_REMOTE_ACCEPTANCE_FAILED_ATTACHMENT = 6;
+  AWAITING_REMOTE_ACCEPTANCE_FAILED_ATTACHMENT = 6 [deprecated = true];
   NOT_ENOUGH_SPACE_ATTACHMENT = 7;
   FAILED_NO_TRANSFER_UPDATE_CALLBACK = 8;
   MEDIA_UNAVAILABLE_ATTACHMENT = 9;
@@ -209,6 +252,21 @@ enum AttachmentTransmissionStatus {
   FAILED_NULL_CONNECTION = 14;
   FAILED_NO_PAYLOAD = 15;
   FAILED_WRITE_INTRODUCTION = 16;
+
+  // The remote response is either missing or has an unknown type.
+  FAILED_UNKNOWN_REMOTE_RESPONSE = 17;
+}
+
+// The status of processing attachments after receiver received payloads
+// successfully.
+enum ProcessReceivedAttachmentsStatus {
+  PROCESSING_STATUS_UNKNOWN = 0;
+
+  PROCESSING_STATUS_COMPLETE_PROCESSING_ATTACHMENTS = 1;
+  PROCESSING_STATUS_FAILED_MOVING_FILES = 2;
+  PROCESSING_STATUS_FAILED_RECEIVING_APK = 3;
+  PROCESSING_STATUS_FAILED_RECEIVING_TEXT = 4;
+  PROCESSING_STATUS_FAILED_RECEIVING_WIFI_CREDENTIALS = 5;
 }
 
 // The status of advertising and discovering sessions. Used by
@@ -246,6 +304,7 @@ enum OSType {
 
   ANDROID = 1;
   CHROME_OS = 2;
+  IOS = 3;
 }
 
 // Relationship of remote device to sender device.
@@ -288,6 +347,8 @@ enum ServerActionName {
   CHECK_REACHABILITY = 3;
   UPLOAD_CONTACTS = 4;
   UPDATE_DEVICE_NAME = 5;
+  UPLOAD_SENDER_CERTIFICATES = 6;
+  DOWNLOAD_SENDER_CERTIFICATES = 7;
 }
 
 // The Fast Share server response state.
@@ -326,6 +387,75 @@ enum ActivityName {
   SETTINGS_ACTIVITY = 2;
   RECEIVE_SURFACE_ACTIVITY = 3;
   SETUP_ACTIVITY = 4;
-  CONTACT_SELECT_ACTIVITY = 5;
+  DEVICE_VISIBILITY_ACTIVITY = 5;
   CONSENTS_ACTIVITY = 6;
+  SET_DEVICE_NAME_DIALOG = 7;
+  SET_DATA_USAGE_DIALOG = 8;
+}
+
+// The type of consent page user launches.
+enum ConsentType {
+  CONSENT_TYPE_UNKNOWN = 0;
+
+  // launch Constellation consent page.
+  CONSENT_TYPE_C11N = 1;
+  // launch device contact consent page.
+  CONSENT_TYPE_DEVICE_CONTACT = 2;
+}
+
+enum ConsentAcceptanceStatus {
+  CONSENT_UNKNOWN_ACCEPT_STATUS = 0;
+
+  CONSENT_ACCEPTED = 1;
+  CONSENT_DECLINED = 2;
+  // unable to enable consent.
+  CONSENT_UNABLE_TO_ENABLE = 3;
+}
+
+enum ApkSource {
+  UNKNOWN_APK_SOURCE = 0;
+
+  APK_FROM_SD_CARD = 1;
+  INSTALLED_APP = 2;
+}
+
+// The Installation status of APK.
+enum InstallAPKStatus {
+  UNKNOWN_INSTALL_APK_STATUS = 0;
+
+  FAIL_INSTALLATION = 1;
+  SUCCESS_INSTALLATION = 2;
+}
+
+// The verification status of APK.
+enum VerifyAPKStatus {
+  UNKNOWN_VERIFY_APK_STATUS = 0;
+
+  NOT_INSTALLABLE = 1;
+  INSTALLABLE = 2;
+  ALREADY_INSTALLED = 3;
+}
+
+enum ShowNotificationStatus {
+  UNKNOWN_SHOW_NOTIFICATION_STATUS = 0;
+
+  SHOW = 1;
+  NOT_SHOW = 2;
+}
+
+enum PermissionRequestResult {
+  PERMISSION_UNKNOWN_REQUEST_RESULT = 0;
+
+  PERMISSION_GRANTED = 1;
+  PERMISSION_REJECTED = 2;
+  PERMISSION_UNABLE_TO_GRANT = 3;
+}
+
+enum PermissionRequestType {
+  PERMISSION_UNKNOWN_TYPE = 0;
+
+  PERMISSION_AIRPLANE_MODE_OFF = 1;
+  PERMISSION_WIFI = 2;
+  PERMISSION_BLUETOOTH = 3;
+  PERMISSION_LOCATION = 4;
 }

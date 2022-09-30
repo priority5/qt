@@ -1,48 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Robin Burchell <robin.burchell@viroteck.net>
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Robin Burchell <robin.burchell@viroteck.net>
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <QtGui/QCursor>
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
 #include <QtGui/QPalette>
 #include <QtGui/QLinearGradient>
+#include <QtGui/QPainterPath>
 
 #include <qpa/qwindowsysteminterface.h>
 
@@ -67,15 +32,15 @@ enum Button
     Minimize
 };
 
-class Q_WAYLAND_CLIENT_EXPORT QWaylandBradientDecoration : public QWaylandAbstractDecoration
+class Q_WAYLANDCLIENT_EXPORT QWaylandBradientDecoration : public QWaylandAbstractDecoration
 {
 public:
     QWaylandBradientDecoration();
 protected:
-    QMargins margins() const override;
+    QMargins margins(MarginsType marginsType = Full) const override;
     void paint(QPaintDevice *device) override;
     bool handleMouse(QWaylandInputDevice *inputDevice, const QPointF &local, const QPointF &global,Qt::MouseButtons b,Qt::KeyboardModifiers mods) override;
-    bool handleTouch(QWaylandInputDevice *inputDevice, const QPointF &local, const QPointF &global, Qt::TouchPointState state, Qt::KeyboardModifiers mods) override;
+    bool handleTouch(QWaylandInputDevice *inputDevice, const QPointF &local, const QPointF &global, QEventPoint::State state, Qt::KeyboardModifiers mods) override;
 private:
     void processMouseTop(QWaylandInputDevice *inputDevice, const QPointF &local, Qt::MouseButtons b,Qt::KeyboardModifiers mods);
     void processMouseBottom(QWaylandInputDevice *inputDevice, const QPointF &local, Qt::MouseButtons b,Qt::KeyboardModifiers mods);
@@ -129,8 +94,11 @@ QRectF QWaylandBradientDecoration::minimizeButtonRect() const
                   (margins().top() - BUTTON_WIDTH) / 2, BUTTON_WIDTH, BUTTON_WIDTH);
 }
 
-QMargins QWaylandBradientDecoration::margins() const
+QMargins QWaylandBradientDecoration::margins(MarginsType marginsType) const
 {
+    if (marginsType == ShadowsOnly)
+        return QMargins();
+
     return QMargins(3, 30, 3, 3);
 }
 
@@ -164,13 +132,10 @@ void QWaylandBradientDecoration::paint(QPaintDevice *device)
     // Window icon
     QIcon icon = waylandWindow()->windowIcon();
     if (!icon.isNull()) {
-        QPixmap pixmap = icon.pixmap(QSize(128, 128));
-        QPixmap scaled = pixmap.scaled(22, 22, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-
         QRectF iconRect(0, 0, 22, 22);
-        p.drawPixmap(iconRect.adjusted(margins().left() + BUTTON_SPACING, 4,
-                                       margins().left() + BUTTON_SPACING, 4),
-                     scaled, iconRect);
+        iconRect.adjust(margins().left() + BUTTON_SPACING, 4,
+                        margins().left() + BUTTON_SPACING, 4),
+        icon.paint(&p, iconRect.toRect());
     }
 
     // Window title
@@ -289,12 +254,12 @@ bool QWaylandBradientDecoration::handleMouse(QWaylandInputDevice *inputDevice, c
     return true;
 }
 
-bool QWaylandBradientDecoration::handleTouch(QWaylandInputDevice *inputDevice, const QPointF &local, const QPointF &global, Qt::TouchPointState state, Qt::KeyboardModifiers mods)
+bool QWaylandBradientDecoration::handleTouch(QWaylandInputDevice *inputDevice, const QPointF &local, const QPointF &global, QEventPoint::State state, Qt::KeyboardModifiers mods)
 {
     Q_UNUSED(inputDevice);
     Q_UNUSED(global);
     Q_UNUSED(mods);
-    bool handled = state == Qt::TouchPointPressed;
+    bool handled = state == QEventPoint::Pressed;
     if (handled) {
         if (closeButtonRect().contains(local))
             QWindowSystemInterface::handleCloseEvent(window());

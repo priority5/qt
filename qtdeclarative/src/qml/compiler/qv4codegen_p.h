@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 #ifndef QV4CODEGEN_P_H
 #define QV4CODEGEN_P_H
 
@@ -60,6 +24,8 @@
 #include <private/qv4bytecodegenerator_p.h>
 #include <private/qv4calldata_p.h>
 
+#include <QtCore/qsharedpointer.h>
+
 QT_BEGIN_NAMESPACE
 
 namespace QV4 {
@@ -78,14 +44,29 @@ struct ControlFlow;
 struct ControlFlowCatch;
 struct ControlFlowFinally;
 
-class Q_QMLCOMPILER_PRIVATE_EXPORT Codegen: protected QQmlJS::AST::Visitor
+class Q_QML_COMPILER_PRIVATE_EXPORT CodegenWarningInterface
+{
+public:
+    virtual void reportVarUsedBeforeDeclaration(const QString &name, const QString &fileName,
+                                                QQmlJS::SourceLocation declarationLocation,
+                                                QQmlJS::SourceLocation accessLocation);
+    virtual ~CodegenWarningInterface() = default;
+};
+
+inline CodegenWarningInterface *defaultCodegenWarningInterface()
+{
+    static CodegenWarningInterface iface;
+    return &iface;
+}
+
+class Q_QML_COMPILER_PRIVATE_EXPORT Codegen: protected QQmlJS::AST::Visitor
 {
 protected:
     using BytecodeGenerator = QV4::Moth::BytecodeGenerator;
     using Instruction = QV4::Moth::Instruction;
 public:
-    Codegen(QV4::Compiler::JSUnitGenerator *jsUnitGenerator, bool strict);
-
+    Codegen(QV4::Compiler::JSUnitGenerator *jsUnitGenerator, bool strict,
+            CodegenWarningInterface *iface = defaultCodegenWarningInterface());
 
     void generateFromProgram(const QString &fileName,
                              const QString &finalUrl,
@@ -105,15 +86,15 @@ public:
     class VolatileMemoryLocations {
         friend VolatileMemoryLocationScanner;
         bool allVolatile = false;
-        QVector<QStringView> specificLocations;
+        QList<QStringView> specificLocations;
     public:
-        bool isVolatile(const QStringView &name) {
+        bool isVolatile(QStringView name) {
             if (allVolatile)
                 return true;
             return specificLocations.contains(name);
         }
 
-        void add(const QStringRef &name) { if (!allVolatile) specificLocations.append(name); }
+        void add(QStringView name) { if (!allVolatile) specificLocations.append(name); }
         void setAllVolatile() { allVolatile = true; }
     };
     class RValue {
@@ -277,11 +258,20 @@ public:
             r.name = name;
             return r;
         }
-        static Reference fromMember(const Reference &baseRef, const QString &name) {
+        static Reference
+        fromMember(const Reference &baseRef, const QString &name,
+                   QQmlJS::SourceLocation sourceLocation = QQmlJS::SourceLocation(),
+                   Moth::BytecodeGenerator::Label jumpLabel = Moth::BytecodeGenerator::Label(),
+                   Moth::BytecodeGenerator::Label targetLabel = Moth::BytecodeGenerator::Label())
+        {
+            Q_ASSERT(baseRef.isValid());
             Reference r(baseRef.codegen, Member);
             r.propertyBase = baseRef.asRValue();
             r.propertyNameIndex = r.codegen->registerString(name);
             r.requiresTDZCheck = baseRef.requiresTDZCheck;
+            r.sourceLocation = sourceLocation;
+            r.optionalChainJumpLabel.reset(new Moth::BytecodeGenerator::Label(jumpLabel));
+            r.optionalChainTargetLabel.reset(new Moth::BytecodeGenerator::Label(targetLabel));
             return r;
         }
         static Reference fromSuperProperty(const Reference &property) {
@@ -291,13 +281,14 @@ public:
             r.subscriptRequiresTDZCheck = property.requiresTDZCheck;
             return r;
         }
-        static Reference fromSubscript(const Reference &baseRef, const Reference &subscript) {
+        static Reference fromSubscript(const Reference &baseRef, const Reference &subscript, Moth::BytecodeGenerator::Label targetLabel = Moth::BytecodeGenerator::Label()) {
             Q_ASSERT(baseRef.isStackSlot());
             Reference r(baseRef.codegen, Subscript);
             r.elementBase = baseRef.stackSlot();
             r.elementSubscript = subscript.asRValue();
             r.requiresTDZCheck = baseRef.requiresTDZCheck;
             r.subscriptRequiresTDZCheck = subscript.requiresTDZCheck;
+            r.optionalChainTargetLabel.reset(new Moth::BytecodeGenerator::Label(targetLabel));
             return r;
         }
         static Reference fromConst(Codegen *cg, QV4::ReturnedValue constant) {
@@ -374,6 +365,9 @@ public:
         quint32 isVolatile:1;
         quint32 global:1;
         quint32 qmlGlobal:1;
+        QQmlJS::SourceLocation sourceLocation = QQmlJS::SourceLocation();
+        QSharedPointer<Moth::BytecodeGenerator::Label> optionalChainJumpLabel;
+        QSharedPointer<Moth::BytecodeGenerator::Label> optionalChainTargetLabel;
 
     private:
         void storeAccumulator() const;
@@ -520,7 +514,7 @@ public:
     // Returns index in _module->functions
     virtual int defineFunction(const QString &name, QQmlJS::AST::Node *ast,
                                QQmlJS::AST::FormalParameterList *formals,
-                               QQmlJS::AST::StatementList *body);
+                               QQmlJS::AST::StatementList *body, bool storeSourceLocation = false);
 
 protected:
     void statement(QQmlJS::AST::Statement *ast);
@@ -598,11 +592,14 @@ protected:
     bool visit(QQmlJS::AST::ArrayMemberExpression *ast) override;
     bool visit(QQmlJS::AST::BinaryExpression *ast) override;
     bool visit(QQmlJS::AST::CallExpression *ast) override;
+    void endVisit(QQmlJS::AST::CallExpression *ast) override;
     bool visit(QQmlJS::AST::ConditionalExpression *ast) override;
     bool visit(QQmlJS::AST::DeleteExpression *ast) override;
+    void endVisit(QQmlJS::AST::DeleteExpression *ast) override;
     bool visit(QQmlJS::AST::FalseLiteral *ast) override;
     bool visit(QQmlJS::AST::SuperLiteral *ast) override;
     bool visit(QQmlJS::AST::FieldMemberExpression *ast) override;
+    void endVisit(QQmlJS::AST::FieldMemberExpression *ast) override;
     bool visit(QQmlJS::AST::TaggedTemplate *ast) override;
     bool visit(QQmlJS::AST::FunctionExpression *ast) override;
     bool visit(QQmlJS::AST::IdentifierExpression *ast) override;
@@ -686,7 +683,7 @@ public:
     Reference jumpBinop(QSOperator::Op oper, Reference &left, Reference &right);
     struct Arguments { int argc; int argv; bool hasSpread; };
     Arguments pushArgs(QQmlJS::AST::ArgumentList *args);
-    void handleCall(Reference &base, Arguments calldata, int slotForFunction, int slotForThisObject);
+    void handleCall(Reference &base, Arguments calldata, int slotForFunction, int slotForThisObject, bool optional = false);
 
     Arguments pushTemplateArgs(QQmlJS::AST::TemplateLiteral *args);
     bool handleTaggedTemplate(Reference base, QQmlJS::AST::TaggedTemplate *ast);
@@ -776,12 +773,15 @@ protected:
     bool functionEndsWithReturn = false;
     bool _tailCallsAreAllowed = true;
     QSet<QString> m_globalNames;
+    QSet<QQmlJS::AST::Node*> m_seenOptionalChainNodes;
+    QHash<QQmlJS::AST::Node*, Moth::BytecodeGenerator::Label> m_optionalChainLabels;
 
     ControlFlow *controlFlow = nullptr;
 
     bool _fileNameIsUrl;
     ErrorType _errorType = NoError;
     QQmlJS::DiagnosticMessage _error;
+    CodegenWarningInterface *_interface;
 
     class TailCallBlocker
     {
@@ -812,6 +812,7 @@ private:
     void handleConstruct(const Reference &base, QQmlJS::AST::ArgumentList *args);
     void throwError(ErrorType errorType, const QQmlJS::SourceLocation &loc,
                     const QString &detail);
+    std::optional<Moth::BytecodeGenerator::Label> traverseOptionalChain(QQmlJS::AST::Node *node);
 };
 
 }

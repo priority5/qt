@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/run_loop.h"
@@ -101,8 +101,8 @@ IN_PROC_BROWSER_TEST_F(PortForwardingTest,
   prefs->SetBoolean(prefs::kDevToolsPortForwardingEnabled, true);
 
   base::DictionaryValue config;
-  config.SetString(
-      forwarding_port, original_url.host() + ":" + original_url.port());
+  config.SetStringKey(forwarding_port,
+                      original_url.host() + ":" + original_url.port());
   prefs->Set(prefs::kDevToolsPortForwardingConfig, config);
 
   Listener wait_for_port_forwarding(profile);
@@ -110,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(PortForwardingTest,
 
   RemoteDebuggingServer::EnableTetheringForDebug();
 
-  ui_test_utils::NavigateToURL(browser(), forwarding_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), forwarding_url));
 
   content::WebContents* wc = browser()->tab_strip_model()->GetWebContentsAt(0);
 
@@ -163,8 +163,8 @@ IN_PROC_BROWSER_TEST_F(PortForwardingDisconnectTest, DisconnectOnRelease) {
   prefs->SetBoolean(prefs::kDevToolsPortForwardingEnabled, true);
 
   base::DictionaryValue config;
-  config.SetString(
-      forwarding_port, original_url.host() + ":" + original_url.port());
+  config.SetStringKey(forwarding_port,
+                      original_url.host() + ":" + original_url.port());
   prefs->Set(prefs::kDevToolsPortForwardingConfig, config);
 
   std::unique_ptr<Listener> wait_for_port_forwarding(new Listener(profile));
@@ -172,10 +172,10 @@ IN_PROC_BROWSER_TEST_F(PortForwardingDisconnectTest, DisconnectOnRelease) {
 
   base::RunLoop run_loop;
 
-  self_provider->set_release_callback_for_test(
-      base::Bind(base::IgnoreResult(&base::SingleThreadTaskRunner::PostTask),
-                 base::ThreadTaskRunnerHandle::Get(), FROM_HERE,
-                 run_loop.QuitWhenIdleClosure()));
+  self_provider->set_release_callback_for_test(base::BindOnce(
+      base::IgnoreResult(&base::SingleThreadTaskRunner::PostTask),
+      base::ThreadTaskRunnerHandle::Get(), FROM_HERE,
+      run_loop.QuitWhenIdleClosure()));
   wait_for_port_forwarding.reset();
 
   content::RunThisRunLoop(&run_loop);

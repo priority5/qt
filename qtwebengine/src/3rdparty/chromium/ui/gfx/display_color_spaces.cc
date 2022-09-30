@@ -5,6 +5,7 @@
 #include "ui/gfx/display_color_spaces.h"
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace gfx {
 
@@ -19,7 +20,7 @@ const ContentColorUsage kAllColorUsages[] = {
 gfx::BufferFormat DefaultBufferFormat() {
   // ChromeOS expects the default buffer format be BGRA_8888 in several places.
   // https://crbug.com/1057501, https://crbug.com/1073237
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   return gfx::BufferFormat::BGRA_8888;
 #else
   return gfx::BufferFormat::RGBA_8888;
@@ -40,25 +41,32 @@ size_t GetIndex(ContentColorUsage color_usage, bool needs_alpha) {
 }  // namespace
 
 DisplayColorSpaces::DisplayColorSpaces() {
-  for (auto& color_space : color_spaces_)
-    color_space = gfx::ColorSpace::CreateSRGB();
-  for (auto& buffer_format : buffer_formats_)
-    buffer_format = DefaultBufferFormat();
+  // TODO(crbug/1309228): Revert back to range-based for loops if possible
+  for (size_t i = 0; i < kConfigCount; i++) {
+    color_spaces_[i] = gfx::ColorSpace::CreateSRGB();
+    buffer_formats_[i] = DefaultBufferFormat();
+  }
 }
+
+DisplayColorSpaces::DisplayColorSpaces(const gfx::DisplayColorSpaces&) =
+    default;
+
+DisplayColorSpaces& DisplayColorSpaces::operator=(
+    const gfx::DisplayColorSpaces&) = default;
 
 DisplayColorSpaces::DisplayColorSpaces(const gfx::ColorSpace& c)
     : DisplayColorSpaces() {
   if (!c.IsValid())
     return;
-  for (auto& color_space : color_spaces_)
-    color_space = c;
+  for (size_t i = 0; i < kConfigCount; i++)  // NOLINT (modernize-loop-convert)
+    color_spaces_[i] = c;
 }
 
 DisplayColorSpaces::DisplayColorSpaces(const ColorSpace& c, BufferFormat f) {
-  for (auto& color_space : color_spaces_)
-    color_space = c.IsValid() ? c : gfx::ColorSpace::CreateSRGB();
-  for (auto& buffer_format : buffer_formats_)
-    buffer_format = f;
+  for (size_t i = 0; i < kConfigCount; i++) {
+    color_spaces_[i] = c.IsValid() ? c : gfx::ColorSpace::CreateSRGB();
+    buffer_formats_[i] = f;
+  }
 }
 
 void DisplayColorSpaces::SetOutputBufferFormats(
@@ -182,7 +190,9 @@ bool DisplayColorSpaces::operator==(const DisplayColorSpaces& other) const {
     if (buffer_formats_[i] != other.buffer_formats_[i])
       return false;
   }
-  if (sdr_white_level_ != other.sdr_white_level_)
+  if (sdr_max_luminance_nits_ != other.sdr_max_luminance_nits_)
+    return false;
+  if (hdr_max_luminance_relative_ != other.hdr_max_luminance_relative_)
     return false;
 
   return true;

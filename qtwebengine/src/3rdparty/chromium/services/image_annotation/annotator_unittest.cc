@@ -7,10 +7,10 @@
 #include <cstring>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/optional.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
@@ -29,6 +29,7 @@
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace image_annotation {
 
@@ -64,7 +65,8 @@ constexpr char kTemplateRequest[] = R"(
     "imageBytes": "%s",
     "engineParameters": [
       {"ocrParameters": {}},
-      {"descriptionParameters": {}}
+      {"descriptionParameters": {}},
+      {"iconParameters": {}}
     ]
   }]
 }
@@ -79,7 +81,8 @@ constexpr char kBatchRequest[] = R"(
       "imageBytes": "BwgJ",
       "engineParameters": [
         {"ocrParameters": {}},
-        {"descriptionParameters": {}}
+        {"descriptionParameters": {}},
+        {"iconParameters": {}}
       ]
     },
     {
@@ -87,7 +90,8 @@ constexpr char kBatchRequest[] = R"(
       "imageBytes": "BAUG",
       "engineParameters": [
         {"ocrParameters": {}},
-        {"descriptionParameters": {}}
+        {"descriptionParameters": {}},
+        {"iconParameters": {}}
       ]
     },
     {
@@ -95,7 +99,8 @@ constexpr char kBatchRequest[] = R"(
       "imageBytes": "AQID",
       "engineParameters": [
         {"ocrParameters": {}},
-        {"descriptionParameters": {}}
+        {"descriptionParameters": {}},
+        {"iconParameters": {}}
       ]
     }
   ]
@@ -224,7 +229,7 @@ constexpr char kBatchResponse[] = R"(
   ]
 })";
 
-constexpr base::TimeDelta kThrottle = base::TimeDelta::FromSeconds(1);
+constexpr base::TimeDelta kThrottle = base::Seconds(1);
 
 // The minimum dimension required for description annotation.
 constexpr int32_t kDescDim = Annotator::kDescMinDimension;
@@ -237,6 +242,9 @@ constexpr char kDescLang[] = "";
 class TestImageProcessor : public mojom::ImageProcessor {
  public:
   TestImageProcessor() = default;
+
+  TestImageProcessor(const TestImageProcessor&) = delete;
+  TestImageProcessor& operator=(const TestImageProcessor&) = delete;
 
   mojo::PendingRemote<mojom::ImageProcessor> GetPendingRemote() {
     mojo::PendingRemote<mojom::ImageProcessor> remote;
@@ -259,8 +267,6 @@ class TestImageProcessor : public mojom::ImageProcessor {
   std::vector<GetJpgImageDataCallback> callbacks_;
 
   mojo::ReceiverSet<mojom::ImageProcessor> receivers_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestImageProcessor);
 };
 
 // A class that supports test URL loading for the "server" use case: where
@@ -273,6 +279,10 @@ class TestServerURLLoaderFactory {
         shared_loader_factory_(
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
                 &loader_factory_)) {}
+
+  TestServerURLLoaderFactory(const TestServerURLLoaderFactory&) = delete;
+  TestServerURLLoaderFactory& operator=(const TestServerURLLoaderFactory&) =
+      delete;
 
   const std::vector<network::TestURLLoaderFactory::PendingRequest>& requests() {
     return *loader_factory_.pending_requests();
@@ -290,7 +300,7 @@ class TestServerURLLoaderFactory {
   // to the second-earliest received request and so on).
   void ExpectRequestAndSimulateResponse(
       const std::string& expected_url_suffix,
-      const std::map<std::string, base::Optional<std::string>>&
+      const std::map<std::string, absl::optional<std::string>>&
           expected_headers,
       const std::string& expected_body,
       const std::string& response,
@@ -326,9 +336,10 @@ class TestServerURLLoaderFactory {
 
       // We only support the simplest body structure.
       if (elements && elements->size() == 1 &&
-          (*elements)[0].type() == network::mojom::DataElementType::kBytes) {
-        actual_body =
-            std::string((*elements)[0].bytes(), (*elements)[0].length());
+          (*elements)[0].type() ==
+              network::mojom::DataElementDataView::Tag::kBytes) {
+        actual_body = std::string(
+            (*elements)[0].As<network::DataElementBytes>().AsStringPiece());
       }
     }
 
@@ -347,8 +358,6 @@ class TestServerURLLoaderFactory {
   const std::string server_url_prefix_;
   network::TestURLLoaderFactory loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> shared_loader_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestServerURLLoaderFactory);
 };
 
 // Returns a "canonically" formatted version of a JSON string by parsing and
@@ -366,7 +375,7 @@ std::string ReformatJson(const std::string& in) {
 
 // Receives the result of an annotation request and writes the result data into
 // the given variables.
-void ReportResult(base::Optional<mojom::AnnotateImageError>* const error,
+void ReportResult(absl::optional<mojom::AnnotateImageError>* const error,
                   std::vector<mojom::Annotation>* const annotations,
                   mojom::AnnotateImageResultPtr result) {
   if (result->which() == mojom::AnnotateImageResult::Tag::ERROR_CODE) {
@@ -431,7 +440,7 @@ TEST(AnnotatorTest, OcrSuccessAndCache) {
 
   // First call performs original image annotation.
   {
-    base::Optional<mojom::AnnotateImageError> error;
+    absl::optional<mojom::AnnotateImageError> error;
     std::vector<mojom::Annotation> annotations;
 
     annotator.AnnotateImage(
@@ -450,7 +459,7 @@ TEST(AnnotatorTest, OcrSuccessAndCache) {
     // No request should be sent yet (because service is waiting to batch up
     // multiple requests).
     EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-    test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+    test_task_env.FastForwardBy(base::Seconds(1));
     test_task_env.RunUntilIdle();
 
     // HTTP request should have been made.
@@ -462,7 +471,7 @@ TEST(AnnotatorTest, OcrSuccessAndCache) {
     test_task_env.RunUntilIdle();
 
     // HTTP response should have completed and callback should have been called.
-    ASSERT_THAT(error, Eq(base::nullopt));
+    ASSERT_THAT(error, Eq(absl::nullopt));
     EXPECT_THAT(annotations,
                 UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr,
                                                  1.0, "Region 1\nRegion 2")));
@@ -497,7 +506,7 @@ TEST(AnnotatorTest, OcrSuccessAndCache) {
 
   // Second call uses cached results.
   {
-    base::Optional<mojom::AnnotateImageError> error;
+    absl::optional<mojom::AnnotateImageError> error;
     std::vector<mojom::Annotation> annotations;
 
     annotator.AnnotateImage(
@@ -509,7 +518,7 @@ TEST(AnnotatorTest, OcrSuccessAndCache) {
     ASSERT_THAT(processor.callbacks(), IsEmpty());
 
     // Results should have been directly returned without any server call.
-    ASSERT_THAT(error, Eq(base::nullopt));
+    ASSERT_THAT(error, Eq(absl::nullopt));
     EXPECT_THAT(annotations,
                 UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr,
                                                  1.0, "Region 1\nRegion 2")));
@@ -536,7 +545,7 @@ TEST(AnnotatorTest, DescriptionSuccess) {
                       std::make_unique<TestAnnotatorClient>());
   TestImageProcessor processor;
 
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   annotator.AnnotateImage(kImage1Url, kDescLang, processor.GetPendingRemote(),
@@ -554,7 +563,7 @@ TEST(AnnotatorTest, DescriptionSuccess) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
   test_task_env.RunUntilIdle();
 
   // HTTP request should have been made.
@@ -595,7 +604,7 @@ TEST(AnnotatorTest, DescriptionSuccess) {
   test_task_env.RunUntilIdle();
 
   // HTTP response should have completed and callback should have been called.
-  ASSERT_THAT(error, Eq(base::nullopt));
+  ASSERT_THAT(error, Eq(absl::nullopt));
   EXPECT_THAT(
       annotations,
       UnorderedElementsAre(
@@ -644,7 +653,7 @@ TEST(AnnotatorTest, DoubleOcrResult) {
                       std::make_unique<TestAnnotatorClient>());
   TestImageProcessor processor;
 
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   annotator.AnnotateImage(kImage1Url, kDescLang, processor.GetPendingRemote(),
@@ -662,7 +671,7 @@ TEST(AnnotatorTest, DoubleOcrResult) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
   test_task_env.RunUntilIdle();
 
   // HTTP request should have been made.
@@ -710,7 +719,7 @@ TEST(AnnotatorTest, DoubleOcrResult) {
   test_task_env.RunUntilIdle();
 
   // HTTP response should have completed and callback should have been called.
-  ASSERT_THAT(error, Eq(base::nullopt));
+  ASSERT_THAT(error, Eq(absl::nullopt));
   EXPECT_THAT(annotations,
               UnorderedElementsAre(
                   AnnotatorEq(mojom::AnnotationType::kOcr, 1.0, "Region 1"),
@@ -760,7 +769,7 @@ TEST(AnnotatorTest, HttpError) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor;
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   annotator.AnnotateImage(kImage1Url, kDescLang, processor.GetPendingRemote(),
@@ -778,7 +787,7 @@ TEST(AnnotatorTest, HttpError) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -817,7 +826,7 @@ TEST(AnnotatorTest, BackendError) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor;
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   annotator.AnnotateImage(kImage1Url, kDescLang, processor.GetPendingRemote(),
@@ -835,7 +844,7 @@ TEST(AnnotatorTest, BackendError) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -901,7 +910,7 @@ TEST(AnnotatorTest, OcrBackendError) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor;
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   annotator.AnnotateImage(kImage1Url, kDescLang, processor.GetPendingRemote(),
@@ -919,7 +928,7 @@ TEST(AnnotatorTest, OcrBackendError) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -955,7 +964,7 @@ TEST(AnnotatorTest, OcrBackendError) {
   test_task_env.RunUntilIdle();
 
   // HTTP response should have completed and callback should have been called.
-  EXPECT_THAT(error, Eq(base::nullopt));
+  EXPECT_THAT(error, Eq(absl::nullopt));
   EXPECT_THAT(annotations, UnorderedElementsAre(
                                AnnotatorEq(mojom::AnnotationType::kCaption, 0.9,
                                            "This is an example image.")));
@@ -996,7 +1005,7 @@ TEST(AnnotatorTest, DescriptionBackendError) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor;
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   annotator.AnnotateImage(kImage1Url, kDescLang, processor.GetPendingRemote(),
@@ -1014,7 +1023,7 @@ TEST(AnnotatorTest, DescriptionBackendError) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1049,7 +1058,7 @@ TEST(AnnotatorTest, DescriptionBackendError) {
   test_task_env.RunUntilIdle();
 
   // HTTP response should have completed and callback should have been called.
-  EXPECT_THAT(error, Eq(base::nullopt));
+  EXPECT_THAT(error, Eq(absl::nullopt));
   EXPECT_THAT(annotations, UnorderedElementsAre(AnnotatorEq(
                                mojom::AnnotationType::kOcr, 1.0, "1")));
 
@@ -1087,7 +1096,7 @@ TEST(AnnotatorTest, ServerError) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor;
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   annotator.AnnotateImage(kImage1Url, kDescLang, processor.GetPendingRemote(),
@@ -1105,7 +1114,7 @@ TEST(AnnotatorTest, ServerError) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request should have been made; respond with nonsense string.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1146,7 +1155,7 @@ TEST(AnnotatorTest, AdultError) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor;
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   annotator.AnnotateImage(kImage1Url, kDescLang, processor.GetPendingRemote(),
@@ -1164,7 +1173,7 @@ TEST(AnnotatorTest, AdultError) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1222,7 +1231,7 @@ TEST(AnnotatorTest, ProcessorFails) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor[3];
-  base::Optional<mojom::AnnotateImageError> error[3];
+  absl::optional<mojom::AnnotateImageError> error[3];
   std::vector<mojom::Annotation> annotations[3];
 
   for (int i = 0; i < 3; ++i) {
@@ -1255,7 +1264,7 @@ TEST(AnnotatorTest, ProcessorFails) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request for image 1 should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1267,7 +1276,7 @@ TEST(AnnotatorTest, ProcessorFails) {
   // Annotator should have called all callbacks, but request 1 received an error
   // when we returned empty bytes.
   ASSERT_THAT(error, ElementsAre(mojom::AnnotateImageError::kFailure,
-                                 base::nullopt, base::nullopt));
+                                 absl::nullopt, absl::nullopt));
   EXPECT_THAT(annotations[0], IsEmpty());
   EXPECT_THAT(annotations[1],
               UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr, 1.0,
@@ -1303,7 +1312,7 @@ TEST(AnnotatorTest, ProcessorFailedPreviously) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor[2];
-  base::Optional<mojom::AnnotateImageError> error[2];
+  absl::optional<mojom::AnnotateImageError> error[2];
   std::vector<mojom::Annotation> annotations[2];
 
   // Processor 1 makes a request for annotation of a given image.
@@ -1338,7 +1347,7 @@ TEST(AnnotatorTest, ProcessorFailedPreviously) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request for image 1 should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1350,7 +1359,7 @@ TEST(AnnotatorTest, ProcessorFailedPreviously) {
   // Annotator should have called all callbacks, but request 1 received an error
   // when we returned empty bytes.
   ASSERT_THAT(error,
-              ElementsAre(mojom::AnnotateImageError::kFailure, base::nullopt));
+              ElementsAre(mojom::AnnotateImageError::kFailure, absl::nullopt));
   EXPECT_THAT(annotations[0], IsEmpty());
   EXPECT_THAT(annotations[1],
               UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr, 1.0,
@@ -1373,7 +1382,7 @@ TEST(AnnotatorTest, ProcessorDies) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor[3];
-  base::Optional<mojom::AnnotateImageError> error[3];
+  absl::optional<mojom::AnnotateImageError> error[3];
   std::vector<mojom::Annotation> annotations[3];
 
   for (int i = 0; i < 3; ++i) {
@@ -1405,7 +1414,7 @@ TEST(AnnotatorTest, ProcessorDies) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // HTTP request for image 1 should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1417,7 +1426,7 @@ TEST(AnnotatorTest, ProcessorDies) {
   // Annotator should have called all callbacks, but request 1 was canceled when
   // we reset processor 1.
   ASSERT_THAT(error, ElementsAre(mojom::AnnotateImageError::kCanceled,
-                                 base::nullopt, base::nullopt));
+                                 absl::nullopt, absl::nullopt));
   EXPECT_THAT(annotations[0], IsEmpty());
   EXPECT_THAT(annotations[1],
               UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr, 1.0,
@@ -1449,7 +1458,7 @@ TEST(AnnotatorTest, ConcurrentSameBatch) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor[3];
-  base::Optional<mojom::AnnotateImageError> error[3];
+  absl::optional<mojom::AnnotateImageError> error[3];
   std::vector<mojom::Annotation> annotations[3];
 
   // Request OCR for images 1, 2 and 3.
@@ -1482,7 +1491,7 @@ TEST(AnnotatorTest, ConcurrentSameBatch) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // A single HTTP request for all images should have been sent.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1492,7 +1501,7 @@ TEST(AnnotatorTest, ConcurrentSameBatch) {
 
   // Annotator should have called each callback with its corresponding text or
   // failure.
-  ASSERT_THAT(error, ElementsAre(base::nullopt, base::nullopt,
+  ASSERT_THAT(error, ElementsAre(absl::nullopt, absl::nullopt,
                                  mojom::AnnotateImageError::kFailure));
   EXPECT_THAT(annotations[0], UnorderedElementsAre(AnnotatorEq(
                                   mojom::AnnotationType::kOcr, 1.0, "1")));
@@ -1537,7 +1546,7 @@ TEST(AnnotatorTest, ConcurrentSeparateBatches) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor[2];
-  base::Optional<mojom::AnnotateImageError> error[2];
+  absl::optional<mojom::AnnotateImageError> error[2];
   std::vector<mojom::Annotation> annotations[2];
 
   // Request OCR for image 1.
@@ -1558,7 +1567,7 @@ TEST(AnnotatorTest, ConcurrentSeparateBatches) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // Request OCR for image 2.
   annotator.AnnotateImage(
@@ -1608,7 +1617,7 @@ TEST(AnnotatorTest, ConcurrentSeparateBatches) {
       net::HTTP_OK);
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
 
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // Now the HTTP request for image 2 should have been made.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1643,7 +1652,7 @@ TEST(AnnotatorTest, ConcurrentSeparateBatches) {
   test_task_env.RunUntilIdle();
 
   // Annotator should have called each callback with its corresponding text.
-  ASSERT_THAT(error, ElementsAre(base::nullopt, base::nullopt));
+  ASSERT_THAT(error, ElementsAre(absl::nullopt, absl::nullopt));
   EXPECT_THAT(annotations[0], UnorderedElementsAre(AnnotatorEq(
                                   mojom::AnnotationType::kOcr, 1.0, "1")));
   EXPECT_THAT(annotations[1], UnorderedElementsAre(AnnotatorEq(
@@ -1682,7 +1691,7 @@ TEST(AnnotatorTest, DuplicateWork) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor[4];
-  base::Optional<mojom::AnnotateImageError> error[4];
+  absl::optional<mojom::AnnotateImageError> error[4];
   std::vector<mojom::Annotation> annotations[4];
 
   // First request annotation of the image with processor 1.
@@ -1731,7 +1740,7 @@ TEST(AnnotatorTest, DuplicateWork) {
 
   // Allow batch HTTP request to be sent off and then request annotation of the
   // image with processor 4.
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
   EXPECT_THAT(test_url_factory.requests(), SizeIs(1));
   annotator.AnnotateImage(
       kImage1Url, kDescLang, processor[3].GetPendingRemote(),
@@ -1754,8 +1763,8 @@ TEST(AnnotatorTest, DuplicateWork) {
   test_task_env.RunUntilIdle();
 
   // Annotator should have called all callbacks with annotation results.
-  ASSERT_THAT(error, ElementsAre(base::nullopt, base::nullopt, base::nullopt,
-                                 base::nullopt));
+  ASSERT_THAT(error, ElementsAre(absl::nullopt, absl::nullopt, absl::nullopt,
+                                 absl::nullopt));
   EXPECT_THAT(annotations[0],
               UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr, 1.0,
                                                "Region 1\nRegion 2")));
@@ -1791,7 +1800,7 @@ TEST(AnnotatorTest, DescPolicy) {
                       std::make_unique<TestAnnotatorClient>());
 
   TestImageProcessor processor[3];
-  base::Optional<mojom::AnnotateImageError> error[3];
+  absl::optional<mojom::AnnotateImageError> error[3];
   std::vector<mojom::Annotation> annotations[3];
 
   // Request annotation for images 1, 2 and 3.
@@ -1837,7 +1846,7 @@ TEST(AnnotatorTest, DescPolicy) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // A single HTTP request for all images should have been sent.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -1858,7 +1867,8 @@ TEST(AnnotatorTest, DescPolicy) {
               "imageId": "https://www.example.com/image2.jpg",
               "imageBytes": "BAUG",
               "engineParameters": [
-                {"ocrParameters": {}}
+                {"ocrParameters": {}},
+                {"iconParameters": {}}
               ]
             },
             {
@@ -1866,7 +1876,8 @@ TEST(AnnotatorTest, DescPolicy) {
               "imageBytes": "AQID",
               "engineParameters": [
                 {"ocrParameters": {}},
-                {"descriptionParameters": {}}
+                {"descriptionParameters": {}},
+                {"iconParameters": {}}
               ]
             }
           ]
@@ -1942,7 +1953,7 @@ TEST(AnnotatorTest, DescPolicy) {
   test_task_env.RunUntilIdle();
 
   // Annotator should have called each callback with its corresponding results.
-  ASSERT_THAT(error, ElementsAre(base::nullopt, base::nullopt, base::nullopt));
+  ASSERT_THAT(error, ElementsAre(absl::nullopt, absl::nullopt, absl::nullopt));
   EXPECT_THAT(
       annotations[0],
       UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr, 1.0, "1"),
@@ -1995,7 +2006,7 @@ TEST(AnnotatorTest, DescLanguage) {
   annotator.server_languages_ = {"en", "it", "fr"};
 
   TestImageProcessor processor[3];
-  base::Optional<mojom::AnnotateImageError> error[3];
+  absl::optional<mojom::AnnotateImageError> error[3];
   std::vector<mojom::Annotation> annotations[3];
 
   // Request annotation for one image in two languages, and one other image in
@@ -2031,7 +2042,7 @@ TEST(AnnotatorTest, DescLanguage) {
   // No request should be sent yet (because service is waiting to batch up
   // multiple requests).
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // A single HTTP request for all images should have been sent.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -2046,7 +2057,8 @@ TEST(AnnotatorTest, DescLanguage) {
               "imageId": "https://www.example.com/image2.jpg en",
               "imageBytes": "BAUG",
               "engineParameters": [
-                {"ocrParameters": {}}
+                {"ocrParameters": {}},
+                {"iconParameters": {}}
               ]
             },
             {
@@ -2058,7 +2070,8 @@ TEST(AnnotatorTest, DescLanguage) {
                   "descriptionParameters": {
                     "preferredLanguages": ["it"]
                   }
-                }
+                },
+                {"iconParameters": {}}
               ]
             },
             {
@@ -2070,7 +2083,8 @@ TEST(AnnotatorTest, DescLanguage) {
                   "descriptionParameters": {
                     "preferredLanguages": ["fr"]
                   }
-                }
+                },
+                {"iconParameters": {}}
               ]
             }
           ]
@@ -2158,7 +2172,7 @@ TEST(AnnotatorTest, DescLanguage) {
   test_task_env.RunUntilIdle();
 
   // Annotator should have called each callback with its corresponding results.
-  ASSERT_THAT(error, ElementsAre(base::nullopt, base::nullopt, base::nullopt));
+  ASSERT_THAT(error, ElementsAre(absl::nullopt, absl::nullopt, absl::nullopt));
   EXPECT_THAT(
       annotations[0],
       UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr, 1.0, "1"),
@@ -2191,7 +2205,7 @@ TEST(AnnotatorTest, LanguageFallback) {
   annotator.server_languages_ = {"en", "it", "fr"};
 
   TestImageProcessor processor;
-  base::Optional<mojom::AnnotateImageError> error;
+  absl::optional<mojom::AnnotateImageError> error;
   std::vector<mojom::Annotation> annotations;
 
   // Send a request in an unsupported language.
@@ -2206,7 +2220,7 @@ TEST(AnnotatorTest, LanguageFallback) {
 
   // Fast-forward time so that server sends batch.
   EXPECT_THAT(test_url_factory.requests(), IsEmpty());
-  test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  test_task_env.FastForwardBy(base::Seconds(1));
 
   // A single HTTP request for all images should have been sent.
   test_url_factory.ExpectRequestAndSimulateResponse(
@@ -2222,7 +2236,8 @@ TEST(AnnotatorTest, LanguageFallback) {
                   "descriptionParameters": {
                     "preferredLanguages": ["en"]
                   }
-                }
+                },
+                {"iconParameters": {}}
               ]
             }
           ]
@@ -2266,7 +2281,7 @@ TEST(AnnotatorTest, LanguageFallback) {
   test_task_env.RunUntilIdle();
 
   // Annotator should have called each callback with its corresponding results.
-  ASSERT_EQ(error, base::nullopt);
+  ASSERT_EQ(error, absl::nullopt);
   EXPECT_THAT(
       annotations,
       UnorderedElementsAre(AnnotatorEq(mojom::AnnotationType::kOcr, 1.0, "1"),
@@ -2303,7 +2318,7 @@ TEST(AnnotatorTest, ApiKey) {
     // Send back image data.
     std::move(processor.callbacks()[0]).Run({1, 2, 3}, kDescDim, kDescDim);
     processor.callbacks().pop_back();
-    test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+    test_task_env.FastForwardBy(base::Seconds(1));
     test_task_env.RunUntilIdle();
 
     // HTTP request should have been made with the API key included.
@@ -2337,12 +2352,12 @@ TEST(AnnotatorTest, ApiKey) {
     // Send back image data.
     std::move(processor.callbacks()[0]).Run({1, 2, 3}, kDescDim, kDescDim);
     processor.callbacks().pop_back();
-    test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+    test_task_env.FastForwardBy(base::Seconds(1));
     test_task_env.RunUntilIdle();
 
     // HTTP request should have been made without the API key included.
     test_url_factory.ExpectRequestAndSimulateResponse(
-        "annotation", {{Annotator::kGoogApiKeyHeader, base::nullopt}},
+        "annotation", {{Annotator::kGoogApiKeyHeader, absl::nullopt}},
         ReformatJson(base::StringPrintf(kTemplateRequest, kImage1Url, "AQID")),
         kOcrSuccessResponse, net::HTTP_OK);
   }
@@ -2368,12 +2383,12 @@ TEST(AnnotatorTest, ApiKey) {
     // Send back image data.
     std::move(processor.callbacks()[0]).Run({1, 2, 3}, kDescDim, kDescDim);
     processor.callbacks().pop_back();
-    test_task_env.FastForwardBy(base::TimeDelta::FromSeconds(1));
+    test_task_env.FastForwardBy(base::Seconds(1));
     test_task_env.RunUntilIdle();
 
     // HTTP request should have been made without the API key included.
     test_url_factory.ExpectRequestAndSimulateResponse(
-        "annotation", {{Annotator::kGoogApiKeyHeader, base::nullopt}},
+        "annotation", {{Annotator::kGoogApiKeyHeader, absl::nullopt}},
         ReformatJson(base::StringPrintf(kTemplateRequest, kImage1Url, "AQID")),
         kOcrSuccessResponse, net::HTTP_OK);
   }

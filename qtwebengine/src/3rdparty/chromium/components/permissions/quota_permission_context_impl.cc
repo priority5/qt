@@ -10,10 +10,10 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "components/permissions/permission_request.h"
 #include "components/permissions/permission_request_manager.h"
+#include "components/permissions/request_type.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -25,7 +25,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "components/resources/android/theme_resources.h"
 #else
 #include "components/vector_icons/vector_icons.h"
@@ -44,91 +44,85 @@ class QuotaPermissionRequest : public PermissionRequest {
  public:
   QuotaPermissionRequest(
       QuotaPermissionContextImpl* context,
-      const GURL& origin_url,
+      const GURL& requesting_origin,
       bool is_large_quota_request,
       content::QuotaPermissionContext::PermissionCallback callback);
 
+  QuotaPermissionRequest(const QuotaPermissionRequest&) = delete;
+  QuotaPermissionRequest& operator=(const QuotaPermissionRequest&) = delete;
+
   ~QuotaPermissionRequest() override;
 
- private:
   // PermissionRequest:
-  IconId GetIconId() const override;
-#if defined(OS_ANDROID)
-  base::string16 GetMessageText() const override;
+  bool IsDuplicateOf(PermissionRequest* other_request) const override;
+#if BUILDFLAG(IS_ANDROID)
+  std::u16string GetDialogMessageText() const override;
 #endif
-  base::string16 GetMessageTextFragment() const override;
-  GURL GetOrigin() const override;
-  void PermissionGranted() override;
-  void PermissionDenied() override;
-  void Cancelled() override;
-  void RequestFinished() override;
-  PermissionRequestType GetPermissionRequestType() const override;
+
+ private:
+  void PermissionDecided(ContentSetting result, bool is_one_time);
+  void DeleteRequest();
 
   const scoped_refptr<QuotaPermissionContextImpl> context_;
-  const GURL origin_url_;
   const bool is_large_quota_request_;
   content::QuotaPermissionContext::PermissionCallback callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(QuotaPermissionRequest);
 };
 
 QuotaPermissionRequest::QuotaPermissionRequest(
     QuotaPermissionContextImpl* context,
-    const GURL& origin_url,
+    const GURL& requesting_origin,
     bool is_large_quota_request,
     content::QuotaPermissionContext::PermissionCallback callback)
-    : context_(context),
-      origin_url_(origin_url),
+    : PermissionRequest(
+          requesting_origin,
+          permissions::RequestType::kDiskQuota,
+          /*has_gesture=*/false,
+          base::BindOnce(&QuotaPermissionRequest::PermissionDecided,
+                         base::Unretained(this)),
+          base::BindOnce(&QuotaPermissionRequest::DeleteRequest,
+                         base::Unretained(this))),
+      context_(context),
       is_large_quota_request_(is_large_quota_request),
-      callback_(std::move(callback)) {
-  // Suppress unused private field warning on desktop.
-  ALLOW_UNUSED_LOCAL(is_large_quota_request_);
-}
+      callback_(std::move(callback)) {}
 
 QuotaPermissionRequest::~QuotaPermissionRequest() {}
 
-PermissionRequest::IconId QuotaPermissionRequest::GetIconId() const {
-#if defined(OS_ANDROID)
-  return IDR_ANDROID_INFOBAR_FOLDER;
-#else
-  return vector_icons::kFolderIcon;
-#endif
+bool QuotaPermissionRequest::IsDuplicateOf(
+    PermissionRequest* other_request) const {
+  // The downcast here is safe because PermissionRequest::IsDuplicateOf ensures
+  // that both requests are of type kDiskQuota.
+  return permissions::PermissionRequest::IsDuplicateOf(other_request) &&
+         is_large_quota_request_ ==
+             static_cast<QuotaPermissionRequest*>(other_request)
+                 ->is_large_quota_request_;
 }
 
-#if defined(OS_ANDROID)
-base::string16 QuotaPermissionRequest::GetMessageText() const {
+#if BUILDFLAG(IS_ANDROID)
+std::u16string QuotaPermissionRequest::GetDialogMessageText() const {
   // If the site requested larger quota than this threshold, show a different
   // message to the user.
   return l10n_util::GetStringFUTF16(
       (is_large_quota_request_ ? IDS_REQUEST_LARGE_QUOTA_INFOBAR_TEXT
                                : IDS_REQUEST_QUOTA_INFOBAR_TEXT),
-      url_formatter::FormatUrlForSecurityDisplay(origin_url_));
+      url_formatter::FormatUrlForSecurityDisplay(requesting_origin()));
 }
-#endif
+#endif  // BUILDFLAG(IS_ANDROID)
 
-base::string16 QuotaPermissionRequest::GetMessageTextFragment() const {
-  return l10n_util::GetStringUTF16(IDS_REQUEST_QUOTA_PERMISSION_FRAGMENT);
-}
-
-GURL QuotaPermissionRequest::GetOrigin() const {
-  return origin_url_;
-}
-
-void QuotaPermissionRequest::PermissionGranted() {
-  context_->DispatchCallbackOnIOThread(
-      std::move(callback_),
-      content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_ALLOW);
-}
-
-void QuotaPermissionRequest::PermissionDenied() {
-  context_->DispatchCallbackOnIOThread(
-      std::move(callback_),
-      content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_DISALLOW);
+void QuotaPermissionRequest::PermissionDecided(ContentSetting result,
+                                               bool is_one_time) {
+  DCHECK(!is_one_time);
+  if (result == CONTENT_SETTING_DEFAULT) {
+    // Handled by `DeleteRequest`.
+    return;
+  }
+  auto response =
+      result == ContentSetting::CONTENT_SETTING_ALLOW
+          ? content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_ALLOW
+          : content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_DISALLOW;
+  context_->DispatchCallbackOnIOThread(std::move(callback_), response);
 }
 
-void QuotaPermissionRequest::Cancelled() {}
-
-void QuotaPermissionRequest::RequestFinished() {
+void QuotaPermissionRequest::DeleteRequest() {
   if (callback_) {
     context_->DispatchCallbackOnIOThread(
         std::move(callback_),
@@ -136,10 +130,6 @@ void QuotaPermissionRequest::RequestFinished() {
   }
 
   delete this;
-}
-
-PermissionRequestType QuotaPermissionRequest::GetPermissionRequestType() const {
-  return PermissionRequestType::QUOTA;
 }
 
 }  // namespace

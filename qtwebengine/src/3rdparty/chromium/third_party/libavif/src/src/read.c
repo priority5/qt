@@ -3,6 +3,9 @@
 
 #include "avif/internal.h"
 
+#include <assert.h>
+#include <inttypes.h>
+#include <limits.h>
 #include <string.h>
 
 #define AUXTYPE_SIZE 64
@@ -29,6 +32,12 @@ static const size_t VISUALSAMPLEENTRY_SIZE = 78;
 
 static const char xmpContentType[] = CONTENT_TYPE_XMP;
 static const size_t xmpContentTypeSize = sizeof(xmpContentType);
+
+// The only supported ipma box values for both version and flags are [0,1], so there technically
+// can't be more than 4 unique tuples right now.
+#define MAX_IPMA_VERSION_AND_FLAGS_SEEN 4
+
+#define MAX_AV1_LAYER_COUNT 4
 
 // ---------------------------------------------------------------------------
 // Box data structures
@@ -83,6 +92,21 @@ typedef struct avifPixelInformationProperty
     uint8_t planeCount;
 } avifPixelInformationProperty;
 
+typedef struct avifOperatingPointSelectorProperty
+{
+    uint8_t opIndex;
+} avifOperatingPointSelectorProperty;
+
+typedef struct avifLayerSelectorProperty
+{
+    uint16_t layerID;
+} avifLayerSelectorProperty;
+
+typedef struct avifAV1LayeredImageIndexingProperty
+{
+    uint32_t layerSize[3];
+} avifAV1LayeredImageIndexingProperty;
+
 // ---------------------------------------------------------------------------
 // Top-level structures
 
@@ -103,6 +127,9 @@ typedef struct avifProperty
         avifImageRotation irot;
         avifImageMirror imir;
         avifPixelInformationProperty pixi;
+        avifOperatingPointSelectorProperty a1op;
+        avifLayerSelectorProperty lsel;
+        avifAV1LayeredImageIndexingProperty a1lx;
     } u;
 } avifProperty;
 AVIF_ARRAY_DECLARE(avifPropertyArray, avifProperty, prop);
@@ -118,12 +145,7 @@ static const avifProperty * avifPropertyArrayFind(const avifPropertyArray * prop
     return NULL;
 }
 
-typedef struct avifDecoderItemExtent
-{
-    uint32_t offset;
-    uint32_t size;
-} avifDecoderItemExtent;
-AVIF_ARRAY_DECLARE(avifDecoderItemExtentArray, avifDecoderItemExtent, extent);
+AVIF_ARRAY_DECLARE(avifExtentArray, avifExtent, extent);
 
 // one "item" worth for decoding (all iref, iloc, iprp, etc refer to one of these)
 typedef struct avifDecoderItem
@@ -131,33 +153,32 @@ typedef struct avifDecoderItem
     uint32_t id;
     struct avifMeta * meta; // Unowned; A back-pointer for convenience
     uint8_t type[4];
-    uint32_t size;
-    uint32_t idatID; // If non-zero, offset is relative to this idat box (iloc construction_method==1)
+    size_t size;
+    avifBool idatStored; // If true, offset is relative to the associated meta box's idat box (iloc construction_method==1)
+    uint32_t width;      // Set from this item's ispe property, if present
+    uint32_t height;     // Set from this item's ispe property, if present
     avifContentType contentType;
     avifPropertyArray properties;
-    avifDecoderItemExtentArray extents; // All extent offsets/sizes
-    avifRWData mergedExtents; // if populated, is a single contiguous block of this item's extents (unused when extents.count == 1)
-    uint32_t thumbnailForID;  // if non-zero, this item is a thumbnail for Item #{thumbnailForID}
-    uint32_t auxForID;        // if non-zero, this item is an auxC plane for Item #{auxForID}
-    uint32_t descForID;       // if non-zero, this item is a content description for Item #{descForID}
-    uint32_t dimgForID;       // if non-zero, this item is a derived image for Item #{dimgForID}
+    avifExtentArray extents;       // All extent offsets/sizes
+    avifRWData mergedExtents;      // if set, is a single contiguous block of this item's extents (unused when extents.count == 1)
+    avifBool ownsMergedExtents;    // if true, mergedExtents must be freed when this item is destroyed
+    avifBool partialMergedExtents; // If true, mergedExtents doesn't have all of the item data yet
+    uint32_t thumbnailForID;       // if non-zero, this item is a thumbnail for Item #{thumbnailForID}
+    uint32_t auxForID;             // if non-zero, this item is an auxC plane for Item #{auxForID}
+    uint32_t descForID;            // if non-zero, this item is a content description for Item #{descForID}
+    uint32_t dimgForID;            // if non-zero, this item is a derived image for Item #{dimgForID}
+    uint32_t premByID;             // if non-zero, this item is premultiplied by Item #{premByID}
     avifBool hasUnsupportedEssentialProperty; // If true, this item cites a property flagged as 'essential' that libavif doesn't support (yet). Ignore the item, if so.
+    avifBool ipmaSeen;    // if true, this item already received a property association
+    avifBool progressive; // if true, this item has progressive layers (a1lx), but does not select a specific layer (lsel)
 } avifDecoderItem;
 AVIF_ARRAY_DECLARE(avifDecoderItemArray, avifDecoderItem, item);
-
-// idat storage
-typedef struct avifDecoderItemData
-{
-    uint32_t id;
-    avifROData data;
-} avifDecoderItemData;
-AVIF_ARRAY_DECLARE(avifDecoderItemDataArray, avifDecoderItemData, idat);
 
 // grid storage
 typedef struct avifImageGrid
 {
-    uint8_t rows;
-    uint8_t columns;
+    uint32_t rows;    // Legal range: [1-256]
+    uint32_t columns; // Legal range: [1-256]
     uint32_t outputWidth;
     uint32_t outputHeight;
 } avifImageGrid;
@@ -216,17 +237,35 @@ typedef struct avifSampleTable
     uint32_t allSamplesSize; // If this is non-zero, sampleSizes will be empty and all samples will be this size
 } avifSampleTable;
 
+static void avifSampleTableDestroy(avifSampleTable * sampleTable);
+
 static avifSampleTable * avifSampleTableCreate()
 {
     avifSampleTable * sampleTable = (avifSampleTable *)avifAlloc(sizeof(avifSampleTable));
     memset(sampleTable, 0, sizeof(avifSampleTable));
-    avifArrayCreate(&sampleTable->chunks, sizeof(avifSampleTableChunk), 16);
-    avifArrayCreate(&sampleTable->sampleDescriptions, sizeof(avifSampleDescription), 2);
-    avifArrayCreate(&sampleTable->sampleToChunks, sizeof(avifSampleTableSampleToChunk), 16);
-    avifArrayCreate(&sampleTable->sampleSizes, sizeof(avifSampleTableSampleSize), 16);
-    avifArrayCreate(&sampleTable->timeToSamples, sizeof(avifSampleTableTimeToSample), 16);
-    avifArrayCreate(&sampleTable->syncSamples, sizeof(avifSyncSample), 16);
+    if (!avifArrayCreate(&sampleTable->chunks, sizeof(avifSampleTableChunk), 16)) {
+        goto error;
+    }
+    if (!avifArrayCreate(&sampleTable->sampleDescriptions, sizeof(avifSampleDescription), 2)) {
+        goto error;
+    }
+    if (!avifArrayCreate(&sampleTable->sampleToChunks, sizeof(avifSampleTableSampleToChunk), 16)) {
+        goto error;
+    }
+    if (!avifArrayCreate(&sampleTable->sampleSizes, sizeof(avifSampleTableSampleSize), 16)) {
+        goto error;
+    }
+    if (!avifArrayCreate(&sampleTable->timeToSamples, sizeof(avifSampleTableTimeToSample), 16)) {
+        goto error;
+    }
+    if (!avifArrayCreate(&sampleTable->syncSamples, sizeof(avifSyncSample), 16)) {
+        goto error;
+    }
     return sampleTable;
+
+error:
+    avifSampleTableDestroy(sampleTable);
+    return NULL;
 }
 
 static void avifSampleTableDestroy(avifSampleTable * sampleTable)
@@ -279,6 +318,19 @@ static uint32_t avifCodecConfigurationBoxGetDepth(const avifCodecConfigurationBo
     return 8;
 }
 
+// This is used as a hint to validating the clap box in avifDecoderItemValidateAV1.
+static avifPixelFormat avifCodecConfigurationBoxGetFormat(const avifCodecConfigurationBox * av1C)
+{
+    if (av1C->monochrome) {
+        return AVIF_PIXEL_FORMAT_YUV400;
+    } else if (av1C->chromaSubsamplingY == 1) {
+        return AVIF_PIXEL_FORMAT_YUV420;
+    } else if (av1C->chromaSubsamplingX == 1) {
+        return AVIF_PIXEL_FORMAT_YUV422;
+    }
+    return AVIF_PIXEL_FORMAT_YUV444;
+}
+
 static const avifPropertyArray * avifSampleTableGetProperties(const avifSampleTable * sampleTable)
 {
     for (uint32_t i = 0; i < sampleTable->sampleDescriptions.count; ++i) {
@@ -294,7 +346,8 @@ static const avifPropertyArray * avifSampleTableGetProperties(const avifSampleTa
 typedef struct avifTrack
 {
     uint32_t id;
-    uint32_t auxForID; // if non-zero, this item is an auxC plane for Track #{auxForID}
+    uint32_t auxForID; // if non-zero, this track is an auxC plane for Track #{auxForID}
+    uint32_t premByID; // if non-zero, this track is premultiplied by Track #{premByID}
     uint32_t mediaTimescale;
     uint64_t mediaDuration;
     uint32_t width;
@@ -311,33 +364,79 @@ avifCodecDecodeInput * avifCodecDecodeInputCreate(void)
 {
     avifCodecDecodeInput * decodeInput = (avifCodecDecodeInput *)avifAlloc(sizeof(avifCodecDecodeInput));
     memset(decodeInput, 0, sizeof(avifCodecDecodeInput));
-    avifArrayCreate(&decodeInput->samples, sizeof(avifDecodeSample), 1);
+    if (!avifArrayCreate(&decodeInput->samples, sizeof(avifDecodeSample), 1)) {
+        goto error;
+    }
     return decodeInput;
+
+error:
+    avifFree(decodeInput);
+    return NULL;
 }
 
 void avifCodecDecodeInputDestroy(avifCodecDecodeInput * decodeInput)
 {
+    for (uint32_t sampleIndex = 0; sampleIndex < decodeInput->samples.count; ++sampleIndex) {
+        avifDecodeSample * sample = &decodeInput->samples.sample[sampleIndex];
+        if (sample->ownsData) {
+            avifRWDataFree((avifRWData *)&sample->data);
+        }
+    }
     avifArrayDestroy(&decodeInput->samples);
     avifFree(decodeInput);
 }
 
-static avifBool avifCodecDecodeInputGetSamples(avifCodecDecodeInput * decodeInput, avifSampleTable * sampleTable, avifROData * rawInput)
+// Returns how many samples are in the chunk.
+static uint32_t avifGetSampleCountOfChunk(const avifSampleTableSampleToChunkArray * sampleToChunks, uint32_t chunkIndex)
 {
+    uint32_t sampleCount = 0;
+    for (int sampleToChunkIndex = sampleToChunks->count - 1; sampleToChunkIndex >= 0; --sampleToChunkIndex) {
+        const avifSampleTableSampleToChunk * sampleToChunk = &sampleToChunks->sampleToChunk[sampleToChunkIndex];
+        if (sampleToChunk->firstChunk <= (chunkIndex + 1)) {
+            sampleCount = sampleToChunk->samplesPerChunk;
+            break;
+        }
+    }
+    return sampleCount;
+}
+
+static avifBool avifCodecDecodeInputFillFromSampleTable(avifCodecDecodeInput * decodeInput,
+                                                        avifSampleTable * sampleTable,
+                                                        const uint32_t imageCountLimit,
+                                                        const uint64_t sizeHint,
+                                                        avifDiagnostics * diag)
+{
+    if (imageCountLimit) {
+        // Verify that the we're not about to exceed the frame count limit.
+
+        uint32_t imageCountLeft = imageCountLimit;
+        for (uint32_t chunkIndex = 0; chunkIndex < sampleTable->chunks.count; ++chunkIndex) {
+            // First, figure out how many samples are in this chunk
+            uint32_t sampleCount = avifGetSampleCountOfChunk(&sampleTable->sampleToChunks, chunkIndex);
+            if (sampleCount == 0) {
+                // chunks with 0 samples are invalid
+                avifDiagnosticsPrintf(diag, "Sample table contains a chunk with 0 samples");
+                return AVIF_FALSE;
+            }
+
+            if (sampleCount > imageCountLeft) {
+                // This file exceeds the imageCountLimit, bail out
+                avifDiagnosticsPrintf(diag, "Exceeded avifDecoder's imageCountLimit");
+                return AVIF_FALSE;
+            }
+            imageCountLeft -= sampleCount;
+        }
+    }
+
     uint32_t sampleSizeIndex = 0;
     for (uint32_t chunkIndex = 0; chunkIndex < sampleTable->chunks.count; ++chunkIndex) {
         avifSampleTableChunk * chunk = &sampleTable->chunks.chunk[chunkIndex];
 
         // First, figure out how many samples are in this chunk
-        uint32_t sampleCount = 0;
-        for (int sampleToChunkIndex = sampleTable->sampleToChunks.count - 1; sampleToChunkIndex >= 0; --sampleToChunkIndex) {
-            avifSampleTableSampleToChunk * sampleToChunk = &sampleTable->sampleToChunks.sampleToChunk[sampleToChunkIndex];
-            if (sampleToChunk->firstChunk <= (chunkIndex + 1)) {
-                sampleCount = sampleToChunk->samplesPerChunk;
-                break;
-            }
-        }
+        uint32_t sampleCount = avifGetSampleCountOfChunk(&sampleTable->sampleToChunks, chunkIndex);
         if (sampleCount == 0) {
             // chunks with 0 samples are invalid
+            avifDiagnosticsPrintf(diag, "Sample table contains a chunk with 0 samples");
             return AVIF_FALSE;
         }
 
@@ -347,6 +446,7 @@ static avifBool avifCodecDecodeInputGetSamples(avifCodecDecodeInput * decodeInpu
             if (sampleSize == 0) {
                 if (sampleSizeIndex >= sampleTable->sampleSizes.count) {
                     // We've run out of samples to sum
+                    avifDiagnosticsPrintf(diag, "Truncated sample table");
                     return AVIF_FALSE;
                 }
                 avifSampleTableSampleSize * sampleSizePtr = &sampleTable->sampleSizes.sampleSize[sampleSizeIndex];
@@ -354,11 +454,20 @@ static avifBool avifCodecDecodeInputGetSamples(avifCodecDecodeInput * decodeInpu
             }
 
             avifDecodeSample * sample = (avifDecodeSample *)avifArrayPushPtr(&decodeInput->samples);
-            sample->data.data = rawInput->data + sampleOffset;
-            sample->data.size = sampleSize;
-            sample->sync = AVIF_FALSE; // to potentially be set to true following the outer loop
+            sample->offset = sampleOffset;
+            sample->size = sampleSize;
+            sample->spatialID = AVIF_SPATIAL_ID_UNSET; // Not filtering by spatial_id
+            sample->sync = AVIF_FALSE;                 // to potentially be set to true following the outer loop
 
-            if ((sampleOffset + sampleSize) > (uint64_t)rawInput->size) {
+            if (sampleSize > UINT64_MAX - sampleOffset) {
+                avifDiagnosticsPrintf(diag,
+                                      "Sample table contains an offset/size pair which overflows: [%" PRIu64 " / %u]",
+                                      sampleOffset,
+                                      sampleSize);
+                return AVIF_FALSE;
+            }
+            if (sizeHint && ((sampleOffset + sampleSize) > sizeHint)) {
+                avifDiagnosticsPrintf(diag, "Exceeded avifIO's sizeHint, possibly truncated data");
                 return AVIF_FALSE;
             }
 
@@ -382,25 +491,139 @@ static avifBool avifCodecDecodeInputGetSamples(avifCodecDecodeInput * decodeInpu
     return AVIF_TRUE;
 }
 
+static avifBool avifCodecDecodeInputFillFromDecoderItem(avifCodecDecodeInput * decodeInput,
+                                                        avifDecoderItem * item,
+                                                        avifBool allowProgressive,
+                                                        const uint32_t imageCountLimit,
+                                                        const uint64_t sizeHint,
+                                                        avifDiagnostics * diag)
+{
+    if (sizeHint && (item->size > sizeHint)) {
+        avifDiagnosticsPrintf(diag, "Exceeded avifIO's sizeHint, possibly truncated data");
+        return AVIF_FALSE;
+    }
+
+    uint8_t layerCount = 0;
+    size_t layerSizes[4] = { 0 };
+    const avifProperty * a1lxProp = avifPropertyArrayFind(&item->properties, "a1lx");
+    if (a1lxProp) {
+        // Calculate layer count and all layer sizes from the a1lx box, and then validate
+
+        size_t remainingSize = item->size;
+        for (int i = 0; i < 3; ++i) {
+            ++layerCount;
+
+            const size_t layerSize = (size_t)a1lxProp->u.a1lx.layerSize[i];
+            if (layerSize) {
+                if (layerSize >= remainingSize) { // >= instead of > because there must be room for the last layer
+                    avifDiagnosticsPrintf(diag, "a1lx layer index [%d] does not fit in item size", i);
+                    return AVIF_FALSE;
+                }
+                layerSizes[i] = layerSize;
+                remainingSize -= layerSize;
+            } else {
+                layerSizes[i] = remainingSize;
+                remainingSize = 0;
+                break;
+            }
+        }
+        if (remainingSize > 0) {
+            assert(layerCount == 3);
+            ++layerCount;
+            layerSizes[3] = remainingSize;
+        }
+    }
+
+    const avifProperty * lselProp = avifPropertyArrayFind(&item->properties, "lsel");
+    item->progressive = (a1lxProp && !lselProp); // Progressive images offer layers via the a1lxProp, but don't specify a layer selection with lsel.
+    if (lselProp) {
+        // Layer selection. This requires that the underlying AV1 codec decodes all layers,
+        // and then only returns the requested layer as a single frame. To the user of libavif,
+        // this appears to be a single frame.
+
+        decodeInput->allLayers = AVIF_TRUE;
+
+        size_t sampleSize = 0;
+        if (layerCount > 0) {
+            // Optimization: If we're selecting a layer that doesn't require the entire image's payload (hinted via the a1lx box)
+
+            if (lselProp->u.lsel.layerID >= layerCount) {
+                avifDiagnosticsPrintf(diag,
+                                      "lsel property requests layer index [%u] which isn't present in a1lx property ([%u] layers)",
+                                      lselProp->u.lsel.layerID,
+                                      layerCount);
+                return AVIF_FALSE;
+            }
+
+            for (uint8_t i = 0; i <= lselProp->u.lsel.layerID; ++i) {
+                sampleSize += layerSizes[i];
+            }
+        } else {
+            // This layer's payload subsection is unknown, just use the whole payload
+            sampleSize = item->size;
+        }
+
+        avifDecodeSample * sample = (avifDecodeSample *)avifArrayPushPtr(&decodeInput->samples);
+        sample->itemID = item->id;
+        sample->offset = 0;
+        sample->size = sampleSize;
+        assert(lselProp->u.lsel.layerID < MAX_AV1_LAYER_COUNT);
+        sample->spatialID = (uint8_t)lselProp->u.lsel.layerID;
+        sample->sync = AVIF_TRUE;
+    } else if (allowProgressive && item->progressive) {
+        // Progressive image. Decode all layers and expose them all to the user.
+
+        if (imageCountLimit && (layerCount > imageCountLimit)) {
+            avifDiagnosticsPrintf(diag, "Exceeded avifDecoder's imageCountLimit (progressive)");
+            return AVIF_FALSE;
+        }
+
+        decodeInput->allLayers = AVIF_TRUE;
+
+        size_t offset = 0;
+        for (int i = 0; i < layerCount; ++i) {
+            avifDecodeSample * sample = (avifDecodeSample *)avifArrayPushPtr(&decodeInput->samples);
+            sample->itemID = item->id;
+            sample->offset = offset;
+            sample->size = layerSizes[i];
+            sample->spatialID = AVIF_SPATIAL_ID_UNSET;
+            sample->sync = (i == 0); // Assume all layers depend on the first layer
+
+            offset += layerSizes[i];
+        }
+    } else {
+        // Typical case: Use the entire item's payload for a single frame output
+
+        avifDecodeSample * sample = (avifDecodeSample *)avifArrayPushPtr(&decodeInput->samples);
+        sample->itemID = item->id;
+        sample->offset = 0;
+        sample->size = item->size;
+        sample->spatialID = AVIF_SPATIAL_ID_UNSET;
+        sample->sync = AVIF_TRUE;
+    }
+    return AVIF_TRUE;
+}
+
 // ---------------------------------------------------------------------------
 // Helper macros / functions
 
-#define BEGIN_STREAM(VARNAME, PTR, SIZE) \
-    avifROStream VARNAME;                \
-    avifROData VARNAME##_roData;         \
-    VARNAME##_roData.data = PTR;         \
-    VARNAME##_roData.size = SIZE;        \
-    avifROStreamStart(&VARNAME, &VARNAME##_roData)
+#define BEGIN_STREAM(VARNAME, PTR, SIZE, DIAG, CONTEXT) \
+    avifROStream VARNAME;                               \
+    avifROData VARNAME##_roData;                        \
+    VARNAME##_roData.data = PTR;                        \
+    VARNAME##_roData.size = SIZE;                       \
+    avifROStreamStart(&VARNAME, &VARNAME##_roData, DIAG, CONTEXT)
 
 // Use this to keep track of whether or not a child box that must be unique (0 or 1 present) has
 // been seen yet, when parsing a parent box. If the "seen" bit is already set for a given box when
 // it is encountered during parse, an error is thrown. Which bit corresponds to which box is
 // dictated entirely by the calling function.
-static avifBool uniqueBoxSeen(uint32_t * uniqueBoxFlags, uint32_t whichFlag)
+static avifBool uniqueBoxSeen(uint32_t * uniqueBoxFlags, uint32_t whichFlag, const char * parentBoxType, const char * boxType, avifDiagnostics * diagnostics)
 {
     const uint32_t flag = 1 << whichFlag;
     if (*uniqueBoxFlags & flag) {
         // This box has already been seen. Error!
+        avifDiagnosticsPrintf(diagnostics, "Box[%s] contains a duplicate unique box of type '%s'", parentBoxType, boxType);
         return AVIF_FALSE;
     }
 
@@ -417,6 +640,9 @@ typedef struct avifTile
     avifCodecDecodeInput * input;
     struct avifCodec * codec;
     avifImage * image;
+    uint32_t width;  // Either avifTrack.width or avifDecoderItem.width
+    uint32_t height; // Either avifTrack.height or avifDecoderItem.height
+    uint8_t operatingPoint;
 } avifTile;
 AVIF_ARRAY_DECLARE(avifTileArray, avifTile, tile);
 
@@ -444,10 +670,11 @@ typedef struct avifMeta
     // (ipma) box.
     avifPropertyArray properties;
 
-    // Filled with the contents of "idat" boxes, which are raw data that an item can directly refer to in its
-    // item location box (iloc) instead of just giving an offset into the overall file. If all items' iloc boxes
-    // simply point at an offset/length in the file itself, this array will likely be empty.
-    avifDecoderItemDataArray idats;
+    // Filled with the contents of this meta box's "idat" box, which is raw data that an item can
+    // directly refer to in its item location box (iloc) instead of just giving an offset into the
+    // overall file. If all items' iloc boxes simply point at an offset/length in the file itself,
+    // this buffer will likely be empty.
+    avifRWData idat;
 
     // Ever-incrementing ID for uniquely identifying which 'meta' box contains an idat (when
     // multiple meta boxes exist as BMFF siblings). Each time avifParseMetaBox() is called on an
@@ -463,14 +690,23 @@ typedef struct avifMeta
     uint32_t primaryItemID;
 } avifMeta;
 
+static void avifMetaDestroy(avifMeta * meta);
+
 static avifMeta * avifMetaCreate()
 {
     avifMeta * meta = (avifMeta *)avifAlloc(sizeof(avifMeta));
     memset(meta, 0, sizeof(avifMeta));
-    avifArrayCreate(&meta->items, sizeof(avifDecoderItem), 8);
-    avifArrayCreate(&meta->properties, sizeof(avifProperty), 16);
-    avifArrayCreate(&meta->idats, sizeof(avifDecoderItemData), 1);
+    if (!avifArrayCreate(&meta->items, sizeof(avifDecoderItem), 8)) {
+        goto error;
+    }
+    if (!avifArrayCreate(&meta->properties, sizeof(avifProperty), 16)) {
+        goto error;
+    }
     return meta;
+
+error:
+    avifMetaDestroy(meta);
+    return NULL;
 }
 
 static void avifMetaDestroy(avifMeta * meta)
@@ -479,11 +715,13 @@ static void avifMetaDestroy(avifMeta * meta)
         avifDecoderItem * item = &meta->items.item[i];
         avifArrayDestroy(&item->properties);
         avifArrayDestroy(&item->extents);
-        avifRWDataFree(&item->mergedExtents);
+        if (item->ownsMergedExtents) {
+            avifRWDataFree(&item->mergedExtents);
+        }
     }
     avifArrayDestroy(&meta->items);
     avifArrayDestroy(&meta->properties);
-    avifArrayDestroy(&meta->idats);
+    avifRWDataFree(&meta->idat);
     avifFree(meta);
 }
 
@@ -500,25 +738,37 @@ static avifDecoderItem * avifMetaFindItem(avifMeta * meta, uint32_t itemID)
     }
 
     avifDecoderItem * item = (avifDecoderItem *)avifArrayPushPtr(&meta->items);
-    avifArrayCreate(&item->properties, sizeof(avifProperty), 16);
-    avifArrayCreate(&item->extents, sizeof(avifDecoderItemExtent), 1);
+    if (!avifArrayCreate(&item->properties, sizeof(avifProperty), 16)) {
+        goto error;
+    }
+    if (!avifArrayCreate(&item->extents, sizeof(avifExtent), 1)) {
+        goto error;
+    }
     item->id = itemID;
     item->meta = meta;
     return item;
+
+error:
+    avifArrayDestroy(&item->extents);
+    avifArrayDestroy(&item->properties);
+    avifArrayPop(&meta->items);
+    return NULL;
 }
 
 typedef struct avifDecoderData
 {
-    avifFileType ftyp;
     avifMeta * meta; // The root-level meta box
     avifTrackArray tracks;
-    avifROData rawInput;
     avifTileArray tiles;
     unsigned int colorTileCount;
     unsigned int alphaTileCount;
+    unsigned int decodedColorTileCount;
+    unsigned int decodedAlphaTileCount;
     avifImageGrid colorGrid;
     avifImageGrid alphaGrid;
     avifDecoderSource source;
+    uint8_t majorBrand[4];                     // From the file's ftyp, used by AVIF_DECODER_SOURCE_AUTO
+    avifDiagnostics * diag;                    // Shallow copy; owned by avifDecoder
     const avifSampleTable * sourceSampleTable; // NULL unless (source == AVIF_DECODER_SOURCE_TRACKS), owned by an avifTrack
     avifBool cicpSet;                          // True if avifDecoder's image has had its CICP set correctly yet.
                                                // This allows nclx colr boxes to override AV1 CICP, as specified in the MIAF
@@ -528,14 +778,24 @@ typedef struct avifDecoderData
     // bitstream, i.e. if the property is present, colour information in the bitstream shall be ignored."
 } avifDecoderData;
 
+static void avifDecoderDataDestroy(avifDecoderData * data);
+
 static avifDecoderData * avifDecoderDataCreate()
 {
     avifDecoderData * data = (avifDecoderData *)avifAlloc(sizeof(avifDecoderData));
     memset(data, 0, sizeof(avifDecoderData));
     data->meta = avifMetaCreate();
-    avifArrayCreate(&data->tracks, sizeof(avifTrack), 2);
-    avifArrayCreate(&data->tiles, sizeof(avifTile), 8);
+    if (!avifArrayCreate(&data->tracks, sizeof(avifTrack), 2)) {
+        goto error;
+    }
+    if (!avifArrayCreate(&data->tiles, sizeof(avifTile), 8)) {
+        goto error;
+    }
     return data;
+
+error:
+    avifDecoderDataDestroy(data);
+    return NULL;
 }
 
 static void avifDecoderDataResetCodec(avifDecoderData * data)
@@ -550,14 +810,35 @@ static void avifDecoderDataResetCodec(avifDecoderData * data)
             tile->codec = NULL;
         }
     }
+    data->decodedColorTileCount = 0;
+    data->decodedAlphaTileCount = 0;
 }
 
-static avifTile * avifDecoderDataCreateTile(avifDecoderData * data)
+static avifTile * avifDecoderDataCreateTile(avifDecoderData * data, uint32_t width, uint32_t height, uint8_t operatingPoint)
 {
     avifTile * tile = (avifTile *)avifArrayPushPtr(&data->tiles);
     tile->image = avifImageCreateEmpty();
+    if (!tile->image) {
+        goto error;
+    }
     tile->input = avifCodecDecodeInputCreate();
+    if (!tile->input) {
+        goto error;
+    }
+    tile->width = width;
+    tile->height = height;
+    tile->operatingPoint = operatingPoint;
     return tile;
+
+error:
+    if (tile->input) {
+        avifCodecDecodeInputDestroy(tile->input);
+    }
+    if (tile->image) {
+        avifImageDestroy(tile->image);
+    }
+    avifArrayPop(&data->tiles);
+    return NULL;
 }
 
 static avifTrack * avifDecoderDataCreateTrack(avifDecoderData * data)
@@ -587,6 +868,8 @@ static void avifDecoderDataClearTiles(avifDecoderData * data)
     data->tiles.count = 0;
     data->colorTileCount = 0;
     data->alphaTileCount = 0;
+    data->decodedColorTileCount = 0;
+    data->decodedAlphaTileCount = 0;
 }
 
 static void avifDecoderDataDestroy(avifDecoderData * data)
@@ -607,90 +890,310 @@ static void avifDecoderDataDestroy(avifDecoderData * data)
     avifFree(data);
 }
 
-static const uint8_t * avifDecoderDataCalcItemPtr(avifDecoderData * data, avifDecoderItem * item)
+// This returns the max extent that has to be read in order to decode this item. If
+// the item is stored in an idat, the data has already been read during Parse() and
+// this function will return AVIF_RESULT_OK with a 0-byte extent.
+static avifResult avifDecoderItemMaxExtent(const avifDecoderItem * item, const avifDecodeSample * sample, avifExtent * outExtent)
 {
-    if (item->mergedExtents.data) {
-        // Multiple extents have already been concatenated for this item, just return it
-        return item->mergedExtents.data;
+    if (item->extents.count == 0) {
+        return AVIF_RESULT_TRUNCATED_DATA;
     }
 
-    // Find this item's source of all extents' data, based on the construction method
-    avifROData * offsetBuffer = NULL;
-    if (item->idatID == 0) {
-        // construction_method: file(0)
-
-        offsetBuffer = &data->rawInput;
-    } else {
+    if (item->idatStored) {
         // construction_method: idat(1)
 
-        // Find associated idat block
-        for (uint32_t i = 0; i < item->meta->idats.count; ++i) {
-            if (item->meta->idats.idat[i].id == item->idatID) {
-                offsetBuffer = &item->meta->idats.idat[i].data;
-                break;
+        if (item->meta->idat.size > 0) {
+            // Already read from a meta box during Parse()
+            memset(outExtent, 0, sizeof(avifExtent));
+            return AVIF_RESULT_OK;
+        }
+
+        // no associated idat box was found in the meta box, bail out
+        return AVIF_RESULT_NO_CONTENT;
+    }
+
+    // construction_method: file(0)
+
+    if (sample->size == 0) {
+        return AVIF_RESULT_TRUNCATED_DATA;
+    }
+    uint64_t remainingOffset = sample->offset;
+    size_t remainingBytes = sample->size; // This may be smaller than item->size if the item is progressive
+
+    // Assert that the for loop below will execute at least one iteration.
+    assert(item->extents.count != 0);
+    uint64_t minOffset = UINT64_MAX;
+    uint64_t maxOffset = 0;
+    for (uint32_t extentIter = 0; extentIter < item->extents.count; ++extentIter) {
+        avifExtent * extent = &item->extents.extent[extentIter];
+
+        // Make local copies of extent->offset and extent->size as they might need to be adjusted
+        // due to the sample's offset.
+        uint64_t startOffset = extent->offset;
+        size_t extentSize = extent->size;
+        if (remainingOffset) {
+            if (remainingOffset >= extentSize) {
+                remainingOffset -= extentSize;
+                continue;
+            } else {
+                if (remainingOffset > UINT64_MAX - startOffset) {
+                    return AVIF_RESULT_BMFF_PARSE_FAILED;
+                }
+                startOffset += remainingOffset;
+                extentSize -= remainingOffset;
+                remainingOffset = 0;
             }
         }
 
-        if (offsetBuffer == NULL) {
-            // no idat box was found in this meta box, bail out
-            return NULL;
+        const size_t usedExtentSize = (extentSize < remainingBytes) ? extentSize : remainingBytes;
+
+        if (usedExtentSize > UINT64_MAX - startOffset) {
+            return AVIF_RESULT_BMFF_PARSE_FAILED;
         }
+        const uint64_t endOffset = startOffset + usedExtentSize;
+
+        if (minOffset > startOffset) {
+            minOffset = startOffset;
+        }
+        if (maxOffset < endOffset) {
+            maxOffset = endOffset;
+        }
+
+        remainingBytes -= usedExtentSize;
+        if (remainingBytes == 0) {
+            // We've got enough bytes for this sample.
+            break;
+        }
+    }
+
+    if (remainingBytes != 0) {
+        return AVIF_RESULT_TRUNCATED_DATA;
+    }
+
+    outExtent->offset = minOffset;
+    const uint64_t extentLength = maxOffset - minOffset;
+    if (extentLength > SIZE_MAX) {
+        return AVIF_RESULT_BMFF_PARSE_FAILED;
+    }
+    outExtent->size = (size_t)extentLength;
+    return AVIF_RESULT_OK;
+}
+
+static uint8_t avifDecoderItemOperatingPoint(const avifDecoderItem * item)
+{
+    const avifProperty * a1opProp = avifPropertyArrayFind(&item->properties, "a1op");
+    if (a1opProp) {
+        return a1opProp->u.a1op.opIndex;
+    }
+    return 0; // default
+}
+
+static avifResult avifDecoderItemValidateAV1(const avifDecoderItem * item, avifDiagnostics * diag, const avifStrictFlags strictFlags)
+{
+    const avifProperty * av1CProp = avifPropertyArrayFind(&item->properties, "av1C");
+    if (!av1CProp) {
+        // An av1C box is mandatory in all valid AVIF configurations. Bail out.
+        avifDiagnosticsPrintf(diag, "Item ID %u of type '%.4s' is missing mandatory av1C property", item->id, (const char *)item->type);
+        return AVIF_RESULT_BMFF_PARSE_FAILED;
+    }
+
+    const avifProperty * pixiProp = avifPropertyArrayFind(&item->properties, "pixi");
+    if (!pixiProp && (strictFlags & AVIF_STRICT_PIXI_REQUIRED)) {
+        // A pixi box is mandatory in all valid AVIF configurations. Bail out.
+        avifDiagnosticsPrintf(diag,
+                              "[Strict] Item ID %u of type '%.4s' is missing mandatory pixi property",
+                              item->id,
+                              (const char *)item->type);
+        return AVIF_RESULT_BMFF_PARSE_FAILED;
+    }
+
+    if (pixiProp) {
+        const uint32_t av1CDepth = avifCodecConfigurationBoxGetDepth(&av1CProp->u.av1C);
+        for (uint8_t i = 0; i < pixiProp->u.pixi.planeCount; ++i) {
+            if (pixiProp->u.pixi.planeDepths[i] != av1CDepth) {
+                // pixi depth must match av1C depth
+                avifDiagnosticsPrintf(diag,
+                                      "Item ID %u depth specified by pixi property [%u] does not match av1C property depth [%u]",
+                                      item->id,
+                                      pixiProp->u.pixi.planeDepths[i],
+                                      av1CDepth);
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+        }
+    }
+
+    if (strictFlags & AVIF_STRICT_CLAP_VALID) {
+        const avifProperty * clapProp = avifPropertyArrayFind(&item->properties, "clap");
+        if (clapProp) {
+            const avifProperty * ispeProp = avifPropertyArrayFind(&item->properties, "ispe");
+            if (!ispeProp) {
+                avifDiagnosticsPrintf(diag,
+                                      "[Strict] Item ID %u is missing an ispe property, so its clap property cannot be validated",
+                                      item->id);
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+
+            avifCropRect cropRect;
+            const uint32_t imageW = ispeProp->u.ispe.width;
+            const uint32_t imageH = ispeProp->u.ispe.height;
+            const avifPixelFormat av1CFormat = avifCodecConfigurationBoxGetFormat(&av1CProp->u.av1C);
+            avifBool validClap = avifCropRectConvertCleanApertureBox(&cropRect, &clapProp->u.clap, imageW, imageH, av1CFormat, diag);
+            if (!validClap) {
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+        }
+    }
+    return AVIF_RESULT_OK;
+}
+
+static avifResult avifDecoderItemRead(avifDecoderItem * item,
+                                      avifIO * io,
+                                      avifROData * outData,
+                                      size_t offset,
+                                      size_t partialByteCount,
+                                      avifDiagnostics * diag)
+{
+    if (item->mergedExtents.data && !item->partialMergedExtents) {
+        // Multiple extents have already been concatenated for this item, just return it
+        if (offset >= item->mergedExtents.size) {
+            avifDiagnosticsPrintf(diag, "Item ID %u read has overflowing offset", item->id);
+            return AVIF_RESULT_TRUNCATED_DATA;
+        }
+        outData->data = item->mergedExtents.data + offset;
+        outData->size = item->mergedExtents.size - offset;
+        return AVIF_RESULT_OK;
     }
 
     if (item->extents.count == 0) {
-        return NULL;
-    } else if (item->extents.count == 1) {
-        // A single extent; just use the pre-existing buffer
-
-        avifDecoderItemExtent * extent = &item->extents.extent[0];
-        if (extent->offset > offsetBuffer->size) {
-            return NULL;
-        }
-        uint64_t offsetSize = (uint64_t)extent->offset + (uint64_t)extent->size;
-        if (offsetSize > (uint64_t)offsetBuffer->size) {
-            return NULL;
-        }
-        return offsetBuffer->data + extent->offset;
+        avifDiagnosticsPrintf(diag, "Item ID %u has zero extents", item->id);
+        return AVIF_RESULT_TRUNCATED_DATA;
     }
 
-    // Multiple extents; merge them into a single contiguous buffer
-    if (item->size > offsetBuffer->size) {
-        // Sanity check: somehow the sum of extents for this item exceeds the entire file or idat
-        // size!
-        return NULL;
+    // Find this item's source of all extents' data, based on the construction method
+    const avifRWData * idatBuffer = NULL;
+    if (item->idatStored) {
+        // construction_method: idat(1)
+
+        if (item->meta->idat.size > 0) {
+            idatBuffer = &item->meta->idat;
+        } else {
+            // no associated idat box was found in the meta box, bail out
+            avifDiagnosticsPrintf(diag, "Item ID %u is stored in an idat, but no associated idat box was found", item->id);
+            return AVIF_RESULT_NO_CONTENT;
+        }
     }
-    avifRWDataRealloc(&item->mergedExtents, item->size);
+
+    // Merge extents into a single contiguous buffer
+    if ((io->sizeHint > 0) && (item->size > io->sizeHint)) {
+        // Sanity check: somehow the sum of extents exceeds the entire file or idat size!
+        avifDiagnosticsPrintf(diag, "Item ID %u reported size failed size hint sanity check. Truncated data?", item->id);
+        return AVIF_RESULT_TRUNCATED_DATA;
+    }
+
+    if (offset >= item->size) {
+        avifDiagnosticsPrintf(diag, "Item ID %u read has overflowing offset", item->id);
+        return AVIF_RESULT_TRUNCATED_DATA;
+    }
+    const size_t maxOutputSize = item->size - offset;
+    const size_t readOutputSize = (partialByteCount && (partialByteCount < maxOutputSize)) ? partialByteCount : maxOutputSize;
+    const size_t totalBytesToRead = offset + readOutputSize;
+
+    // If there is a single extent for this item and the source of the read buffer is going to be
+    // persistent for the lifetime of the avifDecoder (whether it comes from its own internal
+    // idatBuffer or from a known-persistent IO), we can avoid buffer duplication and just use the
+    // preexisting buffer.
+    avifBool singlePersistentBuffer = ((item->extents.count == 1) && (idatBuffer || io->persistent));
+    if (!singlePersistentBuffer) {
+        // Always allocate the item's full size here, as progressive image decodes will do partial
+        // reads into this buffer and begin feeding the buffer to the underlying AV1 decoder, but
+        // will then write more into this buffer without flushing the AV1 decoder (which is still
+        // holding the address of the previous allocation of this buffer). This strategy avoids
+        // use-after-free issues in the AV1 decoder and unnecessary reallocs as a typical
+        // progressive decode use case will eventually decode the final layer anyway.
+        avifRWDataRealloc(&item->mergedExtents, item->size);
+        item->ownsMergedExtents = AVIF_TRUE;
+    }
+
+    // Set this until we manage to fill the entire mergedExtents buffer
+    item->partialMergedExtents = AVIF_TRUE;
 
     uint8_t * front = item->mergedExtents.data;
-    size_t remainingBytes = item->mergedExtents.size;
+    size_t remainingBytes = totalBytesToRead;
     for (uint32_t extentIter = 0; extentIter < item->extents.count; ++extentIter) {
-        avifDecoderItemExtent * extent = &item->extents.extent[extentIter];
-        if (extent->offset > offsetBuffer->size) {
-            return NULL;
-        }
-        uint64_t offsetSize = (uint64_t)extent->offset + (uint64_t)extent->size;
-        if (offsetSize > (uint64_t)offsetBuffer->size) {
-            return NULL;
-        }
-        if ((size_t)extent->size > remainingBytes) {
-            // This should be impossible?
-            return NULL;
+        avifExtent * extent = &item->extents.extent[extentIter];
+
+        size_t bytesToRead = extent->size;
+        if (bytesToRead > remainingBytes) {
+            bytesToRead = remainingBytes;
         }
 
-        memcpy(front, offsetBuffer->data + extent->offset, extent->size);
-        front += extent->size;
-        remainingBytes -= extent->size;
+        avifROData offsetBuffer;
+        if (idatBuffer) {
+            if (extent->offset > idatBuffer->size) {
+                avifDiagnosticsPrintf(diag, "Item ID %u has impossible extent offset in idat buffer", item->id);
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+            // Since extent->offset (a uint64_t) is not bigger than idatBuffer->size (a size_t),
+            // it is safe to cast extent->offset to size_t.
+            const size_t extentOffset = (size_t)extent->offset;
+            if (extent->size > idatBuffer->size - extentOffset) {
+                avifDiagnosticsPrintf(diag, "Item ID %u has impossible extent size in idat buffer", item->id);
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+            offsetBuffer.data = idatBuffer->data + extentOffset;
+            offsetBuffer.size = idatBuffer->size - extentOffset;
+        } else {
+            // construction_method: file(0)
+
+            if ((io->sizeHint > 0) && (extent->offset > io->sizeHint)) {
+                avifDiagnosticsPrintf(diag, "Item ID %u extent offset failed size hint sanity check. Truncated data?", item->id);
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+            avifResult readResult = io->read(io, 0, extent->offset, bytesToRead, &offsetBuffer);
+            if (readResult != AVIF_RESULT_OK) {
+                return readResult;
+            }
+            if (bytesToRead != offsetBuffer.size) {
+                avifDiagnosticsPrintf(diag,
+                                      "Item ID %u tried to read %zu bytes, but only received %zu bytes",
+                                      item->id,
+                                      bytesToRead,
+                                      offsetBuffer.size);
+                return AVIF_RESULT_TRUNCATED_DATA;
+            }
+        }
+
+        if (singlePersistentBuffer) {
+            memcpy(&item->mergedExtents, &offsetBuffer, sizeof(avifRWData));
+            item->mergedExtents.size = bytesToRead;
+        } else {
+            assert(item->ownsMergedExtents);
+            assert(front);
+            memcpy(front, offsetBuffer.data, bytesToRead);
+            front += bytesToRead;
+        }
+
+        remainingBytes -= bytesToRead;
+        if (remainingBytes == 0) {
+            // This happens when partialByteCount is set
+            break;
+        }
     }
     if (remainingBytes != 0) {
         // This should be impossible?
-        return NULL;
+        avifDiagnosticsPrintf(diag, "Item ID %u has %zu unexpected trailing bytes", item->id, remainingBytes);
+        return AVIF_RESULT_TRUNCATED_DATA;
     }
-    return item->mergedExtents.data;
+
+    outData->data = item->mergedExtents.data + offset;
+    outData->size = readOutputSize;
+    item->partialMergedExtents = (item->size != totalBytesToRead);
+    return AVIF_RESULT_OK;
 }
 
-static avifBool avifDecoderDataGenerateImageGridTiles(avifDecoderData * data, avifImageGrid * grid, avifDecoderItem * gridItem, avifBool alpha)
+static avifBool avifDecoderGenerateImageGridTiles(avifDecoder * decoder, avifImageGrid * grid, avifDecoderItem * gridItem, avifBool alpha)
 {
-    unsigned int tilesRequested = (unsigned int)grid->rows * (unsigned int)grid->columns;
+    unsigned int tilesRequested = grid->rows * grid->columns;
 
     // Count number of dimg for this item, bail out if it doesn't match perfectly
     unsigned int tilesAvailable = 0;
@@ -703,6 +1206,7 @@ static avifBool avifDecoderDataGenerateImageGridTiles(avifDecoderData * data, av
             if (item->hasUnsupportedEssentialProperty) {
                 // An essential property isn't supported by libavif; can't
                 // decode a grid image if any tile in the grid isn't supported.
+                avifDiagnosticsPrintf(&decoder->diag, "Grid image contains tile with an unsupported property marked as essential");
                 return AVIF_FALSE;
             }
 
@@ -711,6 +1215,12 @@ static avifBool avifDecoderDataGenerateImageGridTiles(avifDecoderData * data, av
     }
 
     if (tilesRequested != tilesAvailable) {
+        avifDiagnosticsPrintf(&decoder->diag,
+                              "Grid image of dimensions %ux%u requires %u tiles, and only %u were found",
+                              grid->columns,
+                              grid->rows,
+                              tilesRequested,
+                              tilesAvailable);
         return AVIF_FALSE;
     }
 
@@ -722,11 +1232,18 @@ static avifBool avifDecoderDataGenerateImageGridTiles(avifDecoderData * data, av
                 continue;
             }
 
-            avifTile * tile = avifDecoderDataCreateTile(data);
-            avifDecodeSample * sample = (avifDecodeSample *)avifArrayPushPtr(&tile->input->samples);
-            sample->data.data = avifDecoderDataCalcItemPtr(data, item);
-            sample->data.size = item->size;
-            sample->sync = AVIF_TRUE;
+            avifTile * tile = avifDecoderDataCreateTile(decoder->data, item->width, item->height, avifDecoderItemOperatingPoint(item));
+            if (!tile) {
+                return AVIF_FALSE;
+            }
+            if (!avifCodecDecodeInputFillFromDecoderItem(tile->input,
+                                                         item,
+                                                         decoder->allowProgressive,
+                                                         decoder->imageCountLimit,
+                                                         decoder->io->sizeHint,
+                                                         &decoder->diag)) {
+                return AVIF_FALSE;
+            }
             tile->input->alpha = alpha;
 
             if (firstTile) {
@@ -736,32 +1253,43 @@ static avifBool avifDecoderDataGenerateImageGridTiles(avifDecoderData * data, av
                 // the top-level color/alpha item during avifDecoderReset().
                 const avifProperty * srcProp = avifPropertyArrayFind(&item->properties, "av1C");
                 if (!srcProp) {
+                    avifDiagnosticsPrintf(&decoder->diag, "Grid image's first tile is missing an av1C property");
                     return AVIF_FALSE;
                 }
                 avifProperty * dstProp = (avifProperty *)avifArrayPushPtr(&gridItem->properties);
-                memcpy(dstProp, srcProp, sizeof(avifProperty));
+                *dstProp = *srcProp;
+
+                if (!alpha && item->progressive) {
+                    decoder->progressiveState = AVIF_PROGRESSIVE_STATE_AVAILABLE;
+                    if (tile->input->samples.count > 1) {
+                        decoder->progressiveState = AVIF_PROGRESSIVE_STATE_ACTIVE;
+                        decoder->imageCount = tile->input->samples.count;
+                    }
+                }
             }
         }
     }
     return AVIF_TRUE;
 }
 
+// Checks the grid consistency and copies the pixels from the tiles to the
+// dstImage. Only the freshly decoded tiles are considered, skipping the already
+// copied or not-yet-decoded tiles.
 static avifBool avifDecoderDataFillImageGrid(avifDecoderData * data,
                                              avifImageGrid * grid,
                                              avifImage * dstImage,
                                              unsigned int firstTileIndex,
-                                             unsigned int tileCount,
+                                             unsigned int oldDecodedTileCount,
+                                             unsigned int decodedTileCount,
                                              avifBool alpha)
 {
-    if (tileCount == 0) {
-        return AVIF_FALSE;
-    }
+    assert(decodedTileCount > oldDecodedTileCount);
 
     avifTile * firstTile = &data->tiles.tile[firstTileIndex];
     avifBool firstTileUVPresent = (firstTile->image->yuvPlanes[AVIF_CHAN_U] && firstTile->image->yuvPlanes[AVIF_CHAN_V]);
 
     // Check for tile consistency: All tiles in a grid image should match in the properties checked below.
-    for (unsigned int i = 1; i < tileCount; ++i) {
+    for (unsigned int i = AVIF_MAX(1, oldDecodedTileCount); i < decodedTileCount; ++i) {
         avifTile * tile = &data->tiles.tile[firstTileIndex + i];
         avifBool uvPresent = (tile->image->yuvPlanes[AVIF_CHAN_U] && tile->image->yuvPlanes[AVIF_CHAN_V]);
         if ((tile->image->width != firstTile->image->width) || (tile->image->height != firstTile->image->height) ||
@@ -771,6 +1299,7 @@ static avifBool avifDecoderDataFillImageGrid(avifDecoderData * data,
             (tile->image->transferCharacteristics != firstTile->image->transferCharacteristics) ||
             (tile->image->matrixCoefficients != firstTile->image->matrixCoefficients) ||
             (tile->image->alphaRange != firstTile->image->alphaRange)) {
+            avifDiagnosticsPrintf(data->diag, "Grid image contains mismatched tiles");
             return AVIF_FALSE;
         }
     }
@@ -778,35 +1307,32 @@ static avifBool avifDecoderDataFillImageGrid(avifDecoderData * data,
     // Validate grid image size and tile size.
     //
     // HEIF (ISO/IEC 23008-12:2017), Section 6.6.2.3.1:
-    //   The tiled input images shall completely “cover” the reconstructed image grid canvas, ...
+    //   The tiled input images shall completely "cover" the reconstructed image grid canvas, ...
     if (((firstTile->image->width * grid->columns) < grid->outputWidth) ||
         ((firstTile->image->height * grid->rows) < grid->outputHeight)) {
+        avifDiagnosticsPrintf(data->diag,
+                              "Grid image tiles do not completely cover the image (HEIF (ISO/IEC 23008-12:2017), Section 6.6.2.3.1)");
         return AVIF_FALSE;
     }
     // Tiles in the rightmost column and bottommost row must overlap the reconstructed image grid canvas. See MIAF (ISO/IEC 23000-22:2019), Section 7.3.11.4.2, Figure 2.
     if (((firstTile->image->width * (grid->columns - 1)) >= grid->outputWidth) ||
         ((firstTile->image->height * (grid->rows - 1)) >= grid->outputHeight)) {
+        avifDiagnosticsPrintf(data->diag,
+                              "Grid image tiles in the rightmost column and bottommost row do not overlap the reconstructed image grid canvas. See MIAF (ISO/IEC 23000-22:2019), Section 7.3.11.4.2, Figure 2");
         return AVIF_FALSE;
     }
-    // Check the restrictions in MIAF (ISO/IEC 23000-22:2019), Section 7.3.11.4.2.
-    //
-    // The tile_width shall be greater than or equal to 64, and the tile_height shall be greater than or equal to 64.
-    if ((firstTile->image->width < 64) || (firstTile->image->height < 64)) {
-        return AVIF_FALSE;
+
+    if (alpha) {
+        // An alpha tile does not contain any YUV pixels.
+        assert(firstTile->image->yuvFormat == AVIF_PIXEL_FORMAT_NONE);
     }
-    if (!alpha) {
-        if ((firstTile->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV422) || (firstTile->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420)) {
-            // The horizontal tile offsets and widths, and the output width, shall be even numbers.
-            if (((firstTile->image->width & 1) != 0) || ((grid->outputWidth & 1) != 0)) {
-                return AVIF_FALSE;
-            }
-        }
-        if (firstTile->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420) {
-            // The vertical tile offsets and heights, and the output height, shall be even numbers.
-            if (((firstTile->image->height & 1) != 0) || ((grid->outputHeight & 1) != 0)) {
-                return AVIF_FALSE;
-            }
-        }
+    if (!avifAreGridDimensionsValid(firstTile->image->yuvFormat,
+                                    grid->outputWidth,
+                                    grid->outputHeight,
+                                    firstTile->image->width,
+                                    firstTile->image->height,
+                                    data->diag)) {
+        return AVIF_FALSE;
     }
 
     // Lazily populate dstImage with the new frame's properties. If we're decoding alpha,
@@ -815,6 +1341,7 @@ static avifBool avifDecoderDataFillImageGrid(avifDecoderData * data,
         (dstImage->depth != firstTile->image->depth) || (!alpha && (dstImage->yuvFormat != firstTile->image->yuvFormat))) {
         if (alpha) {
             // Alpha doesn't match size, just bail out
+            avifDiagnosticsPrintf(data->diag, "Alpha plane dimensions do not match color plane dimensions");
             return AVIF_FALSE;
         }
 
@@ -840,11 +1367,19 @@ static avifBool avifDecoderDataFillImageGrid(avifDecoderData * data,
     avifPixelFormatInfo formatInfo;
     avifGetPixelFormatInfo(firstTile->image->yuvFormat, &formatInfo);
 
-    unsigned int tileIndex = firstTileIndex;
+    unsigned int tileIndex = oldDecodedTileCount;
     size_t pixelBytes = avifImageUsesU16(dstImage) ? 2 : 1;
-    for (unsigned int rowIndex = 0; rowIndex < grid->rows; ++rowIndex) {
-        for (unsigned int colIndex = 0; colIndex < grid->columns; ++colIndex, ++tileIndex) {
-            avifTile * tile = &data->tiles.tile[tileIndex];
+    unsigned int rowIndex = oldDecodedTileCount / grid->columns;
+    unsigned int colIndex = oldDecodedTileCount % grid->columns;
+    // Only the first iteration of the outer for loop uses this initial value of colIndex.
+    // Subsequent iterations of the outer for loop initializes colIndex to 0.
+    for (; rowIndex < grid->rows; ++rowIndex, colIndex = 0) {
+        for (; colIndex < grid->columns; ++colIndex, ++tileIndex) {
+            if (tileIndex >= decodedTileCount) {
+                // Tile is not ready yet.
+                return AVIF_TRUE;
+            }
+            avifTile * tile = &data->tiles.tile[firstTileIndex + tileIndex];
 
             unsigned int widthToCopy = firstTile->image->width;
             unsigned int maxX = firstTile->image->width * (colIndex + 1);
@@ -859,8 +1394,8 @@ static avifBool avifDecoderDataFillImageGrid(avifDecoderData * data,
             }
 
             // Y and A channels
-            size_t yaColOffset = colIndex * firstTile->image->width;
-            size_t yaRowOffset = rowIndex * firstTile->image->height;
+            size_t yaColOffset = (size_t)colIndex * firstTile->image->width;
+            size_t yaRowOffset = (size_t)rowIndex * firstTile->image->height;
             size_t yaRowBytes = widthToCopy * pixelBytes;
 
             if (alpha) {
@@ -909,10 +1444,12 @@ static avifBool avifDecoderDataFillImageGrid(avifDecoderData * data,
 // If colorId == 0 (a sentinel value as item IDs must be nonzero), accept any found EXIF/XMP metadata. Passing in 0
 // is used when finding metadata in a meta box embedded in a trak box, as any items inside of a meta box that is
 // inside of a trak box are implicitly associated to the track.
-static avifBool avifDecoderDataFindMetadata(avifDecoderData * data, avifMeta * meta, avifImage * image, uint32_t colorId)
+static avifResult avifDecoderFindMetadata(avifDecoder * decoder, avifMeta * meta, avifImage * image, uint32_t colorId)
 {
-    avifROData exifData = AVIF_DATA_EMPTY;
-    avifROData xmpData = AVIF_DATA_EMPTY;
+    if (decoder->ignoreExif && decoder->ignoreXMP) {
+        // Nothing to do!
+        return AVIF_RESULT_OK;
+    }
 
     for (uint32_t itemIndex = 0; itemIndex < meta->items.count; ++itemIndex) {
         avifDecoderItem * item = &meta->items.item[itemIndex];
@@ -929,28 +1466,31 @@ static avifBool avifDecoderDataFindMetadata(avifDecoderData * data, avifMeta * m
             continue;
         }
 
-        if (!memcmp(item->type, "Exif", 4)) {
-            // Advance past Annex A.2.1's header
-            const uint8_t * boxPtr = avifDecoderDataCalcItemPtr(data, item);
-            BEGIN_STREAM(exifBoxStream, boxPtr, item->size);
-            uint32_t exifTiffHeaderOffset;
-            CHECK(avifROStreamReadU32(&exifBoxStream, &exifTiffHeaderOffset)); // unsigned int(32) exif_tiff_header_offset;
+        if (!decoder->ignoreExif && !memcmp(item->type, "Exif", 4)) {
+            avifROData exifContents;
+            avifResult readResult = avifDecoderItemRead(item, decoder->io, &exifContents, 0, 0, &decoder->diag);
+            if (readResult != AVIF_RESULT_OK) {
+                return readResult;
+            }
 
-            exifData.data = avifROStreamCurrent(&exifBoxStream);
-            exifData.size = avifROStreamRemainingBytes(&exifBoxStream);
-        } else if (!memcmp(item->type, "mime", 4) && !memcmp(item->contentType.contentType, xmpContentType, xmpContentTypeSize)) {
-            xmpData.data = avifDecoderDataCalcItemPtr(data, item);
-            xmpData.size = item->size;
+            // Advance past Annex A.2.1's header
+            BEGIN_STREAM(exifBoxStream, exifContents.data, exifContents.size, &decoder->diag, "Exif header");
+            uint32_t exifTiffHeaderOffset;
+            CHECKERR(avifROStreamReadU32(&exifBoxStream, &exifTiffHeaderOffset), AVIF_RESULT_BMFF_PARSE_FAILED); // unsigned int(32) exif_tiff_header_offset;
+
+            avifImageSetMetadataExif(image, avifROStreamCurrent(&exifBoxStream), avifROStreamRemainingBytes(&exifBoxStream));
+        } else if (!decoder->ignoreXMP && !memcmp(item->type, "mime", 4) &&
+                   !memcmp(item->contentType.contentType, xmpContentType, xmpContentTypeSize)) {
+            avifROData xmpContents;
+            avifResult readResult = avifDecoderItemRead(item, decoder->io, &xmpContents, 0, 0, &decoder->diag);
+            if (readResult != AVIF_RESULT_OK) {
+                return readResult;
+            }
+
+            avifImageSetMetadataXMP(image, xmpContents.data, xmpContents.size);
         }
     }
-
-    if (exifData.data && exifData.size) {
-        avifImageSetMetadataExif(image, exifData.data, exifData.size);
-    }
-    if (xmpData.data && xmpData.size) {
-        avifImageSetMetadataXMP(image, xmpData.data, xmpData.size);
-    }
-    return AVIF_TRUE;
+    return AVIF_RESULT_OK;
 }
 
 // ---------------------------------------------------------------------------
@@ -964,13 +1504,44 @@ static avifBool isAlphaURN(const char * urn)
 // ---------------------------------------------------------------------------
 // BMFF Parsing
 
-static avifBool avifParseItemLocationBox(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseHandlerBox(const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[hdlr]");
+
+    CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
+
+    uint32_t predefined;
+    CHECK(avifROStreamReadU32(&s, &predefined)); // unsigned int(32) pre_defined = 0;
+    if (predefined != 0) {
+        avifDiagnosticsPrintf(diag, "Box[hdlr] contains a pre_defined value that is nonzero");
+        return AVIF_FALSE;
+    }
+
+    uint8_t handlerType[4];
+    CHECK(avifROStreamRead(&s, handlerType, 4)); // unsigned int(32) handler_type;
+    if (memcmp(handlerType, "pict", 4) != 0) {
+        avifDiagnosticsPrintf(diag, "Box[hdlr] handler_type is not 'pict'");
+        return AVIF_FALSE;
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        uint32_t reserved;
+        CHECK(avifROStreamReadU32(&s, &reserved)); // const unsigned int(32)[3] reserved = 0;
+    }
+
+    // Verify that a valid string is here, but don't bother to store it
+    CHECK(avifROStreamReadString(&s, NULL, 0)); // string name;
+    return AVIF_TRUE;
+}
+
+static avifBool avifParseItemLocationBox(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
+{
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[iloc]");
 
     uint8_t version;
     CHECK(avifROStreamReadVersionAndFlags(&s, &version, NULL));
     if (version > 2) {
+        avifDiagnosticsPrintf(diag, "Box[iloc] has an unsupported version [%u]", version);
         return AVIF_FALSE;
     }
 
@@ -987,6 +1558,7 @@ static avifBool avifParseItemLocationBox(avifMeta * meta, const uint8_t * raw, s
         indexSize = baseOffsetSizeAndIndexSize & 0xf; // unsigned int(4) index_size;
         if (indexSize != 0) {
             // extent_index unsupported
+            avifDiagnosticsPrintf(diag, "Box[iloc] has an unsupported extent_index");
             return AVIF_FALSE;
         }
     }
@@ -1001,12 +1573,22 @@ static avifBool avifParseItemLocationBox(avifMeta * meta, const uint8_t * raw, s
     }
     for (uint32_t i = 0; i < itemCount; ++i) {
         uint32_t itemID;
-        uint32_t idatID = 0;
         if (version < 2) {
             CHECK(avifROStreamReadU16(&s, &tmp16)); // unsigned int(16) item_ID;
             itemID = tmp16;
         } else {
             CHECK(avifROStreamReadU32(&s, &itemID)); // unsigned int(32) item_ID;
+        }
+
+        avifDecoderItem * item = avifMetaFindItem(meta, itemID);
+        if (!item) {
+            avifDiagnosticsPrintf(diag, "Box[iloc] has an invalid item ID [%u]", itemID);
+            return AVIF_FALSE;
+        }
+        if (item->extents.count > 0) {
+            // This item has already been given extents via this iloc box. This is invalid.
+            avifDiagnosticsPrintf(diag, "Item ID [%u] contains duplicate sets of extents", itemID);
+            return AVIF_FALSE;
         }
 
         if ((version == 1) || (version == 2)) {
@@ -1017,22 +1599,13 @@ static avifBool avifParseItemLocationBox(avifMeta * meta, const uint8_t * raw, s
             constructionMethod = constructionMethod & 0xf;
             if ((constructionMethod != 0 /* file */) && (constructionMethod != 1 /* idat */)) {
                 // construction method item(2) unsupported
+                avifDiagnosticsPrintf(diag, "Box[iloc] has an unsupported construction method [%u]", constructionMethod);
                 return AVIF_FALSE;
             }
             if (constructionMethod == 1) {
-                idatID = meta->idatID;
+                item->idatStored = AVIF_TRUE;
             }
         }
-
-        avifDecoderItem * item = avifMetaFindItem(meta, itemID);
-        if (!item) {
-            return AVIF_FALSE;
-        }
-        if (item->extents.count > 0) {
-            // This item has already been given extents via this iloc box. This is invalid.
-            return AVIF_FALSE;
-        }
-        item->idatID = idatID;
 
         uint16_t dataReferenceIndex;                                 // unsigned int(16) data_ref rence_index;
         CHECK(avifROStreamReadU16(&s, &dataReferenceIndex));         //
@@ -1051,20 +1624,28 @@ static avifBool avifParseItemLocationBox(avifMeta * meta, const uint8_t * raw, s
             uint64_t extentLength; // unsigned int(offset_size*8) extent_length;
             CHECK(avifROStreamReadUX8(&s, &extentLength, lengthSize));
 
-            avifDecoderItemExtent * extent = (avifDecoderItemExtent *)avifArrayPushPtr(&item->extents);
+            avifExtent * extent = (avifExtent *)avifArrayPushPtr(&item->extents);
             if (extentOffset > UINT64_MAX - baseOffset) {
+                avifDiagnosticsPrintf(diag,
+                                      "Item ID [%u] contains an extent offset which overflows: [base: %" PRIu64 " offset:%" PRIu64 "]",
+                                      itemID,
+                                      baseOffset,
+                                      extentOffset);
                 return AVIF_FALSE;
             }
             uint64_t offset = baseOffset + extentOffset;
-            if (offset > UINT32_MAX) {
+            extent->offset = offset;
+            if (extentLength > SIZE_MAX) {
+                avifDiagnosticsPrintf(diag, "Item ID [%u] contains an extent length which overflows: [%" PRIu64 "]", itemID, extentLength);
                 return AVIF_FALSE;
             }
-            extent->offset = (uint32_t)offset;
-            if (extentLength > UINT32_MAX) {
-                return AVIF_FALSE;
-            }
-            extent->size = (uint32_t)extentLength;
-            if (extent->size > UINT32_MAX - item->size) {
+            extent->size = (size_t)extentLength;
+            if (extent->size > SIZE_MAX - item->size) {
+                avifDiagnosticsPrintf(diag,
+                                      "Item ID [%u] contains an extent length which overflows the item size: [%zu, %zu]",
+                                      itemID,
+                                      extent->size,
+                                      item->size);
                 return AVIF_FALSE;
             }
             item->size += extent->size;
@@ -1073,20 +1654,22 @@ static avifBool avifParseItemLocationBox(avifMeta * meta, const uint8_t * raw, s
     return AVIF_TRUE;
 }
 
-static avifBool avifParseImageGridBox(avifImageGrid * grid, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseImageGridBox(avifImageGrid * grid, const uint8_t * raw, size_t rawLen, uint32_t imageSizeLimit, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[grid]");
 
     uint8_t version, flags;
     CHECK(avifROStreamRead(&s, &version, 1)); // unsigned int(8) version = 0;
     if (version != 0) {
+        avifDiagnosticsPrintf(diag, "Box[grid] has unsupported version [%u]", version);
         return AVIF_FALSE;
     }
-    CHECK(avifROStreamRead(&s, &flags, 1));         // unsigned int(8) flags;
-    CHECK(avifROStreamRead(&s, &grid->rows, 1));    // unsigned int(8) rows_minus_one;
-    CHECK(avifROStreamRead(&s, &grid->columns, 1)); // unsigned int(8) columns_minus_one;
-    ++grid->rows;
-    ++grid->columns;
+    uint8_t rowsMinusOne, columnsMinusOne;
+    CHECK(avifROStreamRead(&s, &flags, 1));           // unsigned int(8) flags;
+    CHECK(avifROStreamRead(&s, &rowsMinusOne, 1));    // unsigned int(8) rows_minus_one;
+    CHECK(avifROStreamRead(&s, &columnsMinusOne, 1)); // unsigned int(8) columns_minus_one;
+    grid->rows = (uint32_t)rowsMinusOne + 1;
+    grid->columns = (uint32_t)columnsMinusOne + 1;
 
     uint32_t fieldLength = ((flags & 1) + 1) * 16;
     if (fieldLength == 16) {
@@ -1098,20 +1681,26 @@ static avifBool avifParseImageGridBox(avifImageGrid * grid, const uint8_t * raw,
     } else {
         if (fieldLength != 32) {
             // This should be impossible
+            avifDiagnosticsPrintf(diag, "Grid box contains illegal field length: [%u]", fieldLength);
             return AVIF_FALSE;
         }
         CHECK(avifROStreamReadU32(&s, &grid->outputWidth));  // unsigned int(FieldLength) output_width;
         CHECK(avifROStreamReadU32(&s, &grid->outputHeight)); // unsigned int(FieldLength) output_height;
     }
-    if ((grid->outputWidth == 0) || (grid->outputHeight == 0) || (grid->outputWidth > (AVIF_MAX_IMAGE_SIZE / grid->outputHeight))) {
+    if ((grid->outputWidth == 0) || (grid->outputHeight == 0)) {
+        avifDiagnosticsPrintf(diag, "Grid box contains illegal dimensions: [%u x %u]", grid->outputWidth, grid->outputHeight);
+        return AVIF_FALSE;
+    }
+    if (grid->outputWidth > (imageSizeLimit / grid->outputHeight)) {
+        avifDiagnosticsPrintf(diag, "Grid box dimensions are too large: [%u x %u]", grid->outputWidth, grid->outputHeight);
         return AVIF_FALSE;
     }
     return avifROStreamRemainingBytes(&s) == 0;
 }
 
-static avifBool avifParseImageSpatialExtentsProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseImageSpatialExtentsProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[ispe]");
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
     avifImageSpatialExtents * ispe = &prop->u.ispe;
@@ -1120,18 +1709,18 @@ static avifBool avifParseImageSpatialExtentsProperty(avifProperty * prop, const 
     return AVIF_TRUE;
 }
 
-static avifBool avifParseAuxiliaryTypeProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseAuxiliaryTypeProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[auxC]");
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
     CHECK(avifROStreamReadString(&s, prop->u.auxC.auxType, AUXTYPE_SIZE));
     return AVIF_TRUE;
 }
 
-static avifBool avifParseColourInformationBox(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseColourInformationBox(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[colr]");
 
     avifColourInformationBox * colr = &prop->u.colr;
     colr->hasICC = AVIF_FALSE;
@@ -1144,16 +1733,9 @@ static avifBool avifParseColourInformationBox(avifProperty * prop, const uint8_t
         colr->icc = avifROStreamCurrent(&s);
         colr->iccSize = avifROStreamRemainingBytes(&s);
     } else if (!memcmp(colorType, "nclx", 4)) {
-        uint16_t tmp16;
-        // unsigned int(16) colour_primaries;
-        CHECK(avifROStreamReadU16(&s, &tmp16));
-        colr->colorPrimaries = (avifColorPrimaries)tmp16;
-        // unsigned int(16) transfer_characteristics;
-        CHECK(avifROStreamReadU16(&s, &tmp16));
-        colr->transferCharacteristics = (avifTransferCharacteristics)tmp16;
-        // unsigned int(16) matrix_coefficients;
-        CHECK(avifROStreamReadU16(&s, &tmp16));
-        colr->matrixCoefficients = (avifMatrixCoefficients)tmp16;
+        CHECK(avifROStreamReadU16(&s, &colr->colorPrimaries));          // unsigned int(16) colour_primaries;
+        CHECK(avifROStreamReadU16(&s, &colr->transferCharacteristics)); // unsigned int(16) transfer_characteristics;
+        CHECK(avifROStreamReadU16(&s, &colr->matrixCoefficients));      // unsigned int(16) matrix_coefficients;
         // unsigned int(1) full_range_flag;
         // unsigned int(7) reserved = 0;
         uint8_t tmp8;
@@ -1164,9 +1746,9 @@ static avifBool avifParseColourInformationBox(avifProperty * prop, const uint8_t
     return AVIF_TRUE;
 }
 
-static avifBool avifParseAV1CodecConfigurationBox(const uint8_t * raw, size_t rawLen, avifCodecConfigurationBox * av1C)
+static avifBool avifParseAV1CodecConfigurationBox(const uint8_t * raw, size_t rawLen, avifCodecConfigurationBox * av1C, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[av1C]");
 
     uint8_t markerAndVersion = 0;
     CHECK(avifROStreamRead(&s, &markerAndVersion, 1));
@@ -1177,6 +1759,7 @@ static avifBool avifParseAV1CodecConfigurationBox(const uint8_t * raw, size_t ra
 
     if (markerAndVersion != 0x81) {
         // Marker and version must both == 1
+        avifDiagnosticsPrintf(diag, "av1C contains illegal marker and version pair: [%u]", markerAndVersion);
         return AVIF_FALSE;
     }
 
@@ -1192,14 +1775,14 @@ static avifBool avifParseAV1CodecConfigurationBox(const uint8_t * raw, size_t ra
     return AVIF_TRUE;
 }
 
-static avifBool avifParseAV1CodecConfigurationBoxProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseAV1CodecConfigurationBoxProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    return avifParseAV1CodecConfigurationBox(raw, rawLen, &prop->u.av1C);
+    return avifParseAV1CodecConfigurationBox(raw, rawLen, &prop->u.av1C, diag);
 }
 
-static avifBool avifParsePixelAspectRatioBoxProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParsePixelAspectRatioBoxProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[pasp]");
 
     avifPixelAspectRatioBox * pasp = &prop->u.pasp;
     CHECK(avifROStreamReadU32(&s, &pasp->hSpacing)); // unsigned int(32) hSpacing;
@@ -1207,9 +1790,9 @@ static avifBool avifParsePixelAspectRatioBoxProperty(avifProperty * prop, const 
     return AVIF_TRUE;
 }
 
-static avifBool avifParseCleanApertureBoxProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseCleanApertureBoxProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[clap]");
 
     avifCleanApertureBox * clap = &prop->u.clap;
     CHECK(avifROStreamReadU32(&s, &clap->widthN));    // unsigned int(32) cleanApertureWidthN;
@@ -1223,40 +1806,43 @@ static avifBool avifParseCleanApertureBoxProperty(avifProperty * prop, const uin
     return AVIF_TRUE;
 }
 
-static avifBool avifParseImageRotationProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseImageRotationProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[irot]");
 
     avifImageRotation * irot = &prop->u.irot;
     CHECK(avifROStreamRead(&s, &irot->angle, 1)); // unsigned int (6) reserved = 0; unsigned int (2) angle;
     if ((irot->angle & 0xfc) != 0) {
         // reserved bits must be 0
+        avifDiagnosticsPrintf(diag, "Box[irot] contains nonzero reserved bits [%u]", irot->angle);
         return AVIF_FALSE;
     }
     return AVIF_TRUE;
 }
 
-static avifBool avifParseImageMirrorProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseImageMirrorProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[imir]");
 
     avifImageMirror * imir = &prop->u.imir;
-    CHECK(avifROStreamRead(&s, &imir->axis, 1)); // unsigned int (7) reserved = 0; unsigned int (1) axis;
-    if ((imir->axis & 0xfe) != 0) {
+    CHECK(avifROStreamRead(&s, &imir->mode, 1)); // unsigned int (7) reserved = 0; unsigned int (1) mode;
+    if ((imir->mode & 0xfe) != 0) {
         // reserved bits must be 0
+        avifDiagnosticsPrintf(diag, "Box[imir] contains nonzero reserved bits [%u]", imir->mode);
         return AVIF_FALSE;
     }
     return AVIF_TRUE;
 }
 
-static avifBool avifParsePixelInformationProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen)
+static avifBool avifParsePixelInformationProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[pixi]");
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
     avifPixelInformationProperty * pixi = &prop->u.pixi;
     CHECK(avifROStreamRead(&s, &pixi->planeCount, 1)); // unsigned int (8) num_channels;
     if (pixi->planeCount > MAX_PIXI_PLANE_DEPTHS) {
+        avifDiagnosticsPrintf(diag, "Box[pixi] contains unsupported plane count [%u]", pixi->planeCount);
         return AVIF_FALSE;
     }
     for (uint8_t i = 0; i < pixi->planeCount; ++i) {
@@ -1265,9 +1851,62 @@ static avifBool avifParsePixelInformationProperty(avifProperty * prop, const uin
     return AVIF_TRUE;
 }
 
-static avifBool avifParseItemPropertyContainerBox(avifPropertyArray * properties, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseOperatingPointSelectorProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[a1op]");
+
+    avifOperatingPointSelectorProperty * a1op = &prop->u.a1op;
+    CHECK(avifROStreamRead(&s, &a1op->opIndex, 1));
+    if (a1op->opIndex > 31) { // 31 is AV1's max operating point value
+        avifDiagnosticsPrintf(diag, "Box[a1op] contains an unsupported operating point [%u]", a1op->opIndex);
+        return AVIF_FALSE;
+    }
+    return AVIF_TRUE;
+}
+
+static avifBool avifParseLayerSelectorProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
+{
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[lsel]");
+
+    avifLayerSelectorProperty * lsel = &prop->u.lsel;
+    CHECK(avifROStreamReadU16(&s, &lsel->layerID));
+    if (lsel->layerID >= MAX_AV1_LAYER_COUNT) {
+        avifDiagnosticsPrintf(diag, "Box[lsel] contains an unsupported layer [%u]", lsel->layerID);
+        return AVIF_FALSE;
+    }
+    return AVIF_TRUE;
+}
+
+static avifBool avifParseAV1LayeredImageIndexingProperty(avifProperty * prop, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
+{
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[a1lx]");
+
+    avifAV1LayeredImageIndexingProperty * a1lx = &prop->u.a1lx;
+
+    uint8_t largeSize = 0;
+    CHECK(avifROStreamRead(&s, &largeSize, 1));
+    if (largeSize & 0xFE) {
+        avifDiagnosticsPrintf(diag, "Box[a1lx] has bits set in the reserved section [%u]", largeSize);
+        return AVIF_FALSE;
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        if (largeSize) {
+            CHECK(avifROStreamReadU32(&s, &a1lx->layerSize[i]));
+        } else {
+            uint16_t layerSize16;
+            CHECK(avifROStreamReadU16(&s, &layerSize16));
+            a1lx->layerSize[i] = (uint32_t)layerSize16;
+        }
+    }
+
+    // Layer sizes will be validated layer (when the item's size is known)
+    return AVIF_TRUE;
+}
+
+static avifBool avifParseItemPropertyContainerBox(avifPropertyArray * properties, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
+{
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[ipco]");
 
     while (avifROStreamHasBytesLeft(&s, 1)) {
         avifBoxHeader header;
@@ -1277,23 +1916,29 @@ static avifBool avifParseItemPropertyContainerBox(avifPropertyArray * properties
         avifProperty * prop = &properties->prop[propertyIndex];
         memcpy(prop->type, header.type, 4);
         if (!memcmp(header.type, "ispe", 4)) {
-            CHECK(avifParseImageSpatialExtentsProperty(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseImageSpatialExtentsProperty(prop, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "auxC", 4)) {
-            CHECK(avifParseAuxiliaryTypeProperty(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseAuxiliaryTypeProperty(prop, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "colr", 4)) {
-            CHECK(avifParseColourInformationBox(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseColourInformationBox(prop, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "av1C", 4)) {
-            CHECK(avifParseAV1CodecConfigurationBoxProperty(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseAV1CodecConfigurationBoxProperty(prop, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "pasp", 4)) {
-            CHECK(avifParsePixelAspectRatioBoxProperty(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParsePixelAspectRatioBoxProperty(prop, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "clap", 4)) {
-            CHECK(avifParseCleanApertureBoxProperty(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseCleanApertureBoxProperty(prop, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "irot", 4)) {
-            CHECK(avifParseImageRotationProperty(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseImageRotationProperty(prop, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "imir", 4)) {
-            CHECK(avifParseImageMirrorProperty(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseImageMirrorProperty(prop, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "pixi", 4)) {
-            CHECK(avifParsePixelInformationProperty(prop, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParsePixelInformationProperty(prop, avifROStreamCurrent(&s), header.size, diag));
+        } else if (!memcmp(header.type, "a1op", 4)) {
+            CHECK(avifParseOperatingPointSelectorProperty(prop, avifROStreamCurrent(&s), header.size, diag));
+        } else if (!memcmp(header.type, "lsel", 4)) {
+            CHECK(avifParseLayerSelectorProperty(prop, avifROStreamCurrent(&s), header.size, diag));
+        } else if (!memcmp(header.type, "a1lx", 4)) {
+            CHECK(avifParseAV1LayeredImageIndexingProperty(prop, avifROStreamCurrent(&s), header.size, diag));
         }
 
         CHECK(avifROStreamSkip(&s, header.size));
@@ -1301,18 +1946,26 @@ static avifBool avifParseItemPropertyContainerBox(avifPropertyArray * properties
     return AVIF_TRUE;
 }
 
-static avifBool avifParseItemPropertyAssociation(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseItemPropertyAssociation(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag, uint32_t * outVersionAndFlags)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    // NOTE: If this function ever adds support for versions other than [0,1] or flags other than
+    //       [0,1], please increase the value of MAX_IPMA_VERSION_AND_FLAGS_SEEN accordingly.
+
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[ipma]");
 
     uint8_t version;
     uint32_t flags;
     CHECK(avifROStreamReadVersionAndFlags(&s, &version, &flags));
     avifBool propertyIndexIsU16 = ((flags & 0x1) != 0);
+    *outVersionAndFlags = ((uint32_t)version << 24) | flags;
 
     uint32_t entryCount;
     CHECK(avifROStreamReadU32(&s, &entryCount));
+    unsigned int prevItemID = 0;
     for (uint32_t entryIndex = 0; entryIndex < entryCount; ++entryIndex) {
+        // ISO/IEC 23008-12, First edition, 2017-12, Section 9.3.1:
+        //   Each ItemPropertyAssociation box shall be ordered by increasing item_ID, and there shall
+        //   be at most one association box for each item_ID, in any ItemPropertyAssociation box.
         unsigned int itemID;
         if (version < 1) {
             uint16_t tmp;
@@ -1321,6 +1974,23 @@ static avifBool avifParseItemPropertyAssociation(avifMeta * meta, const uint8_t 
         } else {
             CHECK(avifROStreamReadU32(&s, &itemID));
         }
+        if (itemID <= prevItemID) {
+            avifDiagnosticsPrintf(diag, "Box[ipma] item IDs are not ordered by increasing ID");
+            return AVIF_FALSE;
+        }
+        prevItemID = itemID;
+
+        avifDecoderItem * item = avifMetaFindItem(meta, itemID);
+        if (!item) {
+            avifDiagnosticsPrintf(diag, "Box[ipma] has an invalid item ID [%u]", itemID);
+            return AVIF_FALSE;
+        }
+        if (item->ipmaSeen) {
+            avifDiagnosticsPrintf(diag, "Duplicate Box[ipma] for item ID [%u]", itemID);
+            return AVIF_FALSE;
+        }
+        item->ipmaSeen = AVIF_TRUE;
+
         uint8_t associationCount;
         CHECK(avifROStreamRead(&s, &associationCount, 1));
         for (uint8_t associationIndex = 0; associationIndex < associationCount; ++associationIndex) {
@@ -1344,18 +2014,19 @@ static avifBool avifParseItemPropertyAssociation(avifMeta * meta, const uint8_t 
             --propertyIndex; // 1-indexed
 
             if (propertyIndex >= meta->properties.count) {
-                return AVIF_FALSE;
-            }
-
-            avifDecoderItem * item = avifMetaFindItem(meta, itemID);
-            if (!item) {
+                avifDiagnosticsPrintf(diag,
+                                      "Box[ipma] for item ID [%u] contains an illegal property index [%u] (out of [%u] properties)",
+                                      itemID,
+                                      propertyIndex,
+                                      meta->properties.count);
                 return AVIF_FALSE;
             }
 
             // Copy property to item
-            avifProperty * srcProp = &meta->properties.prop[propertyIndex];
+            const avifProperty * srcProp = &meta->properties.prop[propertyIndex];
 
-            static const char * supportedTypes[] = { "ispe", "auxC", "colr", "av1C", "pasp", "clap", "irot", "imir", "pixi" };
+            static const char * supportedTypes[] = { "ispe", "auxC", "colr", "av1C", "pasp", "clap",
+                                                     "irot", "imir", "pixi", "a1op", "lsel", "a1lx" };
             size_t supportedTypesCount = sizeof(supportedTypes) / sizeof(supportedTypes[0]);
             avifBool supportedType = AVIF_FALSE;
             for (size_t i = 0; i < supportedTypesCount; ++i) {
@@ -1365,8 +2036,54 @@ static avifBool avifParseItemPropertyAssociation(avifMeta * meta, const uint8_t 
                 }
             }
             if (supportedType) {
+                if (essential) {
+                    // Verify that it is legal for this property to be flagged as essential. Any
+                    // types in this list are *required* in the spec to not be flagged as essential
+                    // when associated with an item.
+                    static const char * const nonessentialTypes[] = {
+
+                        // AVIF: Section 2.3.2.3.2: "If associated, it shall not be marked as essential."
+                        "a1lx"
+
+                    };
+                    size_t nonessentialTypesCount = sizeof(nonessentialTypes) / sizeof(nonessentialTypes[0]);
+                    for (size_t i = 0; i < nonessentialTypesCount; ++i) {
+                        if (!memcmp(srcProp->type, nonessentialTypes[i], 4)) {
+                            avifDiagnosticsPrintf(diag,
+                                                  "Item ID [%u] has a %s property association which must not be marked essential, but is",
+                                                  itemID,
+                                                  nonessentialTypes[i]);
+                            return AVIF_FALSE;
+                        }
+                    }
+                } else {
+                    // Verify that it is legal for this property to not be flagged as essential. Any
+                    // types in this list are *required* in the spec to be flagged as essential when
+                    // associated with an item.
+                    static const char * const essentialTypes[] = {
+
+                        // AVIF: Section 2.3.2.1.1: "If associated, it shall be marked as essential."
+                        "a1op",
+
+                        // HEIF: Section 6.5.11.1: "essential shall be equal to 1 for an 'lsel' item property."
+                        "lsel"
+
+                    };
+                    size_t essentialTypesCount = sizeof(essentialTypes) / sizeof(essentialTypes[0]);
+                    for (size_t i = 0; i < essentialTypesCount; ++i) {
+                        if (!memcmp(srcProp->type, essentialTypes[i], 4)) {
+                            avifDiagnosticsPrintf(diag,
+                                                  "Item ID [%u] has a %s property association which must be marked essential, but is not",
+                                                  itemID,
+                                                  essentialTypes[i]);
+                            return AVIF_FALSE;
+                        }
+                    }
+                }
+
+                // Supported and valid; associate it with this item.
                 avifProperty * dstProp = (avifProperty *)avifArrayPushPtr(&item->properties);
-                memcpy(dstProp, srcProp, sizeof(avifProperty));
+                *dstProp = *srcProp;
             } else {
                 if (essential) {
                     // Discovered an essential item property that libavif doesn't support!
@@ -1376,18 +2093,18 @@ static avifBool avifParseItemPropertyAssociation(avifMeta * meta, const uint8_t 
             }
         }
     }
-
     return AVIF_TRUE;
 }
 
-static avifBool avifParsePrimaryItemBox(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParsePrimaryItemBox(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
     if (meta->primaryItemID > 0) {
         // Illegal to have multiple pitm boxes, bail out
+        avifDiagnosticsPrintf(diag, "Multiple boxes of unique Box[pitm] found");
         return AVIF_FALSE;
     }
 
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[pitm]");
 
     uint8_t version;
     CHECK(avifROStreamReadVersionAndFlags(&s, &version, NULL));
@@ -1402,36 +2119,39 @@ static avifBool avifParsePrimaryItemBox(avifMeta * meta, const uint8_t * raw, si
     return AVIF_TRUE;
 }
 
-static avifBool avifParseItemDataBox(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseItemDataBox(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
     // Check to see if we've already seen an idat box for this meta box. If so, bail out
-    for (uint32_t i = 0; i < meta->idats.count; ++i) {
-        if (meta->idats.idat[i].id == meta->idatID) {
-            return AVIF_FALSE;
-        }
+    if (meta->idat.size > 0) {
+        avifDiagnosticsPrintf(diag, "Meta box contains multiple idat boxes");
+        return AVIF_FALSE;
+    }
+    if (rawLen == 0) {
+        avifDiagnosticsPrintf(diag, "idat box has a length of 0");
+        return AVIF_FALSE;
     }
 
-    int index = avifArrayPushIndex(&meta->idats);
-    avifDecoderItemData * idat = &meta->idats.idat[index];
-    idat->id = meta->idatID;
-    idat->data.data = raw;
-    idat->data.size = rawLen;
+    avifRWDataSet(&meta->idat, raw, rawLen);
     return AVIF_TRUE;
 }
 
-static avifBool avifParseItemPropertiesBox(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseItemPropertiesBox(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[iprp]");
 
     avifBoxHeader ipcoHeader;
     CHECK(avifROStreamReadBoxHeader(&s, &ipcoHeader));
     if (memcmp(ipcoHeader.type, "ipco", 4)) {
+        avifDiagnosticsPrintf(diag, "Failed to find Box[ipco] as the first box in Box[iprp]");
         return AVIF_FALSE;
     }
 
     // Read all item properties inside of ItemPropertyContainerBox
-    CHECK(avifParseItemPropertyContainerBox(&meta->properties, avifROStreamCurrent(&s), ipcoHeader.size));
+    CHECK(avifParseItemPropertyContainerBox(&meta->properties, avifROStreamCurrent(&s), ipcoHeader.size, diag));
     CHECK(avifROStreamSkip(&s, ipcoHeader.size));
+
+    uint32_t versionAndFlagsSeen[MAX_IPMA_VERSION_AND_FLAGS_SEEN];
+    uint32_t versionAndFlagsSeenCount = 0;
 
     // Now read all ItemPropertyAssociation until the end of the box, and make associations
     while (avifROStreamHasBytesLeft(&s, 1)) {
@@ -1439,9 +2159,26 @@ static avifBool avifParseItemPropertiesBox(avifMeta * meta, const uint8_t * raw,
         CHECK(avifROStreamReadBoxHeader(&s, &ipmaHeader));
 
         if (!memcmp(ipmaHeader.type, "ipma", 4)) {
-            CHECK(avifParseItemPropertyAssociation(meta, avifROStreamCurrent(&s), ipmaHeader.size));
+            uint32_t versionAndFlags;
+            CHECK(avifParseItemPropertyAssociation(meta, avifROStreamCurrent(&s), ipmaHeader.size, diag, &versionAndFlags));
+            for (uint32_t i = 0; i < versionAndFlagsSeenCount; ++i) {
+                if (versionAndFlagsSeen[i] == versionAndFlags) {
+                    // HEIF (ISO 23008-12:2017) 9.3.1 - There shall be at most one
+                    // ItemPropertyAssociation box with a given pair of values of version and
+                    // flags.
+                    avifDiagnosticsPrintf(diag, "Multiple Box[ipma] with a given pair of values of version and flags. See HEIF (ISO 23008-12:2017) 9.3.1");
+                    return AVIF_FALSE;
+                }
+            }
+            if (versionAndFlagsSeenCount == MAX_IPMA_VERSION_AND_FLAGS_SEEN) {
+                avifDiagnosticsPrintf(diag, "Exceeded possible count of unique ipma version and flags tuples");
+                return AVIF_FALSE;
+            }
+            versionAndFlagsSeen[versionAndFlagsSeenCount] = versionAndFlags;
+            ++versionAndFlagsSeenCount;
         } else {
             // These must all be type ipma
+            avifDiagnosticsPrintf(diag, "Box[iprp] contains a box that isn't type 'ipma'");
             return AVIF_FALSE;
         }
 
@@ -1450,14 +2187,39 @@ static avifBool avifParseItemPropertiesBox(avifMeta * meta, const uint8_t * raw,
     return AVIF_TRUE;
 }
 
-static avifBool avifParseItemInfoEntry(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseItemInfoEntry(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[infe]");
 
-    CHECK(avifROStreamReadAndEnforceVersion(&s, 2)); // TODO: support version > 2? 2+ is required for item_type
+    uint8_t version;
+    uint32_t flags;
+    CHECK(avifROStreamReadVersionAndFlags(&s, &version, &flags));
+    // Version 2+ is required for item_type
+    if (version != 2 && version != 3) {
+        avifDiagnosticsPrintf(s.diag, "%s: Expecting box version 2 or 3, got version %u", s.diagContext, version);
+        return AVIF_FALSE;
+    }
+    // TODO: check flags. ISO/IEC 23008-12:2017, Section 9.2 says:
+    //   The flags field of ItemInfoEntry with version greater than or equal to 2 is specified as
+    //   follows:
+    //
+    //   (flags & 1) equal to 1 indicates that the item is not intended to be a part of the
+    //   presentation. For example, when (flags & 1) is equal to 1 for an image item, the image
+    //   item should not be displayed.
+    //   (flags & 1) equal to 0 indicates that the item is intended to be a part of the
+    //   presentation.
+    //
+    // See also Section 6.4.2.
 
-    uint16_t itemID;                                      // unsigned int(16) item_ID;
-    CHECK(avifROStreamReadU16(&s, &itemID));              //
+    uint32_t itemID;
+    if (version == 2) {
+        uint16_t tmp;
+        CHECK(avifROStreamReadU16(&s, &tmp)); // unsigned int(16) item_ID;
+        itemID = tmp;
+    } else {
+        assert(version == 3);
+        CHECK(avifROStreamReadU32(&s, &itemID)); // unsigned int(32) item_ID;
+    }
     uint16_t itemProtectionIndex;                         // unsigned int(16) item_protection_index;
     CHECK(avifROStreamReadU16(&s, &itemProtectionIndex)); //
     uint8_t itemType[4];                                  // unsigned int(32) item_type;
@@ -1473,17 +2235,18 @@ static avifBool avifParseItemInfoEntry(avifMeta * meta, const uint8_t * raw, siz
 
     avifDecoderItem * item = avifMetaFindItem(meta, itemID);
     if (!item) {
+        avifDiagnosticsPrintf(diag, "Box[infe] has an invalid item ID [%u]", itemID);
         return AVIF_FALSE;
     }
 
     memcpy(item->type, itemType, sizeof(itemType));
-    memcpy(&item->contentType, &contentType, sizeof(contentType));
+    item->contentType = contentType;
     return AVIF_TRUE;
 }
 
-static avifBool avifParseItemInfoBox(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseItemInfoBox(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[iinf]");
 
     uint8_t version;
     CHECK(avifROStreamReadVersionAndFlags(&s, &version, NULL));
@@ -1495,6 +2258,7 @@ static avifBool avifParseItemInfoBox(avifMeta * meta, const uint8_t * raw, size_
     } else if (version == 1) {
         CHECK(avifROStreamReadU32(&s, &entryCount)); // unsigned int(32) entry_count;
     } else {
+        avifDiagnosticsPrintf(diag, "Box[iinf] has an unsupported version %u", version);
         return AVIF_FALSE;
     }
 
@@ -1503,9 +2267,10 @@ static avifBool avifParseItemInfoBox(avifMeta * meta, const uint8_t * raw, size_
         CHECK(avifROStreamReadBoxHeader(&s, &infeHeader));
 
         if (!memcmp(infeHeader.type, "infe", 4)) {
-            CHECK(avifParseItemInfoEntry(meta, avifROStreamCurrent(&s), infeHeader.size));
+            CHECK(avifParseItemInfoEntry(meta, avifROStreamCurrent(&s), infeHeader.size, diag));
         } else {
-            // These must all be type ipma
+            // These must all be type infe
+            avifDiagnosticsPrintf(diag, "Box[iinf] contains a box that isn't type 'infe'");
             return AVIF_FALSE;
         }
 
@@ -1515,9 +2280,9 @@ static avifBool avifParseItemInfoBox(avifMeta * meta, const uint8_t * raw, size_
     return AVIF_TRUE;
 }
 
-static avifBool avifParseItemReferenceBox(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseItemReferenceBox(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[iref]");
 
     uint8_t version;
     CHECK(avifROStreamReadVersionAndFlags(&s, &version, NULL));
@@ -1558,26 +2323,27 @@ static avifBool avifParseItemReferenceBox(avifMeta * meta, const uint8_t * raw, 
             if (fromID && toID) {
                 avifDecoderItem * item = avifMetaFindItem(meta, fromID);
                 if (!item) {
+                    avifDiagnosticsPrintf(diag, "Box[iref] has an invalid item ID [%u]", fromID);
                     return AVIF_FALSE;
                 }
 
                 if (!memcmp(irefHeader.type, "thmb", 4)) {
                     item->thumbnailForID = toID;
-                }
-                if (!memcmp(irefHeader.type, "auxl", 4)) {
+                } else if (!memcmp(irefHeader.type, "auxl", 4)) {
                     item->auxForID = toID;
-                }
-                if (!memcmp(irefHeader.type, "cdsc", 4)) {
+                } else if (!memcmp(irefHeader.type, "cdsc", 4)) {
                     item->descForID = toID;
-                }
-                if (!memcmp(irefHeader.type, "dimg", 4)) {
+                } else if (!memcmp(irefHeader.type, "dimg", 4)) {
                     // derived images refer in the opposite direction
                     avifDecoderItem * dimg = avifMetaFindItem(meta, toID);
                     if (!dimg) {
+                        avifDiagnosticsPrintf(diag, "Box[iref] has an invalid item ID dimg ref [%u]", toID);
                         return AVIF_FALSE;
                     }
 
                     dimg->dimgForID = fromID;
+                } else if (!memcmp(irefHeader.type, "prem", 4)) {
+                    item->premByID = toID;
                 }
             }
         }
@@ -1586,47 +2352,63 @@ static avifBool avifParseItemReferenceBox(avifMeta * meta, const uint8_t * raw, 
     return AVIF_TRUE;
 }
 
-static avifBool avifParseMetaBox(avifMeta * meta, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseMetaBox(avifMeta * meta, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[meta]");
 
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
     ++meta->idatID; // for tracking idat
 
+    avifBool firstBox = AVIF_TRUE;
     uint32_t uniqueBoxFlags = 0;
     while (avifROStreamHasBytesLeft(&s, 1)) {
         avifBoxHeader header;
         CHECK(avifROStreamReadBoxHeader(&s, &header));
 
-        if (!memcmp(header.type, "iloc", 4)) {
-            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 0));
-            CHECK(avifParseItemLocationBox(meta, avifROStreamCurrent(&s), header.size));
+        if (firstBox) {
+            if (!memcmp(header.type, "hdlr", 4)) {
+                CHECK(uniqueBoxSeen(&uniqueBoxFlags, 0, "meta", "hdlr", diag));
+                CHECK(avifParseHandlerBox(avifROStreamCurrent(&s), header.size, diag));
+                firstBox = AVIF_FALSE;
+            } else {
+                // hdlr must be the first box!
+                avifDiagnosticsPrintf(diag, "Box[meta] does not have a Box[hdlr] as its first child box");
+                return AVIF_FALSE;
+            }
+        } else if (!memcmp(header.type, "iloc", 4)) {
+            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 1, "meta", "iloc", diag));
+            CHECK(avifParseItemLocationBox(meta, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "pitm", 4)) {
-            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 1));
-            CHECK(avifParsePrimaryItemBox(meta, avifROStreamCurrent(&s), header.size));
+            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 2, "meta", "pitm", diag));
+            CHECK(avifParsePrimaryItemBox(meta, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "idat", 4)) {
-            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 2));
-            CHECK(avifParseItemDataBox(meta, avifROStreamCurrent(&s), header.size));
+            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 3, "meta", "idat", diag));
+            CHECK(avifParseItemDataBox(meta, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "iprp", 4)) {
-            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 3));
-            CHECK(avifParseItemPropertiesBox(meta, avifROStreamCurrent(&s), header.size));
+            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 4, "meta", "iprp", diag));
+            CHECK(avifParseItemPropertiesBox(meta, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "iinf", 4)) {
-            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 4));
-            CHECK(avifParseItemInfoBox(meta, avifROStreamCurrent(&s), header.size));
+            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 5, "meta", "iinf", diag));
+            CHECK(avifParseItemInfoBox(meta, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "iref", 4)) {
-            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 5));
-            CHECK(avifParseItemReferenceBox(meta, avifROStreamCurrent(&s), header.size));
+            CHECK(uniqueBoxSeen(&uniqueBoxFlags, 6, "meta", "iref", diag));
+            CHECK(avifParseItemReferenceBox(meta, avifROStreamCurrent(&s), header.size, diag));
         }
 
         CHECK(avifROStreamSkip(&s, header.size));
     }
+    if (firstBox) {
+        // The meta box must not be empty (it must contain at least a hdlr box)
+        avifDiagnosticsPrintf(diag, "Box[meta] has no child boxes");
+        return AVIF_FALSE;
+    }
     return AVIF_TRUE;
 }
 
-static avifBool avifParseTrackHeaderBox(avifTrack * track, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseTrackHeaderBox(avifTrack * track, const uint8_t * raw, size_t rawLen, uint32_t imageSizeLimit, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[tkhd]");
 
     uint8_t version;
     CHECK(avifROStreamReadVersionAndFlags(&s, &version, NULL));
@@ -1647,6 +2429,7 @@ static avifBool avifParseTrackHeaderBox(avifTrack * track, const uint8_t * raw, 
         CHECK(avifROStreamReadU32(&s, &ignored32)); // unsigned int(32) duration;
     } else {
         // Unsupported version
+        avifDiagnosticsPrintf(diag, "Box[tkhd] has an unsupported version [%u]", version);
         return AVIF_FALSE;
     }
 
@@ -1666,15 +2449,24 @@ static avifBool avifParseTrackHeaderBox(avifTrack * track, const uint8_t * raw, 
     track->width = width >> 16;
     track->height = height >> 16;
 
+    if ((track->width == 0) || (track->height == 0)) {
+        avifDiagnosticsPrintf(diag, "Track ID [%u] has an invalid size [%ux%u]", track->id, track->width, track->height);
+        return AVIF_FALSE;
+    }
+    if (track->width > (imageSizeLimit / track->height)) {
+        avifDiagnosticsPrintf(diag, "Track ID [%u] size is too large [%ux%u]", track->id, track->width, track->height);
+        return AVIF_FALSE;
+    }
+
     // TODO: support scaling based on width/height track header info?
 
     track->id = trackID;
     return AVIF_TRUE;
 }
 
-static avifBool avifParseMediaHeaderBox(avifTrack * track, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseMediaHeaderBox(avifTrack * track, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[mdhd]");
 
     uint8_t version;
     CHECK(avifROStreamReadVersionAndFlags(&s, &version, NULL));
@@ -1695,6 +2487,7 @@ static avifBool avifParseMediaHeaderBox(avifTrack * track, const uint8_t * raw, 
         track->mediaDuration = (uint64_t)mediaDuration32;
     } else {
         // Unsupported version
+        avifDiagnosticsPrintf(diag, "Box[mdhd] has an unsupported version [%u]", version);
         return AVIF_FALSE;
     }
 
@@ -1702,9 +2495,9 @@ static avifBool avifParseMediaHeaderBox(avifTrack * track, const uint8_t * raw, 
     return AVIF_TRUE;
 }
 
-static avifBool avifParseChunkOffsetBox(avifSampleTable * sampleTable, avifBool largeOffsets, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseChunkOffsetBox(avifSampleTable * sampleTable, avifBool largeOffsets, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, largeOffsets ? "Box[co64]" : "Box[stco]");
 
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
@@ -1726,26 +2519,40 @@ static avifBool avifParseChunkOffsetBox(avifSampleTable * sampleTable, avifBool 
     return AVIF_TRUE;
 }
 
-static avifBool avifParseSampleToChunkBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseSampleToChunkBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[stsc]");
 
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
     uint32_t entryCount;
     CHECK(avifROStreamReadU32(&s, &entryCount)); // unsigned int(32) entry_count;
+    uint32_t prevFirstChunk = 0;
     for (uint32_t i = 0; i < entryCount; ++i) {
         avifSampleTableSampleToChunk * sampleToChunk = (avifSampleTableSampleToChunk *)avifArrayPushPtr(&sampleTable->sampleToChunks);
         CHECK(avifROStreamReadU32(&s, &sampleToChunk->firstChunk));             // unsigned int(32) first_chunk;
         CHECK(avifROStreamReadU32(&s, &sampleToChunk->samplesPerChunk));        // unsigned int(32) samples_per_chunk;
         CHECK(avifROStreamReadU32(&s, &sampleToChunk->sampleDescriptionIndex)); // unsigned int(32) sample_description_index;
+        // The first_chunk fields should start with 1 and be strictly increasing.
+        if (i == 0) {
+            if (sampleToChunk->firstChunk != 1) {
+                avifDiagnosticsPrintf(diag, "Box[stsc] does not begin with chunk 1 [%u]", sampleToChunk->firstChunk);
+                return AVIF_FALSE;
+            }
+        } else {
+            if (sampleToChunk->firstChunk <= prevFirstChunk) {
+                avifDiagnosticsPrintf(diag, "Box[stsc] chunks are not strictly increasing");
+                return AVIF_FALSE;
+            }
+        }
+        prevFirstChunk = sampleToChunk->firstChunk;
     }
     return AVIF_TRUE;
 }
 
-static avifBool avifParseSampleSizeBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseSampleSizeBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[stsz]");
 
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
@@ -1764,9 +2571,9 @@ static avifBool avifParseSampleSizeBox(avifSampleTable * sampleTable, const uint
     return AVIF_TRUE;
 }
 
-static avifBool avifParseSyncSampleBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseSyncSampleBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[stss]");
 
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
@@ -1782,9 +2589,9 @@ static avifBool avifParseSyncSampleBox(avifSampleTable * sampleTable, const uint
     return AVIF_TRUE;
 }
 
-static avifBool avifParseTimeToSampleBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseTimeToSampleBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[stts]");
 
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
@@ -1799,9 +2606,9 @@ static avifBool avifParseTimeToSampleBox(avifSampleTable * sampleTable, const ui
     return AVIF_TRUE;
 }
 
-static avifBool avifParseSampleDescriptionBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseSampleDescriptionBox(avifSampleTable * sampleTable, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[stsd]");
 
     CHECK(avifROStreamReadAndEnforceVersion(&s, 0));
 
@@ -1813,12 +2620,17 @@ static avifBool avifParseSampleDescriptionBox(avifSampleTable * sampleTable, con
         CHECK(avifROStreamReadBoxHeader(&s, &sampleEntryHeader));
 
         avifSampleDescription * description = (avifSampleDescription *)avifArrayPushPtr(&sampleTable->sampleDescriptions);
-        avifArrayCreate(&description->properties, sizeof(avifProperty), 16);
+        if (!avifArrayCreate(&description->properties, sizeof(avifProperty), 16)) {
+            avifArrayPop(&sampleTable->sampleDescriptions);
+            return AVIF_FALSE;
+        }
         memcpy(description->format, sampleEntryHeader.type, sizeof(description->format));
         size_t remainingBytes = avifROStreamRemainingBytes(&s);
         if (!memcmp(description->format, "av01", 4) && (remainingBytes > VISUALSAMPLEENTRY_SIZE)) {
-            CHECK(avifParseItemPropertyContainerBox(
-                &description->properties, avifROStreamCurrent(&s) + VISUALSAMPLEENTRY_SIZE, remainingBytes - VISUALSAMPLEENTRY_SIZE));
+            CHECK(avifParseItemPropertyContainerBox(&description->properties,
+                                                    avifROStreamCurrent(&s) + VISUALSAMPLEENTRY_SIZE,
+                                                    remainingBytes - VISUALSAMPLEENTRY_SIZE,
+                                                    diag));
         }
 
         CHECK(avifROStreamSkip(&s, sampleEntryHeader.size));
@@ -1826,34 +2638,35 @@ static avifBool avifParseSampleDescriptionBox(avifSampleTable * sampleTable, con
     return AVIF_TRUE;
 }
 
-static avifBool avifParseSampleTableBox(avifTrack * track, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseSampleTableBox(avifTrack * track, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
     if (track->sampleTable) {
         // A TrackBox may only have one SampleTable
+        avifDiagnosticsPrintf(diag, "Duplicate Box[stbl] for a single track detected");
         return AVIF_FALSE;
     }
     track->sampleTable = avifSampleTableCreate();
 
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[stbl]");
 
     while (avifROStreamHasBytesLeft(&s, 1)) {
         avifBoxHeader header;
         CHECK(avifROStreamReadBoxHeader(&s, &header));
 
         if (!memcmp(header.type, "stco", 4)) {
-            CHECK(avifParseChunkOffsetBox(track->sampleTable, AVIF_FALSE, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseChunkOffsetBox(track->sampleTable, AVIF_FALSE, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "co64", 4)) {
-            CHECK(avifParseChunkOffsetBox(track->sampleTable, AVIF_TRUE, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseChunkOffsetBox(track->sampleTable, AVIF_TRUE, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "stsc", 4)) {
-            CHECK(avifParseSampleToChunkBox(track->sampleTable, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseSampleToChunkBox(track->sampleTable, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "stsz", 4)) {
-            CHECK(avifParseSampleSizeBox(track->sampleTable, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseSampleSizeBox(track->sampleTable, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "stss", 4)) {
-            CHECK(avifParseSyncSampleBox(track->sampleTable, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseSyncSampleBox(track->sampleTable, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "stts", 4)) {
-            CHECK(avifParseTimeToSampleBox(track->sampleTable, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseTimeToSampleBox(track->sampleTable, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "stsd", 4)) {
-            CHECK(avifParseSampleDescriptionBox(track->sampleTable, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseSampleDescriptionBox(track->sampleTable, avifROStreamCurrent(&s), header.size, diag));
         }
 
         CHECK(avifROStreamSkip(&s, header.size));
@@ -1861,16 +2674,16 @@ static avifBool avifParseSampleTableBox(avifTrack * track, const uint8_t * raw, 
     return AVIF_TRUE;
 }
 
-static avifBool avifParseMediaInformationBox(avifTrack * track, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseMediaInformationBox(avifTrack * track, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[minf]");
 
     while (avifROStreamHasBytesLeft(&s, 1)) {
         avifBoxHeader header;
         CHECK(avifROStreamReadBoxHeader(&s, &header));
 
         if (!memcmp(header.type, "stbl", 4)) {
-            CHECK(avifParseSampleTableBox(track, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseSampleTableBox(track, avifROStreamCurrent(&s), header.size, diag));
         }
 
         CHECK(avifROStreamSkip(&s, header.size));
@@ -1878,18 +2691,18 @@ static avifBool avifParseMediaInformationBox(avifTrack * track, const uint8_t * 
     return AVIF_TRUE;
 }
 
-static avifBool avifParseMediaBox(avifTrack * track, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseMediaBox(avifTrack * track, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[mdia]");
 
     while (avifROStreamHasBytesLeft(&s, 1)) {
         avifBoxHeader header;
         CHECK(avifROStreamReadBoxHeader(&s, &header));
 
         if (!memcmp(header.type, "mdhd", 4)) {
-            CHECK(avifParseMediaHeaderBox(track, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseMediaHeaderBox(track, avifROStreamCurrent(&s), header.size, diag));
         } else if (!memcmp(header.type, "minf", 4)) {
-            CHECK(avifParseMediaInformationBox(track, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseMediaInformationBox(track, avifROStreamCurrent(&s), header.size, diag));
         }
 
         CHECK(avifROStreamSkip(&s, header.size));
@@ -1897,9 +2710,9 @@ static avifBool avifParseMediaBox(avifTrack * track, const uint8_t * raw, size_t
     return AVIF_TRUE;
 }
 
-static avifBool avifTrackReferenceBox(avifTrack * track, const uint8_t * raw, size_t rawLen)
+static avifBool avifTrackReferenceBox(avifTrack * track, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[tref]");
 
     while (avifROStreamHasBytesLeft(&s, 1)) {
         avifBoxHeader header;
@@ -1907,9 +2720,14 @@ static avifBool avifTrackReferenceBox(avifTrack * track, const uint8_t * raw, si
 
         if (!memcmp(header.type, "auxl", 4)) {
             uint32_t toID;
-            CHECK(avifROStreamReadU32(&s, &toID));                       // unsigned int(32) track_IDs[]
+            CHECK(avifROStreamReadU32(&s, &toID));                       // unsigned int(32) track_IDs[];
             CHECK(avifROStreamSkip(&s, header.size - sizeof(uint32_t))); // just take the first one
             track->auxForID = toID;
+        } else if (!memcmp(header.type, "prem", 4)) {
+            uint32_t byID;
+            CHECK(avifROStreamReadU32(&s, &byID));                       // unsigned int(32) track_IDs[];
+            CHECK(avifROStreamSkip(&s, header.size - sizeof(uint32_t))); // just take the first one
+            track->premByID = byID;
         } else {
             CHECK(avifROStreamSkip(&s, header.size));
         }
@@ -1917,9 +2735,9 @@ static avifBool avifTrackReferenceBox(avifTrack * track, const uint8_t * raw, si
     return AVIF_TRUE;
 }
 
-static avifBool avifParseTrackBox(avifDecoderData * data, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseTrackBox(avifDecoderData * data, const uint8_t * raw, size_t rawLen, uint32_t imageSizeLimit)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, data->diag, "Box[trak]");
 
     avifTrack * track = avifDecoderDataCreateTrack(data);
 
@@ -1928,13 +2746,13 @@ static avifBool avifParseTrackBox(avifDecoderData * data, const uint8_t * raw, s
         CHECK(avifROStreamReadBoxHeader(&s, &header));
 
         if (!memcmp(header.type, "tkhd", 4)) {
-            CHECK(avifParseTrackHeaderBox(track, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseTrackHeaderBox(track, avifROStreamCurrent(&s), header.size, imageSizeLimit, data->diag));
         } else if (!memcmp(header.type, "meta", 4)) {
-            CHECK(avifParseMetaBox(track->meta, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseMetaBox(track->meta, avifROStreamCurrent(&s), header.size, data->diag));
         } else if (!memcmp(header.type, "mdia", 4)) {
-            CHECK(avifParseMediaBox(track, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseMediaBox(track, avifROStreamCurrent(&s), header.size, data->diag));
         } else if (!memcmp(header.type, "tref", 4)) {
-            CHECK(avifTrackReferenceBox(track, avifROStreamCurrent(&s), header.size));
+            CHECK(avifTrackReferenceBox(track, avifROStreamCurrent(&s), header.size, data->diag));
         }
 
         CHECK(avifROStreamSkip(&s, header.size));
@@ -1942,16 +2760,16 @@ static avifBool avifParseTrackBox(avifDecoderData * data, const uint8_t * raw, s
     return AVIF_TRUE;
 }
 
-static avifBool avifParseMoovBox(avifDecoderData * data, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseMovieBox(avifDecoderData * data, const uint8_t * raw, size_t rawLen, uint32_t imageSizeLimit)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, data->diag, "Box[moov]");
 
     while (avifROStreamHasBytesLeft(&s, 1)) {
         avifBoxHeader header;
         CHECK(avifROStreamReadBoxHeader(&s, &header));
 
         if (!memcmp(header.type, "trak", 4)) {
-            CHECK(avifParseTrackBox(data, avifROStreamCurrent(&s), header.size));
+            CHECK(avifParseTrackBox(data, avifROStreamCurrent(&s), header.size, imageSizeLimit));
         }
 
         CHECK(avifROStreamSkip(&s, header.size));
@@ -1959,15 +2777,16 @@ static avifBool avifParseMoovBox(avifDecoderData * data, const uint8_t * raw, si
     return AVIF_TRUE;
 }
 
-static avifBool avifParseFileTypeBox(avifFileType * ftyp, const uint8_t * raw, size_t rawLen)
+static avifBool avifParseFileTypeBox(avifFileType * ftyp, const uint8_t * raw, size_t rawLen, avifDiagnostics * diag)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    BEGIN_STREAM(s, raw, rawLen, diag, "Box[ftyp]");
 
     CHECK(avifROStreamRead(&s, ftyp->majorBrand, 4));
     CHECK(avifROStreamReadU32(&s, &ftyp->minorVersion));
 
     size_t compatibleBrandsBytes = avifROStreamRemainingBytes(&s);
     if ((compatibleBrandsBytes % 4) != 0) {
+        avifDiagnosticsPrintf(diag, "Box[ftyp] contains a compatible brands section that isn't divisible by 4 [%zu]", compatibleBrandsBytes);
         return AVIF_FALSE;
     }
     ftyp->compatibleBrands = avifROStreamCurrent(&s);
@@ -1977,47 +2796,126 @@ static avifBool avifParseFileTypeBox(avifFileType * ftyp, const uint8_t * raw, s
     return AVIF_TRUE;
 }
 
-static avifBool avifParse(avifDecoderData * data, const uint8_t * raw, size_t rawLen)
+static avifBool avifFileTypeHasBrand(avifFileType * ftyp, const char * brand);
+static avifBool avifFileTypeIsCompatible(avifFileType * ftyp);
+
+static avifResult avifParse(avifDecoder * decoder)
 {
-    BEGIN_STREAM(s, raw, rawLen);
+    // Note: this top-level function is the only avifParse*() function that returns avifResult instead of avifBool.
+    // Be sure to use CHECKERR() in this function with an explicit error result instead of simply using CHECK().
 
-    while (avifROStreamHasBytesLeft(&s, 1)) {
-        avifBoxHeader header;
-        CHECK(avifROStreamReadBoxHeader(&s, &header));
+    avifResult readResult;
+    uint64_t parseOffset = 0;
+    avifDecoderData * data = decoder->data;
+    avifBool ftypSeen = AVIF_FALSE;
+    avifBool metaSeen = AVIF_FALSE;
+    avifBool moovSeen = AVIF_FALSE;
+    avifBool needsMeta = AVIF_FALSE;
+    avifBool needsMoov = AVIF_FALSE;
 
-        if (!memcmp(header.type, "ftyp", 4)) {
-            CHECK(avifParseFileTypeBox(&data->ftyp, avifROStreamCurrent(&s), header.size));
-        } else if (!memcmp(header.type, "meta", 4)) {
-            CHECK(avifParseMetaBox(data->meta, avifROStreamCurrent(&s), header.size));
-        } else if (!memcmp(header.type, "moov", 4)) {
-            CHECK(avifParseMoovBox(data, avifROStreamCurrent(&s), header.size));
+    for (;;) {
+        // Read just enough to get the next box header (a max of 32 bytes)
+        avifROData headerContents;
+        if ((decoder->io->sizeHint > 0) && (parseOffset > decoder->io->sizeHint)) {
+            return AVIF_RESULT_BMFF_PARSE_FAILED;
+        }
+        readResult = decoder->io->read(decoder->io, 0, parseOffset, 32, &headerContents);
+        if (readResult != AVIF_RESULT_OK) {
+            return readResult;
+        }
+        if (!headerContents.size) {
+            // If we got AVIF_RESULT_OK from the reader but received 0 bytes,
+            // we've reached the end of the file with no errors. Hooray!
+            break;
         }
 
-        CHECK(avifROStreamSkip(&s, header.size));
+        // Parse the header, and find out how many bytes it actually was
+        BEGIN_STREAM(headerStream, headerContents.data, headerContents.size, &decoder->diag, "File-level box header");
+        avifBoxHeader header;
+        CHECKERR(avifROStreamReadBoxHeaderPartial(&headerStream, &header), AVIF_RESULT_BMFF_PARSE_FAILED);
+        parseOffset += headerStream.offset;
+        assert((decoder->io->sizeHint == 0) || (parseOffset <= decoder->io->sizeHint));
+
+        // Try to get the remainder of the box, if necessary
+        avifROData boxContents = AVIF_DATA_EMPTY;
+
+        // TODO: reorg this code to only do these memcmps once each
+        if (!memcmp(header.type, "ftyp", 4) || !memcmp(header.type, "meta", 4) || !memcmp(header.type, "moov", 4)) {
+            readResult = decoder->io->read(decoder->io, 0, parseOffset, header.size, &boxContents);
+            if (readResult != AVIF_RESULT_OK) {
+                return readResult;
+            }
+            if (boxContents.size != header.size) {
+                // A truncated box, bail out
+                return AVIF_RESULT_TRUNCATED_DATA;
+            }
+        } else if (header.size > (UINT64_MAX - parseOffset)) {
+            return AVIF_RESULT_BMFF_PARSE_FAILED;
+        }
+        parseOffset += header.size;
+
+        if (!memcmp(header.type, "ftyp", 4)) {
+            CHECKERR(!ftypSeen, AVIF_RESULT_BMFF_PARSE_FAILED);
+            avifFileType ftyp;
+            CHECKERR(avifParseFileTypeBox(&ftyp, boxContents.data, boxContents.size, data->diag), AVIF_RESULT_BMFF_PARSE_FAILED);
+            if (!avifFileTypeIsCompatible(&ftyp)) {
+                return AVIF_RESULT_INVALID_FTYP;
+            }
+            ftypSeen = AVIF_TRUE;
+            memcpy(data->majorBrand, ftyp.majorBrand, 4); // Remember the major brand for future AVIF_DECODER_SOURCE_AUTO decisions
+            needsMeta = avifFileTypeHasBrand(&ftyp, "avif");
+            needsMoov = avifFileTypeHasBrand(&ftyp, "avis");
+        } else if (!memcmp(header.type, "meta", 4)) {
+            CHECKERR(!metaSeen, AVIF_RESULT_BMFF_PARSE_FAILED);
+            CHECKERR(avifParseMetaBox(data->meta, boxContents.data, boxContents.size, data->diag), AVIF_RESULT_BMFF_PARSE_FAILED);
+            metaSeen = AVIF_TRUE;
+        } else if (!memcmp(header.type, "moov", 4)) {
+            CHECKERR(!moovSeen, AVIF_RESULT_BMFF_PARSE_FAILED);
+            CHECKERR(avifParseMovieBox(data, boxContents.data, boxContents.size, decoder->imageSizeLimit), AVIF_RESULT_BMFF_PARSE_FAILED);
+            moovSeen = AVIF_TRUE;
+        }
+
+        // See if there is enough information to consider Parse() a success and early-out:
+        // * If the brand 'avif' is present, require a meta box
+        // * If the brand 'avis' is present, require a moov box
+        if (ftypSeen && (!needsMeta || metaSeen) && (!needsMoov || moovSeen)) {
+            return AVIF_RESULT_OK;
+        }
     }
-    return AVIF_TRUE;
+    if (!ftypSeen) {
+        return AVIF_RESULT_INVALID_FTYP;
+    }
+    if ((needsMeta && !metaSeen) || (needsMoov && !moovSeen)) {
+        return AVIF_RESULT_TRUNCATED_DATA;
+    }
+    return AVIF_RESULT_OK;
 }
 
 // ---------------------------------------------------------------------------
 
-static avifBool avifFileTypeIsCompatible(avifFileType * ftyp)
+static avifBool avifFileTypeHasBrand(avifFileType * ftyp, const char * brand)
 {
-    avifBool avifCompatible = (!memcmp(ftyp->majorBrand, "avif", 4) || !memcmp(ftyp->majorBrand, "avis", 4));
-    if (!avifCompatible) {
-        for (int compatibleBrandIndex = 0; compatibleBrandIndex < ftyp->compatibleBrandsCount; ++compatibleBrandIndex) {
-            const uint8_t * compatibleBrand = &ftyp->compatibleBrands[4 * compatibleBrandIndex];
-            if (!memcmp(compatibleBrand, "avif", 4) || !memcmp(compatibleBrand, "avis", 4)) {
-                avifCompatible = AVIF_TRUE;
-                break;
-            }
+    if (!memcmp(ftyp->majorBrand, brand, 4)) {
+        return AVIF_TRUE;
+    }
+
+    for (int compatibleBrandIndex = 0; compatibleBrandIndex < ftyp->compatibleBrandsCount; ++compatibleBrandIndex) {
+        const uint8_t * compatibleBrand = &ftyp->compatibleBrands[4 * compatibleBrandIndex];
+        if (!memcmp(compatibleBrand, brand, 4)) {
+            return AVIF_TRUE;
         }
     }
-    return avifCompatible;
+    return AVIF_FALSE;
+}
+
+static avifBool avifFileTypeIsCompatible(avifFileType * ftyp)
+{
+    return avifFileTypeHasBrand(ftyp, "avif") || avifFileTypeHasBrand(ftyp, "avis");
 }
 
 avifBool avifPeekCompatibleFileType(const avifROData * input)
 {
-    BEGIN_STREAM(s, input->data, input->size);
+    BEGIN_STREAM(s, input->data, input->size, NULL, NULL);
 
     avifBoxHeader header;
     CHECK(avifROStreamReadBoxHeader(&s, &header));
@@ -2027,7 +2925,7 @@ avifBool avifPeekCompatibleFileType(const avifROData * input)
 
     avifFileType ftyp;
     memset(&ftyp, 0, sizeof(avifFileType));
-    avifBool parsed = avifParseFileTypeBox(&ftyp, avifROStreamCurrent(&s), header.size);
+    avifBool parsed = avifParseFileTypeBox(&ftyp, avifROStreamCurrent(&s), header.size, NULL);
     if (!parsed) {
         return AVIF_FALSE;
     }
@@ -2040,6 +2938,10 @@ avifDecoder * avifDecoderCreate(void)
 {
     avifDecoder * decoder = (avifDecoder *)avifAlloc(sizeof(avifDecoder));
     memset(decoder, 0, sizeof(avifDecoder));
+    decoder->maxThreads = 1;
+    decoder->imageSizeLimit = AVIF_DEFAULT_IMAGE_SIZE_LIMIT;
+    decoder->imageCountLimit = AVIF_DEFAULT_IMAGE_COUNT_LIMIT;
+    decoder->strictFlags = AVIF_STRICT_ENABLED;
     return decoder;
 }
 
@@ -2054,11 +2956,13 @@ static void avifDecoderCleanup(avifDecoder * decoder)
         avifImageDestroy(decoder->image);
         decoder->image = NULL;
     }
+    avifDiagnosticsClearError(&decoder->diag);
 }
 
 void avifDecoderDestroy(avifDecoder * decoder)
 {
     avifDecoderCleanup(decoder);
+    avifIODestroy(decoder->io);
     avifFree(decoder);
 }
 
@@ -2068,8 +2972,169 @@ avifResult avifDecoderSetSource(avifDecoder * decoder, avifDecoderSource source)
     return avifDecoderReset(decoder);
 }
 
-avifResult avifDecoderParse(avifDecoder * decoder, const avifROData * rawInput)
+void avifDecoderSetIO(avifDecoder * decoder, avifIO * io)
 {
+    avifIODestroy(decoder->io);
+    decoder->io = io;
+}
+
+avifResult avifDecoderSetIOMemory(avifDecoder * decoder, const uint8_t * data, size_t size)
+{
+    avifIO * io = avifIOCreateMemoryReader(data, size);
+    assert(io);
+    avifDecoderSetIO(decoder, io);
+    return AVIF_RESULT_OK;
+}
+
+avifResult avifDecoderSetIOFile(avifDecoder * decoder, const char * filename)
+{
+    avifIO * io = avifIOCreateFileReader(filename);
+    if (!io) {
+        return AVIF_RESULT_IO_ERROR;
+    }
+    avifDecoderSetIO(decoder, io);
+    return AVIF_RESULT_OK;
+}
+
+// 0-byte extents are ignored/overwritten during the merge, as they are the signal from helper
+// functions that no extent was necessary for this given sample. If both provided extents are
+// >0 bytes, this will set dst to be an extent that bounds both supplied extents.
+static avifResult avifExtentMerge(avifExtent * dst, const avifExtent * src)
+{
+    if (!dst->size) {
+        *dst = *src;
+        return AVIF_RESULT_OK;
+    }
+    if (!src->size) {
+        return AVIF_RESULT_OK;
+    }
+
+    const uint64_t minExtent1 = dst->offset;
+    const uint64_t maxExtent1 = dst->offset + dst->size;
+    const uint64_t minExtent2 = src->offset;
+    const uint64_t maxExtent2 = src->offset + src->size;
+    dst->offset = AVIF_MIN(minExtent1, minExtent2);
+    const uint64_t extentLength = AVIF_MAX(maxExtent1, maxExtent2) - dst->offset;
+    if (extentLength > SIZE_MAX) {
+        return AVIF_RESULT_BMFF_PARSE_FAILED;
+    }
+    dst->size = (size_t)extentLength;
+    return AVIF_RESULT_OK;
+}
+
+avifResult avifDecoderNthImageMaxExtent(const avifDecoder * decoder, uint32_t frameIndex, avifExtent * outExtent)
+{
+    if (!decoder->data) {
+        // Nothing has been parsed yet
+        return AVIF_RESULT_NO_CONTENT;
+    }
+
+    memset(outExtent, 0, sizeof(avifExtent));
+
+    uint32_t startFrameIndex = avifDecoderNearestKeyframe(decoder, frameIndex);
+    uint32_t endFrameIndex = frameIndex;
+    for (uint32_t currentFrameIndex = startFrameIndex; currentFrameIndex <= endFrameIndex; ++currentFrameIndex) {
+        for (unsigned int tileIndex = 0; tileIndex < decoder->data->tiles.count; ++tileIndex) {
+            avifTile * tile = &decoder->data->tiles.tile[tileIndex];
+            if (currentFrameIndex >= tile->input->samples.count) {
+                return AVIF_RESULT_NO_IMAGES_REMAINING;
+            }
+
+            avifDecodeSample * sample = &tile->input->samples.sample[currentFrameIndex];
+            avifExtent sampleExtent;
+            if (sample->itemID) {
+                // The data comes from an item. Let avifDecoderItemMaxExtent() do the heavy lifting.
+
+                avifDecoderItem * item = avifMetaFindItem(decoder->data->meta, sample->itemID);
+                avifResult maxExtentResult = avifDecoderItemMaxExtent(item, sample, &sampleExtent);
+                if (maxExtentResult != AVIF_RESULT_OK) {
+                    return maxExtentResult;
+                }
+            } else {
+                // The data likely comes from a sample table. Use the sample position directly.
+
+                sampleExtent.offset = sample->offset;
+                sampleExtent.size = sample->size;
+            }
+
+            if (sampleExtent.size > UINT64_MAX - sampleExtent.offset) {
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+
+            avifResult extentMergeResult = avifExtentMerge(outExtent, &sampleExtent);
+            if (extentMergeResult != AVIF_RESULT_OK) {
+                return extentMergeResult;
+            }
+        }
+    }
+    return AVIF_RESULT_OK;
+}
+
+static avifResult avifDecoderPrepareSample(avifDecoder * decoder, avifDecodeSample * sample, size_t partialByteCount)
+{
+    if (!sample->data.size || sample->partialData) {
+        // This sample hasn't been read from IO or had its extents fully merged yet.
+
+        size_t bytesToRead = sample->size;
+        if (partialByteCount && (bytesToRead > partialByteCount)) {
+            bytesToRead = partialByteCount;
+        }
+
+        if (sample->itemID) {
+            // The data comes from an item. Let avifDecoderItemRead() do the heavy lifting.
+
+            avifDecoderItem * item = avifMetaFindItem(decoder->data->meta, sample->itemID);
+            avifROData itemContents;
+            avifResult readResult = avifDecoderItemRead(item, decoder->io, &itemContents, sample->offset, bytesToRead, &decoder->diag);
+            if (readResult != AVIF_RESULT_OK) {
+                return readResult;
+            }
+
+            // avifDecoderItemRead is guaranteed to already be persisted by either the underlying IO
+            // or by mergedExtents; just reuse the buffer here.
+            sample->data = itemContents;
+            sample->ownsData = AVIF_FALSE;
+            sample->partialData = item->partialMergedExtents;
+        } else {
+            // The data likely comes from a sample table. Pull the sample and make a copy if necessary.
+
+            avifROData sampleContents;
+            if ((decoder->io->sizeHint > 0) && (sample->offset > decoder->io->sizeHint)) {
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+            avifResult readResult = decoder->io->read(decoder->io, 0, sample->offset, bytesToRead, &sampleContents);
+            if (readResult != AVIF_RESULT_OK) {
+                return readResult;
+            }
+            if (sampleContents.size != bytesToRead) {
+                return AVIF_RESULT_TRUNCATED_DATA;
+            }
+
+            sample->ownsData = !decoder->io->persistent;
+            sample->partialData = (bytesToRead != sample->size);
+            if (decoder->io->persistent) {
+                sample->data = sampleContents;
+            } else {
+                avifRWDataSet((avifRWData *)&sample->data, sampleContents.data, sampleContents.size);
+            }
+        }
+    }
+    return AVIF_RESULT_OK;
+}
+
+avifResult avifDecoderParse(avifDecoder * decoder)
+{
+    avifDiagnosticsClearError(&decoder->diag);
+
+    // An imageSizeLimit greater than AVIF_DEFAULT_IMAGE_SIZE_LIMIT and the special value of 0 to
+    // disable the limit are not yet implemented.
+    if ((decoder->imageSizeLimit > AVIF_DEFAULT_IMAGE_SIZE_LIMIT) || (decoder->imageSizeLimit == 0)) {
+        return AVIF_RESULT_NOT_IMPLEMENTED;
+    }
+    if (!decoder->io || !decoder->io->read) {
+        return AVIF_RESULT_IO_NOT_SET;
+    }
+
     // Cleanup anything lingering in the decoder
     avifDecoderCleanup(decoder);
 
@@ -2077,42 +3142,54 @@ avifResult avifDecoderParse(avifDecoder * decoder, const avifROData * rawInput)
     // Parse BMFF boxes
 
     decoder->data = avifDecoderDataCreate();
+    decoder->data->diag = &decoder->diag;
 
-    // Shallow copy, on purpose
-    memcpy(&decoder->data->rawInput, rawInput, sizeof(avifROData));
-
-    if (!avifParse(decoder->data, decoder->data->rawInput.data, decoder->data->rawInput.size)) {
-        return AVIF_RESULT_BMFF_PARSE_FAILED;
+    avifResult parseResult = avifParse(decoder);
+    if (parseResult != AVIF_RESULT_OK) {
+        return parseResult;
     }
 
-    avifBool avifCompatible = avifFileTypeIsCompatible(&decoder->data->ftyp);
-    if (!avifCompatible) {
-        return AVIF_RESULT_INVALID_FTYP;
-    }
-
-    // Sanity check items
-    for (uint32_t itemIndex = 0; itemIndex < decoder->data->meta->items.count; ++itemIndex) {
-        avifDecoderItem * item = &decoder->data->meta->items.item[itemIndex];
+    // Walk the decoded items (if any) and harvest ispe
+    avifDecoderData * data = decoder->data;
+    for (uint32_t itemIndex = 0; itemIndex < data->meta->items.count; ++itemIndex) {
+        avifDecoderItem * item = &data->meta->items.item[itemIndex];
+        if (!item->size) {
+            continue;
+        }
         if (item->hasUnsupportedEssentialProperty) {
             // An essential property isn't supported by libavif; ignore the item.
             continue;
         }
-        const uint8_t * p = avifDecoderDataCalcItemPtr(decoder->data, item);
-        if (p == NULL) {
-            return AVIF_RESULT_BMFF_PARSE_FAILED;
-        }
-    }
-
-    // Sanity check tracks
-    for (uint32_t trackIndex = 0; trackIndex < decoder->data->tracks.count; ++trackIndex) {
-        avifTrack * track = &decoder->data->tracks.track[trackIndex];
-        if (!track->sampleTable) {
+        avifBool isGrid = (memcmp(item->type, "grid", 4) == 0);
+        if (memcmp(item->type, "av01", 4) && !isGrid) {
+            // probably exif or some other data
             continue;
         }
 
-        for (uint32_t chunkIndex = 0; chunkIndex < track->sampleTable->chunks.count; ++chunkIndex) {
-            avifSampleTableChunk * chunk = &track->sampleTable->chunks.chunk[chunkIndex];
-            if (chunk->offset > decoder->data->rawInput.size) {
+        const avifProperty * ispeProp = avifPropertyArrayFind(&item->properties, "ispe");
+        if (ispeProp) {
+            item->width = ispeProp->u.ispe.width;
+            item->height = ispeProp->u.ispe.height;
+
+            if ((item->width == 0) || (item->height == 0)) {
+                avifDiagnosticsPrintf(data->diag, "Item ID [%u] has an invalid size [%ux%u]", item->id, item->width, item->height);
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+            if (item->width > (decoder->imageSizeLimit / item->height)) {
+                avifDiagnosticsPrintf(data->diag, "Item ID [%u] size is too large [%ux%u]", item->id, item->width, item->height);
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+        } else {
+            const avifProperty * auxCProp = avifPropertyArrayFind(&item->properties, "auxC");
+            if (auxCProp && isAlphaURN(auxCProp->u.auxC.auxType)) {
+                if (decoder->strictFlags & AVIF_STRICT_ALPHA_ISPE_REQUIRED) {
+                    avifDiagnosticsPrintf(data->diag,
+                                          "[Strict] Alpha auxiliary image item ID [%u] is missing a mandatory ispe property",
+                                          item->id);
+                    return AVIF_RESULT_BMFF_PARSE_FAILED;
+                }
+            } else {
+                avifDiagnosticsPrintf(data->diag, "Item ID [%u] is missing a mandatory ispe property", item->id);
                 return AVIF_RESULT_BMFF_PARSE_FAILED;
             }
         }
@@ -2120,13 +3197,9 @@ avifResult avifDecoderParse(avifDecoder * decoder, const avifROData * rawInput)
     return avifDecoderReset(decoder);
 }
 
-static avifCodec * avifCodecCreateInternal(avifCodecChoice choice, avifCodecDecodeInput * decodeInput)
+static avifCodec * avifCodecCreateInternal(avifCodecChoice choice)
 {
-    avifCodec * codec = avifCodecCreate(choice, AVIF_CODEC_FLAG_CAN_DECODE);
-    if (codec) {
-        codec->decodeInput = decodeInput;
-    }
-    return codec;
+    return avifCodecCreate(choice, AVIF_CODEC_FLAG_CAN_DECODE);
 }
 
 static avifResult avifDecoderFlush(avifDecoder * decoder)
@@ -2135,12 +3208,11 @@ static avifResult avifDecoderFlush(avifDecoder * decoder)
 
     for (unsigned int i = 0; i < decoder->data->tiles.count; ++i) {
         avifTile * tile = &decoder->data->tiles.tile[i];
-        tile->codec = avifCodecCreateInternal(decoder->codecChoice, tile->input);
-        if (!tile->codec) {
-            return AVIF_RESULT_NO_CODEC_AVAILABLE;
-        }
-        if (!tile->codec->open(tile->codec, decoder->imageIndex + 1)) {
-            return AVIF_RESULT_DECODE_COLOR_FAILED;
+        tile->codec = avifCodecCreateInternal(decoder->codecChoice);
+        if (tile->codec) {
+            tile->codec->diag = &decoder->diag;
+            tile->codec->operatingPoint = tile->operatingPoint;
+            tile->codec->allLayers = tile->input->allLayers;
         }
     }
     return AVIF_RESULT_OK;
@@ -2148,6 +3220,8 @@ static avifResult avifDecoderFlush(avifDecoder * decoder)
 
 avifResult avifDecoderReset(avifDecoder * decoder)
 {
+    avifDiagnosticsClearError(&decoder->diag);
+
     avifDecoderData * data = decoder->data;
     if (!data) {
         // Nothing to reset.
@@ -2163,6 +3237,7 @@ avifResult avifDecoderReset(avifDecoder * decoder)
         avifImageDestroy(decoder->image);
     }
     decoder->image = avifImageCreateEmpty();
+    decoder->progressiveState = AVIF_PROGRESSIVE_STATE_UNAVAILABLE;
     data->cicpSet = AVIF_FALSE;
 
     memset(&decoder->ioStats, 0, sizeof(decoder->ioStats));
@@ -2172,7 +3247,12 @@ avifResult avifDecoderReset(avifDecoder * decoder)
 
     data->sourceSampleTable = NULL; // Reset
     if (decoder->requestedSource == AVIF_DECODER_SOURCE_AUTO) {
-        if (data->tracks.count > 0) {
+        // Honor the major brand (avif or avis) if present, otherwise prefer avis (tracks) if possible.
+        if (!memcmp(data->majorBrand, "avis", 4)) {
+            data->source = AVIF_DECODER_SOURCE_TRACKS;
+        } else if (!memcmp(data->majorBrand, "avif", 4)) {
+            data->source = AVIF_DECODER_SOURCE_PRIMARY_ITEM;
+        } else if (data->tracks.count > 0) {
             data->source = AVIF_DECODER_SOURCE_TRACKS;
         } else {
             data->source = AVIF_DECODER_SOURCE_PRIMARY_ITEM;
@@ -2210,20 +3290,23 @@ avifResult avifDecoderReset(avifDecoder * decoder)
             break;
         }
         if (colorTrackIndex == data->tracks.count) {
+            avifDiagnosticsPrintf(&decoder->diag, "Failed to find AV1 color track");
             return AVIF_RESULT_NO_CONTENT;
         }
         colorTrack = &data->tracks.track[colorTrackIndex];
 
         colorProperties = avifSampleTableGetProperties(colorTrack->sampleTable);
         if (!colorProperties) {
+            avifDiagnosticsPrintf(&decoder->diag, "Failed to find AV1 color track's color properties");
             return AVIF_RESULT_BMFF_PARSE_FAILED;
         }
 
         // Find Exif and/or XMP metadata, if any
         if (colorTrack->meta) {
-            // See the comment above avifDecoderDataFindMetadata() for the explanation of using 0 here
-            if (!avifDecoderDataFindMetadata(data, colorTrack->meta, decoder->image, 0)) {
-                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            // See the comment above avifDecoderFindMetadata() for the explanation of using 0 here
+            avifResult findResult = avifDecoderFindMetadata(decoder, colorTrack->meta, decoder->image, 0);
+            if (findResult != AVIF_RESULT_OK) {
+                return findResult;
             }
         }
 
@@ -2251,15 +3334,29 @@ avifResult avifDecoderReset(avifDecoder * decoder)
             alphaTrack = &data->tracks.track[alphaTrackIndex];
         }
 
-        avifTile * colorTile = avifDecoderDataCreateTile(data);
-        if (!avifCodecDecodeInputGetSamples(colorTile->input, colorTrack->sampleTable, &data->rawInput)) {
+        avifTile * colorTile = avifDecoderDataCreateTile(data, colorTrack->width, colorTrack->height, 0); // No way to set operating point via tracks
+        if (!colorTile) {
+            return AVIF_RESULT_OUT_OF_MEMORY;
+        }
+        if (!avifCodecDecodeInputFillFromSampleTable(colorTile->input,
+                                                     colorTrack->sampleTable,
+                                                     decoder->imageCountLimit,
+                                                     decoder->io->sizeHint,
+                                                     data->diag)) {
             return AVIF_RESULT_BMFF_PARSE_FAILED;
         }
         data->colorTileCount = 1;
 
         if (alphaTrack) {
-            avifTile * alphaTile = avifDecoderDataCreateTile(data);
-            if (!avifCodecDecodeInputGetSamples(alphaTile->input, alphaTrack->sampleTable, &data->rawInput)) {
+            avifTile * alphaTile = avifDecoderDataCreateTile(data, alphaTrack->width, alphaTrack->height, 0); // No way to set operating point via tracks
+            if (!alphaTile) {
+                return AVIF_RESULT_OUT_OF_MEMORY;
+            }
+            if (!avifCodecDecodeInputFillFromSampleTable(alphaTile->input,
+                                                         alphaTrack->sampleTable,
+                                                         decoder->imageCountLimit,
+                                                         decoder->io->sizeHint,
+                                                         data->diag)) {
                 return AVIF_RESULT_BMFF_PARSE_FAILED;
             }
             alphaTile->input->alpha = AVIF_TRUE;
@@ -2284,13 +3381,18 @@ avifResult avifDecoderReset(avifDecoder * decoder)
         decoder->image->width = colorTrack->width;
         decoder->image->height = colorTrack->height;
         decoder->alphaPresent = (alphaTrack != NULL);
+        decoder->image->alphaPremultiplied = decoder->alphaPresent && (colorTrack->premByID == alphaTrack->id);
     } else {
         // Create from items
 
-        avifROData colorOBU = AVIF_DATA_EMPTY;
-        avifROData alphaOBU = AVIF_DATA_EMPTY;
-        avifDecoderItem * colorOBUItem = NULL;
-        avifDecoderItem * alphaOBUItem = NULL;
+        avifDecoderItem * colorItem = NULL;
+        avifDecoderItem * alphaItem = NULL;
+
+        if (data->meta->primaryItemID == 0) {
+            // A primary item is required
+            avifDiagnosticsPrintf(&decoder->diag, "Primary item not specified");
+            return AVIF_RESULT_NO_AV1_ITEMS_FOUND;
+        }
 
         // Find the colorOBU (primary) item
         for (uint32_t itemIndex = 0; itemIndex < data->meta->items.count; ++itemIndex) {
@@ -2311,35 +3413,31 @@ avifResult avifDecoderReset(avifDecoder * decoder)
                 // It's a thumbnail, skip it
                 continue;
             }
-            if ((data->meta->primaryItemID > 0) && (item->id != data->meta->primaryItemID)) {
-                // a primary item ID was specified, require it
+            if (item->id != data->meta->primaryItemID) {
+                // This is not the primary item, skip it
                 continue;
             }
 
             if (isGrid) {
-                if (decoder->disableGridImages) {
-                    return AVIF_RESULT_BMFF_PARSE_FAILED;
+                avifROData readData;
+                avifResult readResult = avifDecoderItemRead(item, decoder->io, &readData, 0, 0, data->diag);
+                if (readResult != AVIF_RESULT_OK) {
+                    return readResult;
                 }
-                const uint8_t * itemPtr = avifDecoderDataCalcItemPtr(data, item);
-                if (itemPtr == NULL) {
-                    return AVIF_RESULT_BMFF_PARSE_FAILED;
-                }
-                if (!avifParseImageGridBox(&data->colorGrid, itemPtr, item->size)) {
+                if (!avifParseImageGridBox(&data->colorGrid, readData.data, readData.size, decoder->imageSizeLimit, data->diag)) {
                     return AVIF_RESULT_INVALID_IMAGE_GRID;
                 }
-            } else {
-                colorOBU.data = avifDecoderDataCalcItemPtr(data, item);
-                colorOBU.size = item->size;
             }
 
-            colorOBUItem = item;
+            colorItem = item;
             break;
         }
 
-        if (!colorOBUItem) {
+        if (!colorItem) {
+            avifDiagnosticsPrintf(&decoder->diag, "Primary item not found");
             return AVIF_RESULT_NO_AV1_ITEMS_FOUND;
         }
-        colorProperties = &colorOBUItem->properties;
+        colorProperties = &colorItem->properties;
 
         // Find the alphaOBU item, if any
         for (uint32_t itemIndex = 0; itemIndex < data->meta->items.count; ++itemIndex) {
@@ -2357,70 +3455,29 @@ avifResult avifDecoderReset(avifDecoder * decoder)
                 continue;
             }
 
-            // Is this an alpha auxiliary item of whatever we chose for colorOBUItem?
+            // Is this an alpha auxiliary item of whatever we chose for colorItem?
             const avifProperty * auxCProp = avifPropertyArrayFind(&item->properties, "auxC");
-            if (auxCProp && isAlphaURN(auxCProp->u.auxC.auxType) && (item->auxForID == colorOBUItem->id)) {
+            if (auxCProp && isAlphaURN(auxCProp->u.auxC.auxType) && (item->auxForID == colorItem->id)) {
                 if (isGrid) {
-                    if (decoder->disableGridImages) {
-                        return AVIF_RESULT_BMFF_PARSE_FAILED;
+                    avifROData readData;
+                    avifResult readResult = avifDecoderItemRead(item, decoder->io, &readData, 0, 0, data->diag);
+                    if (readResult != AVIF_RESULT_OK) {
+                        return readResult;
                     }
-                    const uint8_t * itemPtr = avifDecoderDataCalcItemPtr(data, item);
-                    if (itemPtr == NULL) {
-                        return AVIF_RESULT_BMFF_PARSE_FAILED;
-                    }
-                    if (!avifParseImageGridBox(&data->alphaGrid, itemPtr, item->size)) {
+                    if (!avifParseImageGridBox(&data->alphaGrid, readData.data, readData.size, decoder->imageSizeLimit, data->diag)) {
                         return AVIF_RESULT_INVALID_IMAGE_GRID;
                     }
-                } else {
-                    alphaOBU.data = avifDecoderDataCalcItemPtr(data, item);
-                    alphaOBU.size = item->size;
                 }
 
-                alphaOBUItem = item;
+                alphaItem = item;
                 break;
             }
         }
 
         // Find Exif and/or XMP metadata, if any
-        if (!avifDecoderDataFindMetadata(data, data->meta, decoder->image, colorOBUItem->id)) {
-            return AVIF_RESULT_BMFF_PARSE_FAILED;
-        }
-
-        if ((data->colorGrid.rows > 0) && (data->colorGrid.columns > 0)) {
-            if (!avifDecoderDataGenerateImageGridTiles(data, &data->colorGrid, colorOBUItem, AVIF_FALSE)) {
-                return AVIF_RESULT_INVALID_IMAGE_GRID;
-            }
-            data->colorTileCount = data->tiles.count;
-        } else {
-            if (colorOBU.size == 0) {
-                return AVIF_RESULT_NO_AV1_ITEMS_FOUND;
-            }
-
-            avifTile * colorTile = avifDecoderDataCreateTile(data);
-            avifDecodeSample * colorSample = (avifDecodeSample *)avifArrayPushPtr(&colorTile->input->samples);
-            memcpy(&colorSample->data, &colorOBU, sizeof(avifROData));
-            colorSample->sync = AVIF_TRUE;
-            data->colorTileCount = 1;
-        }
-
-        if (alphaOBUItem) {
-            if ((data->alphaGrid.rows > 0) && (data->alphaGrid.columns > 0)) {
-                if (!avifDecoderDataGenerateImageGridTiles(data, &data->alphaGrid, alphaOBUItem, AVIF_TRUE)) {
-                    return AVIF_RESULT_INVALID_IMAGE_GRID;
-                }
-                data->alphaTileCount = data->tiles.count - data->colorTileCount;
-            } else {
-                if (alphaOBU.size == 0) {
-                    return AVIF_RESULT_NO_AV1_ITEMS_FOUND;
-                }
-
-                avifTile * alphaTile = avifDecoderDataCreateTile(data);
-                avifDecodeSample * alphaSample = (avifDecodeSample *)avifArrayPushPtr(&alphaTile->input->samples);
-                memcpy(&alphaSample->data, &alphaOBU, sizeof(avifROData));
-                alphaSample->sync = AVIF_TRUE;
-                alphaTile->input->alpha = AVIF_TRUE;
-                data->alphaTileCount = 1;
-            }
+        avifResult findResult = avifDecoderFindMetadata(decoder, data->meta, decoder->image, colorItem->id);
+        if (findResult != AVIF_RESULT_OK) {
+            return findResult;
         }
 
         // Set all counts and timing to safe-but-uninteresting values
@@ -2435,18 +3492,94 @@ avifResult avifDecoderReset(avifDecoder * decoder)
         decoder->duration = 1;
         decoder->durationInTimescales = 1;
 
-        decoder->ioStats.colorOBUSize = colorOBU.size;
-        decoder->ioStats.alphaOBUSize = alphaOBU.size;
-
-        const avifProperty * ispeProp = avifPropertyArrayFind(colorProperties, "ispe");
-        if (ispeProp) {
-            decoder->image->width = ispeProp->u.ispe.width;
-            decoder->image->height = ispeProp->u.ispe.height;
+        if ((data->colorGrid.rows > 0) && (data->colorGrid.columns > 0)) {
+            if (!avifDecoderGenerateImageGridTiles(decoder, &data->colorGrid, colorItem, AVIF_FALSE)) {
+                return AVIF_RESULT_INVALID_IMAGE_GRID;
+            }
+            data->colorTileCount = data->tiles.count;
         } else {
-            decoder->image->width = 0;
-            decoder->image->height = 0;
+            if (colorItem->size == 0) {
+                return AVIF_RESULT_NO_AV1_ITEMS_FOUND;
+            }
+
+            avifTile * colorTile =
+                avifDecoderDataCreateTile(data, colorItem->width, colorItem->height, avifDecoderItemOperatingPoint(colorItem));
+            if (!colorTile) {
+                return AVIF_RESULT_OUT_OF_MEMORY;
+            }
+            if (!avifCodecDecodeInputFillFromDecoderItem(colorTile->input,
+                                                         colorItem,
+                                                         decoder->allowProgressive,
+                                                         decoder->imageCountLimit,
+                                                         decoder->io->sizeHint,
+                                                         &decoder->diag)) {
+                return AVIF_RESULT_BMFF_PARSE_FAILED;
+            }
+            data->colorTileCount = 1;
+
+            if (colorItem->progressive) {
+                decoder->progressiveState = AVIF_PROGRESSIVE_STATE_AVAILABLE;
+                if (colorTile->input->samples.count > 1) {
+                    decoder->progressiveState = AVIF_PROGRESSIVE_STATE_ACTIVE;
+                    decoder->imageCount = colorTile->input->samples.count;
+                }
+            }
         }
-        decoder->alphaPresent = (alphaOBUItem != NULL);
+
+        if (alphaItem) {
+            if (!alphaItem->width && !alphaItem->height) {
+                // NON-STANDARD: Alpha subimage does not have an ispe property; adopt width/height from color item
+                assert(!(decoder->strictFlags & AVIF_STRICT_ALPHA_ISPE_REQUIRED));
+                alphaItem->width = colorItem->width;
+                alphaItem->height = colorItem->height;
+            }
+
+            if ((data->alphaGrid.rows > 0) && (data->alphaGrid.columns > 0)) {
+                if (!avifDecoderGenerateImageGridTiles(decoder, &data->alphaGrid, alphaItem, AVIF_TRUE)) {
+                    return AVIF_RESULT_INVALID_IMAGE_GRID;
+                }
+                data->alphaTileCount = data->tiles.count - data->colorTileCount;
+            } else {
+                if (alphaItem->size == 0) {
+                    return AVIF_RESULT_NO_AV1_ITEMS_FOUND;
+                }
+
+                avifTile * alphaTile =
+                    avifDecoderDataCreateTile(data, alphaItem->width, alphaItem->height, avifDecoderItemOperatingPoint(alphaItem));
+                if (!alphaTile) {
+                    return AVIF_RESULT_OUT_OF_MEMORY;
+                }
+                if (!avifCodecDecodeInputFillFromDecoderItem(alphaTile->input,
+                                                             alphaItem,
+                                                             decoder->allowProgressive,
+                                                             decoder->imageCountLimit,
+                                                             decoder->io->sizeHint,
+                                                             &decoder->diag)) {
+                    return AVIF_RESULT_BMFF_PARSE_FAILED;
+                }
+                alphaTile->input->alpha = AVIF_TRUE;
+                data->alphaTileCount = 1;
+            }
+        }
+
+        decoder->ioStats.colorOBUSize = colorItem->size;
+        decoder->ioStats.alphaOBUSize = alphaItem ? alphaItem->size : 0;
+
+        decoder->image->width = colorItem->width;
+        decoder->image->height = colorItem->height;
+        decoder->alphaPresent = (alphaItem != NULL);
+        decoder->image->alphaPremultiplied = decoder->alphaPresent && (colorItem->premByID == alphaItem->id);
+
+        avifResult colorItemValidationResult = avifDecoderItemValidateAV1(colorItem, &decoder->diag, decoder->strictFlags);
+        if (colorItemValidationResult != AVIF_RESULT_OK) {
+            return colorItemValidationResult;
+        }
+        if (alphaItem) {
+            avifResult alphaItemValidationResult = avifDecoderItemValidateAV1(alphaItem, &decoder->diag, decoder->strictFlags);
+            if (alphaItemValidationResult != AVIF_RESULT_OK) {
+                return alphaItemValidationResult;
+            }
+        }
     }
 
     // Sanity check tiles
@@ -2454,23 +3587,39 @@ avifResult avifDecoderReset(avifDecoder * decoder)
         avifTile * tile = &data->tiles.tile[tileIndex];
         for (uint32_t sampleIndex = 0; sampleIndex < tile->input->samples.count; ++sampleIndex) {
             avifDecodeSample * sample = &tile->input->samples.sample[sampleIndex];
-            if (!sample->data.data || !sample->data.size) {
+            if (!sample->size) {
                 // Every sample must have some data
                 return AVIF_RESULT_BMFF_PARSE_FAILED;
             }
         }
     }
 
-    const avifProperty * colrProp = avifPropertyArrayFind(colorProperties, "colr");
-    if (colrProp) {
-        if (colrProp->u.colr.hasICC) {
-            avifImageSetProfileICC(decoder->image, colrProp->u.colr.icc, colrProp->u.colr.iccSize);
-        } else if (colrProp->u.colr.hasNCLX) {
-            data->cicpSet = AVIF_TRUE;
-            decoder->image->colorPrimaries = colrProp->u.colr.colorPrimaries;
-            decoder->image->transferCharacteristics = colrProp->u.colr.transferCharacteristics;
-            decoder->image->matrixCoefficients = colrProp->u.colr.matrixCoefficients;
-            decoder->image->yuvRange = colrProp->u.colr.range;
+    // Find and adopt all colr boxes "at most one for a given value of colour type" (HEIF 6.5.5.1, from Amendment 3)
+    // Accept one of each type, and bail out if more than one of a given type is provided.
+    avifBool colrICCSeen = AVIF_FALSE;
+    avifBool colrNCLXSeen = AVIF_FALSE;
+    for (uint32_t propertyIndex = 0; propertyIndex < colorProperties->count; ++propertyIndex) {
+        avifProperty * prop = &colorProperties->prop[propertyIndex];
+
+        if (!memcmp(prop->type, "colr", 4)) {
+            if (prop->u.colr.hasICC) {
+                if (colrICCSeen) {
+                    return AVIF_RESULT_BMFF_PARSE_FAILED;
+                }
+                colrICCSeen = AVIF_TRUE;
+                avifImageSetProfileICC(decoder->image, prop->u.colr.icc, prop->u.colr.iccSize);
+            }
+            if (prop->u.colr.hasNCLX) {
+                if (colrNCLXSeen) {
+                    return AVIF_RESULT_BMFF_PARSE_FAILED;
+                }
+                colrNCLXSeen = AVIF_TRUE;
+                data->cicpSet = AVIF_TRUE;
+                decoder->image->colorPrimaries = prop->u.colr.colorPrimaries;
+                decoder->image->transferCharacteristics = prop->u.colr.transferCharacteristics;
+                decoder->image->matrixCoefficients = prop->u.colr.matrixCoefficients;
+                decoder->image->yuvRange = prop->u.colr.range;
+            }
         }
     }
 
@@ -2478,36 +3627,55 @@ avifResult avifDecoderReset(avifDecoder * decoder)
     const avifProperty * paspProp = avifPropertyArrayFind(colorProperties, "pasp");
     if (paspProp) {
         decoder->image->transformFlags |= AVIF_TRANSFORM_PASP;
-        memcpy(&decoder->image->pasp, &paspProp->u.pasp, sizeof(avifPixelAspectRatioBox));
+        decoder->image->pasp = paspProp->u.pasp;
     }
     const avifProperty * clapProp = avifPropertyArrayFind(colorProperties, "clap");
     if (clapProp) {
         decoder->image->transformFlags |= AVIF_TRANSFORM_CLAP;
-        memcpy(&decoder->image->clap, &clapProp->u.clap, sizeof(avifCleanApertureBox));
+        decoder->image->clap = clapProp->u.clap;
     }
     const avifProperty * irotProp = avifPropertyArrayFind(colorProperties, "irot");
     if (irotProp) {
         decoder->image->transformFlags |= AVIF_TRANSFORM_IROT;
-        memcpy(&decoder->image->irot, &irotProp->u.irot, sizeof(avifImageRotation));
+        decoder->image->irot = irotProp->u.irot;
     }
     const avifProperty * imirProp = avifPropertyArrayFind(colorProperties, "imir");
     if (imirProp) {
         decoder->image->transformFlags |= AVIF_TRANSFORM_IMIR;
-        memcpy(&decoder->image->imir, &imirProp->u.imir, sizeof(avifImageMirror));
+        decoder->image->imir = imirProp->u.imir;
     }
 
     if (!data->cicpSet && (data->tiles.count > 0)) {
         avifTile * firstTile = &data->tiles.tile[0];
         if (firstTile->input->samples.count > 0) {
             avifDecodeSample * sample = &firstTile->input->samples.sample[0];
-            avifSequenceHeader sequenceHeader;
-            if (avifSequenceHeaderParse(&sequenceHeader, &sample->data)) {
-                data->cicpSet = AVIF_TRUE;
-                decoder->image->colorPrimaries = sequenceHeader.colorPrimaries;
-                decoder->image->transferCharacteristics = sequenceHeader.transferCharacteristics;
-                decoder->image->matrixCoefficients = sequenceHeader.matrixCoefficients;
-                decoder->image->yuvRange = sequenceHeader.range;
-            }
+
+            // Harvest CICP from the AV1's sequence header, which should be very close to the front
+            // of the first sample. Read in successively larger chunks until we successfully parse the sequence.
+            static const size_t searchSampleChunkIncrement = 64;
+            static const size_t searchSampleSizeMax = 4096;
+            size_t searchSampleSize = 0;
+            do {
+                searchSampleSize += searchSampleChunkIncrement;
+                if (searchSampleSize > sample->size) {
+                    searchSampleSize = sample->size;
+                }
+
+                avifResult prepareResult = avifDecoderPrepareSample(decoder, sample, searchSampleSize);
+                if (prepareResult != AVIF_RESULT_OK) {
+                    return prepareResult;
+                }
+
+                avifSequenceHeader sequenceHeader;
+                if (avifSequenceHeaderParse(&sequenceHeader, &sample->data)) {
+                    data->cicpSet = AVIF_TRUE;
+                    decoder->image->colorPrimaries = sequenceHeader.colorPrimaries;
+                    decoder->image->transferCharacteristics = sequenceHeader.transferCharacteristics;
+                    decoder->image->matrixCoefficients = sequenceHeader.matrixCoefficients;
+                    decoder->image->yuvRange = sequenceHeader.range;
+                    break;
+                }
+            } while (searchSampleSize != sample->size && searchSampleSize < searchSampleSizeMax);
         }
     }
 
@@ -2535,83 +3703,188 @@ avifResult avifDecoderReset(avifDecoder * decoder)
     return avifDecoderFlush(decoder);
 }
 
+static avifResult avifDecoderPrepareTiles(avifDecoder * decoder,
+                                          uint32_t nextImageIndex,
+                                          unsigned int firstTileIndex,
+                                          unsigned int tileCount,
+                                          unsigned int decodedTileCount)
+{
+    for (unsigned int tileIndex = decodedTileCount; tileIndex < tileCount; ++tileIndex) {
+        avifTile * tile = &decoder->data->tiles.tile[firstTileIndex + tileIndex];
+
+        // Ensure there's an AV1 codec available before doing anything else
+        if (!tile->codec) {
+            return AVIF_RESULT_NO_CODEC_AVAILABLE;
+        }
+
+        if (nextImageIndex >= tile->input->samples.count) {
+            return AVIF_RESULT_NO_IMAGES_REMAINING;
+        }
+
+        avifDecodeSample * sample = &tile->input->samples.sample[nextImageIndex];
+        avifResult prepareResult = avifDecoderPrepareSample(decoder, sample, 0);
+        if (prepareResult != AVIF_RESULT_OK) {
+            return prepareResult;
+        }
+    }
+    return AVIF_RESULT_OK;
+}
+
+static avifResult avifDecoderDecodeTiles(avifDecoder * decoder,
+                                         uint32_t nextImageIndex,
+                                         unsigned int firstTileIndex,
+                                         unsigned int tileCount,
+                                         unsigned int * decodedTileCount)
+{
+    const unsigned int oldDecodedTileCount = *decodedTileCount;
+    for (unsigned int tileIndex = oldDecodedTileCount; tileIndex < tileCount; ++tileIndex) {
+        avifTile * tile = &decoder->data->tiles.tile[firstTileIndex + tileIndex];
+
+        const avifDecodeSample * sample = &tile->input->samples.sample[nextImageIndex];
+        if (!sample->data.data) {
+            assert(decoder->allowIncremental);
+            // Data is missing but there is no error yet. Output available pixel rows.
+            return AVIF_RESULT_OK;
+        }
+
+        if (!tile->codec->getNextImage(tile->codec, decoder, sample, tile->input->alpha, tile->image)) {
+            avifDiagnosticsPrintf(&decoder->diag, "tile->codec->getNextImage() failed");
+            return tile->input->alpha ? AVIF_RESULT_DECODE_ALPHA_FAILED : AVIF_RESULT_DECODE_COLOR_FAILED;
+        }
+
+        // Scale the decoded image so that it corresponds to this tile's output dimensions
+        if ((tile->width != tile->image->width) || (tile->height != tile->image->height)) {
+            if (!avifImageScale(tile->image, tile->width, tile->height, decoder->imageSizeLimit, &decoder->diag)) {
+                avifDiagnosticsPrintf(&decoder->diag, "avifImageScale() failed");
+                return tile->input->alpha ? AVIF_RESULT_DECODE_ALPHA_FAILED : AVIF_RESULT_DECODE_COLOR_FAILED;
+            }
+        }
+
+        ++*decodedTileCount;
+    }
+    return AVIF_RESULT_OK;
+}
+
 avifResult avifDecoderNextImage(avifDecoder * decoder)
 {
-    for (unsigned int tileIndex = 0; tileIndex < decoder->data->tiles.count; ++tileIndex) {
-        avifTile * tile = &decoder->data->tiles.tile[tileIndex];
+    avifDiagnosticsClearError(&decoder->diag);
 
-        if (!tile->codec->getNextImage(tile->codec, tile->image)) {
-            if (tile->input->alpha) {
-                return AVIF_RESULT_DECODE_ALPHA_FAILED;
-            } else {
-                if (tile->image->width) {
-                    // We've sent at least one image, but we've run out now.
-                    return AVIF_RESULT_NO_IMAGES_REMAINING;
-                }
-                return AVIF_RESULT_DECODE_COLOR_FAILED;
+    if (!decoder->data) {
+        // Nothing has been parsed yet
+        return AVIF_RESULT_NO_CONTENT;
+    }
+
+    if (!decoder->io || !decoder->io->read) {
+        return AVIF_RESULT_IO_NOT_SET;
+    }
+
+    if ((decoder->data->decodedColorTileCount == decoder->data->colorTileCount) &&
+        (decoder->data->decodedAlphaTileCount == decoder->data->alphaTileCount)) {
+        // A frame was decoded during the last avifDecoderNextImage() call.
+        decoder->data->decodedColorTileCount = 0;
+        decoder->data->decodedAlphaTileCount = 0;
+    }
+
+    assert(decoder->data->tiles.count == (decoder->data->colorTileCount + decoder->data->alphaTileCount));
+    const uint32_t nextImageIndex = (uint32_t)(decoder->imageIndex + 1);
+    const unsigned int firstColorTileIndex = 0;
+    const unsigned int firstAlphaTileIndex = decoder->data->colorTileCount;
+
+    // Acquire all sample data for the current image first, allowing for any read call to bail out
+    // with AVIF_RESULT_WAITING_ON_IO harmlessly / idempotently, unless decoder->allowIncremental.
+    // Start with color tiles.
+    const avifResult prepareColorTileResult =
+        avifDecoderPrepareTiles(decoder, nextImageIndex, firstColorTileIndex, decoder->data->colorTileCount, decoder->data->decodedColorTileCount);
+    if ((prepareColorTileResult != AVIF_RESULT_OK) &&
+        (!decoder->allowIncremental || (prepareColorTileResult != AVIF_RESULT_WAITING_ON_IO))) {
+        return prepareColorTileResult;
+    }
+    // Do the same with alpha tiles. They are handled separately because their
+    // order of appearance relative to the color tiles in the bitstream is left
+    // to the encoder's choice, and decoding as many as possible of each
+    // category in parallel is beneficial for incremental decoding, as pixel
+    // rows need all channels to be decoded before being accessible to the user.
+    const avifResult prepareAlphaTileResult =
+        avifDecoderPrepareTiles(decoder, nextImageIndex, firstAlphaTileIndex, decoder->data->alphaTileCount, decoder->data->decodedAlphaTileCount);
+    if ((prepareAlphaTileResult != AVIF_RESULT_OK) &&
+        (!decoder->allowIncremental || (prepareAlphaTileResult != AVIF_RESULT_WAITING_ON_IO))) {
+        return prepareAlphaTileResult;
+    }
+
+    // Decode all available color tiles now, then all available alpha tiles.
+    const unsigned int oldDecodedColorTileCount = decoder->data->decodedColorTileCount;
+    const avifResult decodeColorTileResult =
+        avifDecoderDecodeTiles(decoder, nextImageIndex, firstColorTileIndex, decoder->data->colorTileCount, &decoder->data->decodedColorTileCount);
+    if (decodeColorTileResult != AVIF_RESULT_OK) {
+        return decodeColorTileResult;
+    }
+    const unsigned int oldDecodedAlphaTileCount = decoder->data->decodedAlphaTileCount;
+    const avifResult decodeAlphaTileResult =
+        avifDecoderDecodeTiles(decoder, nextImageIndex, firstAlphaTileIndex, decoder->data->alphaTileCount, &decoder->data->decodedAlphaTileCount);
+    if (decodeAlphaTileResult != AVIF_RESULT_OK) {
+        return decodeAlphaTileResult;
+    }
+
+    if (decoder->data->decodedColorTileCount > oldDecodedColorTileCount) {
+        // There is at least one newly decoded color tile.
+        if ((decoder->data->colorGrid.rows > 0) && (decoder->data->colorGrid.columns > 0)) {
+            assert(decoder->data->colorTileCount == (decoder->data->colorGrid.rows * decoder->data->colorGrid.columns));
+            if (!avifDecoderDataFillImageGrid(decoder->data,
+                                              &decoder->data->colorGrid,
+                                              decoder->image,
+                                              firstColorTileIndex,
+                                              oldDecodedColorTileCount,
+                                              decoder->data->decodedColorTileCount,
+                                              AVIF_FALSE)) {
+                return AVIF_RESULT_INVALID_IMAGE_GRID;
             }
-        }
-    }
+        } else {
+            // Normal (most common) non-grid path. Just steal the planes from the only "tile".
+            assert(decoder->data->colorTileCount == 1);
+            avifImage * srcColor = decoder->data->tiles.tile[0].image;
+            if ((decoder->image->width != srcColor->width) || (decoder->image->height != srcColor->height) ||
+                (decoder->image->depth != srcColor->depth)) {
+                avifImageFreePlanes(decoder->image, AVIF_PLANES_ALL);
 
-    if (decoder->data->tiles.count != (decoder->data->colorTileCount + decoder->data->alphaTileCount)) {
-        // TODO: assert here? This should be impossible.
-        return AVIF_RESULT_UNKNOWN_ERROR;
-    }
-
-    if ((decoder->data->colorGrid.rows > 0) && (decoder->data->colorGrid.columns > 0)) {
-        if (!avifDecoderDataFillImageGrid(
-                decoder->data, &decoder->data->colorGrid, decoder->image, 0, decoder->data->colorTileCount, AVIF_FALSE)) {
-            return AVIF_RESULT_INVALID_IMAGE_GRID;
-        }
-    } else {
-        // Normal (most common) non-grid path. Just steal the planes from the only "tile".
-
-        if (decoder->data->colorTileCount != 1) {
-            return AVIF_RESULT_DECODE_COLOR_FAILED;
-        }
-
-        avifImage * srcColor = decoder->data->tiles.tile[0].image;
-
-        if ((decoder->image->width != srcColor->width) || (decoder->image->height != srcColor->height) ||
-            (decoder->image->depth != srcColor->depth)) {
-            avifImageFreePlanes(decoder->image, AVIF_PLANES_ALL);
-
-            decoder->image->width = srcColor->width;
-            decoder->image->height = srcColor->height;
-            decoder->image->depth = srcColor->depth;
-        }
+                decoder->image->width = srcColor->width;
+                decoder->image->height = srcColor->height;
+                decoder->image->depth = srcColor->depth;
+            }
 
 #if 0
-        // This code is currently unnecessary as the CICP is always set by the end of avifDecoderParse().
-        if (!decoder->data->cicpSet) {
-            decoder->data->cicpSet = AVIF_TRUE;
-            decoder->image->colorPrimaries = srcColor->colorPrimaries;
-            decoder->image->transferCharacteristics = srcColor->transferCharacteristics;
-            decoder->image->matrixCoefficients = srcColor->matrixCoefficients;
-        }
+            // This code is currently unnecessary as the CICP is always set by the end of avifDecoderParse().
+            if (!decoder->data->cicpSet) {
+                decoder->data->cicpSet = AVIF_TRUE;
+                decoder->image->colorPrimaries = srcColor->colorPrimaries;
+                decoder->image->transferCharacteristics = srcColor->transferCharacteristics;
+                decoder->image->matrixCoefficients = srcColor->matrixCoefficients;
+            }
 #endif
 
-        avifImageStealPlanes(decoder->image, srcColor, AVIF_PLANES_YUV);
+            avifImageStealPlanes(decoder->image, srcColor, AVIF_PLANES_YUV);
+        }
     }
 
-    if ((decoder->data->alphaGrid.rows > 0) && (decoder->data->alphaGrid.columns > 0)) {
-        if (!avifDecoderDataFillImageGrid(
-                decoder->data, &decoder->data->alphaGrid, decoder->image, decoder->data->colorTileCount, decoder->data->alphaTileCount, AVIF_TRUE)) {
-            return AVIF_RESULT_INVALID_IMAGE_GRID;
-        }
-    } else {
-        // Normal (most common) non-grid path. Just steal the planes from the only "tile".
-
-        if (decoder->data->alphaTileCount == 0) {
-            avifImageFreePlanes(decoder->image, AVIF_PLANES_A); // no alpha
-        } else {
-            if (decoder->data->alphaTileCount != 1) {
-                return AVIF_RESULT_DECODE_ALPHA_FAILED;
+    if (decoder->data->decodedAlphaTileCount > oldDecodedAlphaTileCount) {
+        // There is at least one newly decoded alpha tile.
+        if ((decoder->data->alphaGrid.rows > 0) && (decoder->data->alphaGrid.columns > 0)) {
+            assert(decoder->data->alphaTileCount == (decoder->data->alphaGrid.rows * decoder->data->alphaGrid.columns));
+            if (!avifDecoderDataFillImageGrid(decoder->data,
+                                              &decoder->data->alphaGrid,
+                                              decoder->image,
+                                              firstAlphaTileIndex,
+                                              oldDecodedAlphaTileCount,
+                                              decoder->data->decodedAlphaTileCount,
+                                              AVIF_TRUE)) {
+                return AVIF_RESULT_INVALID_IMAGE_GRID;
             }
-
+        } else {
+            // Normal (most common) non-grid path. Just steal the planes from the only "tile".
+            assert(decoder->data->alphaTileCount == 1);
             avifImage * srcAlpha = decoder->data->tiles.tile[decoder->data->colorTileCount].image;
             if ((decoder->image->width != srcAlpha->width) || (decoder->image->height != srcAlpha->height) ||
                 (decoder->image->depth != srcAlpha->depth)) {
+                avifDiagnosticsPrintf(&decoder->diag, "decoder->image does not match srcAlpha in width, height, or bit depth");
                 return AVIF_RESULT_DECODE_ALPHA_FAILED;
             }
 
@@ -2620,7 +3893,25 @@ avifResult avifDecoderNextImage(avifDecoder * decoder)
         }
     }
 
-    ++decoder->imageIndex;
+    if ((decoder->data->decodedColorTileCount != decoder->data->colorTileCount) ||
+        (decoder->data->decodedAlphaTileCount != decoder->data->alphaTileCount)) {
+        assert(decoder->allowIncremental);
+        // The image is not completely decoded. There should be no error unrelated to missing bytes,
+        // and at least some missing bytes.
+        assert((prepareColorTileResult == AVIF_RESULT_OK) || (prepareColorTileResult == AVIF_RESULT_WAITING_ON_IO));
+        assert((prepareAlphaTileResult == AVIF_RESULT_OK) || (prepareAlphaTileResult == AVIF_RESULT_WAITING_ON_IO));
+        assert((prepareColorTileResult != AVIF_RESULT_OK) || (prepareAlphaTileResult != AVIF_RESULT_OK));
+        // Return the "not enough bytes" status now instead of moving on to the next frame.
+        return AVIF_RESULT_WAITING_ON_IO;
+    }
+    assert((prepareColorTileResult == AVIF_RESULT_OK) && (prepareAlphaTileResult == AVIF_RESULT_OK));
+
+    // Only advance decoder->imageIndex once the image is completely decoded, so that
+    // avifDecoderNthImage(decoder, decoder->imageIndex + 1) is equivalent to avifDecoderNextImage(decoder)
+    // if the previous call to avifDecoderNextImage() returned AVIF_RESULT_WAITING_ON_IO.
+    decoder->imageIndex = nextImageIndex;
+    // The decoded tile counts will be reset to 0 the next time avifDecoderNextImage() is called,
+    // for avifDecoderDecodedRowCount() to work until then.
     if (decoder->data->sourceSampleTable) {
         // Decoding from a track! Provide timing information.
 
@@ -2639,7 +3930,7 @@ avifResult avifDecoderNthImageTiming(const avifDecoder * decoder, uint32_t frame
         return AVIF_RESULT_NO_CONTENT;
     }
 
-    if ((int)frameIndex >= decoder->imageCount) {
+    if ((frameIndex > INT_MAX) || ((int)frameIndex >= decoder->imageCount)) {
         // Impossible index
         return AVIF_RESULT_NO_IMAGES_REMAINING;
     }
@@ -2647,7 +3938,7 @@ avifResult avifDecoderNthImageTiming(const avifDecoder * decoder, uint32_t frame
     if (!decoder->data->sourceSampleTable) {
         // There isn't any real timing associated with this decode, so
         // just hand back the defaults chosen in avifDecoderReset().
-        memcpy(outTiming, &decoder->imageTiming, sizeof(avifImageTiming));
+        *outTiming = decoder->imageTiming;
         return AVIF_RESULT_OK;
     }
 
@@ -2670,25 +3961,41 @@ avifResult avifDecoderNthImageTiming(const avifDecoder * decoder, uint32_t frame
 
 avifResult avifDecoderNthImage(avifDecoder * decoder, uint32_t frameIndex)
 {
-    int requestedIndex = (int)frameIndex;
-    if (requestedIndex == decoder->imageIndex) {
-        // We're here already, nothing to do
-        return AVIF_RESULT_OK;
+    avifDiagnosticsClearError(&decoder->diag);
+
+    if (!decoder->data) {
+        // Nothing has been parsed yet
+        return AVIF_RESULT_NO_CONTENT;
     }
 
-    if (requestedIndex == (decoder->imageIndex + 1)) {
-        // it's just the next image, nothing special here
-        return avifDecoderNextImage(decoder);
-    }
-
-    if (requestedIndex >= decoder->imageCount) {
+    if ((frameIndex > INT_MAX) || ((int)frameIndex >= decoder->imageCount)) {
         // Impossible index
         return AVIF_RESULT_NO_IMAGES_REMAINING;
     }
 
-    // If we get here, a decoder flush is necessary
-    decoder->imageIndex = ((int)avifDecoderNearestKeyframe(decoder, frameIndex)) - 1; // prepare to read nearest keyframe
-    avifDecoderFlush(decoder);
+    int requestedIndex = (int)frameIndex;
+    if (requestedIndex == (decoder->imageIndex + 1)) {
+        // It's just the next image (already partially decoded or not at all), nothing special here
+        return avifDecoderNextImage(decoder);
+    }
+
+    if (requestedIndex == decoder->imageIndex) {
+        if ((decoder->data->decodedColorTileCount == decoder->data->colorTileCount) &&
+            (decoder->data->decodedAlphaTileCount == decoder->data->alphaTileCount)) {
+            // The current fully decoded image (decoder->imageIndex) is requested, nothing to do
+            return AVIF_RESULT_OK;
+        }
+        // The next image (decoder->imageIndex + 1) is partially decoded but
+        // the previous image (decoder->imageIndex) is requested.
+        // Fall through to flush and start decoding from the nearest key frame.
+    }
+
+    int nearestKeyFrame = (int)avifDecoderNearestKeyframe(decoder, frameIndex);
+    if ((nearestKeyFrame > (decoder->imageIndex + 1)) || (requestedIndex <= decoder->imageIndex)) {
+        // If we get here, a decoder flush is necessary
+        decoder->imageIndex = nearestKeyFrame - 1; // prepare to read nearest keyframe
+        avifDecoderFlush(decoder);
+    }
     for (;;) {
         avifResult result = avifDecoderNextImage(decoder);
         if (result != AVIF_RESULT_OK) {
@@ -2704,16 +4011,31 @@ avifResult avifDecoderNthImage(avifDecoder * decoder, uint32_t frameIndex)
 
 avifBool avifDecoderIsKeyframe(const avifDecoder * decoder, uint32_t frameIndex)
 {
-    if ((decoder->data->tiles.count > 0) && decoder->data->tiles.tile[0].input) {
-        if (frameIndex < decoder->data->tiles.tile[0].input->samples.count) {
-            return decoder->data->tiles.tile[0].input->samples.sample[frameIndex].sync;
+    if (!decoder->data || (decoder->data->tiles.count == 0)) {
+        // Nothing has been parsed yet
+        return AVIF_FALSE;
+    }
+
+    // *All* tiles for the requested frameIndex must be keyframes in order for
+    //  avifDecoderIsKeyframe() to return true, otherwise we may seek to a frame in which the color
+    //  planes are a keyframe but the alpha plane isn't a keyframe, which will cause an alpha plane
+    //  decode failure.
+    for (unsigned int i = 0; i < decoder->data->tiles.count; ++i) {
+        const avifTile * tile = &decoder->data->tiles.tile[i];
+        if ((frameIndex >= tile->input->samples.count) || !tile->input->samples.sample[frameIndex].sync) {
+            return AVIF_FALSE;
         }
     }
-    return AVIF_FALSE;
+    return AVIF_TRUE;
 }
 
 uint32_t avifDecoderNearestKeyframe(const avifDecoder * decoder, uint32_t frameIndex)
 {
+    if (!decoder->data) {
+        // Nothing has been parsed yet
+        return 0;
+    }
+
     for (; frameIndex != 0; --frameIndex) {
         if (avifDecoderIsKeyframe(decoder, frameIndex)) {
             break;
@@ -2722,9 +4044,48 @@ uint32_t avifDecoderNearestKeyframe(const avifDecoder * decoder, uint32_t frameI
     return frameIndex;
 }
 
-avifResult avifDecoderRead(avifDecoder * decoder, avifImage * image, const avifROData * input)
+// Returns the number of available rows in decoder->image given a color or alpha subimage.
+static uint32_t avifGetDecodedRowCount(const avifDecoder * decoder,
+                                       const avifImageGrid * grid,
+                                       unsigned int firstTileIndex,
+                                       unsigned int tileCount,
+                                       unsigned int decodedTileCount)
 {
-    avifResult result = avifDecoderParse(decoder, input);
+    if (decodedTileCount == tileCount) {
+        return decoder->image->height;
+    }
+    if (decodedTileCount == 0) {
+        return 0;
+    }
+
+    if ((grid->rows > 0) && (grid->columns > 0)) {
+        // Grid of AVIF tiles (not to be confused with AV1 tiles).
+        const uint32_t tileHeight = decoder->data->tiles.tile[firstTileIndex].height;
+        return AVIF_MIN((decodedTileCount / grid->columns) * tileHeight, decoder->image->height);
+    } else {
+        // Non-grid image.
+        return decoder->image->height;
+    }
+}
+
+uint32_t avifDecoderDecodedRowCount(const avifDecoder * decoder)
+{
+    const uint32_t colorRowCount = avifGetDecodedRowCount(decoder,
+                                                          &decoder->data->colorGrid,
+                                                          /*firstTileIndex=*/0,
+                                                          decoder->data->colorTileCount,
+                                                          decoder->data->decodedColorTileCount);
+    const uint32_t alphaRowCount = avifGetDecodedRowCount(decoder,
+                                                          &decoder->data->alphaGrid,
+                                                          /*firstTileIndex=*/decoder->data->colorTileCount,
+                                                          decoder->data->alphaTileCount,
+                                                          decoder->data->decodedAlphaTileCount);
+    return AVIF_MIN(colorRowCount, alphaRowCount);
+}
+
+avifResult avifDecoderRead(avifDecoder * decoder, avifImage * image)
+{
+    avifResult result = avifDecoderParse(decoder);
     if (result != AVIF_RESULT_OK) {
         return result;
     }
@@ -2734,4 +4095,24 @@ avifResult avifDecoderRead(avifDecoder * decoder, avifImage * image, const avifR
     }
     avifImageCopy(image, decoder->image, AVIF_PLANES_ALL);
     return AVIF_RESULT_OK;
+}
+
+avifResult avifDecoderReadMemory(avifDecoder * decoder, avifImage * image, const uint8_t * data, size_t size)
+{
+    avifDiagnosticsClearError(&decoder->diag);
+    avifResult result = avifDecoderSetIOMemory(decoder, data, size);
+    if (result != AVIF_RESULT_OK) {
+        return result;
+    }
+    return avifDecoderRead(decoder, image);
+}
+
+avifResult avifDecoderReadFile(avifDecoder * decoder, avifImage * image, const char * filename)
+{
+    avifDiagnosticsClearError(&decoder->diag);
+    avifResult result = avifDecoderSetIOFile(decoder, filename);
+    if (result != AVIF_RESULT_OK) {
+        return result;
+    }
+    return avifDecoderRead(decoder, image);
 }

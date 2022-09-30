@@ -12,8 +12,7 @@
 
 class CFWL_MessageKillFocus final : public CFWL_Message {
  public:
-  explicit CFWL_MessageKillFocus(CFWL_Widget* pSrcTarget);
-  CFWL_MessageKillFocus(CFWL_Widget* pSrcTarget, CFWL_Widget* pDstTarget);
+  explicit CFWL_MessageKillFocus(CFWL_Widget* pDstTarget);
   ~CFWL_MessageKillFocus() override;
 
   bool IsFocusedOnWidget(const CFWL_Widget* pWidget) const {
@@ -21,7 +20,7 @@ class CFWL_MessageKillFocus final : public CFWL_Message {
   }
 
  private:
-  UnownedPtr<CFWL_Widget> m_pSetFocus;
+  UnownedPtr<CFWL_Widget> m_pSetFocus;  // Ok, stack-only.
 };
 
 #endif  // XFA_FWL_CFWL_MESSAGEKILLFOCUS_H_

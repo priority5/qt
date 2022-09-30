@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \page stylesheet.html
@@ -1033,7 +1009,7 @@
 
            The slider can be styled using the \l{#handle-sub}{::handle} subcontrol.
            Setting the \l{#min-width-prop}{min-width} or \l{#min-height-prop}{min-height}
-           provides size contraints for the slider depending on the orientation.
+           provides size constraints for the slider depending on the orientation.
 
            The \l{add-line-sub}{::add-line} subcontrol can be used to style the
            button to add a line. By default, the add-line subcontrol is placed in
@@ -1950,7 +1926,7 @@
 
         The only widget currently supporting this property is QPushButton.
 
-        \note It's the application's responsibilty to assign an icon to a
+        \note It's the application's responsibility to assign an icon to a
         button (using the QAbstractButton API), and not the style's. So be
         careful setting it unless your stylesheet is targeting a specific
         application.
@@ -2724,6 +2700,10 @@
         \li QStyle::SP_DirHomeIcon
 
     \row
+        \li lineedit-clear-button-icon
+        \li QStyle::SP_LineEditClearButton
+
+    \row
         \li leftarrow-icon
         \li QStyle::SP_ArrowLeft
 
@@ -2923,7 +2903,7 @@
            | \tt{hsl(\e{h}, \e{s}, \e{l})} \br
            | \tt{hsla(\e{h}, \e{s}, \e{l}, \e{a})} \br
            | \tt{#\e{rrggbb}} \br
-           | \l{QColor::setNamedColor()}{Color Name} \br
+           | \l{QColor::fromString()}{Color Name} \br
         \li Specifies a color as RGB (red, green, blue), RGBA (red,
            green, blue, alpha), HSV (hue, saturation, value), HSVA
            (hue, saturation, value, alpha), HSL (hue, saturation,
@@ -3023,7 +3003,8 @@
            \list
            \li \c px: pixels
            \li \c pt: the size of one point (i.e., 1/72 of an inch)
-           \li \c em: the em width of the font (i.e., the width of 'M')
+           \li \c em: the size relative to the font size of the element
+                  (e.g., 2em means 2 times the size of the font)
            \li \c ex: the x-height of the font (i.e., the height of 'x')
            \endlist
 
@@ -3936,8 +3917,10 @@
     \image tabWidget-stylesheet2.png
 
     For a tab widget that looks like above, we make use of
-    \l{http://www.communitymx.com/content/article.cfm?cid=B0029}
-    {negative margins}. The resulting stylesheet looks like this:
+    \l{https://doc.qt.io/qt-5/stylesheet-customizing.html#the-box-model}
+    {negative margins}. Negative values draw the element closer to its
+    neighbors than it would be by default. The resulting stylesheet
+    looks like this:
 
     \snippet code/doc_src_stylesheet.qdoc 146
 

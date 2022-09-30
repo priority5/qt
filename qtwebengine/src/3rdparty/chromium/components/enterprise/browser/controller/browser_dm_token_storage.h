@@ -9,16 +9,14 @@
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece_forward.h"
 #include "base/system/sys_info.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/policy/core/common/cloud/dm_token.h"
 
 namespace base {
@@ -64,13 +62,15 @@ class BrowserDMTokenStorage {
   // Returns the global singleton object. Must be called from the UI thread. The
   // first caller must set the platform-specific delegate via SetDelegate().
   static BrowserDMTokenStorage* Get();
+
+  BrowserDMTokenStorage(const BrowserDMTokenStorage&) = delete;
+  BrowserDMTokenStorage& operator=(const BrowserDMTokenStorage&) = delete;
+
   // Sets the delegate to use for platform-specific operations.
   static void SetDelegate(std::unique_ptr<Delegate> delegate);
 
   // Returns a client ID unique to the machine.
   std::string RetrieveClientId();
-  // Returns the serial number of the machine.
-  std::string RetrieveSerialNumber();
   // Returns the enrollment token, or an empty string if there is none.
   std::string RetrieveEnrollmentToken();
   // Asynchronously stores |dm_token| and calls |callback| with a boolean to
@@ -120,10 +120,6 @@ class BrowserDMTokenStorage {
   // is called the first time the BrowserDMTokenStorage is interacted with.
   void InitIfNeeded();
 
-  // Gets the client ID and returns it. This implementation is shared by all
-  // platforms.
-  std::string InitSerialNumber();
-
   // Saves the DM token.
   void SaveDMToken(const std::string& token);
 
@@ -133,7 +129,6 @@ class BrowserDMTokenStorage {
   bool is_initialized_;
 
   std::string client_id_;
-  base::Optional<std::string> serial_number_;
   std::string enrollment_token_;
   DMToken dm_token_;
   bool should_display_error_message_on_failure_;
@@ -141,8 +136,6 @@ class BrowserDMTokenStorage {
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<BrowserDMTokenStorage> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserDMTokenStorage);
 };
 
 }  // namespace policy

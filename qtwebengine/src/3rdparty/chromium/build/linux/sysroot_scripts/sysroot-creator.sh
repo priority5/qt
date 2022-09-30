@@ -3,13 +3,13 @@
 # found in the LICENSE file.
 #
 # This script should not be run directly but sourced by the other
-# scripts (e.g. sysroot-creator-sid.sh).  Its up to the parent scripts
+# scripts (e.g. sysroot-creator-bullseye.sh).  Its up to the parent scripts
 # to define certain environment variables: e.g.
 #  DISTRO=debian
-#  DIST=sid
+#  DIST=bullseye
 #  # Similar in syntax to /etc/apt/sources.list
-#  APT_SOURCES_LIST="http://ftp.us.debian.org/debian/ sid main"
-#  KEYRING_FILE=debian-archive-sid-stable.gpg
+#  APT_SOURCES_LIST=( "http://ftp.us.debian.org/debian/ bullseye main" )
+#  KEYRING_FILE=debian-archive-bullseye-stable.gpg
 #  DEBIAN_PACKAGES="gcc libz libssl"
 
 #@ This script builds Debian/Ubuntu sysroot images for building Google Chrome.
@@ -234,14 +234,13 @@ ExtractPackageXz() {
     sed "s|Filename: |Filename: ${repo}|" > "${dst_file}"
 }
 
-GeneratePackageListDist() {
+GeneratePackageListDistRepo() {
   local arch="$1"
-  set -- $2
-  local repo="$1"
-  local dist="$2"
-  local repo_name="$3"
+  local repo="$2"
+  local dist="$3"
+  local repo_name="$4"
 
-  TMP_PACKAGE_LIST="${BUILD_DIR}/Packages.${dist}_${repo_name}_${arch}"
+  local tmp_package_list="${BUILD_DIR}/Packages.${dist}_${repo_name}_${arch}"
   local repo_basedir="${repo}/dists/${dist}"
   local package_list="${BUILD_DIR}/Packages.${dist}_${repo_name}_${arch}.${PACKAGES_EXT}"
   local package_file_arch="${repo_name}/binary-${arch}/Packages.${PACKAGES_EXT}"
@@ -249,7 +248,20 @@ GeneratePackageListDist() {
 
   DownloadOrCopyNonUniqueFilename "${package_list_arch}" "${package_list}"
   VerifyPackageListing "${package_file_arch}" "${package_list}" ${repo} ${dist}
-  ExtractPackageXz "${package_list}" "${TMP_PACKAGE_LIST}" ${repo}
+  ExtractPackageXz "${package_list}" "${tmp_package_list}" ${repo}
+  cat "${tmp_package_list}" | ./merge-package-lists.py "${list_base}"
+}
+
+GeneratePackageListDist() {
+  local arch="$1"
+  set -- $2
+  local repo="$1"
+  local dist="$2"
+  shift 2
+  while (( "$#" )); do
+      GeneratePackageListDistRepo "$arch" "$repo" "$dist" "$1"
+      shift
+  done
 }
 
 GeneratePackageListCommon() {
@@ -257,13 +269,10 @@ GeneratePackageListCommon() {
   local arch="$2"
   local packages="$3"
 
-  local dists="${DIST} ${DIST_UPDATES:-}"
-
   local list_base="${BUILD_DIR}/Packages.${DIST}_${arch}"
   > "${list_base}"  # Create (or truncate) a zero-length file.
-  echo "${APT_SOURCES_LIST}" | while read source; do
+  printf '%s\n' "${APT_SOURCES_LIST[@]}" | while read source; do
     GeneratePackageListDist "${arch}" "${source}"
-    cat "${TMP_PACKAGE_LIST}" | ./merge-package-lists.py "${list_base}"
   done
 
   GeneratePackageList "${list_base}" "${output_file}" "${packages}"
@@ -341,6 +350,10 @@ HacksAndPatchesCommon() {
   cp "${SCRIPT_DIR}/libxkbcommon0-symbols" \
     "${INSTALL_ROOT}/debian/libxkbcommon0/DEBIAN/symbols"
 
+  # libxcomposite1 is missing a symbols file.
+  cp "${SCRIPT_DIR}/libxcomposite1-symbols" \
+    "${INSTALL_ROOT}/debian/libxcomposite1/DEBIAN/symbols"
+
   # Shared objects depending on libdbus-1.so.3 have unsatisfied undefined
   # versioned symbols. To avoid LLD --no-allow-shlib-undefined errors, rewrite
   # DT_NEEDED entries from libdbus-1.so.3 to a different string. LLD will
@@ -358,31 +371,15 @@ HacksAndPatchesCommon() {
   done
   set -e
 
-  # Glibc 2.27 introduced some new optimizations to several math functions, but
-  # it will be a while before it makes it into all supported distros.  Luckily,
-  # glibc maintains ABI compatibility with previous versions, so the old symbols
-  # are still there.
-  # TODO(thomasanderson): Remove this once glibc 2.27 is available on all
-  # supported distros.
-  local math_h="${INSTALL_ROOT}/usr/include/math.h"
-  local libm_so="${INSTALL_ROOT}/lib/${arch}-${os}/libm.so.6"
-  nm -D --defined-only --with-symbol-versions "${libm_so}" | \
-    "${SCRIPT_DIR}/find_incompatible_glibc_symbols.py" >> "${math_h}"
-
-  # glob64() was also optimized in glibc 2.27.  Make sure to choose the older
-  # version.
-  local glob_h="${INSTALL_ROOT}/usr/include/glob.h"
-  local libc_so="${INSTALL_ROOT}/lib/${arch}-${os}/libc.so.6"
-  nm -D --defined-only --with-symbol-versions "${libc_so}" | \
-    "${SCRIPT_DIR}/find_incompatible_glibc_symbols.py" >> "${glob_h}"
-
   # fcntl64() was introduced in glibc 2.28.  Make sure to use fcntl() instead.
   local fcntl_h="${INSTALL_ROOT}/usr/include/fcntl.h"
   sed -i '{N; s/#ifndef __USE_FILE_OFFSET64\(\nextern int fcntl\)/#if 1\1/}' \
       "${fcntl_h}"
-  # On i386, fcntl() was updated in glibc 2.28.
-  nm -D --defined-only --with-symbol-versions "${libc_so}" | \
-    "${SCRIPT_DIR}/find_incompatible_glibc_symbols.py" >> "${fcntl_h}"
+
+  # __GLIBC_MINOR__ is used as a feature test macro.  Replace it with the
+  # earliest supported version of glibc (2.17, https://crbug.com/376567).
+  local features_h="${INSTALL_ROOT}/usr/include/features.h"
+  sed -i 's|\(#define\s\+__GLIBC_MINOR__\)|\1 17 //|' "${features_h}"
 
   # This is for chrome's ./build/linux/pkg-config-wrapper
   # which overwrites PKG_CONFIG_LIBDIR internally
@@ -390,47 +387,61 @@ HacksAndPatchesCommon() {
   mkdir -p ${INSTALL_ROOT}/usr/lib/pkgconfig
   mv ${INSTALL_ROOT}/usr/lib/${arch}-${os}/pkgconfig/* \
       ${INSTALL_ROOT}/usr/lib/pkgconfig
+}
 
-  # Temporary workaround for invalid implicit conversion from void* in pipewire.
-  # This is already fixed upstream in [1], so this can be removed once it rolls
-  # into Debian.
-  # [1] https://github.com/PipeWire/pipewire/commit/371da358d1580dc06218d18a12a99611cac39e4e
-  local pipewire_utils_h="${INSTALL_ROOT}/usr/include/pipewire/utils.h"
-  sed -i 's/malloc/(struct spa_pod*)malloc/' "${pipewire_utils_h}"
+
+ReversionGlibc() {
+  local arch=$1
+  local os=$2
+
+  # Avoid requiring unsupported glibc versions.
+  "${SCRIPT_DIR}/reversion_glibc.py" \
+    "${INSTALL_ROOT}/lib/${arch}-${os}/libc.so.6"
+  "${SCRIPT_DIR}/reversion_glibc.py" \
+    "${INSTALL_ROOT}/lib/${arch}-${os}/libm.so.6"
 }
 
 
 HacksAndPatchesAmd64() {
   HacksAndPatchesCommon x86_64 linux-gnu strip
+  ReversionGlibc x86_64 linux-gnu
 }
 
 
 HacksAndPatchesI386() {
   HacksAndPatchesCommon i386 linux-gnu strip
+  ReversionGlibc i386 linux-gnu
 }
 
 
 HacksAndPatchesARM() {
   HacksAndPatchesCommon arm linux-gnueabihf arm-linux-gnueabihf-strip
+  ReversionGlibc arm linux-gnueabihf
 }
 
 HacksAndPatchesARM64() {
   # Use the unstripped libdbus for arm64 to prevent linker errors.
   # https://bugs.chromium.org/p/webrtc/issues/detail?id=8535
   HacksAndPatchesCommon aarch64 linux-gnu true
+  # Skip reversion_glibc.py. Glibc is compiled in a way where many libm math
+  # functions do not have compatibility symbols for versions <= 2.17.
+  # ReversionGlibc aarch64 linux-gnu
 }
 
 HacksAndPatchesARMEL() {
   HacksAndPatchesCommon arm linux-gnueabi arm-linux-gnueabi-strip
+  ReversionGlibc arm linux-gnueabi
 }
 
 HacksAndPatchesMips() {
   HacksAndPatchesCommon mipsel linux-gnu mipsel-linux-gnu-strip
+  ReversionGlibc mipsel linux-gnu
 }
 
 
 HacksAndPatchesMips64el() {
   HacksAndPatchesCommon mips64el linux-gnuabi64 mips64el-linux-gnuabi64-strip
+  ReversionGlibc mips64el linux-gnuabi64
 }
 
 
@@ -495,14 +506,18 @@ CleanupJailSymlinks() {
     ln -snfv "${prefix}${target}" "${link}"
   done
 
-  find $libdirs -type l -printf '%p %l\n' | while read link target; do
+  failed=0
+  while read link target; do
     # Make sure we catch new bad links.
     if [ ! -r "${link}" ]; then
       echo "ERROR: FOUND BAD LINK ${link}"
       ls -l ${link}
-      exit 1
+      failed=1
     fi
-  done
+  done < <(find $libdirs -type l -printf '%p %l\n')
+  if [ $failed -eq 1 ]; then
+      exit 1
+  fi
   cd "$SAVEDPWD"
 }
 
@@ -511,6 +526,7 @@ VerifyLibraryDepsCommon() {
   local arch=$1
   local os=$2
   local find_dirs=(
+    "${INSTALL_ROOT}/lib/"
     "${INSTALL_ROOT}/lib/${arch}-${os}/"
     "${INSTALL_ROOT}/usr/lib/${arch}-${os}/"
   )
@@ -876,21 +892,26 @@ GeneratePackageList() {
   /bin/rm -f "${output_file}"
   shift
   shift
+  local failed=0
   for pkg in $@ ; do
     local pkg_full=$(grep -A 1 " ${pkg}\$" "$input_file" | \
       egrep "pool/.*" | sed 's/.*Filename: //')
     if [ -z "${pkg_full}" ]; then
-        echo "ERROR: missing package: $pkg"
-        exit 1
+      echo "ERROR: missing package: $pkg"
+      local failed=1
+    else
+      local sha256sum=$(grep -A 4 " ${pkg}\$" "$input_file" | \
+        grep ^SHA256: | sed 's/^SHA256: //')
+      if [ "${#sha256sum}" -ne "64" ]; then
+        echo "Bad sha256sum from Packages"
+        local failed=1
+      fi
+      echo $pkg_full $sha256sum >> "$output_file"
     fi
-    local sha256sum=$(grep -A 4 " ${pkg}\$" "$input_file" | \
-      grep ^SHA256: | sed 's/^SHA256: //')
-    if [ "${#sha256sum}" -ne "64" ]; then
-      echo "Bad sha256sum from Packages"
-      exit 1
-    fi
-    echo $pkg_full $sha256sum >> "$output_file"
   done
+  if [ $failed -eq 1 ]; then
+    exit 1
+  fi
   # sort -o does an in-place sort of this file
   sort "$output_file" -o "$output_file"
 }

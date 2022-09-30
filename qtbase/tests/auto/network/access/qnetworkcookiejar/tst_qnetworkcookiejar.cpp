@@ -1,33 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -44,6 +19,8 @@ class tst_QNetworkCookieJar: public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase();
+
     void getterSetter();
     void setCookiesFromUrl_data();
     void setCookiesFromUrl();
@@ -55,6 +32,8 @@ private slots:
 #endif
     void rfc6265_data();
     void rfc6265();
+private:
+    QSharedPointer<QTemporaryDir> m_dataDir;
 };
 
 class MyCookieJar: public QNetworkCookieJar
@@ -80,6 +59,22 @@ void tst_QNetworkCookieJar::getterSetter()
 
     jar.setAllCookies(list);
     QCOMPARE(jar.allCookies(), list);
+}
+
+void tst_QNetworkCookieJar::initTestCase()
+{
+#if QT_CONFIG(topleveldomain) && QT_CONFIG(publicsuffix_system)
+    QString testDataDir;
+#ifdef BUILTIN_TESTDATA
+    m_dataDir = QEXTRACTTESTDATA("/testdata");
+    QVERIFY(m_dataDir);
+    testDataDir = m_dataDir->path() + "/testdata";
+#else
+    testDataDir = QFINDTESTDATA("testdata");
+#endif
+    qDebug() << "Test data dir:" << testDataDir;
+    qputenv("XDG_DATA_DIRS", QFile::encodeName(testDataDir));
+#endif
 }
 
 void tst_QNetworkCookieJar::setCookiesFromUrl_data()
@@ -435,16 +430,16 @@ void tst_QNetworkCookieJar::effectiveTLDs_data()
     QTest::newRow("no10") << "bla.bla" << false;
     QTest::newRow("no11") << "mosreg.ru" << false;
 
-    const ushort s1[] = {0x74, 0x72, 0x61, 0x6e, 0xf8, 0x79, 0x2e, 0x6e, 0x6f, 0x00}; // xn--trany-yua.no
-    const ushort s2[] = {0x5d9, 0x5e8, 0x5d5, 0x5e9, 0x5dc, 0x5d9, 0x5dd, 0x2e, 0x6d, 0x75, 0x73, 0x65, 0x75, 0x6d, 0x00}; // xn--9dbhblg6di.museum
-    const ushort s3[] = {0x7ec4, 0x7e54, 0x2e, 0x68, 0x6b, 0x00}; // xn--mk0axi.hk
-    const ushort s4[] = {0x7f51, 0x7edc, 0x2e, 0x63, 0x6e, 0x00}; // xn--io0a7i.cn
-    const ushort s5[] = {0x72, 0xe1, 0x68, 0x6b, 0x6b, 0x65, 0x72, 0xe1, 0x76, 0x6a, 0x75, 0x2e, 0x6e, 0x6f, 0x00}; // xn--rhkkervju-01af.no
-    const ushort s6[] = {0xb9a, 0xbbf, 0xb99, 0xbcd, 0xb95, 0xbaa, 0xbcd, 0xbaa, 0xbc2, 0xbb0, 0xbcd, 0x00}; // xn--clchc0ea0b2g2a9gcd
-    const ushort s7[] = {0x627, 0x644, 0x627, 0x631, 0x62f, 0x646, 0x00}; // xn--mgbayh7gpa
-    const ushort s8[] = {0x63, 0x6f, 0x72, 0x72, 0x65, 0x69, 0x6f, 0x73, 0x2d, 0x65, 0x2d, 0x74, 0x65, 0x6c, 0x65,
-                         0x63, 0x6f, 0x6d, 0x75, 0x6e, 0x69, 0x63, 0x61, 0xe7, 0xf5, 0x65, 0x73, 0x2e, 0x6d, 0x75,
-                         0x73, 0x65, 0x75, 0x6d, 0x00}; // xn--correios-e-telecomunicaes-ghc29a.museum
+    const char16_t s1[] = {0x74, 0x72, 0x61, 0x6e, 0xf8, 0x79, 0x2e, 0x6e, 0x6f, 0x00}; // xn--trany-yua.no
+    const char16_t s2[] = {0x5d9, 0x5e8, 0x5d5, 0x5e9, 0x5dc, 0x5d9, 0x5dd, 0x2e, 0x6d, 0x75, 0x73, 0x65, 0x75, 0x6d, 0x00}; // xn--9dbhblg6di.museum
+    const char16_t s3[] = {0x7ec4, 0x7e54, 0x2e, 0x68, 0x6b, 0x00}; // xn--mk0axi.hk
+    const char16_t s4[] = {0x7f51, 0x7edc, 0x2e, 0x63, 0x6e, 0x00}; // xn--io0a7i.cn
+    const char16_t s5[] = {0x72, 0xe1, 0x68, 0x6b, 0x6b, 0x65, 0x72, 0xe1, 0x76, 0x6a, 0x75, 0x2e, 0x6e, 0x6f, 0x00}; // xn--rhkkervju-01af.no
+    const char16_t s6[] = {0xb9a, 0xbbf, 0xb99, 0xbcd, 0xb95, 0xbaa, 0xbcd, 0xbaa, 0xbc2, 0xbb0, 0xbcd, 0x00}; // xn--clchc0ea0b2g2a9gcd
+    const char16_t s7[] = {0x627, 0x644, 0x627, 0x631, 0x62f, 0x646, 0x00}; // xn--mgbayh7gpa
+    const char16_t s8[] = {0x63, 0x6f, 0x72, 0x72, 0x65, 0x69, 0x6f, 0x73, 0x2d, 0x65, 0x2d, 0x74, 0x65, 0x6c, 0x65,
+                           0x63, 0x6f, 0x6d, 0x75, 0x6e, 0x69, 0x63, 0x61, 0xe7, 0xf5, 0x65, 0x73, 0x2e, 0x6d, 0x75,
+                           0x73, 0x65, 0x75, 0x6d, 0x00}; // xn--correios-e-telecomunicaes-ghc29a.museum
     QTest::newRow("yes-specialchars1") << QString::fromUtf16(s1) << true;
     QTest::newRow("yes-specialchars2") << QString::fromUtf16(s2) << true;
     QTest::newRow("yes-specialchars3") << QString::fromUtf16(s3) << true;
@@ -501,7 +496,7 @@ void tst_QNetworkCookieJar::rfc6265_data()
     QVERIFY(!document.isNull());
     QVERIFY(document.isArray());
 
-    foreach (const QJsonValue& testCase, document.array()) {
+    for (const QJsonValue testCase : document.array()) {
         QJsonObject testObject = testCase.toObject();
 
         //"test" - the test case name
@@ -510,15 +505,15 @@ void tst_QNetworkCookieJar::rfc6265_data()
             continue;
 
         //"received" - the cookies received from the server
-        QJsonArray received = testObject.value("received").toArray();
+        const QJsonArray received = testObject.value("received").toArray();
         QStringList receivedList;
-        foreach (const QJsonValue& receivedCookie, received)
+        for (const QJsonValue receivedCookie : received)
             receivedList.append(receivedCookie.toString());
 
         //"sent" - the cookies sent back to the server
-        QJsonArray sent = testObject.value("sent").toArray();
+        const QJsonArray sent = testObject.value("sent").toArray();
         QList<QNetworkCookie> sentList;
-        foreach (const QJsonValue& sentCookie, sent) {
+        for (const QJsonValue sentCookie : sent) {
             QJsonObject sentCookieObject = sentCookie.toObject();
             QNetworkCookie cookie;
             cookie.setName(sentCookieObject.value("name").toString().toUtf8());

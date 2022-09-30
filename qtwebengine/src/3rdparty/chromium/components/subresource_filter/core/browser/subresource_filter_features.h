@@ -10,9 +10,10 @@
 #include <vector>
 
 #include "base/feature_list.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/string_piece.h"
+#include "base/time/time.h"
 #include "components/subresource_filter/core/common/activation_list.h"
 #include "components/subresource_filter/core/common/activation_scope.h"
 #include "components/subresource_filter/core/mojom/subresource_filter.mojom.h"
@@ -137,6 +138,9 @@ class ConfigurationList : public base::RefCountedThreadSafe<ConfigurationList> {
  public:
   explicit ConfigurationList(std::vector<Configuration> configs);
 
+  ConfigurationList(const ConfigurationList&) = delete;
+  ConfigurationList& operator=(const ConfigurationList&) = delete;
+
   // Returns the lexicographically greatest flavor string that is prescribed by
   // any of the configurations. The caller must hold a reference to this
   // instance while using the returned string piece.
@@ -156,8 +160,6 @@ class ConfigurationList : public base::RefCountedThreadSafe<ConfigurationList> {
 
   const std::vector<Configuration> configs_by_decreasing_priority_;
   const base::StringPiece lexicographically_greatest_ruleset_flavor_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfigurationList);
 };
 
 // Retrieves all currently enabled subresource filtering configurations. The
@@ -180,7 +182,7 @@ scoped_refptr<ConfigurationList> GetAndSetActivateConfigurations(
 
 // Feature and variation parameter definitions -------------------------------
 
-// The master toggle to enable/disable the Safe Browsing Subresource Filter.
+// The primary toggle to enable/disable the Safe Browsing Subresource Filter.
 extern const base::Feature kSafeBrowsingSubresourceFilter;
 
 // Enables the blocking of ads on sites that are abusive.
@@ -189,7 +191,12 @@ extern const base::Feature kFilterAdsOnAbusiveSites;
 // Enables the blocking of ads on sites that have ads violations.
 extern const base::Feature kAdsInterventionsEnforced;
 
-// The duration that an ads intervention is active for.
+// The maximum duration that an ads intervention is active for.
+// TODO(crbug.com/1131971): This currently is the default delay.
+// We should move to an approach where each intervention has a duration that is
+// attainable separately as a parameter for that intervention. Right now this is
+// overridden explicitly in a switch for interventions that require a different
+// default duration.
 extern const base::FeatureParam<base::TimeDelta> kAdsInterventionDuration;
 
 // Name/values of the variation parameter controlling maximum activation level.

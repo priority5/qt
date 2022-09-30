@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qqmlconnections_p.h"
 
@@ -88,7 +52,7 @@ public:
 
     \qml
     MouseArea {
-        onClicked: { foo(parameters) }
+        onClicked: (mouse)=> { foo(mouse) }
     }
     \endqml
 
@@ -130,6 +94,12 @@ public:
     }
     \endqml
 
+    \note For backwards compatibility you can also specify the signal handlers
+    without \c{function}, like you would specify them directly in the target
+    object. This is not recommended. If you specify one signal handler this way,
+    then all signal handlers specified as \c{function} in the same Connections
+    object are ignored.
+
     \sa {Qt QML}
 */
 QQmlConnections::QQmlConnections(QObject *parent) :
@@ -137,12 +107,8 @@ QQmlConnections::QQmlConnections(QObject *parent) :
 {
 }
 
-QQmlConnections::~QQmlConnections()
-{
-}
-
 /*!
-    \qmlproperty Object QtQml::Connections::target
+    \qmlproperty QtObject QtQml::Connections::target
     This property holds the object that sends the signal.
 
     If this property is not set, the \c target defaults to the parent of the Connection.
@@ -241,23 +207,27 @@ void QQmlConnectionsParser::verifyBindings(const QQmlRefPointer<QV4::ExecutableC
         const QV4::CompiledData::Binding *binding = props.at(ii);
         const QString &propName = compilationUnit->stringAt(binding->propertyNameIndex);
 
-        const bool thirdCharacterIsValid = (propName.length() >= 2) && (propName.at(2).isUpper() || propName.at(2) == '_');
+        const bool thirdCharacterIsValid = (propName.length() >= 2)
+                && (propName.at(2).isUpper() || propName.at(2) == u'_');
         if (!propName.startsWith(QLatin1String("on")) || !thirdCharacterIsValid) {
             error(props.at(ii), QQmlConnections::tr("Cannot assign to non-existent property \"%1\"").arg(propName));
             return;
         }
 
-        if (binding->type >= QV4::CompiledData::Binding::Type_Object) {
+        if (binding->type() == QV4::CompiledData::Binding::Type_Script)
+            continue;
+
+        if (binding->type() >= QV4::CompiledData::Binding::Type_Object) {
             const QV4::CompiledData::Object *target = compilationUnit->objectAt(binding->value.objectIndex);
             if (!compilationUnit->stringAt(target->inheritedTypeNameIndex).isEmpty())
                 error(binding, QQmlConnections::tr("Connections: nested objects not allowed"));
             else
                 error(binding, QQmlConnections::tr("Connections: syntax error"));
             return;
-        } if (binding->type != QV4::CompiledData::Binding::Type_Script) {
-            error(binding, QQmlConnections::tr("Connections: script expected"));
-            return;
         }
+
+        error(binding, QQmlConnections::tr("Connections: script expected"));
+        return;
     }
 }
 
@@ -297,15 +267,15 @@ void QQmlConnections::connectSignalsToMethods()
     if (!ddata)
         return;
 
-    QV4::ExecutionEngine *engine = ddata->context->engine->handle();
+    QV4::ExecutionEngine *engine = ddata->context->engine()->handle();
 
-    QQmlContextData *ctxtdata = ddata->outerContext;
+    QQmlRefPointer<QQmlContextData> ctxtdata = ddata->outerContext;
     for (int i = ddata->propertyCache->methodOffset(),
              end = ddata->propertyCache->methodOffset() + ddata->propertyCache->methodCount();
          i < end;
          ++i) {
 
-        QQmlPropertyData *handler = ddata->propertyCache->method(i);
+        const QQmlPropertyData *handler = ddata->propertyCache->method(i);
         if (!handler || !handler->isVMEFunction())
             continue;
 
@@ -349,10 +319,10 @@ void QQmlConnections::connectSignalsToBindings()
     Q_D(QQmlConnections);
     QObject *target = this->target();
     QQmlData *ddata = QQmlData::get(this);
-    QQmlContextData *ctxtdata = ddata ? ddata->outerContext : nullptr;
+    QQmlRefPointer<QQmlContextData> ctxtdata = ddata ? ddata->outerContext : nullptr;
 
     for (const QV4::CompiledData::Binding *binding : qAsConst(d->bindings)) {
-        Q_ASSERT(binding->type == QV4::CompiledData::Binding::Type_Script);
+        Q_ASSERT(binding->type() == QV4::CompiledData::Binding::Type_Script);
         QString propName = d->compilationUnit->stringAt(binding->propertyNameIndex);
 
         QQmlProperty prop(target, propName);

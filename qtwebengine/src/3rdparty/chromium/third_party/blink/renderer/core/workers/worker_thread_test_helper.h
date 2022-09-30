@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/synchronization/waitable_event.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/ip_address_space.mojom-blink.h"
@@ -16,6 +15,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
+#include "third_party/blink/renderer/core/event_target_names.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -30,7 +30,7 @@
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -51,7 +51,7 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
       : WorkerGlobalScope(std::move(creation_params),
                           thread,
                           base::TimeTicks::Now(),
-                          ukm::kInvalidSourceId) {
+                          false) {
     ReadyToRunWorkerScript();
   }
 
@@ -63,19 +63,19 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
   }
 
   // WorkerGlobalScope
-  void Initialize(const KURL& response_url,
-                  network::mojom::ReferrerPolicy response_referrer_policy,
-                  network::mojom::IPAddressSpace response_address_space,
-                  const Vector<CSPHeaderAndType>& response_csp_headers,
-                  const Vector<String>* response_origin_trial_tokens,
-                  int64_t appcache_id) override {
+  void Initialize(
+      const KURL& response_url,
+      network::mojom::ReferrerPolicy response_referrer_policy,
+      network::mojom::IPAddressSpace response_address_space,
+      Vector<network::mojom::blink::ContentSecurityPolicyPtr> response_csp,
+      const Vector<String>* response_origin_trial_tokens) override {
     InitializeURL(response_url);
     SetReferrerPolicy(response_referrer_policy);
     SetAddressSpace(response_address_space);
 
     // These should be called after SetAddressSpace() to correctly override the
     // address space by the "treat-as-public-address" CSP directive.
-    InitContentSecurityPolicyFromVector(response_csp_headers);
+    InitContentSecurityPolicyFromVector(std::move(response_csp));
     BindContentSecurityPolicyToExecutionContext();
 
     OriginTrialContext::AddTokens(this, response_origin_trial_tokens);
@@ -110,6 +110,7 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
   // Returns a token uniquely identifying this fake worker.
   WorkerToken GetWorkerToken() const final { return token_; }
   bool CrossOriginIsolatedCapability() const final { return false; }
+  bool DirectSocketCapability() const final { return false; }
   ExecutionContextToken GetExecutionContextToken() const final {
     return token_;
   }
@@ -137,18 +138,18 @@ class WorkerThreadForTest : public WorkerThread {
                            const String& source,
                            const KURL& script_url = KURL("http://fake.url/"),
                            WorkerClients* worker_clients = nullptr) {
-    Vector<CSPHeaderAndType> headers{
-        {"contentSecurityPolicy",
-         network::mojom::ContentSecurityPolicyType::kReport}};
     auto creation_params = std::make_unique<GlobalScopeCreationParams>(
         script_url, mojom::blink::ScriptType::kClassic,
         "fake global scope name", "fake user agent", UserAgentMetadata(),
-        nullptr /* web_worker_fetch_context */, headers,
+        nullptr /* web_worker_fetch_context */,
+        Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
+        Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
         network::mojom::ReferrerPolicy::kDefault, security_origin,
         false /* starter_secure_context */,
         CalculateHttpsState(security_origin), worker_clients,
         nullptr /* content_settings_client */,
-        network::mojom::IPAddressSpace::kLocal, nullptr,
+        network::mojom::IPAddressSpace::kLocal,
+        nullptr /* inherited_trial_features */,
         base::UnguessableToken::Create(),
         std::make_unique<WorkerSettings>(std::make_unique<Settings>().get()),
         mojom::blink::V8CacheOptions::kDefault,

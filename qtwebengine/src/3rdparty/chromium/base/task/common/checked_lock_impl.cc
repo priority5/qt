@@ -4,12 +4,12 @@
 
 #include "base/task/common/checked_lock_impl.h"
 
-#include <algorithm>
 #include <unordered_map>
 #include <vector>
 
 #include "base/check_op.h"
 #include "base/lazy_instance.h"
+#include "base/ranges/algorithm.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/task/common/checked_lock.h"
 #include "base/threading/platform_thread.h"
@@ -23,6 +23,9 @@ namespace {
 class SafeAcquisitionTracker {
  public:
   SafeAcquisitionTracker() = default;
+
+  SafeAcquisitionTracker(const SafeAcquisitionTracker&) = delete;
+  SafeAcquisitionTracker& operator=(const SafeAcquisitionTracker&) = delete;
 
   void RegisterLock(const CheckedLockImpl* const lock,
                     const CheckedLockImpl* const predecessor) {
@@ -44,8 +47,7 @@ class SafeAcquisitionTracker {
 
   void RecordRelease(const CheckedLockImpl* const lock) {
     LockVector* acquired_locks = GetAcquiredLocksOnCurrentThread();
-    const auto iter_at_lock =
-        std::find(acquired_locks->begin(), acquired_locks->end(), lock);
+    const auto iter_at_lock = ranges::find(*acquired_locks, lock);
     DCHECK(iter_at_lock != acquired_locks->end());
     acquired_locks->erase(iter_at_lock);
   }
@@ -126,8 +128,6 @@ class SafeAcquisitionTracker {
   // A thread-local slot holding a vector of locks currently acquired on the
   // current thread.
   ThreadLocalOwnedPointer<LockVector> tls_acquired_locks_;
-
-  DISALLOW_COPY_AND_ASSIGN(SafeAcquisitionTracker);
 };
 
 LazyInstance<SafeAcquisitionTracker>::Leaky g_safe_acquisition_tracker =

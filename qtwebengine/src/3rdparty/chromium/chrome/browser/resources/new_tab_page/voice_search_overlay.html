@@ -1,6 +1,6 @@
 <style include="cr-icons">
   :host {
-    --receiving-audio-color: var(--google-red-refresh-500);
+    --receiving-audio-color: var(--google-red-500);
     --speak-shown-duration: 2s;
   }
 
@@ -22,6 +22,8 @@
     justify-content: center;
     left: 0;
     margin: 0;
+    max-height: initial;
+    max-width: initial;
     padding: 0;
     top: 0;
     width: 100%;
@@ -68,6 +70,8 @@
   *[text='waiting'],
   *[text='speak'] {
     opacity: 0;
+    /* Hiding overflow to prevent jitter when the content area is narrow. */
+    overflow-x: hidden;
     padding-inline-start: 50px;
   }
 
@@ -173,11 +177,7 @@
 </style>
 <dialog id="dialog" on-close="onOverlayClose_" on-click="onOverlayClick_"
     on-keydown="onOverlayKeydown_">
-  <!-- Purely exists to capture focus upon opening the dialog. -->
-  <div tabindex="-1"></div>
-  <cr-icon-button id="closeButton" class="icon-clear" title="$i18n{close}">
-  </cr-icon-button>
-  <div id="content">
+  <div id="content" tabindex="-1">
     <iron-selector id="texts" selected="[[getText_(state_)]]"
         attr-for-selected="text" fallback-selection="none" aria-live="polite"
         selected-attribute="visible" class="display-stack">
@@ -232,4 +232,6 @@
       </cr-button>
     </div>
   </div>
+  <cr-icon-button id="closeButton" class="icon-clear" title="$i18n{close}">
+  </cr-icon-button>
 </dialog>

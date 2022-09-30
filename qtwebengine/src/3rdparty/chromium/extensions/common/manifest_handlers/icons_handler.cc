@@ -58,11 +58,11 @@ IconsHandler::IconsHandler() {
 IconsHandler::~IconsHandler() {
 }
 
-bool IconsHandler::Parse(Extension* extension, base::string16* error) {
+bool IconsHandler::Parse(Extension* extension, std::u16string* error) {
   std::unique_ptr<IconsInfo> icons_info(new IconsInfo);
   const base::Value* icons_dict = nullptr;
   if (!extension->manifest()->GetDictionary(keys::kIcons, &icons_dict)) {
-    *error = base::ASCIIToUTF16(manifest_errors::kInvalidIcons);
+    *error = manifest_errors::kInvalidIcons;
     return false;
   }
 
@@ -87,11 +87,7 @@ bool IconsHandler::Validate(const Extension* extension,
 
 base::span<const char* const> IconsHandler::Keys() const {
   static constexpr const char* kKeys[] = {keys::kIcons};
-#if !defined(__GNUC__) || __GNUC__ > 5
   return kKeys;
-#else
-  return base::make_span(kKeys, 1);
-#endif
 }
 
 }  // namespace extensions

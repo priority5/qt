@@ -70,7 +70,8 @@ class BLINK_PLATFORM_EXPORT WebURLLoaderClient {
       const WebString& new_method,
       const WebURLResponse& passed_redirect_response,
       bool& report_raw_headers,
-      std::vector<std::string>* removed_headers) {
+      std::vector<std::string>* removed_headers,
+      bool insecure_scheme_was_upgraded) {
     return true;
   }
 
@@ -134,4 +135,4 @@ class BLINK_PLATFORM_EXPORT WebURLLoaderClient {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_URL_LOADER_CLIENT_H_

@@ -1,13 +1,15 @@
-# v-0012 - This fails because of the duplicated `foo` structure.
+// v-0012 - This fails because of the duplicated `foo` structure.
 
-type foo = struct {}
+struct foo {
+  a : i32
+};
 
-type foo = struct {
-  [[offset 0]] b : f32;
-}
+struct foo {
+  b : f32
+};
 
-fn main() -> void {
+@stage(fragment)
+fn main() {
   return;
 }
-entry_point vertex = main;
 

@@ -9,9 +9,8 @@
 
 #include "base/base_export.h"
 #include "base/check_op.h"
-#include "base/macros.h"
-#include "base/optional.h"
 #include "base/win/variant_util.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 namespace win {
@@ -40,11 +39,7 @@ class BASE_EXPORT ScopedSafearray {
     using pointer = value_type*;
     using const_pointer = const value_type*;
 
-    LockScope()
-        : safearray_(nullptr),
-          vartype_(VT_EMPTY),
-          array_(nullptr),
-          array_size_(0U) {}
+    LockScope() = default;
 
     LockScope(LockScope<ElementVartype>&& other)
         : safearray_(std::exchange(other.safearray_, nullptr)),
@@ -61,6 +56,9 @@ class BASE_EXPORT ScopedSafearray {
       array_size_ = std::exchange(other.array_size_, 0U);
       return *this;
     }
+
+    LockScope(const LockScope&) = delete;
+    LockScope& operator=(const LockScope&) = delete;
 
     ~LockScope() { Reset(); }
 
@@ -107,17 +105,19 @@ class BASE_EXPORT ScopedSafearray {
       array_size_ = 0U;
     }
 
-    SAFEARRAY* safearray_;
-    VARTYPE vartype_;
-    pointer array_;
-    size_t array_size_;
+    SAFEARRAY* safearray_ = nullptr;
+    VARTYPE vartype_ = VT_EMPTY;
+    pointer array_ = nullptr;
+    size_t array_size_ = 0U;
 
     friend class ScopedSafearray;
-    DISALLOW_COPY_AND_ASSIGN(LockScope);
   };
 
   explicit ScopedSafearray(SAFEARRAY* safearray = nullptr)
       : safearray_(safearray) {}
+
+  ScopedSafearray(const ScopedSafearray&) = delete;
+  ScopedSafearray& operator=(const ScopedSafearray&) = delete;
 
   // Move constructor
   ScopedSafearray(ScopedSafearray&& r) noexcept : safearray_(r.safearray_) {
@@ -135,21 +135,21 @@ class BASE_EXPORT ScopedSafearray {
   // Creates a LockScope for accessing the contents of a
   // single-dimensional SAFEARRAYs.
   template <VARTYPE ElementVartype>
-  base::Optional<LockScope<ElementVartype>> CreateLockScope() const {
+  absl::optional<LockScope<ElementVartype>> CreateLockScope() const {
     if (!safearray_ || SafeArrayGetDim(safearray_) != 1)
-      return base::nullopt;
+      return absl::nullopt;
 
     VARTYPE vartype;
     HRESULT hr = SafeArrayGetVartype(safearray_, &vartype);
     if (FAILED(hr) ||
         !internal::VariantUtil<ElementVartype>::IsConvertibleTo(vartype)) {
-      return base::nullopt;
+      return absl::nullopt;
     }
 
     typename LockScope<ElementVartype>::pointer array = nullptr;
     hr = SafeArrayAccessData(safearray_, reinterpret_cast<void**>(&array));
     if (FAILED(hr))
-      return base::nullopt;
+      return absl::nullopt;
 
     const size_t array_size = GetCount();
     return LockScope<ElementVartype>(safearray_, vartype, array, array_size);
@@ -215,7 +215,6 @@ class BASE_EXPORT ScopedSafearray {
 
  private:
   SAFEARRAY* safearray_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedSafearray);
 };
 
 }  // namespace win

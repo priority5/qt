@@ -26,8 +26,13 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import functools
+import mock
 import optparse
+import sys
+import unittest
 
+from blinkpy.common.system import filesystem_mock
 from blinkpy.common.system import output_capture
 from blinkpy.common.system.executive_mock import MockExecutive
 from blinkpy.web_tests.port import port_testcase
@@ -66,15 +71,15 @@ class WinPortTest(port_testcase.PortTestCase):
         self.assert_name(None, 'win7', 'win-win7')
         self.assert_name('win', 'win7', 'win-win7')
 
-        self.assert_name(None, '10', 'win-win10')
-        self.assert_name('win', '10', 'win-win10')
-        self.assert_name('win-win10', '10', 'win-win10')
-        self.assert_name('win-win10', 'win7', 'win-win10')
+        self.assert_name(None, '10.20h2', 'win-win10.20h2')
+        self.assert_name('win', '10.20h2', 'win-win10.20h2')
+        self.assert_name('win-win10.20h2', '10.20h2', 'win-win10.20h2')
+        self.assert_name('win-win10.20h2', 'win7', 'win-win10.20h2')
 
-        self.assert_name(None, '8', 'win-win10')
-        self.assert_name(None, '8.1', 'win-win10')
-        self.assert_name('win', '8', 'win-win10')
-        self.assert_name('win', '8.1', 'win-win10')
+        self.assert_name(None, '8', 'win-win10.20h2')
+        self.assert_name(None, '8.1', 'win-win10.20h2')
+        self.assert_name('win', '8', 'win-win10.20h2')
+        self.assert_name('win', '8.1', 'win-win10.20h2')
 
         self.assert_name(None, '7sp1', 'win-win7')
         self.assert_name(None, '7sp0', 'win-win7')
@@ -86,9 +91,9 @@ class WinPortTest(port_testcase.PortTestCase):
         self.assert_name('win-win7', '7sp0', 'win-win7')
         self.assert_name('win-win7', 'vista', 'win-win7')
 
-        self.assert_name(None, 'future', 'win-win10')
-        self.assert_name('win', 'future', 'win-win10')
-        self.assert_name('win-win10', 'future', 'win-win10')
+        self.assert_name(None, 'future', 'win-win10.20h2')
+        self.assert_name('win', 'future', 'win-win10.20h2')
+        self.assert_name('win-win10.20h2', 'future', 'win-win10.20h2')
 
         with self.assertRaises(AssertionError):
             self.assert_name(None, 'w2k', 'win-win7')
@@ -103,10 +108,45 @@ class WinPortTest(port_testcase.PortTestCase):
 
     def test_baseline_path(self):
         self.assert_baseline_paths('win-win7', 'win7', '/win')
-        self.assert_baseline_paths('win-win10', 'win')
+        self.assert_baseline_paths('win-win10.20h2', 'win')
 
     def test_operating_system(self):
         self.assertEqual('win', self.make_port().operating_system())
+
+    @unittest.skipIf(sys.platform != 'win32',
+                     'Needs WindowsError to be defined')
+    def test_python3_command(self):
+        def run_command_fn(valid_python, args):
+            if args[0] != valid_python:
+                raise WindowsError('%s != %s' % (valid_python, args[0]))
+            return 0
+
+        with mock.patch('os.getenv', return_value='.BAT;.EXE;.COM'):
+            # Simple case: one of the extensions match.
+            port = self.make_port()
+            port._executive = MockExecutive(run_command_fn=functools.partial(
+                run_command_fn, 'python3.EXE'))
+            self.assertEqual('python3.EXE', port.python3_command())
+
+            # Ensure that the code checks for python3 without an extension.
+            port = self.make_port()
+            port._executive = MockExecutive(
+                run_command_fn=functools.partial(run_command_fn, 'python3'))
+            self.assertEqual('python3', port.python3_command())
+
+            # If there are no matches, a WindowsError should be raised.
+            port = self.make_port()
+            port._executive = MockExecutive(
+                run_command_fn=functools.partial(run_command_fn, None))
+            with self.assertRaises(WindowsError):
+                port.python3_command()
+
+    @unittest.skipIf(sys.platform != 'win32', 'Smoketest for Windows only')
+    def test_python3_command_smoketest(self):
+        # This is a smoketest to make sure that depot_tools has ensured a valid
+        # Python 3 is available. If this test fails on a machine, it means that
+        # there is something wrong with the Python 3 setup.
+        self.assertIsNotNone(self.make_port().python3_command())
 
     def test_driver_name_option(self):
         self.assertTrue(
@@ -126,3 +166,19 @@ class WinPortTest(port_testcase.PortTestCase):
             self.make_port().path_to_apache_config_file(),
             '/mock-checkout/third_party/blink/tools/apache_config/win-httpd.conf'
         )
+
+    def test_relative_test_filename(self):
+        port = self.make_port()
+        relative_path = port._filesystem.join(port.web_tests_dir(), 'foo',
+                                              'bar')
+        self.assertEqual(port.relative_test_filename(relative_path), 'foo/bar')
+        absolute_path = 'C:\\foo\\bar\\not_relative'
+        # Non-Windows platforms won't see the given path as absolute, so mock
+        # that out.
+        if sys.platform != 'win32':
+            mock_filesystem = filesystem_mock.MockFileSystem()
+            mock_filesystem.abspath = lambda p: p
+            port._filesystem = mock_filesystem
+            port.host.filesystem = mock_filesystem
+        self.assertEqual(port.relative_test_filename(absolute_path),
+                         '/C:/foo/bar/not_relative')

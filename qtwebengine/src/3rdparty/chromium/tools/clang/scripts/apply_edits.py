@@ -52,6 +52,7 @@ def _GetFilesFromGit(paths=None):
     args.extend(paths)
   command = subprocess.Popen(args, stdout=subprocess.PIPE)
   output, _ = command.communicate()
+  output = output.decode('utf-8')
   return [os.path.realpath(p) for p in output.splitlines()]
 
 
@@ -164,6 +165,59 @@ _INCLUDE_INSERTION_POINT_REGEX_TEMPLATE = r'''
 '''
 
 
+_NEWLINE_CHARACTERS = [ord('\n'), ord('\r')]
+
+
+def _FindStartOfPreviousLine(contents, index):
+  """ Requires that `index` points to the start of a line.
+      Returns an index to the start of the previous line.
+  """
+  assert (index > 0)
+  assert (contents[index - 1] in _NEWLINE_CHARACTERS)
+
+  # Go back over the newline characters associated with the *single* end of a
+  # line just before `index`, despite of whether end of a line is designated by
+  # "\r", "\n" or "\r\n".  Examples:
+  # 1. "... \r\n <new index> \r\n <old index> ...
+  # 2. "... \n <new index> \n <old index> ...
+  index = index - 1
+  if index > 0 and contents[index - 1] in _NEWLINE_CHARACTERS and \
+      contents[index - 1] != contents[index]:
+    index = index - 1
+
+  # Go back until `index` points right after an end of a line (or at the
+  # beginning of the `contents`).
+  while index > 0 and contents[index - 1] not in _NEWLINE_CHARACTERS:
+    index = index - 1
+
+  return index
+
+
+def _SkipOverPreviousComment(contents, index):
+  """ Returns `index`, possibly moving it earlier so that it skips over comment
+      lines appearing in `contents` just before the old `index.
+
+      Example:
+          <returned `index` points here>// Comment
+                                        // Comment
+          <original `index` points here>bar
+  """
+  # If `index` points at the start of the file, or `index` doesn't point at the
+  # beginning of a line, then don't skip anything and just return `index`.
+  if index == 0 or contents[index - 1] not in _NEWLINE_CHARACTERS:
+    return index
+
+  # Is the previous line a non-comment?  If so, just return `index`.
+  new_index = _FindStartOfPreviousLine(contents, index)
+  prev_text = contents[new_index:index]
+  _COMMENT_START_REGEX = "^  \s*  (  //  |  \*  )"
+  if not re.search(_COMMENT_START_REGEX, prev_text, re.VERBOSE):
+    return index
+
+  # Otherwise skip over the previous line + continue skipping via recursion.
+  return _SkipOverPreviousComment(contents, new_index)
+
+
 def _InsertNonSystemIncludeHeader(filepath, header_line_to_add, contents):
   """ Mutates |contents| (contents of |filepath|) to #include
       the |header_to_add
@@ -171,7 +225,7 @@ def _InsertNonSystemIncludeHeader(filepath, header_line_to_add, contents):
   # Don't add the header if it is already present.
   replacement_text = header_line_to_add
   if replacement_text in contents:
-    return
+    return contents
   replacement_text += '\n'
 
   # Find the right insertion point.
@@ -185,7 +239,7 @@ def _InsertNonSystemIncludeHeader(filepath, header_line_to_add, contents):
   regex_text = _INCLUDE_INSERTION_POINT_REGEX_TEMPLATE % primary_header_basename
   match = re.search(regex_text, contents, re.MULTILINE | re.VERBOSE)
   assert (match is not None)
-  insertion_point = match.start()
+  insertion_point = _SkipOverPreviousComment(contents, match.start())
 
   # Extra empty line is required if the addition is not adjacent to other
   # includes.
@@ -193,7 +247,8 @@ def _InsertNonSystemIncludeHeader(filepath, header_line_to_add, contents):
     replacement_text += '\n'
 
   # Make the edit.
-  contents[insertion_point:insertion_point] = replacement_text
+  return contents[:insertion_point] + replacement_text + \
+      contents[insertion_point:]
 
 
 def _ApplyReplacement(filepath, contents, edit, last_edit):
@@ -216,24 +271,28 @@ def _ApplyReplacement(filepath, contents, edit, last_edit):
           (filepath, edit.offset, edit.length, edit.replacement,
            last_edit.offset, last_edit.length, last_edit.replacement))
 
-  contents[edit.offset:edit.offset + edit.length] = edit.replacement
+  start = edit.offset
+  end = edit.offset + edit.length
+  contents = contents[:start] + edit.replacement + contents[end:]
   if not edit.replacement:
-    _ExtendDeletionIfElementIsInList(contents, edit.offset)
+    contents = _ExtendDeletionIfElementIsInList(contents, edit.offset)
+  return contents
 
 
 def _ApplyIncludeHeader(filepath, contents, edit, last_edit):
   header_line_to_add = '#include "%s"' % edit.replacement
-  _InsertNonSystemIncludeHeader(filepath, header_line_to_add, contents)
+  return _InsertNonSystemIncludeHeader(filepath, header_line_to_add, contents)
 
 
 def _ApplySingleEdit(filepath, contents, edit, last_edit):
   if edit.edit_type == 'r':
-    _ApplyReplacement(filepath, contents, edit, last_edit)
+    return _ApplyReplacement(filepath, contents, edit, last_edit)
   elif edit.edit_type == 'include-user-header':
-    _ApplyIncludeHeader(filepath, contents, edit, last_edit)
+    return _ApplyIncludeHeader(filepath, contents, edit, last_edit)
   else:
     raise ValueError('Unrecognized edit directive "%s": %s\n' %
                      (edit.edit_type, filepath))
+    return contents
 
 
 def _ApplyEditsToSingleFileContents(filepath, contents, edits):
@@ -253,25 +312,25 @@ def _ApplyEditsToSingleFileContents(filepath, contents, edits):
     if edit == last_edit:
       continue
     try:
-      _ApplySingleEdit(filepath, contents, edit, last_edit)
+      contents = _ApplySingleEdit(filepath, contents, edit, last_edit)
       last_edit = edit
       edit_count += 1
     except ValueError as err:
       sys.stderr.write(str(err) + '\n')
       error_count += 1
 
-  return (edit_count, error_count)
+  return (contents, edit_count, error_count)
 
 
 def _ApplyEditsToSingleFile(filepath, edits):
-  with open(filepath, 'rb+') as f:
-    contents = bytearray(f.read())
-    edit_and_error_counts = _ApplyEditsToSingleFileContents(
-        filepath, contents, edits)
+  with open(filepath, 'r+') as f:
+    contents = f.read()
+    (contents, edit_count,
+     error_count) = _ApplyEditsToSingleFileContents(filepath, contents, edits)
     f.seek(0)
     f.truncate()
     f.write(contents)
-  return edit_and_error_counts
+  return (edit_count, error_count)
 
 
 def _ApplyEdits(edits):
@@ -283,7 +342,7 @@ def _ApplyEdits(edits):
   edit_count = 0
   error_count = 0
   done_files = 0
-  for k, v in edits.iteritems():
+  for k, v in edits.items():
     tmp_edit_count, tmp_error_count = _ApplyEditsToSingleFile(k, v)
     edit_count += tmp_edit_count
     error_count += tmp_error_count
@@ -336,9 +395,10 @@ def _ExtendDeletionIfElementIsInList(contents, offset):
 
   if char_before:
     if char_after:
-      del contents[offset:offset + right_trim_count]
+      return contents[:offset] + contents[offset + right_trim_count:]
     elif char_before in (',', ':'):
-      del contents[offset - left_trim_count:offset]
+      return contents[:offset - left_trim_count] + contents[offset:]
+  return contents
 
 
 def main():
@@ -356,8 +416,8 @@ def main():
   filenames = set(_GetFilesFromGit(args.path_filter))
   edits = _ParseEditsFromStdin(args.p)
   return _ApplyEdits(
-      {k: v for k, v in edits.iteritems()
-            if os.path.realpath(k) in filenames})
+      {k: v
+       for k, v in edits.items() if os.path.realpath(k) in filenames})
 
 
 if __name__ == '__main__':

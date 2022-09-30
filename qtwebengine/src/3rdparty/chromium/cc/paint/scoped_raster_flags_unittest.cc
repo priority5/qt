@@ -4,6 +4,7 @@
 
 #include "cc/paint/scoped_raster_flags.h"
 
+#include <utility>
 #include "base/bind.h"
 #include "base/callback.h"
 #include "cc/paint/paint_op_buffer.h"
@@ -11,6 +12,14 @@
 #include "cc/test/skia_common.h"
 #include "cc/test/test_paint_worklet_input.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkImage.h"
+#include "third_party/skia/include/core/SkMatrix.h"
+#include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkRect.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkSize.h"
+#include "third_party/skia/include/core/SkTileMode.h"
 
 namespace cc {
 namespace {
@@ -28,8 +37,9 @@ class MockImageProvider : public ImageProvider {
     sk_sp<SkImage> image = SkImage::MakeFromBitmap(bitmap);
 
     return ScopedResult(
-        DecodedDrawImage(image, SkSize::MakeEmpty(), SkSize::Make(1.0f, 1.0f),
-                         draw_image.filter_quality(), true),
+        DecodedDrawImage(image, nullptr, SkSize::MakeEmpty(),
+                         SkSize::Make(1.0f, 1.0f), draw_image.filter_quality(),
+                         true),
         base::BindOnce(&MockImageProvider::UnrefImage, base::Unretained(this)));
   }
 
@@ -80,11 +90,11 @@ TEST(ScopedRasterFlagsTest, DecodePaintWorkletImageShader) {
 TEST(ScopedRasterFlagsTest, KeepsDecodesAlive) {
   auto record = sk_make_sp<PaintOpBuffer>();
   record->push<DrawImageOp>(CreateDiscardablePaintImage(gfx::Size(10, 10)), 0.f,
-                            0.f, nullptr);
+                            0.f);
   record->push<DrawImageOp>(CreateDiscardablePaintImage(gfx::Size(10, 10)), 0.f,
-                            0.f, nullptr);
+                            0.f);
   record->push<DrawImageOp>(CreateDiscardablePaintImage(gfx::Size(10, 10)), 0.f,
-                            0.f, nullptr);
+                            0.f);
   auto record_shader = PaintShader::MakePaintRecord(
       record, SkRect::MakeWH(100, 100), SkTileMode::kClamp, SkTileMode::kClamp,
       &SkMatrix::I());

@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
 #include "components/update_client/configurator.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -32,10 +32,13 @@ class ConfiguratorImpl {
   ConfiguratorImpl(const update_client::CommandLineConfigPolicy& config_policy,
                    bool require_encryption);
 
+  ConfiguratorImpl(const ConfiguratorImpl&) = delete;
+  ConfiguratorImpl& operator=(const ConfiguratorImpl&) = delete;
+
   ~ConfiguratorImpl();
 
   // Delay in seconds from calling Start() to the first update check.
-  int InitialDelay() const;
+  double InitialDelay() const;
 
   // Delay in seconds to every subsequent update check. 0 means don't check.
   int NextCheckDelay() const;
@@ -92,6 +95,10 @@ class ConfiguratorImpl {
   std::unique_ptr<update_client::ProtocolHandlerFactory>
   GetProtocolHandlerFactory() const;
 
+  absl::optional<bool> IsMachineExternallyManaged() const;
+
+  update_client::UpdaterStateProvider GetUpdaterStateProvider() const;
+
  private:
   base::flat_map<std::string, std::string> extra_info_;
   const bool background_downloads_enabled_;
@@ -100,9 +107,7 @@ class ConfiguratorImpl {
   const bool pings_enabled_;
   const bool require_encryption_;
   const GURL url_source_override_;
-  const int initial_delay_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfiguratorImpl);
+  const double initial_delay_;
 };
 
 }  // namespace component_updater

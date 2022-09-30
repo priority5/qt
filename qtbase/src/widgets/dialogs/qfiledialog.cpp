@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWidgets module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #define QT_NO_URL_CAST_FROM_STRING
 
@@ -48,8 +12,11 @@
 #include <private/qguiapplication_p.h>
 #include <qfontmetrics.h>
 #include <qaction.h>
+#include <qactiongroup.h>
 #include <qheaderview.h>
-#include <qshortcut.h>
+#if QT_CONFIG(shortcut)
+#  include <qshortcut.h>
+#endif
 #include <qgridlayout.h>
 #if QT_CONFIG(menu)
 #include <qmenu.h>
@@ -64,6 +31,9 @@
 #include <qdebug.h>
 #if QT_CONFIG(mimetype)
 #include <qmimedatabase.h>
+#endif
+#if QT_CONFIG(regularexpression)
+#include <qregularexpression.h>
 #endif
 #include <qapplication.h>
 #include <qstylepainter.h>
@@ -81,6 +51,8 @@
 #include <algorithm>
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 Q_GLOBAL_STATIC(QUrl, lastVisitedDir)
 
@@ -161,12 +133,13 @@ Q_GLOBAL_STATIC(QUrl, lastVisitedDir)
   By default, a platform-native file dialog will be used if the platform has
   one. In that case, the widgets which would otherwise be used to construct the
   dialog will not be instantiated, so related accessors such as layout() and
-  itemDelegate() will return null. You can set the \l DontUseNativeDialog option to
-  ensure that the widget-based implementation will be used instead of the
-  native dialog.
+  itemDelegate() will return null. Also, not all platforms show file dialogs
+  with a title bar, so be aware that the caption text might not be visible to
+  the user. You can set the \l DontUseNativeDialog option to ensure that the
+  widget-based implementation will be used instead of the native dialog.
 
   \sa QDir, QFileInfo, QFile, QColorDialog, QFontDialog, {Standard Dialogs Example},
-      {Application Example}
+      {Qt Widgets - Application Example}
 */
 
 /*!
@@ -204,10 +177,6 @@ Q_GLOBAL_STATIC(QUrl, lastVisitedDir)
                           directory chooser.
     \value ExistingFiles  The names of zero or more existing files.
 
-    This value is obsolete since Qt 4.5:
-
-    \value DirectoryOnly  Use \c Directory and setOption(ShowDirsOnly, true) instead.
-
     \sa setFileMode()
 */
 
@@ -239,12 +208,6 @@ Q_GLOBAL_STATIC(QUrl, lastVisitedDir)
 
     \value HideNameFilterDetails Indicates if the file name filter details are
     hidden or not.
-
-    \value DontUseSheet In previous versions of Qt, the static
-    functions would create a sheet by default if the static function
-    was given a parent. This is no longer supported and does nothing in Qt 4.5, The
-    static functions will always be an application modal dialog. If
-    you want to use sheets, use QFileDialog::open() instead.
 
     \value DontUseCustomDirectoryIcons Always use the default directory icon.
     Some platforms allow the user to set a different icon. Custom icon lookup
@@ -347,7 +310,9 @@ Q_GLOBAL_STATIC(QUrl, lastVisitedDir)
 
 QT_BEGIN_INCLUDE_NAMESPACE
 #include <QMetaEnum>
-#include <qshortcut.h>
+#if QT_CONFIG(shortcut)
+#  include <qshortcut.h>
+#endif
 QT_END_INCLUDE_NAMESPACE
 
 /*!
@@ -453,6 +418,7 @@ QByteArray QFileDialog::saveState() const
     int version = 4;
     QByteArray data;
     QDataStream stream(&data, QIODevice::WriteOnly);
+    stream.setVersion(QDataStream::Qt_5_0);
 
     stream << qint32(QFileDialogMagic);
     stream << qint32(version);
@@ -487,6 +453,7 @@ bool QFileDialog::restoreState(const QByteArray &state)
     Q_D(QFileDialog);
     QByteArray sd = state;
     QDataStream stream(&sd, QIODevice::ReadOnly);
+    stream.setVersion(QDataStream::Qt_5_0);
     if (stream.atEnd())
         return false;
     QStringList history;
@@ -597,13 +564,10 @@ void QFileDialogPrivate::retranslateWindowTitle()
         return;
     if (q->acceptMode() == QFileDialog::AcceptOpen) {
         const QFileDialog::FileMode fileMode = q->fileMode();
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-        if (fileMode == QFileDialog::DirectoryOnly || fileMode == QFileDialog::Directory)
+        if (fileMode == QFileDialog::Directory)
             q->setWindowTitle(QFileDialog::tr("Find Directory"));
         else
             q->setWindowTitle(QFileDialog::tr("Open"));
-QT_WARNING_POP
     } else
         q->setWindowTitle(QFileDialog::tr("Save As"));
 
@@ -627,10 +591,6 @@ void QFileDialogPrivate::updateFileNameLabel()
         setLabelTextControl(QFileDialog::FileName, options->labelText(QFileDialogOptions::FileName));
     } else {
         switch (q_func()->fileMode()) {
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-        case QFileDialog::DirectoryOnly:
-QT_WARNING_POP
         case QFileDialog::Directory:
             setLabelTextControl(QFileDialog::FileName, QFileDialog::tr("Directory:"));
             break;
@@ -658,10 +618,6 @@ void QFileDialogPrivate::updateOkButtonText(bool saveAsOnFolder)
         return;
     } else {
         switch (q->fileMode()) {
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-        case QFileDialog::DirectoryOnly:
-QT_WARNING_POP
         case QFileDialog::Directory:
             setLabelTextControl(QFileDialog::Accept, QFileDialog::tr("&Choose"));
             break;
@@ -734,8 +690,8 @@ bool QFileDialogPrivate::canBeNativeDialog() const
         return false;
     }
 
-    QLatin1String staticName(QFileDialog::staticMetaObject.className());
-    QLatin1String dynamicName(q->metaObject()->className());
+    QLatin1StringView staticName(QFileDialog::staticMetaObject.className());
+    QLatin1StringView dynamicName(q->metaObject()->className());
     return (staticName == dynamicName);
 }
 
@@ -843,6 +799,13 @@ void QFileDialog::setOptions(Options options)
 QFileDialog::Options QFileDialog::options() const
 {
     Q_D(const QFileDialog);
+    static_assert((int)QFileDialog::ShowDirsOnly == (int)QFileDialogOptions::ShowDirsOnly);
+    static_assert((int)QFileDialog::DontResolveSymlinks == (int)QFileDialogOptions::DontResolveSymlinks);
+    static_assert((int)QFileDialog::DontConfirmOverwrite == (int)QFileDialogOptions::DontConfirmOverwrite);
+    static_assert((int)QFileDialog::DontUseNativeDialog == (int)QFileDialogOptions::DontUseNativeDialog);
+    static_assert((int)QFileDialog::ReadOnly == (int)QFileDialogOptions::ReadOnly);
+    static_assert((int)QFileDialog::HideNameFilterDetails == (int)QFileDialogOptions::HideNameFilterDetails);
+    static_assert((int)QFileDialog::DontUseCustomDirectoryIcons == (int)QFileDialogOptions::DontUseCustomDirectoryIcons);
     return QFileDialog::Options(int(d->options->options()));
 }
 
@@ -968,10 +931,10 @@ void QFileDialog::setDirectory(const QString &directory)
         d->qFileDialogUi->newFolderButton->setEnabled(d->model->flags(root) & Qt::ItemIsDropEnabled);
         if (root != d->rootIndex()) {
 #if QT_CONFIG(fscompleter)
-            if (directory.endsWith(QLatin1Char('/')))
+            if (directory.endsWith(u'/'))
                 d->completer->setCompletionPrefix(newDirectory);
             else
-                d->completer->setCompletionPrefix(newDirectory + QLatin1Char('/'));
+                d->completer->setCompletionPrefix(newDirectory + u'/');
 #endif
             d->setRootIndex(root);
         }
@@ -1003,7 +966,7 @@ QDir QFileDialog::directory() const
     by the CLSID value with the curly braces removed. For example the URL
     \c clsid:374DE290-123F-4565-9164-39C4925E467B denotes the download
     location. For a complete list of possible values, see the MSDN documentation on
-    \l{https://msdn.microsoft.com/en-us/library/windows/desktop/dd378457.aspx}{KNOWNFOLDERID}.
+    \l{https://docs.microsoft.com/en-us/windows/win32/shell/knownfolderid}{KNOWNFOLDERID}.
     This feature was added in Qt 5.5.
 
     \sa QUuid
@@ -1043,7 +1006,7 @@ QUrl QFileDialog::directoryUrl() const
 // FIXME Qt 5.4: Use upcoming QVolumeInfo class to determine this information?
 static inline bool isCaseSensitiveFileSystem(const QString &path)
 {
-    Q_UNUSED(path)
+    Q_UNUSED(path);
 #if defined(Q_OS_WIN)
     // Return case insensitive unconditionally, even if someone has a case sensitive
     // file system mounted, wrongly capitalized drive letters will cause mismatches.
@@ -1070,7 +1033,7 @@ static inline QString fileFromPath(const QString &rootPath, QString path)
     if (path.at(0) == QDir::separator()
 #ifdef Q_OS_WIN
             //On Windows both cases can happen
-            || path.at(0) == QLatin1Char('/')
+            || path.at(0) == u'/'
 #endif
             ) {
             path.remove(0, 1);
@@ -1094,8 +1057,8 @@ void QFileDialog::selectFile(const QString &filename)
         if (QFileInfo(filename).isRelative()) {
             url = d->options->initialDirectory();
             QString path = url.path();
-            if (!path.endsWith(QLatin1Char('/')))
-                path += QLatin1Char('/');
+            if (!path.endsWith(u'/'))
+                path += u'/';
             url.setPath(path + filename);
         } else {
             url = QUrl::fromLocalFile(filename);
@@ -1144,18 +1107,18 @@ void QFileDialog::selectUrl(const QUrl &url)
 #ifdef Q_OS_UNIX
 Q_AUTOTEST_EXPORT QString qt_tildeExpansion(const QString &path)
 {
-    if (!path.startsWith(QLatin1Char('~')))
+    if (!path.startsWith(u'~'))
         return path;
     int separatorPosition = path.indexOf(QDir::separator());
     if (separatorPosition < 0)
         separatorPosition = path.size();
     if (separatorPosition == 1) {
-        return QDir::homePath() + path.midRef(1);
+        return QDir::homePath() + QStringView{path}.mid(1);
     } else {
 #if defined(Q_OS_VXWORKS) || defined(Q_OS_INTEGRITY)
         const QString homePath = QDir::homePath();
 #else
-        const QByteArray userName = path.midRef(1, separatorPosition - 1).toLocal8Bit();
+        const QByteArray userName = QStringView{path}.mid(1, separatorPosition - 1).toLocal8Bit();
 # if defined(_POSIX_THREAD_SAFE_FUNCTIONS) && !defined(Q_OS_OPENBSD) && !defined(Q_OS_WASM)
         passwd pw;
         passwd *tmpPw;
@@ -1177,7 +1140,7 @@ Q_AUTOTEST_EXPORT QString qt_tildeExpansion(const QString &path)
         const QString homePath = QString::fromLocal8Bit(pw->pw_dir);
 # endif
 #endif
-        return homePath + path.midRef(separatorPosition);
+        return homePath + QStringView{path}.mid(separatorPosition);
     }
 }
 #endif
@@ -1190,7 +1153,7 @@ QStringList QFileDialogPrivate::typedFiles() const
     Q_Q(const QFileDialog);
     QStringList files;
     QString editText = lineEdit()->text();
-    if (!editText.contains(QLatin1Char('"'))) {
+    if (!editText.contains(u'"')) {
 #ifdef Q_OS_UNIX
         const QString prefix = q->directory().absolutePath() + QDir::separator();
         if (QFile::exists(prefix + editText))
@@ -1199,12 +1162,12 @@ QStringList QFileDialogPrivate::typedFiles() const
             files << qt_tildeExpansion(editText);
 #else
         files << editText;
-        Q_UNUSED(q)
+        Q_UNUSED(q);
 #endif
     } else {
         // " is used to separate files like so: "file1" "file2" "file3" ...
         // ### need escape character for filenames with quotes (")
-        QStringList tokens = editText.split(QLatin1Char('\"'));
+        QStringList tokens = editText.split(u'\"');
         for (int i=0; i<tokens.size(); ++i) {
             if ((i % 2) == 0)
                 continue; // Every even token is a separator
@@ -1256,8 +1219,9 @@ QStringList QFileDialogPrivate::addDefaultSuffixToFiles(const QStringList &files
         QFileInfo info(name);
         // if the filename has no suffix, add the default suffix
         const QString defaultSuffix = options->defaultSuffix();
-        if (!defaultSuffix.isEmpty() && !info.isDir() && name.lastIndexOf(QLatin1Char('.')) == -1)
-            name += QLatin1Char('.') + defaultSuffix;
+        if (!defaultSuffix.isEmpty() && !info.isDir() && !info.fileName().contains(u'.'))
+            name += u'.' + defaultSuffix;
+
         if (info.isAbsolute()) {
             files.append(name);
         } else {
@@ -1265,8 +1229,8 @@ QStringList QFileDialogPrivate::addDefaultSuffixToFiles(const QStringList &files
             // This check is needed since we might be at the root directory
             // and on Windows it already ends with slash.
             QString path = rootPath();
-            if (!path.endsWith(QLatin1Char('/')))
-                path += QLatin1Char('/');
+            if (!path.endsWith(u'/'))
+                path += u'/';
             path += name;
             files.append(path);
         }
@@ -1283,8 +1247,12 @@ QList<QUrl> QFileDialogPrivate::addDefaultSuffixToUrls(const QList<QUrl> &urlsTo
         QUrl url = urlsToFix.at(i);
         // if the filename has no suffix, add the default suffix
         const QString defaultSuffix = options->defaultSuffix();
-        if (!defaultSuffix.isEmpty() && !url.path().endsWith(QLatin1Char('/')) && url.path().lastIndexOf(QLatin1Char('.')) == -1)
-            url.setPath(url.path() + QLatin1Char('.') + defaultSuffix);
+        if (!defaultSuffix.isEmpty()) {
+            const QString urlPath = url.path();
+            const auto idx = urlPath.lastIndexOf(u'/');
+            if (idx != (urlPath.size() - 1) && !QStringView{urlPath}.mid(idx + 1).contains(u'.'))
+                url.setPath(urlPath + u'.' + defaultSuffix);
+        }
         urls.append(url);
     }
     return urls;
@@ -1348,21 +1316,14 @@ QList<QUrl> QFileDialog::selectedUrls() const
 */
 QStringList qt_make_filter_list(const QString &filter)
 {
-    QString f(filter);
-
-    if (f.isEmpty())
+    if (filter.isEmpty())
         return QStringList();
 
-    QString sep(QLatin1String(";;"));
-    int i = f.indexOf(sep, 0);
-    if (i == -1) {
-        if (f.indexOf(QLatin1Char('\n'), 0) != -1) {
-            sep = QLatin1Char('\n');
-            i = f.indexOf(sep, 0);
-        }
-    }
+    QString sep(";;"_L1);
+    if (!filter.contains(sep) && filter.contains(u'\n'))
+        sep = u'\n';
 
-    return f.split(sep);
+    return filter.split(sep);
 }
 
 /*!
@@ -1388,48 +1349,27 @@ void QFileDialog::setNameFilter(const QString &filter)
 }
 
 
-#if QT_DEPRECATED_SINCE(5, 13)
-/*!
-    \property QFileDialog::nameFilterDetailsVisible
-    \obsolete
-    \brief This property holds whether the filter details is shown or not.
-    \since 4.4
-
-    When this property is \c true (the default), the filter details are shown
-    in the combo box.  When the property is set to false, these are hidden.
-
-    Use setOption(HideNameFilterDetails, !\e enabled) or
-    !testOption(HideNameFilterDetails).
-*/
-void QFileDialog::setNameFilterDetailsVisible(bool enabled)
-{
-    setOption(HideNameFilterDetails, !enabled);
-}
-
-bool QFileDialog::isNameFilterDetailsVisible() const
-{
-    return !testOption(HideNameFilterDetails);
-}
-#endif
-
-
 /*
     Strip the filters by removing the details, e.g. (*.*).
 */
 QStringList qt_strip_filters(const QStringList &filters)
 {
+#if QT_CONFIG(regularexpression)
     QStringList strippedFilters;
-    QRegExp r(QString::fromLatin1(QPlatformFileDialogHelper::filterRegExp));
+    static const QRegularExpression r(QString::fromLatin1(QPlatformFileDialogHelper::filterRegExp));
     const int numFilters = filters.count();
     strippedFilters.reserve(numFilters);
     for (int i = 0; i < numFilters; ++i) {
         QString filterName;
-        int index = r.indexIn(filters[i]);
-        if (index >= 0)
-            filterName = r.cap(1);
+        auto match = r.match(filters[i]);
+        if (match.hasMatch())
+            filterName = match.captured(1);
         strippedFilters.append(filterName.simplified());
     }
     return strippedFilters;
+#else
+    return filters;
+#endif
 }
 
 
@@ -1582,8 +1522,8 @@ static QString nameFilterForMime(const QString &mimeType)
         if (mime.isDefault()) {
             return QFileDialog::tr("All files (*)");
         } else {
-            const QString patterns = mime.globPatterns().join(QLatin1Char(' '));
-            return mime.comment() + QLatin1String(" (") + patterns + QLatin1Char(')');
+            const QString patterns = mime.globPatterns().join(u' ');
+            return mime.comment() + " ("_L1 + patterns + u')';
         }
     }
     return QString();
@@ -1733,13 +1673,6 @@ void QFileDialog::setFileMode(QFileDialog::FileMode mode)
 {
     Q_D(QFileDialog);
     d->options->setFileMode(static_cast<QFileDialogOptions::FileMode>(mode));
-
-    // keep ShowDirsOnly option in sync with fileMode (BTW, DirectoryOnly is obsolete)
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-    setOption(ShowDirsOnly, mode == DirectoryOnly);
-QT_WARNING_POP
-
     if (!d->usingWidgets())
         return;
 
@@ -1756,14 +1689,11 @@ QT_WARNING_POP
     // set filter
     d->model->setFilter(d->filterForMode(filter()));
     // setup file type for directory
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-    if (mode == DirectoryOnly || mode == Directory) {
+    if (mode == Directory) {
         d->qFileDialogUi->fileTypeCombo->clear();
         d->qFileDialogUi->fileTypeCombo->addItem(tr("Directories"));
         d->qFileDialogUi->fileTypeCombo->setEnabled(false);
     }
-QT_WARNING_POP
     d->updateFileNameLabel();
     d->updateOkButtonText();
     d->qFileDialogUi->fileTypeCombo->setEnabled(!testOption(ShowDirsOnly));
@@ -1852,9 +1782,6 @@ int QFileDialogPrivate::maxNameLength(const QString &path)
 {
 #if defined(Q_OS_UNIX)
     return ::pathconf(QFile::encodeName(path).data(), _PC_NAME_MAX);
-#elif defined(Q_OS_WINRT)
-    Q_UNUSED(path);
-    return MAX_PATH;
 #elif defined(Q_OS_WIN)
     DWORD maxLength;
     const QString drive = path.left(3);
@@ -1895,68 +1822,6 @@ QFileDialog::AcceptMode QFileDialog::acceptMode() const
     Q_D(const QFileDialog);
     return static_cast<AcceptMode>(d->options->acceptMode());
 }
-
-#if QT_DEPRECATED_SINCE(5, 13)
-/*!
-    \property QFileDialog::readOnly
-    \obsolete
-    \brief Whether the filedialog is read-only
-
-    If this property is set to false, the file dialog will allow renaming,
-    and deleting of files and directories and creating directories.
-
-    Use setOption(ReadOnly, \e enabled) or testOption(ReadOnly) instead.
-*/
-void QFileDialog::setReadOnly(bool enabled)
-{
-    setOption(ReadOnly, enabled);
-}
-
-bool QFileDialog::isReadOnly() const
-{
-    return testOption(ReadOnly);
-}
-
-/*!
-    \property QFileDialog::resolveSymlinks
-    \obsolete
-    \brief whether the filedialog should resolve shortcuts
-
-    If this property is set to true, the file dialog will resolve
-    shortcuts or symbolic links.
-
-    Use setOption(DontResolveSymlinks, !\a enabled) or
-    !testOption(DontResolveSymlinks).
-*/
-void QFileDialog::setResolveSymlinks(bool enabled)
-{
-    setOption(DontResolveSymlinks, !enabled);
-}
-
-bool QFileDialog::resolveSymlinks() const
-{
-    return !testOption(DontResolveSymlinks);
-}
-
-/*!
-    \property QFileDialog::confirmOverwrite
-    \obsolete
-    \brief whether the filedialog should ask before accepting a selected file,
-    when the accept mode is AcceptSave
-
-    Use setOption(DontConfirmOverwrite, !\e enabled) or
-    !testOption(DontConfirmOverwrite) instead.
-*/
-void QFileDialog::setConfirmOverwrite(bool enabled)
-{
-    setOption(DontConfirmOverwrite, !enabled);
-}
-
-bool QFileDialog::confirmOverwrite() const
-{
-    return !testOption(DontConfirmOverwrite);
-}
-#endif
 
 /*!
     \property QFileDialog::defaultSuffix
@@ -2001,7 +1866,7 @@ void QFileDialogComboBox::setHistory(const QStringList &paths)
     //On windows the popup display the "C:\", convert to nativeSeparators
     const QUrl url = idx.isValid()
                    ? QUrl::fromLocalFile(QDir::toNativeSeparators(idx.data(QFileSystemModel::FilePathRole).toString()))
-                   : QUrl(QLatin1String("file:"));
+                   : QUrl("file:"_L1);
     if (url.isValid())
         list.append(url);
     urlModel->setUrls(list);
@@ -2026,6 +1891,9 @@ QStringList QFileDialog::history() const
 /*!
     Sets the item delegate used to render items in the views in the
     file dialog to the given \a delegate.
+
+    Any existing delegate will be removed, but not deleted. QFileDialog
+    does not take ownership of \a delegate.
 
     \warning You should not share the same instance of a delegate between views.
     Doing so can cause incorrect or unintuitive editing behavior since each
@@ -2061,7 +1929,7 @@ QAbstractItemDelegate *QFileDialog::itemDelegate() const
 /*!
     Sets the icon provider used by the filedialog to the specified \a provider.
 */
-void QFileDialog::setIconProvider(QFileIconProvider *provider)
+void QFileDialog::setIconProvider(QAbstractFileIconProvider *provider)
 {
     Q_D(QFileDialog);
     if (!d->usingWidgets())
@@ -2074,7 +1942,7 @@ void QFileDialog::setIconProvider(QFileIconProvider *provider)
 /*!
     Returns the icon provider used by the filedialog.
 */
-QFileIconProvider *QFileDialog::iconProvider() const
+QAbstractFileIconProvider *QFileDialog::iconProvider() const
 {
     Q_D(const QFileDialog);
     if (!d->model)
@@ -2183,7 +2051,8 @@ QString QFileDialog::labelText(DialogLabel label) const
     then a default caption will be used.
 
     On Windows, and \macos, this static function will use the
-    native file dialog and not a QFileDialog.
+    native file dialog and not a QFileDialog. Note that the \macos native file
+    dialog does not show a title bar.
 
     On Windows the dialog will spin a blocking modal event loop that will not
     dispatch any QTimers, and if \a parent is not \nullptr then it will position
@@ -2294,7 +2163,8 @@ QUrl QFileDialog::getOpenFileUrl(QWidget *parent,
     then a default caption will be used.
 
     On Windows, and \macos, this static function will use the
-    native file dialog and not a QFileDialog.
+    native file dialog and not a QFileDialog. Note that the \macos native file
+    dialog does not show a title bar.
 
     On Windows the dialog will spin a blocking modal event loop that will not
     dispatch any QTimers, and if \a parent is not \nullptr then it will position
@@ -2447,7 +2317,7 @@ void QFileDialog::getOpenFileContent(const QString &nameFilter, const std::funct
 #else
     QFileDialog *dialog = new QFileDialog();
     dialog->setFileMode(QFileDialog::ExistingFile);
-    dialog->selectNameFilter(nameFilter);
+    dialog->setNameFilter(nameFilter);
 
     auto fileSelected = [=](const QString &fileName) {
         QByteArray fileContent;
@@ -2461,7 +2331,7 @@ void QFileDialog::getOpenFileContent(const QString &nameFilter, const std::funct
 
     auto dialogClosed = [=](int code) {
         Q_UNUSED(code);
-        delete dialog;
+        dialog->deleteLater();
     };
 
     connect(dialog, &QFileDialog::fileSelected, fileSelected);
@@ -2506,7 +2376,7 @@ void QFileDialog::saveFileContent(const QByteArray &fileContent, const QString &
 
     auto dialogClosed = [=](int code) {
         Q_UNUSED(code);
-        delete dialog;
+        dialog->deleteLater();
     };
 
     connect(dialog, &QFileDialog::fileSelected, fileSelected);
@@ -2659,6 +2529,8 @@ QUrl QFileDialog::getSaveFileUrl(QWidget *parent,
     to pass \l{QFileDialog::}{DontUseNativeDialog} to display files using a
     QFileDialog.
 
+    Note that the \macos native file dialog does not show a title bar.
+
     On Unix/X11, the normal behavior of the file dialog is to resolve and
     follow symlinks. For example, if \c{/usr/tmp} is a symlink to \c{/var/tmp},
     the file dialog will change to \c{/var/tmp} after entering \c{/usr/tmp}. If
@@ -2725,10 +2597,7 @@ QUrl QFileDialog::getExistingDirectoryUrl(QWidget *parent,
     QFileDialogArgs args(dir);
     args.parent = parent;
     args.caption = caption;
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-    args.mode = (options & ShowDirsOnly ? DirectoryOnly : Directory);
-QT_WARNING_POP
+    args.mode = Directory;
     args.options = options;
 
     QFileDialog dialog(args);
@@ -2829,7 +2698,7 @@ void QFileDialog::accept()
     QString lineEditText = d->lineEdit()->text();
     // "hidden feature" type .. and then enter, and it will move up a dir
     // special case for ".."
-    if (lineEditText == QLatin1String("..")) {
+    if (lineEditText == ".."_L1) {
         d->_q_navigateToParent();
         const QSignalBlocker blocker(d->qFileDialogUi->fileNameEdit);
         d->lineEdit()->selectAll();
@@ -2837,10 +2706,6 @@ void QFileDialog::accept()
     }
 
     switch (fileMode()) {
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-    case DirectoryOnly:
-QT_WARNING_POP
     case Directory: {
         QString fn = files.first();
         QFileInfo info(fn);
@@ -2924,37 +2789,37 @@ QT_WARNING_POP
 void QFileDialogPrivate::saveSettings()
 {
     Q_Q(QFileDialog);
-    QSettings settings(QSettings::UserScope, QLatin1String("QtProject"));
-    settings.beginGroup(QLatin1String("FileDialog"));
+    QSettings settings(QSettings::UserScope, "QtProject"_L1);
+    settings.beginGroup("FileDialog"_L1);
 
     if (usingWidgets()) {
-        settings.setValue(QLatin1String("sidebarWidth"), qFileDialogUi->splitter->sizes().constFirst());
-        settings.setValue(QLatin1String("shortcuts"), QUrl::toStringList(qFileDialogUi->sidebar->urls()));
-        settings.setValue(QLatin1String("treeViewHeader"), qFileDialogUi->treeView->header()->saveState());
+        settings.setValue("sidebarWidth"_L1, qFileDialogUi->splitter->sizes().constFirst());
+        settings.setValue("shortcuts"_L1, QUrl::toStringList(qFileDialogUi->sidebar->urls()));
+        settings.setValue("treeViewHeader"_L1, qFileDialogUi->treeView->header()->saveState());
     }
     QStringList historyUrls;
     const QStringList history = q->history();
     historyUrls.reserve(history.size());
     for (const QString &path : history)
         historyUrls << QUrl::fromLocalFile(path).toString();
-    settings.setValue(QLatin1String("history"), historyUrls);
-    settings.setValue(QLatin1String("lastVisited"), lastVisitedDir()->toString());
+    settings.setValue("history"_L1, historyUrls);
+    settings.setValue("lastVisited"_L1, lastVisitedDir()->toString());
     const QMetaEnum &viewModeMeta = q->metaObject()->enumerator(q->metaObject()->indexOfEnumerator("ViewMode"));
-    settings.setValue(QLatin1String("viewMode"), QLatin1String(viewModeMeta.key(q->viewMode())));
-    settings.setValue(QLatin1String("qtVersion"), QLatin1String(QT_VERSION_STR));
+    settings.setValue("viewMode"_L1, QLatin1StringView(viewModeMeta.key(q->viewMode())));
+    settings.setValue("qtVersion"_L1, QT_VERSION_STR ""_L1);
 }
 
 bool QFileDialogPrivate::restoreFromSettings()
 {
     Q_Q(QFileDialog);
-    QSettings settings(QSettings::UserScope, QLatin1String("QtProject"));
-    if (!settings.childGroups().contains(QLatin1String("FileDialog")))
+    QSettings settings(QSettings::UserScope, "QtProject"_L1);
+    if (!settings.childGroups().contains("FileDialog"_L1))
         return false;
-    settings.beginGroup(QLatin1String("FileDialog"));
+    settings.beginGroup("FileDialog"_L1);
 
-    q->setDirectoryUrl(lastVisitedDir()->isEmpty() ? settings.value(QLatin1String("lastVisited")).toUrl() : *lastVisitedDir());
+    q->setDirectoryUrl(lastVisitedDir()->isEmpty() ? settings.value("lastVisited"_L1).toUrl() : *lastVisitedDir());
 
-    QByteArray viewModeStr = settings.value(QLatin1String("viewMode")).toString().toLatin1();
+    QByteArray viewModeStr = settings.value("viewMode"_L1).toString().toLatin1();
     const QMetaEnum &viewModeMeta = q->metaObject()->enumerator(q->metaObject()->indexOfEnumerator("ViewMode"));
     bool ok = false;
     int viewMode = viewModeMeta.keyToValue(viewModeStr.constData(), &ok);
@@ -2962,21 +2827,21 @@ bool QFileDialogPrivate::restoreFromSettings()
         viewMode = QFileDialog::List;
     q->setViewMode(static_cast<QFileDialog::ViewMode>(viewMode));
 
-    sidebarUrls = QUrl::fromStringList(settings.value(QLatin1String("shortcuts")).toStringList());
-    headerData = settings.value(QLatin1String("treeViewHeader")).toByteArray();
+    sidebarUrls = QUrl::fromStringList(settings.value("shortcuts"_L1).toStringList());
+    headerData = settings.value("treeViewHeader"_L1).toByteArray();
 
     if (!usingWidgets())
         return true;
 
     QStringList history;
-    const auto urlStrings = settings.value(QLatin1String("history")).toStringList();
+    const auto urlStrings = settings.value("history"_L1).toStringList();
     for (const QString &urlStr : urlStrings) {
         QUrl url(urlStr);
         if (url.isLocalFile())
             history << url.toLocalFile();
     }
 
-    return restoreWidgetState(history, settings.value(QLatin1String("sidebarWidth"), -1).toInt());
+    return restoreWidgetState(history, settings.value("sidebarWidth"_L1, -1).toInt());
 }
 #endif // settings
 
@@ -3058,8 +2923,8 @@ void QFileDialogPrivate::init(const QFileDialogArgs &args)
     // Try to restore from the FileDialog settings group; if it fails, fall back
     // to the pre-5.5 QByteArray serialized settings.
     if (!restoreFromSettings()) {
-        const QSettings settings(QSettings::UserScope, QLatin1String("QtProject"));
-        q->restoreState(settings.value(QLatin1String("Qt/filedialog")).toByteArray());
+        const QSettings settings(QSettings::UserScope, "QtProject"_L1);
+        q->restoreState(settings.value("Qt/filedialog"_L1).toByteArray());
     }
 #endif
 
@@ -3093,8 +2958,9 @@ void QFileDialogPrivate::createWidgets()
     Qt::WindowStates preState = q->windowState();
 
     model = new QFileSystemModel(q);
+    model->setIconProvider(&defaultIconProvider);
     model->setFilter(options->filter());
-    model->setObjectName(QLatin1String("qt_filesystem_model"));
+    model->setObjectName("qt_filesystem_model"_L1);
     if (QPlatformFileDialogHelper *helper = platformFileDialogHelper())
         model->setNameFilterDisables(helper->defaultNameFilterDisables());
     else
@@ -3113,7 +2979,7 @@ void QFileDialogPrivate::createWidgets()
     qFileDialogUi->setupUi(q);
 
     QList<QUrl> initialBookmarks;
-    initialBookmarks << QUrl(QLatin1String("file:"))
+    initialBookmarks << QUrl("file:"_L1)
                      << QUrl::fromLocalFile(QDir::homePath());
     qFileDialogUi->sidebar->setModelAndUrls(model, initialBookmarks);
     QFileDialog::connect(qFileDialogUi->sidebar, SIGNAL(goToUrl(QUrl)),
@@ -3123,7 +2989,7 @@ void QFileDialogPrivate::createWidgets()
     QObject::connect(qFileDialogUi->buttonBox, SIGNAL(rejected()), q, SLOT(reject()));
 
     qFileDialogUi->lookInCombo->setFileDialogPrivate(this);
-    QObject::connect(qFileDialogUi->lookInCombo, SIGNAL(activated(QString)), q, SLOT(_q_goToDirectory(QString)));
+    QObject::connect(qFileDialogUi->lookInCombo, SIGNAL(textActivated(QString)), q, SLOT(_q_goToDirectory(QString)));
 
     qFileDialogUi->lookInCombo->setInsertPolicy(QComboBox::NoInsert);
     qFileDialogUi->lookInCombo->setDuplicatesEnabled(false);
@@ -3153,7 +3019,7 @@ void QFileDialogPrivate::createWidgets()
     qFileDialogUi->fileTypeCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     QObject::connect(qFileDialogUi->fileTypeCombo, SIGNAL(activated(int)),
                      q, SLOT(_q_useNameFilter(int)));
-    QObject::connect(qFileDialogUi->fileTypeCombo, SIGNAL(activated(QString)),
+    QObject::connect(qFileDialogUi->fileTypeCombo, SIGNAL(textActivated(QString)),
                      q, SIGNAL(filterSelected(QString)));
 
     qFileDialogUi->listView->setFileDialogPrivate(this);
@@ -3163,8 +3029,7 @@ void QFileDialogPrivate::createWidgets()
     QObject::connect(qFileDialogUi->listView, SIGNAL(customContextMenuRequested(QPoint)),
                     q, SLOT(_q_showContextMenu(QPoint)));
 #ifndef QT_NO_SHORTCUT
-    QShortcut *shortcut = new QShortcut(qFileDialogUi->listView);
-    shortcut->setKey(QKeySequence(QLatin1String("Delete")));
+    QShortcut *shortcut = new QShortcut(QKeySequence::Delete, qFileDialogUi->listView);
     QObject::connect(shortcut, SIGNAL(activated()), q, SLOT(_q_deleteCurrent()));
 #endif
 
@@ -3172,10 +3037,10 @@ void QFileDialogPrivate::createWidgets()
     qFileDialogUi->treeView->setModel(model);
     QHeaderView *treeHeader = qFileDialogUi->treeView->header();
     QFontMetrics fm(q->font());
-    treeHeader->resizeSection(0, fm.horizontalAdvance(QLatin1String("wwwwwwwwwwwwwwwwwwwwwwwwww")));
-    treeHeader->resizeSection(1, fm.horizontalAdvance(QLatin1String("128.88 GB")));
-    treeHeader->resizeSection(2, fm.horizontalAdvance(QLatin1String("mp3Folder")));
-    treeHeader->resizeSection(3, fm.horizontalAdvance(QLatin1String("10/29/81 02:02PM")));
+    treeHeader->resizeSection(0, fm.horizontalAdvance("wwwwwwwwwwwwwwwwwwwwwwwwww"_L1));
+    treeHeader->resizeSection(1, fm.horizontalAdvance("128.88 GB"_L1));
+    treeHeader->resizeSection(2, fm.horizontalAdvance("mp3Folder"_L1));
+    treeHeader->resizeSection(3, fm.horizontalAdvance("10/29/81 02:02PM"_L1));
     treeHeader->setContextMenuPolicy(Qt::ActionsContextMenu);
 
     QActionGroup *showActionGroup = new QActionGroup(q);
@@ -3203,8 +3068,7 @@ void QFileDialogPrivate::createWidgets()
     QObject::connect(qFileDialogUi->treeView, SIGNAL(customContextMenuRequested(QPoint)),
                      q, SLOT(_q_showContextMenu(QPoint)));
 #ifndef QT_NO_SHORTCUT
-    shortcut = new QShortcut(qFileDialogUi->treeView);
-    shortcut->setKey(QKeySequence(QLatin1String("Delete")));
+    shortcut = new QShortcut(QKeySequence::Delete, qFileDialogUi->treeView);
     QObject::connect(shortcut, SIGNAL(activated()), q, SLOT(_q_deleteCurrent()));
 #endif
 
@@ -3223,8 +3087,8 @@ void QFileDialogPrivate::createWidgets()
     // Try to restore from the FileDialog settings group; if it fails, fall back
     // to the pre-5.5 QByteArray serialized settings.
     if (!restoreFromSettings()) {
-        const QSettings settings(QSettings::UserScope, QLatin1String("QtProject"));
-        q->restoreState(settings.value(QLatin1String("Qt/filedialog")).toByteArray());
+        const QSettings settings(QSettings::UserScope, "QtProject"_L1);
+        q->restoreState(settings.value("Qt/filedialog"_L1).toByteArray());
     }
 #endif
 
@@ -3402,7 +3266,7 @@ void QFileDialogPrivate::createMenuActions()
 
     QAction *goHomeAction =  new QAction(q);
 #ifndef QT_NO_SHORTCUT
-    goHomeAction->setShortcut(Qt::CTRL + Qt::Key_H + Qt::SHIFT);
+    goHomeAction->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_H);
 #endif
     QObject::connect(goHomeAction, SIGNAL(triggered()), q, SLOT(_q_goHome()));
     q->addAction(goHomeAction);
@@ -3410,7 +3274,7 @@ void QFileDialogPrivate::createMenuActions()
     // ### TODO add Desktop & Computer actions
 
     QAction *goToParent =  new QAction(q);
-    goToParent->setObjectName(QLatin1String("qt_goto_parent_action"));
+    goToParent->setObjectName("qt_goto_parent_action"_L1);
 #ifndef QT_NO_SHORTCUT
     goToParent->setShortcut(Qt::CTRL | Qt::Key_Up);
 #endif
@@ -3419,21 +3283,21 @@ void QFileDialogPrivate::createMenuActions()
 
     renameAction = new QAction(q);
     renameAction->setEnabled(false);
-    renameAction->setObjectName(QLatin1String("qt_rename_action"));
+    renameAction->setObjectName("qt_rename_action"_L1);
     QObject::connect(renameAction, SIGNAL(triggered()), q, SLOT(_q_renameCurrent()));
 
     deleteAction = new QAction(q);
     deleteAction->setEnabled(false);
-    deleteAction->setObjectName(QLatin1String("qt_delete_action"));
+    deleteAction->setObjectName("qt_delete_action"_L1);
     QObject::connect(deleteAction, SIGNAL(triggered()), q, SLOT(_q_deleteCurrent()));
 
     showHiddenAction = new QAction(q);
-    showHiddenAction->setObjectName(QLatin1String("qt_show_hidden_action"));
+    showHiddenAction->setObjectName("qt_show_hidden_action"_L1);
     showHiddenAction->setCheckable(true);
     QObject::connect(showHiddenAction, SIGNAL(triggered()), q, SLOT(_q_showHidden()));
 
     newFolderAction = new QAction(q);
-    newFolderAction->setObjectName(QLatin1String("qt_new_folder_action"));
+    newFolderAction->setObjectName("qt_new_folder_action"_L1);
     QObject::connect(newFolderAction, SIGNAL(triggered()), q, SLOT(_q_createDirectory()));
 }
 
@@ -3729,7 +3593,7 @@ void QFileDialogPrivate::_q_deleteCurrent()
 
 void QFileDialogPrivate::_q_autoCompleteFileName(const QString &text)
 {
-    if (text.startsWith(QLatin1String("//")) || text.startsWith(QLatin1Char('\\'))) {
+    if (text.startsWith("//"_L1) || text.startsWith(u'\\')) {
         qFileDialogUi->listView->selectionModel()->clearSelection();
         return;
     }
@@ -3737,7 +3601,7 @@ void QFileDialogPrivate::_q_autoCompleteFileName(const QString &text)
     const QStringList multipleFiles = typedFiles();
     if (multipleFiles.count() > 0) {
         QModelIndexList oldFiles = qFileDialogUi->listView->selectionModel()->selectedRows();
-        QVector<QModelIndex> newFiles;
+        QList<QModelIndex> newFiles;
         for (const auto &file : multipleFiles) {
             QModelIndex idx = model->index(file);
             if (oldFiles.removeAll(idx) == 0)
@@ -3771,7 +3635,7 @@ void QFileDialogPrivate::_q_updateOkButton()
     const QStringList files = q->selectedFiles();
     QString lineEditText = lineEdit()->text();
 
-    if (lineEditText.startsWith(QLatin1String("//")) || lineEditText.startsWith(QLatin1Char('\\'))) {
+    if (lineEditText.startsWith("//"_L1) || lineEditText.startsWith(u'\\')) {
         button->setEnabled(true);
         updateOkButtonText();
         return;
@@ -3779,14 +3643,10 @@ void QFileDialogPrivate::_q_updateOkButton()
 
     if (files.isEmpty()) {
         enableButton = false;
-    } else if (lineEditText == QLatin1String("..")) {
+    } else if (lineEditText == ".."_L1) {
         isOpenDirectory = true;
     } else {
         switch (fileMode) {
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-        case QFileDialog::DirectoryOnly:
-QT_WARNING_POP
         case QFileDialog::Directory: {
             QString fn = files.first();
             QModelIndex idx = model->index(fn);
@@ -3805,10 +3665,10 @@ QT_WARNING_POP
             if (info.isDir()) {
                 fileDir = info.canonicalFilePath();
             } else {
-                fileDir = fn.mid(0, fn.lastIndexOf(QLatin1Char('/')));
+                fileDir = fn.mid(0, fn.lastIndexOf(u'/'));
                 fileName = fn.mid(fileDir.length() + 1);
             }
-            if (lineEditText.contains(QLatin1String(".."))) {
+            if (lineEditText.contains(".."_L1)) {
                 fileDir = info.canonicalFilePath();
                 fileName = info.fileName();
             }
@@ -3878,15 +3738,11 @@ void QFileDialogPrivate::_q_enterDirectory(const QModelIndex &index)
         const QFileDialog::FileMode fileMode = q->fileMode();
         q->setDirectory(path);
         emit q->directoryEntered(path);
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-        if (fileMode == QFileDialog::Directory
-                || fileMode == QFileDialog::DirectoryOnly) {
+        if (fileMode == QFileDialog::Directory) {
             // ### find out why you have to do both of these.
             lineEdit()->setText(QString());
             lineEdit()->clear();
         }
-QT_WARNING_POP
     } else {
         // Do not accept when shift-clicking to multi-select a file in environments with single-click-activation (KDE)
         if (!q->style()->styleHint(QStyle::SH_ItemView_ActivateItemOnSingleClick, nullptr, qFileDialogUi->treeView)
@@ -3957,8 +3813,8 @@ void QFileDialogPrivate::_q_useNameFilter(int index)
         QString fileName = lineEdit()->text();
         const QString fileNameExtension = QFileInfo(fileName).suffix();
         if (!fileNameExtension.isEmpty() && !newNameFilterExtension.isEmpty()) {
-            const int fileNameExtensionLength = fileNameExtension.count();
-            fileName.replace(fileName.count() - fileNameExtensionLength,
+            const int fileNameExtensionLength = fileNameExtension.length();
+            fileName.replace(fileName.length() - fileNameExtensionLength,
                              fileNameExtensionLength, newNameFilterExtension);
             qFileDialogUi->listView->clearSelection();
             lineEdit()->setText(fileName);
@@ -3978,10 +3834,7 @@ void QFileDialogPrivate::_q_selectionChanged()
 {
     const QFileDialog::FileMode fileMode = q_func()->fileMode();
     const QModelIndexList indexes = qFileDialogUi->listView->selectionModel()->selectedRows();
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-    bool stripDirs = (fileMode != QFileDialog::DirectoryOnly && fileMode != QFileDialog::Directory);
-QT_WARNING_POP
+    bool stripDirs = fileMode != QFileDialog::Directory;
 
     QStringList allFiles;
     for (const auto &index : indexes) {
@@ -3990,11 +3843,11 @@ QT_WARNING_POP
         allFiles.append(index.data().toString());
     }
     if (allFiles.count() > 1)
-        for (int i = 0; i < allFiles.count(); ++i) {
-            allFiles.replace(i, QString(QLatin1Char('"') + allFiles.at(i) + QLatin1Char('"')));
+        for (qsizetype i = 0; i < allFiles.count(); ++i) {
+            allFiles.replace(i, QString(u'"' + allFiles.at(i) + u'"'));
     }
 
-    QString finalFiles = allFiles.join(QLatin1Char(' '));
+    QString finalFiles = allFiles.join(u' ');
     if (!finalFiles.isEmpty() && !lineEdit()->hasFocus() && lineEdit()->isVisible())
         lineEdit()->setText(finalFiles);
     else
@@ -4033,13 +3886,10 @@ void QFileDialogPrivate::_q_rowsInserted(const QModelIndex &parent)
 void QFileDialogPrivate::_q_fileRenamed(const QString &path, const QString &oldName, const QString &newName)
 {
     const QFileDialog::FileMode fileMode = q_func()->fileMode();
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-    if (fileMode == QFileDialog::Directory || fileMode == QFileDialog::DirectoryOnly) {
+    if (fileMode == QFileDialog::Directory) {
         if (path == rootPath() && lineEdit()->text() == oldName)
             lineEdit()->setText(newName);
     }
-QT_WARNING_POP
 }
 
 void QFileDialogPrivate::_q_emitUrlSelected(const QUrl &file)
@@ -4121,12 +3971,12 @@ bool QFileDialogPrivate::itemViewKeyboardEvent(QKeyEvent *event) {
 QString QFileDialogPrivate::getEnvironmentVariable(const QString &string)
 {
 #ifdef Q_OS_UNIX
-    if (string.size() > 1 && string.startsWith(QLatin1Char('$'))) {
-        return QString::fromLocal8Bit(qgetenv(string.midRef(1).toLatin1().constData()));
+    if (string.size() > 1 && string.startsWith(u'$')) {
+        return QString::fromLocal8Bit(qgetenv(QStringView{string}.mid(1).toLatin1().constData()));
     }
 #else
-    if (string.size() > 2 && string.startsWith(QLatin1Char('%')) && string.endsWith(QLatin1Char('%'))) {
-        return QString::fromLocal8Bit(qgetenv(string.midRef(1, string.size() - 2).toLatin1().constData()));
+    if (string.size() > 2 && string.startsWith(u'%') && string.endsWith(u'%')) {
+        return QString::fromLocal8Bit(qgetenv(QStringView{string}.mid(1, string.size() - 2).toLatin1().constData()));
     }
 #endif
     return string;
@@ -4155,7 +4005,7 @@ void QFileDialogComboBox::showPopup()
         idx = idx.parent();
     }
     // add "my computer"
-    list.append(QUrl(QLatin1String("file:")));
+    list.append(QUrl("file:"_L1));
     urlModel->addUrls(list, 0);
     idx = model()->index(model()->rowCount() - 1, 0);
 
@@ -4204,10 +4054,6 @@ void QFileDialogComboBox::paintEvent(QPaintEvent *)
     painter.drawControl(QStyle::CE_ComboBoxLabel, opt);
 }
 
-QFileDialogListView::QFileDialogListView(QWidget *parent) : QListView(parent)
-{
-}
-
 void QFileDialogListView::setFileDialogPrivate(QFileDialogPrivate *d_pointer)
 {
     d_ptr = d_pointer;
@@ -4239,10 +4085,6 @@ void QFileDialogListView::keyPressEvent(QKeyEvent *e)
     if (!d_ptr->itemViewKeyboardEvent(e))
         QListView::keyPressEvent(e);
     e->accept();
-}
-
-QFileDialogTreeView::QFileDialogTreeView(QWidget *parent) : QTreeView(parent)
-{
 }
 
 void QFileDialogTreeView::setFileDialogPrivate(QFileDialogPrivate *d_pointer)
@@ -4322,7 +4164,7 @@ QString QFSCompleter::pathFromIndex(const QModelIndex &index) const
         if (currentLocation == QDir::separator())
             return path.mid(currentLocation.length());
 #endif
-        if (currentLocation.endsWith(QLatin1Char('/')))
+        if (currentLocation.endsWith(u'/'))
             return path.mid(currentLocation.length());
         else
             return path.mid(currentLocation.length()+1);
@@ -4336,11 +4178,11 @@ QStringList QFSCompleter::splitPath(const QString &path) const
         return QStringList(completionPrefix());
 
     QString pathCopy = QDir::toNativeSeparators(path);
-    QString sep = QDir::separator();
+    QChar sep = QDir::separator();
 #if defined(Q_OS_WIN)
-    if (pathCopy == QLatin1String("\\") || pathCopy == QLatin1String("\\\\"))
+    if (pathCopy == "\\"_L1 || pathCopy == "\\\\"_L1)
         return QStringList(pathCopy);
-    QString doubleSlash(QLatin1String("\\\\"));
+    QString doubleSlash("\\\\"_L1);
     if (pathCopy.startsWith(doubleSlash))
         pathCopy = pathCopy.mid(2);
     else
@@ -4360,24 +4202,22 @@ QStringList QFSCompleter::splitPath(const QString &path) const
     }
 #endif
 
-    QRegExp re(QLatin1Char('[') + QRegExp::escape(sep) + QLatin1Char(']'));
-
 #if defined(Q_OS_WIN)
-    QStringList parts = pathCopy.split(re, Qt::SkipEmptyParts);
+    QStringList parts = pathCopy.split(sep, Qt::SkipEmptyParts);
     if (!doubleSlash.isEmpty() && !parts.isEmpty())
         parts[0].prepend(doubleSlash);
     if (pathCopy.endsWith(sep))
         parts.append(QString());
 #else
-    QStringList parts = pathCopy.split(re);
-    if (pathCopy[0] == sep[0]) // read the "/" at the beginning as the split removed it
-        parts[0] = sep[0];
+    QStringList parts = pathCopy.split(sep);
+    if (pathCopy[0] == sep) // read the "/" at the beginning as the split removed it
+        parts[0] = sep;
 #endif
 
 #if defined(Q_OS_WIN)
-    bool startsFromRoot = !parts.isEmpty() && parts[0].endsWith(QLatin1Char(':'));
+    bool startsFromRoot = !parts.isEmpty() && parts[0].endsWith(u':');
 #else
-    bool startsFromRoot = pathCopy[0] == sep[0];
+    bool startsFromRoot = pathCopy[0] == sep;
 #endif
     if (parts.count() == 1 || (parts.count() > 1 && !startsFromRoot)) {
         const QFileSystemModel *dirModel;
@@ -4387,14 +4227,12 @@ QStringList QFSCompleter::splitPath(const QString &path) const
             dirModel = sourceModel;
         QString currentLocation = QDir::toNativeSeparators(dirModel->rootPath());
 #if defined(Q_OS_WIN)
-        if (currentLocation.endsWith(QLatin1Char(':')))
+        if (currentLocation.endsWith(u':'))
             currentLocation.append(sep);
 #endif
         if (currentLocation.contains(sep) && path != currentLocation) {
             QStringList currentLocationList = splitPath(currentLocation);
-            while (!currentLocationList.isEmpty()
-                   && parts.count() > 0
-                   && parts.at(0) == QLatin1String("..")) {
+            while (!currentLocationList.isEmpty() && parts.count() > 0 && parts.at(0) == ".."_L1) {
                 parts.removeFirst();
                 currentLocationList.removeLast();
             }

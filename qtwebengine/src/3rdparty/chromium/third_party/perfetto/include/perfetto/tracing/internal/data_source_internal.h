@@ -34,6 +34,7 @@
 namespace perfetto {
 
 class DataSourceBase;
+class InterceptorBase;
 class TraceWriterBase;
 
 namespace internal {
@@ -60,6 +61,10 @@ struct DataSourceState {
   // doing extra pointr arithmetic.
   bool trace_lambda_enabled = false;
 
+  // The overall TracingMuxerImpl instance id, which gets incremented by
+  // ResetForTesting.
+  uint32_t muxer_id_for_testing = 0;
+
   // The central buffer id that all TraceWriter(s) created by this data source
   // must target.
   BufferId buffer_id = 0;
@@ -68,6 +73,11 @@ struct DataSourceState {
   // lookup the Producer object, and hence the IPC channel, for this data
   // source.
   TracingBackendId backend_id = 0;
+
+  // Each backend may connect to the tracing service multiple times if a
+  // disconnection occurs. This counter is used to uniquely identify each
+  // connection so that trace writers don't get reused across connections.
+  uint32_t backend_connection_id = 0;
 
   // The instance id as assigned by the tracing service. Note that because a
   // process can be connected to >1 services, this ID is not globally unique but
@@ -80,13 +90,23 @@ struct DataSourceState {
   // event).
   uint64_t config_hash = 0;
 
+  // If this data source is being intercepted (see Interceptor), this field
+  // contains the non-zero id of a registered interceptor which should receive
+  // trace packets for this session. Note: interceptor id 1 refers to the first
+  // element of TracingMuxerImpl::interceptors_ with successive numbers using
+  // the following slots.
+  uint32_t interceptor_id = 0;
+
   // This lock is not held to implement Trace() and it's used only if the trace
   // code wants to access its own data source state.
   // This is to prevent that accessing the data source on an arbitrary embedder
   // thread races with the internal IPC thread destroying the data source
   // because of a end-of-tracing notification from the service.
+  // This lock is also used to protect access to a possible interceptor for this
+  // data source session.
   std::recursive_mutex lock;
   std::unique_ptr<DataSourceBase> data_source;
+  std::unique_ptr<InterceptorBase> interceptor;
 };
 
 // This is to allow lazy-initialization and avoid static initializers and
@@ -98,6 +118,9 @@ struct DataSourceStateStorage {
 
 // Per-DataSource-type global state.
 struct DataSourceStaticState {
+  // System-wide unique id of the data source.
+  uint64_t id = 0;
+
   // Unique index of the data source, assigned at registration time.
   uint32_t index = kMaxDataSources;
 
@@ -105,6 +128,10 @@ struct DataSourceStaticState {
   // i-th bit of the bitmap it's set, instances[i] is valid.
   std::atomic<uint32_t> valid_instances{};
   std::array<DataSourceStateStorage, kMaxDataSourceInstances> instances{};
+
+  // Incremented whenever incremental state should be reset for any instance of
+  // this data source.
+  std::atomic<uint32_t> incremental_state_generation{};
 
   // Can be used with a cached |valid_instances| bitmap.
   DataSourceState* TryGetCached(uint32_t cached_bitmap, size_t n) {
@@ -125,19 +152,31 @@ struct DataSourceStaticState {
 
 // Per-DataSource-instance thread-local state.
 struct DataSourceInstanceThreadLocalState {
-  using IncrementalStatePointer = std::unique_ptr<void, void (*)(void*)>;
 
   void Reset() {
     trace_writer.reset();
     incremental_state.reset();
+    data_source_custom_tls.reset();
+    muxer_id_for_testing = 0;
     backend_id = 0;
+    backend_connection_id = 0;
     buffer_id = 0;
+    data_source_instance_id = 0;
+    incremental_state_generation = 0;
+    is_intercepted = false;
   }
 
   std::unique_ptr<TraceWriterBase> trace_writer;
-  IncrementalStatePointer incremental_state = {nullptr, [](void*) {}};
+  using ObjectWithDeleter = std::unique_ptr<void, void (*)(void*)>;
+  ObjectWithDeleter incremental_state = {nullptr, [](void*) {}};
+  ObjectWithDeleter data_source_custom_tls = {nullptr, [](void*) {}};
+  uint32_t incremental_state_generation;
+  uint32_t muxer_id_for_testing;
   TracingBackendId backend_id;
+  uint32_t backend_connection_id;
   BufferId buffer_id;
+  uint64_t data_source_instance_id;
+  bool is_intercepted;
 };
 
 // Per-DataSource-type thread-local state.

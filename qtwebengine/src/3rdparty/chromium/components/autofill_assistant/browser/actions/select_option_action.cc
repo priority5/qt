@@ -12,7 +12,8 @@
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
 #include "components/autofill_assistant/browser/actions/action_delegate_util.h"
 #include "components/autofill_assistant/browser/client_status.h"
-#include "components/autofill_assistant/browser/field_formatter.h"
+#include "components/autofill_assistant/browser/user_data_util.h"
+#include "components/autofill_assistant/browser/web/web_controller.h"
 
 namespace autofill_assistant {
 
@@ -34,46 +35,35 @@ void SelectOptionAction::InternalProcessAction(ProcessActionCallback callback) {
     EndAction(ClientStatus(INVALID_SELECTOR));
     return;
   }
+  if (proto_.select_option().option_comparison_attribute() ==
+      SelectOptionProto::NOT_SET) {
+    VLOG(1) << __func__ << ": no option comparison attribute set";
+    EndAction(ClientStatus(INVALID_ACTION));
+    return;
+  }
 
   switch (select_option.value_case()) {
-    case SelectOptionProto::kSelectedOption:
-      if (select_option.selected_option().empty()) {
-        VLOG(1) << __func__ << ": empty |selected_option|";
+    case SelectOptionProto::kTextFilterValue:
+      if (select_option.text_filter_value().re2().empty()) {
+        VLOG(1) << __func__ << ": empty |re2_value|";
         EndAction(ClientStatus(INVALID_ACTION));
         return;
       }
 
-      value_ = select_option.selected_option();
+      value_ = select_option.text_filter_value().re2();
+      case_sensitive_ = select_option.text_filter_value().case_sensitive();
       break;
-    case SelectOptionProto::kAutofillValue: {
-      if (select_option.autofill_value().profile().identifier().empty() ||
-          select_option.autofill_value().value_expression().empty()) {
-        VLOG(1) << "SelectOptionAction: |autofill_value| with empty "
-                   "|profile.identifier| or |value_expression|";
-        EndAction(ClientStatus(INVALID_ACTION));
+    case SelectOptionProto::kAutofillRegexpValue: {
+      ClientStatus autofill_status = user_data::GetFormattedClientValue(
+          select_option.autofill_regexp_value(), *delegate_->GetUserData(),
+          &value_);
+      if (!autofill_status.ok()) {
+        EndAction(autofill_status);
         return;
       }
-
-      const autofill::AutofillProfile* address =
-          delegate_->GetUserData()->selected_address(
-              select_option.autofill_value().profile().identifier());
-      if (address == nullptr) {
-        VLOG(1) << "SelectOptionAction: requested unknown address '"
-                << select_option.autofill_value().profile().identifier() << "'";
-        EndAction(ClientStatus(PRECONDITION_FAILED));
-        return;
-      }
-
-      auto value = field_formatter::FormatString(
-          select_option.autofill_value().value_expression(),
-          field_formatter::CreateAutofillMappings(*address,
-                                                  /* locale= */ "en-US"));
-      if (!value.has_value()) {
-        EndAction(ClientStatus(AUTOFILL_INFO_NOT_AVAILABLE));
-        return;
-      }
-
-      value_ = *value;
+      case_sensitive_ = select_option.autofill_regexp_value()
+                            .value_expression_re2()
+                            .case_sensitive();
       break;
     }
     default:
@@ -82,9 +72,12 @@ void SelectOptionAction::InternalProcessAction(ProcessActionCallback callback) {
       return;
   }
 
-  delegate_->ShortWaitForElement(
-      selector, base::BindOnce(&SelectOptionAction::OnWaitForElement,
-                               weak_ptr_factory_.GetWeakPtr(), selector));
+  delegate_->ShortWaitForElementWithSlowWarning(
+      selector,
+      base::BindOnce(&SelectOptionAction::OnWaitForElementTimed,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     base::BindOnce(&SelectOptionAction::OnWaitForElement,
+                                    weak_ptr_factory_.GetWeakPtr(), selector)));
 }
 
 void SelectOptionAction::OnWaitForElement(const Selector& selector,
@@ -94,10 +87,15 @@ void SelectOptionAction::OnWaitForElement(const Selector& selector,
     return;
   }
 
-  ActionDelegateUtil::FindElementAndPerform(
+  DCHECK(proto_.select_option().option_comparison_attribute() !=
+         SelectOptionProto::NOT_SET);
+  action_delegate_util::FindElementAndPerform(
       delegate_, selector,
-      base::BindOnce(&ActionDelegate::SelectOption, delegate_->GetWeakPtr(),
-                     value_, proto_.select_option().select_strategy()),
+      base::BindOnce(&WebController::SelectOption,
+                     delegate_->GetWebController()->GetWeakPtr(), value_,
+                     case_sensitive_,
+                     proto_.select_option().option_comparison_attribute(),
+                     proto_.select_option().strict()),
       base::BindOnce(&SelectOptionAction::EndAction,
                      weak_ptr_factory_.GetWeakPtr()));
 }

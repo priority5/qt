@@ -1,7 +1,9 @@
 include_rules = [
+  "+ash/components/arc",
+  "+ash/components/cryptohome",
+  "+ash/constants",
   "+ash/public/cpp",
-  "+chromeos/constants",
-  "+chromeos/cryptohome",
+  "+chromeos/components/sensors",
   "+chromeos/dbus",
   "+chromeos/memory",
   "+chromeos/system",
@@ -12,9 +14,9 @@ include_rules = [
   "+components/pref_registry",
   "+components/prefs",
   "+components/session_manager/core",
-  "+components/timers",
   "+components/user_manager",
   "+components/user_prefs",
+  "+components/vector_icons",
   "+components/version_info",
   "+content/public/browser",
   "+media/base",
@@ -24,6 +26,7 @@ include_rules = [
   "+storage/browser/file_system",
   "+third_party/re2",
   "+third_party/skia",
+  "+third_party/blink/public/mojom",
   "+ui/base",
   "+ui/display",
   "+ui/events",
@@ -36,11 +39,18 @@ specific_include_rules = {
     "+ash/public",
     "+services/service_manager/public",
   ],
+  "arc_intent_helper_bridge.cc": [
+    # For net::IsLocalhost.
+    "+net/base/url_util.h",
+  ],
   "arc_util.cc": [
     "+ui/aura",
   ],
   "arc_util_unittest.cc": [
     "+ui/aura",
+  ],
+  "arc_vm_client_adapter.cc": [
+    "+chromeos/components/sensors/buildflags.h",
   ],
   ".*_unittest.cc": [
     "+content/public/test/browser_task_environment.h"

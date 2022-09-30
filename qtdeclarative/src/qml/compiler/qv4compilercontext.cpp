@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qv4compilercontext_p.h"
 #include "qv4compilercontrolflow_p.h"
@@ -80,14 +44,16 @@ bool Context::Member::requiresTDZCheck(const SourceLocation &accessLocation, boo
     if (accessAcrossContextBoundaries)
         return true;
 
-    if (!accessLocation.isValid() || !endOfInitializerLocation.isValid())
+    if (!accessLocation.isValid() || !declarationLocation.isValid())
         return true;
 
-    return accessLocation.begin() < endOfInitializerLocation.end();
+    return accessLocation.begin() < declarationLocation.end();
 }
 
-bool Context::addLocalVar(const QString &name, Context::MemberType type, VariableScope scope, FunctionExpression *function,
-                          const QQmlJS::SourceLocation &endOfInitializer)
+bool Context::addLocalVar(
+        const QString &name, Context::MemberType type, VariableScope scope,
+        FunctionExpression *function, const QQmlJS::SourceLocation &declarationLocation,
+        bool isInjected)
 {
     // ### can this happen?
     if (name.isEmpty())
@@ -112,13 +78,14 @@ bool Context::addLocalVar(const QString &name, Context::MemberType type, Variabl
 
     // hoist var declarations to the function level
     if (contextType == ContextType::Block && (scope == VariableScope::Var && type != MemberType::FunctionDefinition))
-        return parent->addLocalVar(name, type, scope, function, endOfInitializer);
+        return parent->addLocalVar(name, type, scope, function, declarationLocation);
 
     Member m;
     m.type = type;
     m.function = function;
     m.scope = scope;
-    m.endOfInitializerLocation = endOfInitializer;
+    m.declarationLocation = declarationLocation;
+    m.isInjected = isInjected;
     members.insert(name, m);
     return true;
 }
@@ -146,9 +113,11 @@ Context::ResolvedName Context::resolveName(const QString &name, const QQmlJS::So
             result.requiresTDZCheck = m.requiresTDZCheck(accessLocation, c != this);
             if (c->isStrict && (name == QLatin1String("arguments") || name == QLatin1String("eval")))
                 result.isArgOrEval = true;
+            result.declarationLocation = m.declarationLocation;
+            result.isInjected = m.isInjected;
             return result;
         }
-        const int argIdx = c->findArgument(name);
+        const int argIdx = c->findArgument(name, &result.isInjected);
         if (argIdx != -1) {
             if (c->argumentsCanEscape) {
                 result.index = argIdx + c->locals.size();
@@ -174,7 +143,10 @@ Context::ResolvedName Context::resolveName(const QString &name, const QQmlJS::So
         c = c->parent;
     }
 
-    if (c && c->contextType == ContextType::ESModule) {
+    if (!c)
+        return result;
+
+    if (c->contextType == ContextType::ESModule) {
         for (int i = 0; i < c->importEntries.count(); ++i) {
             if (c->importEntries.at(i).localName == name) {
                 result.index = i;

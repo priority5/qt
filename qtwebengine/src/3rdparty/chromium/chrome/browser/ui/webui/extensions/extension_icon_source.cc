@@ -9,7 +9,7 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_number_conversions.h"
@@ -99,7 +99,7 @@ GURL ExtensionIconSource::GetIconURL(const std::string& extension_id,
 SkBitmap* ExtensionIconSource::LoadImageByResourceId(int resource_id) {
   base::StringPiece contents =
       ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
-          resource_id, ui::SCALE_FACTOR_100P);
+          resource_id, ui::k100Percent);
 
   // Convert and return it.
   const unsigned char* data =

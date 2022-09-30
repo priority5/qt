@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickpath_p.h"
 #include "qquickpath_p_p.h"
@@ -89,12 +53,10 @@ QT_BEGIN_NAMESPACE
         \li Element
         \li PathView
         \li Shape
-        \li Shape, GL_NV_path_rendering
         \li Shape, software
     \row
         \li PathMove
         \li N/A
-        \li Yes
         \li Yes
         \li Yes
     \row
@@ -102,22 +64,18 @@ QT_BEGIN_NAMESPACE
         \li Yes
         \li Yes
         \li Yes
-        \li Yes
     \row
         \li PathPolyline
         \li Yes
         \li Yes
-        \li No
         \li Yes
     \row
-        \li PathMultiLine
+    \li PathMultiLine
         \li Yes
         \li Yes
-        \li No
         \li Yes
     \row
         \li PathQuad
-        \li Yes
         \li Yes
         \li Yes
         \li Yes
@@ -126,10 +84,8 @@ QT_BEGIN_NAMESPACE
         \li Yes
         \li Yes
         \li Yes
-        \li Yes
     \row
         \li PathArc
-        \li Yes
         \li Yes
         \li Yes
         \li Yes
@@ -138,10 +94,8 @@ QT_BEGIN_NAMESPACE
         \li Yes
         \li Yes
         \li Yes
-        \li Yes
     \row
         \li PathSvg
-        \li Yes
         \li Yes
         \li Yes
         \li Yes
@@ -150,17 +104,14 @@ QT_BEGIN_NAMESPACE
         \li Yes
         \li N/A
         \li N/A
-        \li N/A
     \row
         \li PathPercent
         \li Yes
         \li N/A
         \li N/A
-        \li N/A
     \row
         \li PathCurve
         \li Yes
-        \li No
         \li No
         \li No
     \endtable
@@ -247,7 +198,7 @@ bool QQuickPath::isClosed() const
     \qmlproperty list<PathElement> QtQuick::Path::pathElements
     This property holds the objects composing the path.
 
-    \default
+    \qmldefault
 
     A path can contain the following path objects:
     \list
@@ -284,7 +235,7 @@ static QQuickPathPrivate *privatePath(QObject *object)
     return QQuickPathPrivate::get(path);
 }
 
-QQuickPathElement *QQuickPath::pathElements_at(QQmlListProperty<QQuickPathElement> *property, int index)
+QQuickPathElement *QQuickPath::pathElements_at(QQmlListProperty<QQuickPathElement> *property, qsizetype index)
 {
     QQuickPathPrivate *d = privatePath(property->object);
 
@@ -316,7 +267,7 @@ void QQuickPath::pathElements_append(QQmlListProperty<QQuickPathElement> *proper
     }
 }
 
-int QQuickPath::pathElements_count(QQmlListProperty<QQuickPathElement> *property)
+qsizetype QQuickPath::pathElements_count(QQmlListProperty<QQuickPathElement> *property)
 {
     QQuickPathPrivate *d = privatePath(property->object);
 
@@ -2236,11 +2187,6 @@ void QQuickPathAngleArc::addToPath(QPainterPath &path, const QQuickPathData &)
     }
     \endqml
     \endtable
-
-    \note Mixing PathSvg with other type of elements is not always supported.
-    For example, when \l Shape is backed by \c{GL_NV_path_rendering}, a
-    ShapePath can contain one or more PathSvg elements, or one or more other
-    type of elements, but not both.
 
     \sa Path, PathLine, PathQuad, PathCubic, PathArc, PathAngleArc, PathCurve
 */

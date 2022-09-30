@@ -34,7 +34,7 @@ export function maybeShowErrorDialog(errLog: string) {
   const now = performance.now();
 
   // Here we rely on the exception message from onCannotGrowMemory function
-  if (errLog.includes('Cannot enlarge memory arrays')) {
+  if (errLog.includes('Cannot enlarge memory')) {
     showOutOfMemoryDialog();
     // Refresh timeLastReport to prevent a different error showing a dialog
     timeLastReport = now;
@@ -43,21 +43,17 @@ export function maybeShowErrorDialog(errLog: string) {
 
   if (errLog.includes('Unable to claim interface.') ||
       errLog.includes('A transfer error has occurred')) {
-    showModal({
-      title: 'A WebUSB error occurred',
-      content: m(
-          'div',
-          m('span', `Is adb already running on the host? Run this command and
-        try again.`),
-          m('br'),
-          m('.modal-bash', '> adb kill-server'),
-          m('br'),
-          m('span', 'For details see '),
-          m('a', {href: 'http://b/159048331', target: '_blank'}, 'b/159048331'),
-          ),
-      buttons: []
-    });
+    showWebUSBError();
     timeLastReport = now;
+  }
+
+  if (errLog.includes('(ERR:fmt)')) {
+    showUnknownFileError();
+    return;
+  }
+
+  if (errLog.includes('(ERR:rpc_seq)')) {
+    showRpcSequencingError();
     return;
   }
 
@@ -100,7 +96,7 @@ export function maybeShowErrorDialog(errLog: string) {
                 errTitle, errMessage, userDescription, shareTraceSection);
           },
         }),
-        m('span', `Check this box to share the current trace for debugging 
+        m('span', `Check this box to share the current trace for debugging
      purposes.`),
         m('div.modal-small',
           `This will create a permalink to this trace, you may
@@ -186,28 +182,91 @@ function createLink(
     link +=
         encodeURIComponent('User description:\n' + userDescription + '\n\n');
   }
-  link += encodeURIComponent(errMessage.substr(0, 32768));
-  return link;
+  link += encodeURIComponent(errMessage);
+  // 8kb is common limit on request size so restrict links to that long:
+  return link.substr(0, 8000);
 }
 
 function showOutOfMemoryDialog() {
   const url =
       'https://perfetto.dev/docs/quickstart/trace-analysis#get-trace-processor';
-  const description = 'This is a limitation of your browser. ' +
-      'You can get around this by loading the trace ' +
-      'directly in the trace_processor binary.';
 
+  const tpCmd = 'curl -LO https://get.perfetto.dev/trace_processor\n' +
+      'chmod +x ./trace_processor\n' +
+      'trace_processor --httpd /path/to/trace.pftrace\n' +
+      '# Reload the UI, it will prompt to use the HTTP+RPC interface';
   showModal({
     title: 'Oops! Your WASM trace processor ran out of memory',
     content: m(
         'div',
-        m('span', description),
+        m('span',
+          'The in-memory representation of the trace is too big ' +
+              'for the browser memory limits (typically 2GB per tab).'),
+        m('br'),
+        m('span',
+          'You can work around this problem by using the trace_processor ' +
+              'native binary as an accelerator for the UI as follows:'),
         m('br'),
         m('br'),
-        m('span', 'Example command:'),
-        m('.modal-bash', '> trace_processor trace.pftrace --http'),
+        m('.modal-bash', tpCmd),
+        m('br'),
         m('span', 'For details see '),
         m('a', {href: url, target: '_blank'}, url),
+        ),
+    buttons: []
+  });
+}
+
+function showUnknownFileError() {
+  showModal({
+    title: 'Cannot open this file',
+    content: m(
+        'div',
+        m('p',
+          'The file opened doesn\'t look like a Perfetto trace or any ' +
+              'other format recognized by the Perfetto TraceProcessor.'),
+        m('p', 'Formats supported:'),
+        m(
+            'ul',
+            m('li', 'Perfetto protobuf trace'),
+            m('li', 'chrome://tracing JSON'),
+            m('li', 'Android systrace'),
+            m('li', 'Fuchsia trace'),
+            m('li', 'Ninja build log'),
+            ),
+        ),
+    buttons: []
+  });
+}
+
+function showWebUSBError() {
+  showModal({
+    title: 'A WebUSB error occurred',
+    content: m(
+        'div',
+        m('span', `Is adb already running on the host? Run this command and
+      try again.`),
+        m('br'),
+        m('.modal-bash', '> adb kill-server'),
+        m('br'),
+        m('span', 'For details see '),
+        m('a', {href: 'http://b/159048331', target: '_blank'}, 'b/159048331'),
+        ),
+    buttons: []
+  });
+}
+
+function showRpcSequencingError() {
+  showModal({
+    title: 'A TraceProcessor RPC error occurred',
+    content: m(
+        'div',
+        m('p', 'The trace processor RPC sequence ID was broken'),
+        m('p', `This can happen when using a HTTP trace processor instance and
+either accidentally sharing this between multiple tabs or
+restarting the trace processor while still in use by UI.`),
+        m('p', `Please refresh this tab and ensure that trace processor is used
+at most one tab at a time.`),
         ),
     buttons: []
   });

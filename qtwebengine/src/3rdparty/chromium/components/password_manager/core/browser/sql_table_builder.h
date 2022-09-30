@@ -9,8 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/strings/string_piece.h"
 
 namespace sql {
@@ -50,6 +49,9 @@ class SQLTableBuilder {
   // Create the builder for an arbitrary table name.
   explicit SQLTableBuilder(const std::string& table_name);
 
+  SQLTableBuilder(const SQLTableBuilder& rhs) = delete;
+  SQLTableBuilder& operator=(const SQLTableBuilder& rhs) = delete;
+
   ~SQLTableBuilder();
 
   // Adds a column in the table description, with |name| and |type|. |name|
@@ -63,6 +65,14 @@ class SQLTableBuilder {
 
   // As AddColumn but also adds column |name| to the unique key of the table.
   void AddColumnToUniqueKey(std::string name, std::string type);
+
+  // As AddColumn but also adds column |name| to the unique key of the table.
+  // The column |name| is a foreign key to 'parent_table' and an implicit index
+  // is created.
+  void AddColumnToUniqueKey(std::string name,
+                            std::string type,
+                            std::string parent_table,
+                            std::string index_name);
 
   // Renames column |old_name| to |new_name|. |new_name| can not exist already.
   // |old_name| must have been added in the past. Furthermore, there must be no
@@ -186,8 +196,6 @@ class SQLTableBuilder {
 
   // The name of the table.
   const std::string table_name_;
-
-  DISALLOW_COPY_AND_ASSIGN(SQLTableBuilder);
 };
 
 }  // namespace password_manager

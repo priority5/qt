@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 // NOTE: The format of types has changed. 'FooType' is now
 //   'chrome.autofillPrivate.FooType'.
 // Please run the closure compiler before committing changes.
-// See https://chromium.googlesource.com/chromium/src/+/master/docs/closure_compilation.md
+// See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
 /** @fileoverview Externs generated from namespace: autofillPrivate */
 
@@ -18,6 +18,7 @@ chrome.autofillPrivate = {};
  * @enum {string}
  */
 chrome.autofillPrivate.AddressField = {
+  HONORIFIC: 'HONORIFIC',
   FULL_NAME: 'FULL_NAME',
   COMPANY_NAME: 'COMPANY_NAME',
   ADDRESS_LINES: 'ADDRESS_LINES',
@@ -35,7 +36,9 @@ chrome.autofillPrivate.AddressField = {
  *   summarySublabel: (string|undefined),
  *   isLocal: (boolean|undefined),
  *   isCached: (boolean|undefined),
- *   isMigratable: (boolean|undefined)
+ *   isMigratable: (boolean|undefined),
+ *   isVirtualCardEnrollmentEligible: (boolean|undefined),
+ *   isVirtualCardEnrolled: (boolean|undefined)
  * }}
  */
 chrome.autofillPrivate.AutofillMetadata;
@@ -44,6 +47,7 @@ chrome.autofillPrivate.AutofillMetadata;
  * @typedef {{
  *   guid: (string|undefined),
  *   fullNames: (!Array<string>|undefined),
+ *   honorific: (string|undefined),
  *   companyName: (string|undefined),
  *   addressLines: (string|undefined),
  *   addressLevel1: (string|undefined),
@@ -101,6 +105,7 @@ chrome.autofillPrivate.AddressComponents;
  *   expirationMonth: (string|undefined),
  *   expirationYear: (string|undefined),
  *   nickname: (string|undefined),
+ *   network: (string|undefined),
  *   metadata: (!chrome.autofillPrivate.AutofillMetadata|undefined)
  * }}
  */
@@ -209,7 +214,23 @@ chrome.autofillPrivate.setCreditCardFIDOAuthEnabledState = function(enabled) {};
 chrome.autofillPrivate.getUpiIdList = function(callback) {};
 
 /**
- * Fired when the perosnal data has changed, meaning that an entry has been
+ * Enrolls a credit card into virtual cards.
+ * @param {string} cardId The server side id of the credit card to be
+ *     enrolled. Note it refers to the legacy server id of credit cards, not the
+ *     instrument ids.
+ */
+chrome.autofillPrivate.addVirtualCard = function(cardId) {};
+
+/**
+ * Unenrolls a credit card from virtual cards.
+ * @param {string} cardId The server side id of the credit card to be
+ *     unenrolled. Note it refers to the legacy server id of credit cards, not
+ *     the instrument ids.
+ */
+chrome.autofillPrivate.removeVirtualCard = function(cardId) {};
+
+/**
+ * Fired when the personal data has changed, meaning that an entry has been
  * added, removed, or changed. |entries| The updated list of entries.
  * @type {!ChromeEvent}
  */

@@ -1,42 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Copyright (C) 2012 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com, author James Turner <james.turner@kdab.com>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// Copyright (C) 2012 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com, author James Turner <james.turner@kdab.com>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+#include <AppKit/AppKit.h>
 
 #include <qpa/qplatformtheme.h>
 
@@ -50,11 +16,13 @@
 #include "qcocoamenuloader.h"
 #include <QtGui/private/qcoregraphics_p.h>
 #include <QtCore/qregularexpression.h>
+#include <QtGui/private/qapplekeymapper_p.h>
 
 #include <QtCore/QDebug>
-#include <QtCore/QRegExp>
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 static const char *application_menu_strings[] =
 {
@@ -77,42 +45,6 @@ QString qt_mac_applicationmenu_string(int type)
         return QCoreApplication::translate("MAC_APPLICATION_MENU", application_menu_strings[type]);
     }
 }
-
-static quint32 constructModifierMask(quint32 accel_key)
-{
-    quint32 ret = 0;
-    const bool dontSwap = qApp->testAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
-    if ((accel_key & Qt::CTRL) == Qt::CTRL)
-        ret |= (dontSwap ? NSEventModifierFlagControl : NSEventModifierFlagCommand);
-    if ((accel_key & Qt::META) == Qt::META)
-        ret |= (dontSwap ? NSEventModifierFlagCommand : NSEventModifierFlagControl);
-    if ((accel_key & Qt::ALT) == Qt::ALT)
-        ret |= NSEventModifierFlagOption;
-    if ((accel_key & Qt::SHIFT) == Qt::SHIFT)
-        ret |= NSEventModifierFlagShift;
-    return ret;
-}
-
-#ifndef QT_NO_SHORTCUT
-// return an autoreleased string given a QKeySequence (currently only looks at the first one).
-NSString *keySequenceToKeyEqivalent(const QKeySequence &accel)
-{
-    quint32 accel_key = (accel[0] & ~(Qt::MODIFIER_MASK | Qt::UNICODE_ACCEL));
-    QChar cocoa_key = qt_mac_qtKey2CocoaKey(Qt::Key(accel_key));
-    if (cocoa_key.isNull())
-        cocoa_key = QChar(accel_key).toLower().unicode();
-    // Similar to qt_mac_removePrivateUnicode change the delete key so the symbol is correctly seen in native menubar
-    if (cocoa_key.unicode() == NSDeleteFunctionKey)
-        cocoa_key = NSDeleteCharacter;
-    return [NSString stringWithCharacters:&cocoa_key.unicode() length:1];
-}
-
-// return the cocoa modifier mask for the QKeySequence (currently only looks at the first one).
-NSUInteger keySequenceModifierMask(const QKeySequence &accel)
-{
-    return constructModifierMask(accel[0]);
-}
-#endif
 
 QCocoaMenuItem::QCocoaMenuItem() :
     m_native(nil),
@@ -203,7 +135,7 @@ void QCocoaMenuItem::setIsSeparator(bool isSeparator)
 
 void QCocoaMenuItem::setFont(const QFont &font)
 {
-    Q_UNUSED(font)
+    Q_UNUSED(font);
 }
 
 void QCocoaMenuItem::setRole(MenuRole role)
@@ -250,11 +182,11 @@ void QCocoaMenuItem::setNativeContents(WId item)
 static QPlatformMenuItem::MenuRole detectMenuRole(const QString &caption)
 {
     QString captionNoAmpersand(caption);
-    captionNoAmpersand.remove(QLatin1Char('&'));
+    captionNoAmpersand.remove(u'&');
     const QString aboutString = QCoreApplication::translate("QCocoaMenuItem", "About");
     if (captionNoAmpersand.startsWith(aboutString, Qt::CaseInsensitive)
         || captionNoAmpersand.endsWith(aboutString, Qt::CaseInsensitive)) {
-        static const QRegularExpression qtRegExp(QLatin1String("qt$"), QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression qtRegExp("qt$"_L1, QRegularExpression::CaseInsensitiveOption);
         if (captionNoAmpersand.contains(qtRegExp))
             return QPlatformMenuItem::AboutQtRole;
         return QPlatformMenuItem::AboutRole;
@@ -379,15 +311,26 @@ NSMenuItem *QCocoaMenuItem::sync()
 
     // Show multiple key sequences as part of the menu text.
     if (accel.count() > 1)
-        text += QLatin1String(" (") + accel.toString(QKeySequence::NativeText) + QLatin1String(")");
+        text += " ("_L1 + accel.toString(QKeySequence::NativeText) + ")"_L1;
 #endif
 
     m_native.title = QPlatformTheme::removeMnemonics(text).toNSString();
 
 #ifndef QT_NO_SHORTCUT
     if (accel.count() == 1) {
-        m_native.keyEquivalent = keySequenceToKeyEqivalent(accel);
-        m_native.keyEquivalentModifierMask = keySequenceModifierMask(accel);
+        auto key = accel[0].key();
+        auto modifiers = accel[0].keyboardModifiers();
+
+        QChar cocoaKey = QAppleKeyMapper::toCocoaKey(key);
+        if (cocoaKey.isNull())
+            cocoaKey = QChar(key).toLower().unicode();
+        // Similar to qt_mac_removePrivateUnicode change the delete key,
+        // so the symbol is correctly seen in native menu bar.
+        if (cocoaKey.unicode() == NSDeleteFunctionKey)
+            cocoaKey = QChar(NSDeleteCharacter);
+
+        m_native.keyEquivalent = QStringView(&cocoaKey, 1).toNSString();
+        m_native.keyEquivalentModifierMask = QAppleKeyMapper::toCocoaModifiers(modifiers);
     } else
 #endif
     {
@@ -397,7 +340,7 @@ NSMenuItem *QCocoaMenuItem::sync()
 
     m_native.image = [NSImage imageFromQIcon:m_icon withSize:m_iconSize];
 
-    m_native.state = m_checked ?  NSOnState : NSOffState;
+    m_native.state = m_checked ?  NSControlStateValueOn : NSControlStateValueOff;
     return m_native;
 }
 

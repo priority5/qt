@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Network Auth module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QtNetwork/qtnetwork-config.h>
 
@@ -140,12 +114,12 @@ void QOAuth1Private::appendSignature(QAbstractOAuth::Stage stage,
                                      QVariantMap *headers,
                                      const QUrl &url,
                                      QNetworkAccessManager::Operation operation,
-                                     const QVariantMap parameters)
+                                     const QMultiMap<QString, QVariant> parameters)
 {
     QByteArray signature;
     {
-        QMultiMap<QString, QVariant> headerCopy = *headers;
-        QVariantMap allParameters = headerCopy.unite(parameters);
+        QMultiMap<QString, QVariant> allParameters(*headers);
+        allParameters.unite(parameters);
         if (modifyParametersFunction)
             modifyParametersFunction(stage, &allParameters);
         signature = generateSignature(allParameters, url, operation);
@@ -173,11 +147,10 @@ QNetworkReply *QOAuth1Private::requestToken(QNetworkAccessManager::Operation ope
     }
 
     QNetworkRequest request(url);
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QAbstractOAuth::Stage stage = QAbstractOAuth::Stage::RequestingTemporaryCredentials;
     QVariantMap headers;
-    QVariantMap remainingParameters;
+    QMultiMap<QString, QVariant> remainingParameters;
     appendCommonHeaders(&headers);
     for (auto it = parameters.begin(), end = parameters.end(); it != end; ++it) {
         const auto key = it.key();
@@ -240,7 +213,7 @@ QString QOAuth1Private::signatureMethodString() const
     return QString();
 }
 
-QByteArray QOAuth1Private::generateSignature(const QVariantMap &parameters,
+QByteArray QOAuth1Private::generateSignature(const QMultiMap<QString, QVariant> &parameters,
                                              const QUrl &url,
                                              QNetworkAccessManager::Operation operation) const
 {
@@ -252,7 +225,7 @@ QByteArray QOAuth1Private::generateSignature(const QVariantMap &parameters,
     return formatSignature(signature);
 }
 
-QByteArray QOAuth1Private::generateSignature(const QVariantMap &parameters,
+QByteArray QOAuth1Private::generateSignature(const QMultiMap<QString, QVariant> &parameters,
                                              const QUrl &url,
                                              const QByteArray &verb) const
 {
@@ -294,11 +267,12 @@ QVariantMap QOAuth1Private::createOAuthBaseParams() const
     return oauthParams;
 }
 
-void QOAuth1Private::prepareRequestImpl(QNetworkRequest *request,
-                                        const QByteArray &verb,
-                                        const QByteArray &body)
+/*!
+    \reimp
+*/
+void QOAuth1::prepareRequest(QNetworkRequest *request, const QByteArray &verb,
+                                 const QByteArray &body)
 {
-    Q_Q(QOAuth1);
     QVariantMap signingParams;
     if (verb == "POST" &&
         request->header(QNetworkRequest::ContentTypeHeader).toByteArray()
@@ -307,7 +281,7 @@ void QOAuth1Private::prepareRequestImpl(QNetworkRequest *request,
         for (const auto &item : query.queryItems(QUrl::FullyDecoded))
             signingParams.insert(item.first, item.second);
     }
-    q->setup(request, signingParams, verb);
+    setup(request, signingParams, verb);
 }
 
 void QOAuth1Private::_q_onTokenRequestError(QNetworkReply::NetworkError error)
@@ -764,8 +738,8 @@ void QOAuth1::setup(QNetworkRequest *request,
 
     // Add signature parameter
     {
-        QMultiMap<QString, QVariant> oauthParamsCopy(oauthParams);
-        const auto parameters = oauthParamsCopy.unite(signingParameters);
+        QMultiMap<QString, QVariant> parameters(oauthParams);
+        parameters.unite(QMultiMap<QString, QVariant>(signingParameters));
         const auto signature = d->generateSignature(parameters, request->url(), operation);
         oauthParams.insert(Key::oauthSignature, signature);
     }
@@ -805,8 +779,8 @@ void QOAuth1::setup(QNetworkRequest *request, const QVariantMap &signingParamete
 
     // Add signature parameter
     {
-        QMultiMap<QString, QVariant> oauthParamsCopy(oauthParams);
-        const auto parameters = oauthParamsCopy.unite(signingParameters);
+        QMultiMap<QString, QVariant> parameters(oauthParams);
+        parameters.unite(QMultiMap<QString, QVariant>(signingParameters));
         const auto signature = d->generateSignature(parameters, request->url(), operationVerb);
         oauthParams.insert(Key::oauthSignature, signature);
     }
@@ -892,7 +866,7 @@ void QOAuth1::grant()
                                                      qMakePair(d->token, d->tokenSecret));
                 connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
             } else {
-                QVariantMap parameters;
+                QMultiMap<QString, QVariant> parameters;
                 parameters.insert(Key::oauthToken, d->token);
                 if (d->modifyParametersFunction)
                     d->modifyParametersFunction(Stage::RequestingAuthorization, &parameters);

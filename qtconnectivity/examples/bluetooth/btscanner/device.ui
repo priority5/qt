@@ -47,21 +47,18 @@
     </widget>
    </item>
    <item>
-    <widget class="QCheckBox" name="inquiryType">
-     <property name="text">
-      <string>General Unlimited Inquiry</string>
-     </property>
-     <property name="checked">
-      <bool>true</bool>
-     </property>
-    </widget>
-   </item>
-   <item>
     <layout class="QHBoxLayout" name="horizontalLayout">
      <item>
       <widget class="QPushButton" name="scan">
        <property name="text">
         <string>Scan</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="stopScan">
+       <property name="text">
+        <string>Stop scan</string>
        </property>
       </widget>
      </item>

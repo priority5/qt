@@ -9,14 +9,49 @@
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
+#include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/accessibility/test_browser_accessibility_delegate.h"
+#include "content/test/test_content_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/strings/grit/blink_accessibility_strings.h"
 
 namespace content {
+
+class MockContentClient : public TestContentClient {
+ public:
+  std::u16string GetLocalizedString(int message_id) override {
+    switch (message_id) {
+      case IDS_AX_UNLABELED_IMAGE_ROLE_DESCRIPTION:
+        return u"Unlabeled image";
+      case IDS_AX_IMAGE_ELIGIBLE_FOR_ANNOTATION_ANDROID_LTR:
+        return u"This image isn't labeled. Open the More Options menu at the "
+               u"top "
+               u"right to get image descriptions.";
+      case IDS_AX_IMAGE_ELIGIBLE_FOR_ANNOTATION_ANDROID_RTL:
+        return u"This image isn't labeled. Open the More Options menu at the "
+               u"top "
+               u"left to get image descriptions.";
+      case IDS_AX_IMAGE_ANNOTATION_PENDING:
+        return u"Getting description...";
+      case IDS_AX_IMAGE_ANNOTATION_ADULT:
+        return u"Appears to contain adult content. No description available.";
+      case IDS_AX_IMAGE_ANNOTATION_NO_DESCRIPTION:
+        return u"No description available.";
+      default:
+        return std::u16string();
+    }
+  }
+};
 
 class BrowserAccessibilityAndroidTest : public testing::Test {
  public:
   BrowserAccessibilityAndroidTest();
+
+  BrowserAccessibilityAndroidTest(const BrowserAccessibilityAndroidTest&) =
+      delete;
+  BrowserAccessibilityAndroidTest& operator=(
+      const BrowserAccessibilityAndroidTest&) = delete;
+
   ~BrowserAccessibilityAndroidTest() override;
 
  protected:
@@ -26,17 +61,19 @@ class BrowserAccessibilityAndroidTest : public testing::Test {
  private:
   void SetUp() override;
   base::test::TaskEnvironment task_environment_;
-  DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityAndroidTest);
+  MockContentClient client_;
+  ui::testing::ScopedAxModeSetter ax_mode_setter_;
 };
 
-BrowserAccessibilityAndroidTest::BrowserAccessibilityAndroidTest() = default;
+BrowserAccessibilityAndroidTest::BrowserAccessibilityAndroidTest()
+    : ax_mode_setter_(ui::kAXModeComplete) {}
 
 BrowserAccessibilityAndroidTest::~BrowserAccessibilityAndroidTest() = default;
 
 void BrowserAccessibilityAndroidTest::SetUp() {
-  ui::AXPlatformNode::NotifyAddAXModeFlags(ui::kAXModeComplete);
   test_browser_accessibility_delegate_ =
       std::make_unique<TestBrowserAccessibilityDelegate>();
+  SetContentClient(&client_);
 }
 
 TEST_F(BrowserAccessibilityAndroidTest, TestRetargetTextOnly) {
@@ -61,13 +98,13 @@ TEST_F(BrowserAccessibilityAndroidTest, TestRetargetTextOnly) {
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_obj = manager->GetRoot();
-  EXPECT_FALSE(root_obj->PlatformIsLeaf());
+  EXPECT_FALSE(root_obj->IsLeaf());
   EXPECT_TRUE(root_obj->CanFireEvents());
   BrowserAccessibility* para_obj = root_obj->PlatformGetChild(0);
-  EXPECT_TRUE(para_obj->PlatformIsLeaf());
+  EXPECT_TRUE(para_obj->IsLeaf());
   EXPECT_TRUE(para_obj->CanFireEvents());
   BrowserAccessibility* text_obj = manager->GetFromID(111);
-  EXPECT_TRUE(text_obj->PlatformIsLeaf());
+  EXPECT_TRUE(text_obj->IsLeaf());
   EXPECT_FALSE(text_obj->CanFireEvents());
   BrowserAccessibility* updated = manager->RetargetForEvents(
       text_obj, BrowserAccessibilityManager::RetargetEventType::
@@ -100,13 +137,13 @@ TEST_F(BrowserAccessibilityAndroidTest, TestRetargetHeading) {
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_obj = manager->GetRoot();
-  EXPECT_FALSE(root_obj->PlatformIsLeaf());
+  EXPECT_FALSE(root_obj->IsLeaf());
   EXPECT_TRUE(root_obj->CanFireEvents());
   BrowserAccessibility* heading_obj = root_obj->PlatformGetChild(0);
-  EXPECT_TRUE(heading_obj->PlatformIsLeaf());
+  EXPECT_TRUE(heading_obj->IsLeaf());
   EXPECT_TRUE(heading_obj->CanFireEvents());
   BrowserAccessibility* text_obj = manager->GetFromID(111);
-  EXPECT_TRUE(text_obj->PlatformIsLeaf());
+  EXPECT_TRUE(text_obj->IsLeaf());
   EXPECT_FALSE(text_obj->CanFireEvents());
   BrowserAccessibility* updated = manager->RetargetForEvents(
       text_obj, BrowserAccessibilityManager::RetargetEventType::
@@ -140,13 +177,13 @@ TEST_F(BrowserAccessibilityAndroidTest, TestRetargetFocusable) {
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_obj = manager->GetRoot();
-  EXPECT_FALSE(root_obj->PlatformIsLeaf());
+  EXPECT_FALSE(root_obj->IsLeaf());
   EXPECT_TRUE(root_obj->CanFireEvents());
   BrowserAccessibility* para_obj = root_obj->PlatformGetChild(0);
-  EXPECT_TRUE(para_obj->PlatformIsLeaf());
+  EXPECT_TRUE(para_obj->IsLeaf());
   EXPECT_TRUE(para_obj->CanFireEvents());
   BrowserAccessibility* text_obj = manager->GetFromID(111);
-  EXPECT_TRUE(text_obj->PlatformIsLeaf());
+  EXPECT_TRUE(text_obj->IsLeaf());
   EXPECT_FALSE(text_obj->CanFireEvents());
   BrowserAccessibility* updated = manager->RetargetForEvents(
       text_obj, BrowserAccessibilityManager::RetargetEventType::
@@ -228,56 +265,370 @@ TEST_F(BrowserAccessibilityAndroidTest, TestRetargetInputControl) {
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_obj = manager->GetRoot();
-  EXPECT_FALSE(root_obj->PlatformIsLeaf());
+  EXPECT_FALSE(root_obj->IsLeaf());
   EXPECT_TRUE(root_obj->CanFireEvents());
-  BrowserAccessibility* label_obj = manager->GetFromID(1111);
-  EXPECT_TRUE(label_obj->PlatformIsLeaf());
+  BrowserAccessibility* label_obj = manager->GetFromID(label.id);
+  EXPECT_TRUE(label_obj->IsLeaf());
   EXPECT_TRUE(label_obj->CanFireEvents());
-  BrowserAccessibility* label_text_obj = manager->GetFromID(11111);
-  EXPECT_TRUE(label_text_obj->PlatformIsLeaf());
+  BrowserAccessibility* label_text_obj = manager->GetFromID(label_text.id);
+  EXPECT_TRUE(label_text_obj->IsLeaf());
   EXPECT_FALSE(label_text_obj->CanFireEvents());
   BrowserAccessibility* updated = manager->RetargetForEvents(
       label_text_obj, BrowserAccessibilityManager::RetargetEventType::
                           RetargetEventTypeBlinkHover);
-  // |updated| should be the labelText.
-  EXPECT_EQ(1111, updated->GetId());
+  EXPECT_EQ(label.id, updated->GetId());
   EXPECT_TRUE(updated->CanFireEvents());
 
-  BrowserAccessibility* input_time_obj = manager->GetFromID(1112);
-  EXPECT_TRUE(input_time_obj->PlatformIsLeaf());
+  BrowserAccessibility* input_time_obj = manager->GetFromID(input_time.id);
+  EXPECT_TRUE(input_time_obj->IsLeaf());
   EXPECT_TRUE(input_time_obj->CanFireEvents());
-  BrowserAccessibility* input_time_container_obj = manager->GetFromID(11121);
-  EXPECT_TRUE(input_time_container_obj->PlatformIsLeaf());
+  BrowserAccessibility* input_time_container_obj =
+      manager->GetFromID(input_container.id);
+  EXPECT_TRUE(input_time_container_obj->IsLeaf());
   EXPECT_FALSE(input_time_container_obj->CanFireEvents());
   updated = manager->RetargetForEvents(
       input_time_container_obj, BrowserAccessibilityManager::RetargetEventType::
                                     RetargetEventTypeBlinkHover);
-  // |updated| should be the inputTime.
-  EXPECT_EQ(1112, updated->GetId());
+  EXPECT_EQ(input_time.id, updated->GetId());
   EXPECT_TRUE(updated->CanFireEvents());
-  BrowserAccessibility* input_text_obj = manager->GetFromID(111211);
-  EXPECT_TRUE(input_text_obj->PlatformIsLeaf());
+  BrowserAccessibility* input_text_obj = manager->GetFromID(input_text.id);
+  EXPECT_TRUE(input_text_obj->IsLeaf());
   EXPECT_FALSE(input_text_obj->CanFireEvents());
   updated = manager->RetargetForEvents(
       input_text_obj, BrowserAccessibilityManager::RetargetEventType::
                           RetargetEventTypeBlinkHover);
-  // |updated| should be the inputTime.
-  EXPECT_EQ(1112, updated->GetId());
+  EXPECT_EQ(input_time.id, updated->GetId());
   EXPECT_TRUE(updated->CanFireEvents());
 
-  BrowserAccessibility* button_obj = manager->GetFromID(1113);
-  EXPECT_TRUE(button_obj->PlatformIsLeaf());
+  BrowserAccessibility* button_obj = manager->GetFromID(button.id);
+  EXPECT_TRUE(button_obj->IsLeaf());
   EXPECT_TRUE(button_obj->CanFireEvents());
-  BrowserAccessibility* button_text_obj = manager->GetFromID(11131);
-  EXPECT_TRUE(button_text_obj->PlatformIsLeaf());
+  BrowserAccessibility* button_text_obj = manager->GetFromID(button_text.id);
+  EXPECT_TRUE(button_text_obj->IsLeaf());
   EXPECT_FALSE(button_text_obj->CanFireEvents());
   updated = manager->RetargetForEvents(
       button_text_obj, BrowserAccessibilityManager::RetargetEventType::
                            RetargetEventTypeBlinkHover);
-  // |updated| should be the button.
-  EXPECT_EQ(1113, updated->GetId());
+  EXPECT_EQ(button.id, updated->GetId());
   EXPECT_TRUE(updated->CanFireEvents());
   manager.reset();
+}
+
+TEST_F(BrowserAccessibilityAndroidTest,
+       TestImageRoleDescription_UnlabeledImage) {
+  ui::AXTreeUpdate tree;
+  tree.root_id = 1;
+  tree.nodes.resize(6);
+  tree.nodes[0].id = 1;
+  tree.nodes[0].child_ids = {2, 3, 4, 5, 6};
+
+  // Images with these annotation statuses should report "Unlabeled image"
+  tree.nodes[1].id = 2;
+  tree.nodes[1].role = ax::mojom::Role::kImage;
+  tree.nodes[1].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kEligibleForAnnotation);
+
+  tree.nodes[2].id = 3;
+  tree.nodes[2].role = ax::mojom::Role::kImage;
+  tree.nodes[2].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationPending);
+
+  tree.nodes[3].id = 4;
+  tree.nodes[3].role = ax::mojom::Role::kImage;
+  tree.nodes[3].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationEmpty);
+
+  tree.nodes[4].id = 5;
+  tree.nodes[4].role = ax::mojom::Role::kImage;
+  tree.nodes[4].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationAdult);
+
+  tree.nodes[5].id = 6;
+  tree.nodes[5].role = ax::mojom::Role::kImage;
+  tree.nodes[5].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationProcessFailed);
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          tree, test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityManagerAndroid* android_manager =
+      manager->ToBrowserAccessibilityManagerAndroid();
+  android_manager->set_allow_image_descriptions_for_testing(true);
+
+  for (int child_index = 0;
+       child_index < static_cast<int>(tree.nodes[0].child_ids.size());
+       ++child_index) {
+    BrowserAccessibilityAndroid* child =
+        static_cast<BrowserAccessibilityAndroid*>(
+            manager->GetRoot()->PlatformGetChild(child_index));
+
+    EXPECT_EQ(u"Unlabeled image", child->GetRoleDescription());
+  }
+}
+
+TEST_F(BrowserAccessibilityAndroidTest, TestImageRoleDescription_Empty) {
+  ui::AXTreeUpdate tree;
+  tree.root_id = 1;
+  tree.nodes.resize(6);
+  tree.nodes[0].id = 1;
+  tree.nodes[0].child_ids = {2, 3, 4, 5, 6};
+
+  // Images with these annotation statuses should report nothing.
+  tree.nodes[1].id = 2;
+  tree.nodes[1].role = ax::mojom::Role::kImage;
+  tree.nodes[1].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationSucceeded);
+
+  tree.nodes[2].id = 3;
+  tree.nodes[2].role = ax::mojom::Role::kImage;
+  tree.nodes[2].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kNone);
+
+  tree.nodes[3].id = 4;
+  tree.nodes[3].role = ax::mojom::Role::kImage;
+  tree.nodes[3].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kWillNotAnnotateDueToScheme);
+
+  tree.nodes[4].id = 5;
+  tree.nodes[4].role = ax::mojom::Role::kImage;
+  tree.nodes[4].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kIneligibleForAnnotation);
+
+  tree.nodes[5].id = 6;
+  tree.nodes[5].role = ax::mojom::Role::kImage;
+  tree.nodes[5].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kSilentlyEligibleForAnnotation);
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          tree, test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityManagerAndroid* android_manager =
+      manager->ToBrowserAccessibilityManagerAndroid();
+  android_manager->set_allow_image_descriptions_for_testing(true);
+
+  for (int child_index = 0;
+       child_index < static_cast<int>(tree.nodes[0].child_ids.size());
+       ++child_index) {
+    BrowserAccessibilityAndroid* child =
+        static_cast<BrowserAccessibilityAndroid*>(
+            manager->GetRoot()->PlatformGetChild(child_index));
+
+    EXPECT_EQ(std::u16string(), child->GetRoleDescription());
+  }
+}
+
+TEST_F(BrowserAccessibilityAndroidTest, TestImageInnerText_Eligible) {
+  ui::AXTreeUpdate tree;
+  tree.root_id = 1;
+  tree.nodes.resize(3);
+  tree.nodes[0].id = 1;
+  tree.nodes[0].child_ids = {2, 3};
+
+  tree.nodes[1].id = 2;
+  tree.nodes[1].role = ax::mojom::Role::kImage;
+  tree.nodes[1].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kEligibleForAnnotation);
+  tree.nodes[1].AddIntAttribute(
+      ax::mojom::IntAttribute::kTextDirection,
+      static_cast<int32_t>(ax::mojom::WritingDirection::kLtr));
+
+  tree.nodes[2].id = 3;
+  tree.nodes[2].role = ax::mojom::Role::kImage;
+  tree.nodes[2].SetName("image_name");
+  tree.nodes[2].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kEligibleForAnnotation);
+  tree.nodes[2].AddIntAttribute(
+      ax::mojom::IntAttribute::kTextDirection,
+      static_cast<int32_t>(ax::mojom::WritingDirection::kRtl));
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          tree, test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityManagerAndroid* android_manager =
+      manager->ToBrowserAccessibilityManagerAndroid();
+  android_manager->set_allow_image_descriptions_for_testing(true);
+
+  BrowserAccessibilityAndroid* image_ltr =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(0));
+
+  EXPECT_EQ(
+      u"This image isn't labeled. Open the More Options menu "
+      u"at the top right to get image descriptions.",
+      image_ltr->GetTextContentUTF16());
+
+  BrowserAccessibilityAndroid* image_rtl =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(1));
+
+  EXPECT_EQ(
+      u"image_name, This image isn't labeled. Open the More Options "
+      u"menu at the top left to get image descriptions.",
+      image_rtl->GetTextContentUTF16());
+}
+
+TEST_F(BrowserAccessibilityAndroidTest,
+       TestImageInnerText_PendingAdultOrEmpty) {
+  ui::AXTreeUpdate tree;
+  tree.root_id = 1;
+  tree.nodes.resize(5);
+  tree.nodes[0].id = 1;
+  tree.nodes[0].child_ids = {2, 3, 4, 5};
+
+  tree.nodes[1].id = 2;
+  tree.nodes[1].role = ax::mojom::Role::kImage;
+  tree.nodes[1].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationPending);
+
+  tree.nodes[2].id = 3;
+  tree.nodes[2].role = ax::mojom::Role::kImage;
+  tree.nodes[2].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationEmpty);
+
+  tree.nodes[3].id = 4;
+  tree.nodes[3].role = ax::mojom::Role::kImage;
+  tree.nodes[3].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationAdult);
+
+  tree.nodes[4].id = 5;
+  tree.nodes[4].role = ax::mojom::Role::kImage;
+  tree.nodes[4].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationProcessFailed);
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          tree, test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityManagerAndroid* android_manager =
+      manager->ToBrowserAccessibilityManagerAndroid();
+  android_manager->set_allow_image_descriptions_for_testing(true);
+
+  BrowserAccessibilityAndroid* image_pending =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(0));
+
+  BrowserAccessibilityAndroid* image_empty =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(1));
+
+  BrowserAccessibilityAndroid* image_adult =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(2));
+
+  BrowserAccessibilityAndroid* image_failed =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(3));
+
+  EXPECT_EQ(u"Getting description...", image_pending->GetTextContentUTF16());
+  EXPECT_EQ(u"No description available.", image_empty->GetTextContentUTF16());
+  EXPECT_EQ(u"Appears to contain adult content. No description available.",
+            image_adult->GetTextContentUTF16());
+  EXPECT_EQ(u"No description available.", image_failed->GetTextContentUTF16());
+}
+
+TEST_F(BrowserAccessibilityAndroidTest, TestImageInnerText_Ineligible) {
+  ui::AXTreeUpdate tree;
+  tree.root_id = 1;
+  tree.nodes.resize(5);
+  tree.nodes[0].id = 1;
+  tree.nodes[0].child_ids = {2, 3, 4, 5};
+
+  tree.nodes[1].id = 2;
+  tree.nodes[1].role = ax::mojom::Role::kImage;
+  tree.nodes[1].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kNone);
+
+  tree.nodes[2].id = 3;
+  tree.nodes[2].role = ax::mojom::Role::kImage;
+  tree.nodes[2].SetName("image_name");
+  tree.nodes[2].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kWillNotAnnotateDueToScheme);
+
+  tree.nodes[3].id = 4;
+  tree.nodes[3].role = ax::mojom::Role::kImage;
+  tree.nodes[3].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kIneligibleForAnnotation);
+
+  tree.nodes[4].id = 5;
+  tree.nodes[4].role = ax::mojom::Role::kImage;
+  tree.nodes[4].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kSilentlyEligibleForAnnotation);
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          tree, test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityManagerAndroid* android_manager =
+      manager->ToBrowserAccessibilityManagerAndroid();
+  android_manager->set_allow_image_descriptions_for_testing(true);
+
+  BrowserAccessibilityAndroid* image_none =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(0));
+
+  BrowserAccessibilityAndroid* image_scheme =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(1));
+
+  BrowserAccessibilityAndroid* image_ineligible =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(2));
+
+  BrowserAccessibilityAndroid* image_silent =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(3));
+
+  EXPECT_EQ(std::u16string(), image_none->GetTextContentUTF16());
+  EXPECT_EQ(u"image_name", image_scheme->GetTextContentUTF16());
+  EXPECT_EQ(std::u16string(), image_ineligible->GetTextContentUTF16());
+  EXPECT_EQ(std::u16string(), image_silent->GetTextContentUTF16());
+}
+
+TEST_F(BrowserAccessibilityAndroidTest,
+       TestImageInnerText_AnnotationSucceeded) {
+  ui::AXTreeUpdate tree;
+  tree.root_id = 1;
+  tree.nodes.resize(3);
+  tree.nodes[0].id = 1;
+  tree.nodes[0].child_ids = {2, 3};
+
+  tree.nodes[1].id = 2;
+  tree.nodes[1].role = ax::mojom::Role::kImage;
+  tree.nodes[1].AddStringAttribute(ax::mojom::StringAttribute::kImageAnnotation,
+                                   "test_annotation");
+  tree.nodes[1].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationSucceeded);
+
+  tree.nodes[2].id = 3;
+  tree.nodes[2].role = ax::mojom::Role::kImage;
+  tree.nodes[2].SetName("image_name");
+  tree.nodes[2].AddStringAttribute(ax::mojom::StringAttribute::kImageAnnotation,
+                                   "test_annotation");
+  tree.nodes[2].SetImageAnnotationStatus(
+      ax::mojom::ImageAnnotationStatus::kAnnotationSucceeded);
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          tree, test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityManagerAndroid* android_manager =
+      manager->ToBrowserAccessibilityManagerAndroid();
+  android_manager->set_allow_image_descriptions_for_testing(true);
+
+  BrowserAccessibilityAndroid* image_succeeded =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(0));
+
+  BrowserAccessibilityAndroid* image_succeeded_with_name =
+      static_cast<BrowserAccessibilityAndroid*>(
+          manager->GetRoot()->PlatformGetChild(1));
+
+  EXPECT_EQ(u"test_annotation", image_succeeded->GetTextContentUTF16());
+  EXPECT_EQ(u"test_annotation",
+            image_succeeded_with_name->GetTextContentUTF16());
 }
 
 }  // namespace content

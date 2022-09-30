@@ -1,38 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
-**
-** This file is part of the Qt Gui module
-**
-** $QT_BEGIN_LICENSE:LGPL3$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPLv3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or later as published by the Free
-** Software Foundation and appearing in the file LICENSE.GPL included in
-** the packaging of this file. Please review the following information to
-** ensure the GNU General Public License version 2.0 requirements will be
-** met: http://www.gnu.org/licenses/gpl-2.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qshader_p_p.h"
 #include <QDataStream>
@@ -304,7 +271,7 @@ void QShader::setDescription(const QShaderDescription &desc)
 /*!
     \return the list of available shader versions
  */
-QVector<QShaderKey> QShader::availableShaders() const
+QList<QShaderKey> QShader::availableShaders() const
 {
     return d->shaders.keys().toVector();
 }
@@ -368,7 +335,7 @@ QByteArray QShader::serialized() const
     ds << QShaderPrivate::QSB_VERSION;
     ds << int(d->stage);
     d->desc.serialize(&ds);
-    ds << d->shaders.count();
+    ds << int(d->shaders.count());
     for (auto it = d->shaders.cbegin(), itEnd = d->shaders.cend(); it != itEnd; ++it) {
         const QShaderKey &k(it.key());
         writeShaderKey(&ds, k);
@@ -376,16 +343,28 @@ QByteArray QShader::serialized() const
         ds << shader.shader();
         ds << shader.entryPoint();
     }
-    ds << d->bindings.count();
+    ds << int(d->bindings.count());
     for (auto it = d->bindings.cbegin(), itEnd = d->bindings.cend(); it != itEnd; ++it) {
         const QShaderKey &k(it.key());
         writeShaderKey(&ds, k);
         const NativeResourceBindingMap &map(it.value());
-        ds << map.count();
+        ds << int(map.count());
         for (auto mapIt = map.cbegin(), mapItEnd = map.cend(); mapIt != mapItEnd; ++mapIt) {
             ds << mapIt.key();
             ds << mapIt.value().first;
             ds << mapIt.value().second;
+        }
+    }
+    ds << int(d->combinedImageMap.count());
+    for (auto it = d->combinedImageMap.cbegin(), itEnd = d->combinedImageMap.cend(); it != itEnd; ++it) {
+        const QShaderKey &k(it.key());
+        writeShaderKey(&ds, k);
+        const SeparateToCombinedImageSamplerMappingList &list(it.value());
+        ds << int(list.count());
+        for (auto listIt = list.cbegin(), listItEnd = list.cend(); listIt != listItEnd; ++listIt) {
+            ds << listIt->combinedSamplerName;
+            ds << listIt->textureBinding;
+            ds << listIt->samplerBinding;
         }
     }
 
@@ -428,6 +407,7 @@ QShader QShader::fromSerialized(const QByteArray &data)
     ds >> intVal;
     d->qsbVersion = intVal;
     if (d->qsbVersion != QShaderPrivate::QSB_VERSION
+            && d->qsbVersion != QShaderPrivate::QSB_VERSION_WITHOUT_SEPARATE_IMAGES_AND_SAMPLERS
             && d->qsbVersion != QShaderPrivate::QSB_VERSION_WITHOUT_VAR_ARRAYDIMS
             && d->qsbVersion != QShaderPrivate::QSB_VERSION_WITH_CBOR
             && d->qsbVersion != QShaderPrivate::QSB_VERSION_WITH_BINARY_JSON
@@ -442,21 +422,11 @@ QShader QShader::fromSerialized(const QByteArray &data)
     if (d->qsbVersion > QShaderPrivate::QSB_VERSION_WITH_CBOR) {
         d->desc = QShaderDescription::deserialize(&ds, d->qsbVersion);
     } else if (d->qsbVersion > QShaderPrivate::QSB_VERSION_WITH_BINARY_JSON) {
-        QByteArray descBin;
-        ds >> descBin;
-        d->desc = QShaderDescription::fromCbor(descBin);
-    } else {
-#if QT_CONFIG(binaryjson) && QT_DEPRECATED_SINCE(5, 15)
-        QT_WARNING_PUSH
-        QT_WARNING_DISABLE_DEPRECATED
-        QByteArray descBin;
-        ds >> descBin;
-        d->desc = QShaderDescription::fromBinaryJson(descBin);
-        QT_WARNING_POP
-#else
-        qWarning("Cannot load QShaderDescription from binary JSON due to disabled binaryjson feature");
+        qWarning("Can no longer load QShaderDescription from CBOR.");
         d->desc = QShaderDescription();
-#endif
+    } else {
+        qWarning("Can no longer load QShaderDescription from binary JSON.");
+        d->desc = QShaderDescription();
     }
     int count;
     ds >> count;
@@ -493,6 +463,27 @@ QShader QShader::fromSerialized(const QByteArray &data)
         }
     }
 
+    if (d->qsbVersion > QShaderPrivate::QSB_VERSION_WITHOUT_SEPARATE_IMAGES_AND_SAMPLERS) {
+        ds >> count;
+        for (int i = 0; i < count; ++i) {
+            QShaderKey k;
+            readShaderKey(&ds, &k);
+            SeparateToCombinedImageSamplerMappingList list;
+            int listSize;
+            ds >> listSize;
+            for (int b = 0; b < listSize; ++b) {
+                QByteArray combinedSamplerName;
+                ds >> combinedSamplerName;
+                int textureBinding;
+                ds >> textureBinding;
+                int samplerBinding;
+                ds >> samplerBinding;
+                list.append({ combinedSamplerName, textureBinding, samplerBinding });
+            }
+            d->combinedImageMap.insert(k, list);
+        }
+    }
+
     return bs;
 }
 
@@ -522,14 +513,15 @@ QShaderKey::QShaderKey(QShader::Source s,
 
     \relates QShader
  */
-bool operator==(const QShader &lhs, const QShader &rhs) Q_DECL_NOTHROW
+bool operator==(const QShader &lhs, const QShader &rhs) noexcept
 {
     return lhs.d->stage == rhs.d->stage
-            && lhs.d->shaders == rhs.d->shaders;
-    // do not bother with desc and bindings, if the shader code is the same, the description must match too
+            && lhs.d->shaders == rhs.d->shaders
+            && lhs.d->bindings == rhs.d->bindings;
 }
 
 /*!
+    \internal
     \fn bool operator!=(const QShader &lhs, const QShader &rhs)
 
     Returns \c false if the values in the two QShader objects \a a and \a b
@@ -543,12 +535,14 @@ bool operator==(const QShader &lhs, const QShader &rhs) Q_DECL_NOTHROW
 
     \relates QShader
  */
-uint qHash(const QShader &s, uint seed) Q_DECL_NOTHROW
+size_t qHash(const QShader &s, size_t seed) noexcept
 {
-    uint h = s.stage();
-    for (auto it = s.d->shaders.constBegin(), itEnd = s.d->shaders.constEnd(); it != itEnd; ++it)
-        h += qHash(it.key(), seed) + qHash(it.value().shader(), seed);
-    return h;
+    QtPrivate::QHashCombine hash;
+    seed = hash(seed, s.stage());
+    seed = qHashRange(s.d->shaders.keyValueBegin(),
+                      s.d->shaders.keyValueEnd(),
+                      seed);
+    return seed;
 }
 
 /*!
@@ -557,12 +551,20 @@ uint qHash(const QShader &s, uint seed) Q_DECL_NOTHROW
 
     \relates QShaderVersion
  */
-bool operator==(const QShaderVersion &lhs, const QShaderVersion &rhs) Q_DECL_NOTHROW
+bool operator==(const QShaderVersion &lhs, const QShaderVersion &rhs) noexcept
 {
     return lhs.version() == rhs.version() && lhs.flags() == rhs.flags();
 }
 
+#ifdef Q_OS_INTEGRITY
+size_t qHash(const QShaderVersion &s, size_t seed) noexcept
+{
+    return qHashMulti(seed, s.version(), s.flags());
+}
+#endif
+
 /*!
+    \internal
     \fn bool operator!=(const QShaderVersion &lhs, const QShaderVersion &rhs)
 
     Returns \c false if the values in the two QShaderVersion objects \a a
@@ -576,13 +578,14 @@ bool operator==(const QShaderVersion &lhs, const QShaderVersion &rhs) Q_DECL_NOT
 
     \relates QShaderKey
  */
-bool operator==(const QShaderKey &lhs, const QShaderKey &rhs) Q_DECL_NOTHROW
+bool operator==(const QShaderKey &lhs, const QShaderKey &rhs) noexcept
 {
     return lhs.source() == rhs.source() && lhs.sourceVersion() == rhs.sourceVersion()
             && lhs.sourceVariant() == rhs.sourceVariant();
 }
 
 /*!
+    \internal
     \fn bool operator!=(const QShaderKey &lhs, const QShaderKey &rhs)
 
     Returns \c false if the values in the two QShaderKey objects \a a
@@ -596,9 +599,13 @@ bool operator==(const QShaderKey &lhs, const QShaderKey &rhs) Q_DECL_NOTHROW
 
     \relates QShaderKey
  */
-uint qHash(const QShaderKey &k, uint seed) Q_DECL_NOTHROW
+size_t qHash(const QShaderKey &k, size_t seed) noexcept
 {
-    return seed + 10 * k.source() + k.sourceVersion().version() + k.sourceVersion().flags() + k.sourceVariant();
+    return qHashMulti(seed,
+                      k.source(),
+                      k.sourceVersion().version(),
+                      k.sourceVersion().flags(),
+                      k.sourceVariant());
 }
 
 /*!
@@ -606,12 +613,13 @@ uint qHash(const QShaderKey &k, uint seed) Q_DECL_NOTHROW
 
     \relates QShaderCode
  */
-bool operator==(const QShaderCode &lhs, const QShaderCode &rhs) Q_DECL_NOTHROW
+bool operator==(const QShaderCode &lhs, const QShaderCode &rhs) noexcept
 {
     return lhs.shader() == rhs.shader() && lhs.entryPoint() == rhs.entryPoint();
 }
 
 /*!
+    \internal
     \fn bool operator!=(const QShaderCode &lhs, const QShaderCode &rhs)
 
     Returns \c false if the values in the two QShaderCode objects \a a
@@ -619,6 +627,16 @@ bool operator==(const QShaderCode &lhs, const QShaderCode &rhs) Q_DECL_NOTHROW
 
     \relates QShaderCode
  */
+
+/*!
+    Returns the hash value for \a k, using \a seed to seed the calculation.
+
+    \relates QShaderCode
+ */
+size_t qHash(const QShaderCode &k, size_t seed) noexcept
+{
+    return qHash(k.shader(), seed);
+}
 
 #ifndef QT_NO_DEBUG_STREAM
 QDebug operator<<(QDebug dbg, const QShader &bs)
@@ -664,17 +682,20 @@ QDebug operator<<(QDebug dbg, const QShaderVersion &v)
     \c binding layout qualifier in the Vulkan-compatible GLSL shader.
 
     Graphics APIs other than Vulkan may use a resource binding model that is
-    not fully compatible with this. In addition, the generator of the shader
-    code translated from SPIR-V may choose not to take the SPIR-V binding
-    qualifiers into account, for various reasons. (this is the case with the
-    Metal backend of SPIRV-Cross, for example).
+    not fully compatible with this. The generator of the shader code translated
+    from SPIR-V may choose not to take the SPIR-V binding qualifiers into
+    account, for various reasons. This is the case with the Metal backend of
+    SPIRV-Cross, for example. In addition, even when an automatic, implicit
+    translation is mostly possible (e.g. by using SPIR-V binding points as HLSL
+    resource register indices), assigning resource bindings without being
+    constrained by the SPIR-V binding points can lead to better results.
 
     Therefore, a QShader may expose an additional map that describes what the
-    native binding point for a given SPIR-V binding is. The QRhi backends are
-    expected to use this map automatically, as appropriate. The value is a
-    pair, because combined image samplers may map to two native resources (a
-    texture and a sampler) in some shading languages. In that case the second
-    value refers to the sampler.
+    native binding point for a given SPIR-V binding is. The QRhi backends, for
+    which this is relevant, are expected to use this map automatically, as
+    appropriate. The value is a pair, because combined image samplers may map
+    to two native resources (a texture and a sampler) in some shading
+    languages. In that case the second value refers to the sampler.
 
     \note The native binding may be -1, in case there is no active binding for
     the resource in the shader. (for example, there is a uniform block
@@ -685,16 +706,17 @@ QDebug operator<<(QDebug dbg, const QShaderVersion &v)
 */
 
 /*!
-    \return the native binding map for \a key or null if no extra mapping is
-    available, or is not applicable.
+    \return the native binding map for \a key. The map is empty if no mapping
+    is available for \a key (for example, because the map is not applicable for
+    the API and shading language described by \a key).
  */
-const QShader::NativeResourceBindingMap *QShader::nativeResourceBindingMap(const QShaderKey &key) const
+QShader::NativeResourceBindingMap QShader::nativeResourceBindingMap(const QShaderKey &key) const
 {
     auto it = d->bindings.constFind(key);
     if (it == d->bindings.cend())
-        return nullptr;
+        return {};
 
-    return &it.value();
+    return it.value();
 }
 
 /*!
@@ -719,6 +741,64 @@ void QShader::removeResourceBindingMap(const QShaderKey &key)
 
     detach();
     d->bindings.erase(it);
+}
+
+/*!
+    \typedef QShader::SeparateToCombinedImageSamplerMappingList
+
+    Synonym for QList<QShader::SeparateToCombinedImageSamplerMapping>.
+ */
+
+/*!
+    \struct QShader::SeparateToCombinedImageSamplerMapping
+
+    Describes a mapping from a traditional combined image sampler uniform to
+    binding points for a separate texture and sampler.
+
+    For example, if \c combinedImageSampler is \c{"_54"}, \c textureBinding is
+    \c 1, and \c samplerBinding is \c 2, this means that the GLSL shader code
+    contains a \c sampler2D (or sampler3D, etc.) uniform with the name of
+    \c{_54} which corresponds to two separate resource bindings (\c 1 and \c 2)
+    in the original shader.
+ */
+
+/*!
+    \return the combined image sampler mapping list for \a key, or an empty
+    list if there is no data available for \a key, for example because such a
+    mapping is not applicable for the shading language.
+ */
+QShader::SeparateToCombinedImageSamplerMappingList QShader::separateToCombinedImageSamplerMappingList(const QShaderKey &key) const
+{
+    auto it = d->combinedImageMap.constFind(key);
+    if (it == d->combinedImageMap.cend())
+        return {};
+
+    return it.value();
+}
+
+/*!
+    Stores the given combined image sampler mapping \a list associated with \a key.
+
+    \sa separateToCombinedImageSamplerMappingList()
+ */
+void QShader::setSeparateToCombinedImageSamplerMappingList(const QShaderKey &key,
+                                                           const SeparateToCombinedImageSamplerMappingList &list)
+{
+    detach();
+    d->combinedImageMap[key] = list;
+}
+
+/*!
+    Removes the combined image sampler mapping list for \a key.
+ */
+void QShader::removeSeparateToCombinedImageSamplerMappingList(const QShaderKey &key)
+{
+    auto it = d->combinedImageMap.find(key);
+    if (it == d->combinedImageMap.end())
+        return;
+
+    detach();
+    d->combinedImageMap.erase(it);
 }
 
 QT_END_NAMESPACE

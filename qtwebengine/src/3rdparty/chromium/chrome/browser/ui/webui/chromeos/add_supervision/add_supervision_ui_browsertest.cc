@@ -4,10 +4,8 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/chromeos/add_supervision/add_supervision_metrics_recorder.h"
 #include "chrome/browser/ui/webui/chromeos/add_supervision/add_supervision_ui.h"
@@ -15,7 +13,6 @@
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -34,18 +31,20 @@ const char kGetAddSupervisionUIElementJS[] =
 // Base class for AddSupervision tests.
 class AddSupervisionBrowserTest : public InProcessBrowserTest {
  public:
-  AddSupervisionBrowserTest() {
-    scoped_feature_list_.InitWithFeatures(
-        {chromeos::features::kParentalControlsSettings}, {});
-  }
+  AddSupervisionBrowserTest() = default;
+
+  AddSupervisionBrowserTest(const AddSupervisionBrowserTest&) = delete;
+  AddSupervisionBrowserTest& operator=(const AddSupervisionBrowserTest&) =
+      delete;
+
   ~AddSupervisionBrowserTest() override = default;
 
   void SetUpOnMainThread() override {
     // TODO(danan):  See if this is possible to do this instead using
     // FakeGaia.IssueOAuthToken().
     identity_test_env_ = std::make_unique<signin::IdentityTestEnvironment>();
-    identity_test_env_->MakeUnconsentedPrimaryAccountAvailable(
-        "example@gmail.com");
+    identity_test_env_->MakePrimaryAccountAvailable(
+        "example@gmail.com", signin::ConsentLevel::kSync);
     // This makes the identity manager return the string "access_token" for the
     // access token.
     identity_test_env_->SetAutomaticIssueOfAccessTokens(true);
@@ -84,15 +83,13 @@ class AddSupervisionBrowserTest : public InProcessBrowserTest {
   }
 
  private:
-  base::test::ScopedFeatureList scoped_feature_list_;
   std::unique_ptr<signin::IdentityTestEnvironment> identity_test_env_;
-
-  DISALLOW_COPY_AND_ASSIGN(AddSupervisionBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(AddSupervisionBrowserTest, URLParameters) {
   // Open the Add Supervision URL.
-  ui_test_utils::NavigateToURL(browser(), add_supervision_webui_url());
+  ASSERT_TRUE(
+      ui_test_utils::NavigateToURL(browser(), add_supervision_webui_url()));
   EXPECT_TRUE(content::WaitForLoadStop(contents()));
 
   // Get the URL from the embedded webview.
@@ -129,7 +126,8 @@ IN_PROC_BROWSER_TEST_F(AddSupervisionBrowserTest, URLParameters) {
 
 IN_PROC_BROWSER_TEST_F(AddSupervisionBrowserTest, ShowOfflineScreen) {
   // Open the Add Supervision URL.
-  ui_test_utils::NavigateToURL(browser(), add_supervision_webui_url());
+  ASSERT_TRUE(
+      ui_test_utils::NavigateToURL(browser(), add_supervision_webui_url()));
   EXPECT_TRUE(content::WaitForLoadStop(contents()));
 
   // Webview div should be initially visible.
@@ -163,7 +161,8 @@ IN_PROC_BROWSER_TEST_F(AddSupervisionBrowserTest, ShowOfflineScreen) {
 
 IN_PROC_BROWSER_TEST_F(AddSupervisionBrowserTest, ShowConfirmSignoutDialog) {
   // Open the Add Supervision URL.
-  ui_test_utils::NavigateToURL(browser(), add_supervision_webui_url());
+  ASSERT_TRUE(
+      ui_test_utils::NavigateToURL(browser(), add_supervision_webui_url()));
   EXPECT_TRUE(content::WaitForLoadStop(contents()));
 
   // Request that the dialog close before supervision has been enabled.
@@ -200,7 +199,8 @@ IN_PROC_BROWSER_TEST_F(AddSupervisionBrowserTest, UMATest) {
             0);
 
   // Open the Add Supervision URL.
-  ui_test_utils::NavigateToURL(browser(), add_supervision_webui_url());
+  ASSERT_TRUE(
+      ui_test_utils::NavigateToURL(browser(), add_supervision_webui_url()));
   EXPECT_TRUE(content::WaitForLoadStop(contents()));
 
   // Simulate supervision being enabled.

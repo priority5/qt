@@ -1,37 +1,15 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-#include <QtCore/QObject>
-#include <QtCore/QVariant>
-#include <QtCore/QList>
-#include <QtCore/QVector>
-#include <QtTest/QtTest>
-#include <QtDBus>
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
+#include <QTest>
+#include <QTestEventLoop>
+#include <QObject>
+#include <QVariant>
+#include <QList>
+#include <QDBusConnection>
+#include <QDBusVariant>
+#include <QDBusPendingCallWatcher>
+#include <QDBusMetaType>
 
 class tst_QDBusLocalCalls: public QObject
 {
@@ -52,8 +30,7 @@ public Q_SLOTS:
     Q_SCRIPTABLE QDBusVariant echo(const QDBusVariant &value)
     { return value; }
 
-    Q_SCRIPTABLE QVector<int> echo(const QVector<int> &value)
-    { return value; }
+    Q_SCRIPTABLE QList<int> echo(const QList<int> &value) { return value; }
 
     Q_SCRIPTABLE QString echo2(const QStringList &list, QString &out)
     { out = list[1]; return list[0]; }
@@ -200,7 +177,7 @@ void tst_QDBusLocalCalls::makeCallsTwoRets()
 void tst_QDBusLocalCalls::makeCallsComplex()
 {
     qDBusRegisterMetaType<QList<int> >();
-    qDBusRegisterMetaType<QVector<int> >();
+    qDBusRegisterMetaType<QList<int>>();
 
     QList<int> value;
     value << 1 << -42 << 47;

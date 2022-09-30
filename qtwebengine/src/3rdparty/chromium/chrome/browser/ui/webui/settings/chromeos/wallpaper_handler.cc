@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/webui/settings/chromeos/wallpaper_handler.h"
 
 #include "base/bind.h"
-#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client_impl.h"
 #include "content/public/browser/web_ui.h"
 
 namespace chromeos {
@@ -36,23 +36,24 @@ void WallpaperHandler::RegisterMessages() {
 }
 
 void WallpaperHandler::HandleIsWallpaperSettingVisible(
-    const base::ListValue* args) {
-  CHECK_EQ(args->GetSize(), 1U);
+    const base::Value::List& args) {
+  CHECK_EQ(args.size(), 1U);
   ResolveCallback(
-      args->GetList()[0],
-      WallpaperControllerClient::Get()->ShouldShowWallpaperSetting());
+      args[0],
+      WallpaperControllerClientImpl::Get()->ShouldShowWallpaperSetting());
 }
 
 void WallpaperHandler::HandleIsWallpaperPolicyControlled(
-    const base::ListValue* args) {
-  CHECK_EQ(args->GetSize(), 1U);
-  bool result = WallpaperControllerClient::Get()
+    const base::Value::List& args) {
+  CHECK_EQ(args.size(), 1U);
+  bool result = WallpaperControllerClientImpl::Get()
                     ->IsActiveUserWallpaperControlledByPolicy();
-  ResolveCallback(args->GetList()[0], result);
+  ResolveCallback(args[0], result);
 }
 
-void WallpaperHandler::HandleOpenWallpaperManager(const base::ListValue* args) {
-  WallpaperControllerClient::Get()->OpenWallpaperPickerIfAllowed();
+void WallpaperHandler::HandleOpenWallpaperManager(
+    const base::Value::List& args) {
+  WallpaperControllerClientImpl::Get()->OpenWallpaperPickerIfAllowed();
 }
 
 void WallpaperHandler::ResolveCallback(const base::Value& callback_id,

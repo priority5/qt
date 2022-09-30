@@ -12,35 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {hsluvToHex} from 'hsluv';
+
 import {searchSegment} from '../../base/binary_search';
 import {Actions} from '../../common/actions';
-import {TrackState} from '../../common/state';
+import {hslForSlice} from '../../common/colorizer';
 import {fromNs, toNs} from '../../common/time';
 import {globals} from '../../frontend/globals';
 import {TimeScale} from '../../frontend/time_scale';
-import {Track} from '../../frontend/track';
+import {NewTrackArgs, Track} from '../../frontend/track';
 import {trackRegistry} from '../../frontend/track_registry';
 
 import {Config, CPU_PROFILE_TRACK_KIND, Data} from './common';
 
+const BAR_HEIGHT = 3;
 const MARGIN_TOP = 4.5;
 const RECT_HEIGHT = 30.5;
 
-const CPU_PROFILE_COLOR = 'hsl(350, 45%, 70%)';
-const CPU_PROFILE_HOVERED_COLOR = 'hsl(350, 45%, 55%)';
+function colorForSample(callsiteId: number, isHovered: boolean): string {
+  return hsluvToHex(hslForSlice(String(callsiteId), isHovered));
+}
 
 class CpuProfileTrack extends Track<Config, Data> {
   static readonly kind = CPU_PROFILE_TRACK_KIND;
-  static create(trackState: TrackState): CpuProfileTrack {
-    return new CpuProfileTrack(trackState);
+  static create(args: NewTrackArgs): CpuProfileTrack {
+    return new CpuProfileTrack(args);
   }
 
-  private centerY = this.getHeight() / 2;
-  private markerWidth = (this.getHeight() - MARGIN_TOP) / 2;
+  private centerY = this.getHeight() / 2 + BAR_HEIGHT;
+  private markerWidth = (this.getHeight() - MARGIN_TOP - BAR_HEIGHT) / 2;
   private hoveredTs: number|undefined = undefined;
 
-  constructor(trackState: TrackState) {
-    super(trackState);
+  constructor(args: NewTrackArgs) {
+    super(args);
   }
 
   getHeight() {
@@ -67,23 +71,44 @@ class CpuProfileTrack extends Track<Config, Data> {
           timeScale.timeToPx(fromNs(centerX)),
           this.centerY,
           isHovered,
-          strokeWidth);
+          strokeWidth,
+          data.callsiteId[i]);
+    }
+
+    let startX = data.tsStarts.length ? data.tsStarts[0] : -1;
+    let endX = data.tsStarts.length ? data.tsStarts[0] : -1;
+    let lastCallsiteId = data.callsiteId.length ? data.callsiteId[0] : -1;
+    for (let i = 0; i < data.tsStarts.length; i++) {
+      const centerX = data.tsStarts[i];
+      const callsiteId = data.callsiteId[i];
+      if (lastCallsiteId !== callsiteId) {
+        if (startX !== endX) {
+          const leftPx = timeScale.timeToPx(fromNs(startX)) - this.markerWidth;
+          const rightPx = timeScale.timeToPx(fromNs(endX)) + this.markerWidth;
+          const width = rightPx - leftPx;
+          ctx.fillStyle = colorForSample(lastCallsiteId, false);
+          ctx.fillRect(leftPx, MARGIN_TOP, width, BAR_HEIGHT);
+        }
+        startX = centerX;
+      }
+      endX = centerX;
+      lastCallsiteId = callsiteId;
     }
   }
 
   drawMarker(
       ctx: CanvasRenderingContext2D, x: number, y: number, isHovered: boolean,
-      strokeWidth: number): void {
+      strokeWidth: number, callsiteId: number): void {
     ctx.beginPath();
     ctx.moveTo(x - this.markerWidth, y - this.markerWidth);
     ctx.lineTo(x, y + this.markerWidth);
     ctx.lineTo(x + this.markerWidth, y - this.markerWidth);
     ctx.lineTo(x - this.markerWidth, y - this.markerWidth);
     ctx.closePath();
-    ctx.fillStyle = isHovered ? CPU_PROFILE_HOVERED_COLOR : CPU_PROFILE_COLOR;
+    ctx.fillStyle = colorForSample(callsiteId, isHovered);
     ctx.fill();
     if (strokeWidth > 0) {
-      ctx.strokeStyle = CPU_PROFILE_HOVERED_COLOR;
+      ctx.strokeStyle = colorForSample(callsiteId, false);
       ctx.lineWidth = strokeWidth;
       ctx.stroke();
     }

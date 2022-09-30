@@ -8,11 +8,9 @@
 #include <stdint.h>
 #include <string.h>  // For memcpy
 
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "ppapi/proxy/serialized_flash_menu.h"
 #include "ppapi/proxy/serialized_var.h"
 #include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/shared_impl/private/ppb_x509_certificate_private_shared.h"
@@ -322,62 +320,7 @@ void ParamTraits<ppapi::proxy::PPBURLLoader_UpdateProgress_Params>::Log(
     std::string* l) {
 }
 
-#if !defined(OS_NACL) && !defined(NACL_WIN64)
-// PPBFlash_DrawGlyphs_Params --------------------------------------------------
-// static
-void ParamTraits<ppapi::proxy::PPBFlash_DrawGlyphs_Params>::Write(
-    base::Pickle* m,
-    const param_type& p) {
-  WriteParam(m, p.instance);
-  WriteParam(m, p.image_data);
-  WriteParam(m, p.font_desc);
-  WriteParam(m, p.color);
-  WriteParam(m, p.position);
-  WriteParam(m, p.clip);
-  WriteParam(m, p.transformation[0][0]);
-  WriteParam(m, p.transformation[0][1]);
-  WriteParam(m, p.transformation[0][2]);
-  WriteParam(m, p.transformation[1][0]);
-  WriteParam(m, p.transformation[1][1]);
-  WriteParam(m, p.transformation[1][2]);
-  WriteParam(m, p.transformation[2][0]);
-  WriteParam(m, p.transformation[2][1]);
-  WriteParam(m, p.transformation[2][2]);
-  WriteParam(m, p.allow_subpixel_aa);
-  WriteParam(m, p.glyph_indices);
-  WriteParam(m, p.glyph_advances);
-}
-
-// static
-bool ParamTraits<ppapi::proxy::PPBFlash_DrawGlyphs_Params>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* r) {
-  return ReadParam(m, iter, &r->instance) &&
-         ReadParam(m, iter, &r->image_data) &&
-         ReadParam(m, iter, &r->font_desc) && ReadParam(m, iter, &r->color) &&
-         ReadParam(m, iter, &r->position) && ReadParam(m, iter, &r->clip) &&
-         ReadParam(m, iter, &r->transformation[0][0]) &&
-         ReadParam(m, iter, &r->transformation[0][1]) &&
-         ReadParam(m, iter, &r->transformation[0][2]) &&
-         ReadParam(m, iter, &r->transformation[1][0]) &&
-         ReadParam(m, iter, &r->transformation[1][1]) &&
-         ReadParam(m, iter, &r->transformation[1][2]) &&
-         ReadParam(m, iter, &r->transformation[2][0]) &&
-         ReadParam(m, iter, &r->transformation[2][1]) &&
-         ReadParam(m, iter, &r->transformation[2][2]) &&
-         ReadParam(m, iter, &r->allow_subpixel_aa) &&
-         ReadParam(m, iter, &r->glyph_indices) &&
-         ReadParam(m, iter, &r->glyph_advances) &&
-         r->glyph_indices.size() == r->glyph_advances.size();
-}
-
-// static
-void ParamTraits<ppapi::proxy::PPBFlash_DrawGlyphs_Params>::Log(
-    const param_type& p,
-    std::string* l) {
-}
-
+#if !BUILDFLAG(IS_NACL) && !defined(NACL_WIN64)
 // SerializedDirEntry ----------------------------------------------------------
 
 // static
@@ -433,40 +376,9 @@ void ParamTraits<ppapi::proxy::SerializedFontDescription>::Log(
     const param_type& p,
     std::string* l) {
 }
-#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
+#endif  // !BUILDFLAG(IS_NACL) && !defined(NACL_WIN64)
 
-// ppapi::proxy::SerializedTrueTypeFontDesc ------------------------------------
-
-// static
-void ParamTraits<ppapi::proxy::SerializedTrueTypeFontDesc>::Write(
-    base::Pickle* m,
-    const param_type& p) {
-  WriteParam(m, p.family);
-  WriteParam(m, p.generic_family);
-  WriteParam(m, p.style);
-  WriteParam(m, p.weight);
-  WriteParam(m, p.width);
-  WriteParam(m, p.charset);
-}
-
-// static
-bool ParamTraits<ppapi::proxy::SerializedTrueTypeFontDesc>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* r) {
-  return ReadParam(m, iter, &r->family) &&
-         ReadParam(m, iter, &r->generic_family) &&
-         ReadParam(m, iter, &r->style) && ReadParam(m, iter, &r->weight) &&
-         ReadParam(m, iter, &r->width) && ReadParam(m, iter, &r->charset);
-}
-
-// static
-void ParamTraits<ppapi::proxy::SerializedTrueTypeFontDesc>::Log(
-    const param_type& p,
-    std::string* l) {
-}
-
-#if !defined(OS_NACL) && !defined(NACL_WIN64)
+#if !BUILDFLAG(IS_NACL) && !defined(NACL_WIN64)
 // ppapi::PepperFilePath -------------------------------------------------------
 
 // static
@@ -502,28 +414,7 @@ void ParamTraits<ppapi::PepperFilePath>::Log(const param_type& p,
   l->append(")");
 }
 
-// SerializedFlashMenu ---------------------------------------------------------
-
-// static
-void ParamTraits<ppapi::proxy::SerializedFlashMenu>::Write(
-    base::Pickle* m,
-    const param_type& p) {
-  p.WriteToMessage(m);
-}
-
-// static
-bool ParamTraits<ppapi::proxy::SerializedFlashMenu>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* r) {
-  return r->ReadFromMessage(m, iter);
-}
-
-// static
-void ParamTraits<ppapi::proxy::SerializedFlashMenu>::Log(const param_type& p,
-                                                         std::string* l) {
-}
-#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
+#endif  // !BUILDFLAG(IS_NACL) && !defined(NACL_WIN64)
 
 // PPB_X509Certificate_Fields --------------------------------------------------
 

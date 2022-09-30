@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
+#include "base/strings/string_piece.h"
 #include "net/base/ip_address.h"
 #include "net/dns/dns_response.h"
 #include "net/dns/public/dns_protocol.h"
@@ -25,6 +26,9 @@ static const size_t kSrvRecordMinimumSize = 6;
 static constexpr size_t kIntegrityMinimumSize =
     sizeof(uint16_t) + IntegrityRecordRdata::kDigestLen;
 
+// Minimal HTTPS rdata is 2 octets priority + 1 octet empty name.
+static constexpr size_t kHttpsRdataMinimumSize = 3;
+
 bool RecordRdata::HasValidSize(const base::StringPiece& data, uint16_t type) {
   switch (type) {
     case dns_protocol::kTypeSRV:
@@ -35,6 +39,8 @@ bool RecordRdata::HasValidSize(const base::StringPiece& data, uint16_t type) {
       return data.size() == IPAddress::kIPv6AddressSize;
     case dns_protocol::kExperimentalTypeIntegrity:
       return data.size() >= kIntegrityMinimumSize;
+    case dns_protocol::kTypeHttps:
+      return data.size() >= kHttpsRdataMinimumSize;
     case dns_protocol::kTypeCNAME:
     case dns_protocol::kTypePTR:
     case dns_protocol::kTypeTXT:
@@ -43,8 +49,8 @@ bool RecordRdata::HasValidSize(const base::StringPiece& data, uint16_t type) {
     case dns_protocol::kTypeSOA:
       return true;
     default:
-      VLOG(1) << "Unsupported RDATA type.";
-      return false;
+      VLOG(1) << "Unrecognized RDATA type.";
+      return true;
   }
 }
 
@@ -58,11 +64,11 @@ std::unique_ptr<SrvRecordRdata> SrvRecordRdata::Create(
     const base::StringPiece& data,
     const DnsRecordParser& parser) {
   if (!HasValidSize(data, kType))
-    return std::unique_ptr<SrvRecordRdata>();
+    return nullptr;
 
   std::unique_ptr<SrvRecordRdata> rdata(new SrvRecordRdata);
 
-  base::BigEndianReader reader(data.data(), data.size());
+  auto reader = base::BigEndianReader::FromStringPiece(data);
   // 2 bytes for priority, 2 bytes for weight, 2 bytes for port.
   reader.ReadU16(&rdata->priority_);
   reader.ReadU16(&rdata->weight_);
@@ -70,7 +76,7 @@ std::unique_ptr<SrvRecordRdata> SrvRecordRdata::Create(
 
   if (!parser.ReadName(data.substr(kSrvRecordMinimumSize).begin(),
                        &rdata->target_))
-    return std::unique_ptr<SrvRecordRdata>();
+    return nullptr;
 
   return rdata;
 }
@@ -97,7 +103,7 @@ std::unique_ptr<ARecordRdata> ARecordRdata::Create(
     const base::StringPiece& data,
     const DnsRecordParser& parser) {
   if (!HasValidSize(data, kType))
-    return std::unique_ptr<ARecordRdata>();
+    return nullptr;
 
   std::unique_ptr<ARecordRdata> rdata(new ARecordRdata);
   rdata->address_ =
@@ -124,7 +130,7 @@ std::unique_ptr<AAAARecordRdata> AAAARecordRdata::Create(
     const base::StringPiece& data,
     const DnsRecordParser& parser) {
   if (!HasValidSize(data, kType))
-    return std::unique_ptr<AAAARecordRdata>();
+    return nullptr;
 
   std::unique_ptr<AAAARecordRdata> rdata(new AAAARecordRdata);
   rdata->address_ =
@@ -153,7 +159,7 @@ std::unique_ptr<CnameRecordRdata> CnameRecordRdata::Create(
   std::unique_ptr<CnameRecordRdata> rdata(new CnameRecordRdata);
 
   if (!parser.ReadName(data.begin(), &rdata->cname_))
-    return std::unique_ptr<CnameRecordRdata>();
+    return nullptr;
 
   return rdata;
 }
@@ -180,7 +186,7 @@ std::unique_ptr<PtrRecordRdata> PtrRecordRdata::Create(
   std::unique_ptr<PtrRecordRdata> rdata(new PtrRecordRdata);
 
   if (!parser.ReadName(data.begin(), &rdata->ptrdomain_))
-    return std::unique_ptr<PtrRecordRdata>();
+    return nullptr;
 
   return rdata;
 }
@@ -209,9 +215,9 @@ std::unique_ptr<TxtRecordRdata> TxtRecordRdata::Create(
     uint8_t length = data[i];
 
     if (i + length >= data.size())
-      return std::unique_ptr<TxtRecordRdata>();
+      return nullptr;
 
-    rdata->texts_.push_back(data.substr(i + 1, length).as_string());
+    rdata->texts_.push_back(std::string(data.substr(i + 1, length)));
 
     // Move to the next string.
     i += length + 1;
@@ -247,7 +253,7 @@ std::unique_ptr<NsecRecordRdata> NsecRecordRdata::Create(
   // If we did not succeed in getting the next domain or the data length
   // is too short for reading the bitmap header, return.
   if (next_domain_length == 0 || data.length() < next_domain_length + 2)
-    return std::unique_ptr<NsecRecordRdata>();
+    return nullptr;
 
   struct BitmapHeader {
     uint8_t block_number;  // The block number should be zero.
@@ -260,14 +266,14 @@ std::unique_ptr<NsecRecordRdata> NsecRecordRdata::Create(
   // The block number must be zero in mDns-specific NSEC records. The bitmap
   // length must be between 1 and 32.
   if (header->block_number != 0 || header->length == 0 || header->length > 32)
-    return std::unique_ptr<NsecRecordRdata>();
+    return nullptr;
 
   base::StringPiece bitmap_data = data.substr(next_domain_length + 2);
 
   // Since we may only have one block, the data length must be exactly equal to
   // the domain length plus bitmap size.
   if (bitmap_data.length() != header->length)
-    return std::unique_ptr<NsecRecordRdata>();
+    return nullptr;
 
   rdata->bitmap_.insert(rdata->bitmap_.begin(),
                         bitmap_data.begin(),
@@ -312,14 +318,14 @@ std::unique_ptr<OptRecordRdata> OptRecordRdata::Create(
   std::unique_ptr<OptRecordRdata> rdata(new OptRecordRdata);
   rdata->buf_.assign(data.begin(), data.end());
 
-  base::BigEndianReader reader(data.data(), data.size());
+  auto reader = base::BigEndianReader::FromStringPiece(data);
   while (reader.remaining() > 0) {
     uint16_t opt_code, opt_data_size;
     base::StringPiece opt_data;
 
     if (!(reader.ReadU16(&opt_code) && reader.ReadU16(&opt_data_size) &&
           reader.ReadPiece(&opt_data, opt_data_size))) {
-      return std::unique_ptr<OptRecordRdata>();
+      return nullptr;
     }
     rdata->opts_.push_back(Opt(opt_code, opt_data));
   }
@@ -406,7 +412,7 @@ uint16_t IntegrityRecordRdata::Type() const {
 // static
 std::unique_ptr<IntegrityRecordRdata> IntegrityRecordRdata::Create(
     const base::StringPiece& data) {
-  base::BigEndianReader reader(data.data(), data.size());
+  auto reader = base::BigEndianReader::FromStringPiece(data);
   // Parse a U16-prefixed |Nonce| followed by a |Digest|.
   base::StringPiece parsed_nonce, parsed_digest;
 
@@ -449,9 +455,9 @@ IntegrityRecordRdata IntegrityRecordRdata::Random() {
   return IntegrityRecordRdata(std::move(nonce));
 }
 
-base::Optional<std::vector<uint8_t>> IntegrityRecordRdata::Serialize() const {
+absl::optional<std::vector<uint8_t>> IntegrityRecordRdata::Serialize() const {
   if (!is_intact_) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Create backing buffer and writer.

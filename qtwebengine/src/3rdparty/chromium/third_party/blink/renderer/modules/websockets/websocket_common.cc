@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include "base/metrics/histogram_macros.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/blink/public/common/security_context/insecure_request_policy.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -16,9 +17,7 @@
 #include "third_party/blink/renderer/modules/websockets/websocket_channel.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
-#include "third_party/blink/renderer/platform/weborigin/known_ports.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
@@ -46,7 +45,7 @@ WebSocketCommon::ConnectResult WebSocketCommon::Connect(
       mojom::blink::InsecureRequestPolicy::kLeaveInsecureRequestsAlone;
 
   if (upgrade_insecure_requests_set && url_.Protocol() == "ws" &&
-      !SecurityOrigin::Create(url_)->IsPotentiallyTrustworthy()) {
+      !network::IsUrlPotentiallyTrustworthy(url_)) {
     UseCounter::Count(
         execution_context,
         WebFeature::kUpgradeInsecureRequestsUpgradedRequestWebsocket);
@@ -77,13 +76,6 @@ WebSocketCommon::ConnectResult WebSocketCommon::Connect(
         "The URL contains a fragment identifier ('" +
             url_.FragmentIdentifier() +
             "'). Fragment identifiers are not allowed in WebSocket URLs.");
-    return ConnectResult::kException;
-  }
-
-  if (!IsPortAllowedForScheme(url_)) {
-    state_ = kClosed;
-    exception_state.ThrowSecurityError(
-        "The port " + String::Number(url_.Port()) + " is not allowed.");
     return ConnectResult::kException;
   }
 
@@ -176,9 +168,10 @@ void WebSocketCommon::CloseInternal(int code,
     return;
   if (state_ == kConnecting) {
     state_ = kClosing;
-    channel->Fail("WebSocket is closed before the connection is established.",
-                  mojom::ConsoleMessageLevel::kWarning,
-                  std::make_unique<SourceLocation>(String(), 0, 0, nullptr));
+    channel->Fail(
+        "WebSocket is closed before the connection is established.",
+        mojom::ConsoleMessageLevel::kWarning,
+        std::make_unique<SourceLocation>(String(), String(), 0, 0, nullptr));
     return;
   }
   state_ = kClosing;

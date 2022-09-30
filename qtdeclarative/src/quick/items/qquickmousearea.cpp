@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickmousearea_p.h"
 #include "qquickmousearea_p_p.h"
@@ -57,7 +21,7 @@ QT_BEGIN_NAMESPACE
 
 DEFINE_BOOL_CONFIG_OPTION(qmlVisualTouchDebugging, QML_VISUAL_TOUCH_DEBUGGING)
 
-Q_DECLARE_LOGGING_CATEGORY(DBG_HOVER_TRACE)
+Q_DECLARE_LOGGING_CATEGORY(lcHoverTrace)
 
 QQuickMouseAreaPrivate::QQuickMouseAreaPrivate()
 : enabled(true), scrollGestureEnabled(true), hovered(false), longPress(false),
@@ -96,8 +60,8 @@ void QQuickMouseAreaPrivate::init()
 
 void QQuickMouseAreaPrivate::saveEvent(QMouseEvent *event)
 {
-    lastPos = event->localPos();
-    lastScenePos = event->windowPos();
+    lastPos = event->position();
+    lastScenePos = event->scenePosition();
     lastButton = event->button();
     lastButtons = event->buttons();
     lastModifiers = event->modifiers();
@@ -122,11 +86,13 @@ bool QQuickMouseAreaPrivate::isClickConnected()
     IS_SIGNAL_CONNECTED(q, QQuickMouseArea, clicked, (QQuickMouseEvent *));
 }
 
+#if QT_CONFIG(wheelevent)
 bool QQuickMouseAreaPrivate::isWheelConnected()
 {
     Q_Q(QQuickMouseArea);
     IS_SIGNAL_CONNECTED(q, QQuickMouseArea, wheel, (QQuickWheelEvent *));
 }
+#endif
 
 void QQuickMouseAreaPrivate::propagate(QQuickMouseEvent* event, PropagateType t)
 {
@@ -597,7 +563,7 @@ void QQuickMouseArea::setPreventStealing(bool prevent)
             MouseArea {
                 anchors.fill: parent
                 propagateComposedEvents: true
-                onClicked: {
+                onClicked: (mouse)=> {
                     console.log("clicked blue")
                     mouse.accepted = false
                 }
@@ -672,7 +638,7 @@ void QQuickMouseArea::mousePressEvent(QMouseEvent *event)
             d->drag->setActive(false);
 #endif
         setHovered(true);
-        d->startScene = event->windowPos();
+        d->startScene = event->scenePosition();
         setKeepMouseGrab(d->stealMouse);
         event->setAccepted(setPressed(event->button(), true, event->source()));
         if (event->isAccepted())
@@ -690,7 +656,7 @@ void QQuickMouseArea::mouseMoveEvent(QMouseEvent *event)
 
     // ### we should skip this if these signals aren't used
     // ### can GV handle this for us?
-    setHovered(contains(event->localPos()));
+    setHovered(contains(event->position()));
 
     if ((event->buttons() & acceptedMouseButtons()) == 0) {
         QQuickItem::mouseMoveEvent(event);
@@ -712,10 +678,10 @@ void QQuickMouseArea::mouseMoveEvent(QMouseEvent *event)
         QPointF curLocalPos;
         if (drag()->target()->parentItem()) {
             startLocalPos = drag()->target()->parentItem()->mapFromScene(d->startScene);
-            curLocalPos = drag()->target()->parentItem()->mapFromScene(event->windowPos());
+            curLocalPos = drag()->target()->parentItem()->mapFromScene(event->scenePosition());
         } else {
             startLocalPos = d->startScene;
-            curLocalPos = event->windowPos();
+            curLocalPos = event->scenePosition();
         }
 
         if (keepMouseGrab() && d->stealMouse && d->overThreshold && !d->drag->active())
@@ -752,17 +718,17 @@ void QQuickMouseArea::mouseMoveEvent(QMouseEvent *event)
             d->lastPos = mapFromScene(d->lastScenePos);
         }
 
-        bool dragOverThresholdX = QQuickWindowPrivate::dragOverThreshold(dragPos.x() - startPos.x(),
-                                                                         Qt::XAxis, event, d->drag->threshold());
-        bool dragOverThresholdY = QQuickWindowPrivate::dragOverThreshold(dragPos.y() - startPos.y(),
-                                                                         Qt::YAxis, event, d->drag->threshold());
+        bool dragOverThresholdX = QQuickDeliveryAgentPrivate::dragOverThreshold(dragPos.x() - startPos.x(),
+                                                                                Qt::XAxis, event, d->drag->threshold());
+        bool dragOverThresholdY = QQuickDeliveryAgentPrivate::dragOverThreshold(dragPos.y() - startPos.y(),
+                                                                                Qt::YAxis, event, d->drag->threshold());
 
         if (!d->overThreshold && (((targetPos.x() != boundedDragPos.x()) && dragOverThresholdX) ||
                                   ((targetPos.y() != boundedDragPos.y()) && dragOverThresholdY)))
         {
             d->overThreshold = true;
             if (d->drag->smoothed())
-                d->startScene = event->windowPos();
+                d->startScene = event->scenePosition();
         }
 
         if (!keepMouseGrab() && d->overThreshold) {
@@ -806,7 +772,8 @@ void QQuickMouseArea::mouseReleaseEvent(QMouseEvent *event)
             QQuickWindow *w = window();
             if (w && w->mouseGrabberItem() == this)
                 ungrabMouse();
-            setKeepMouseGrab(false);
+            if (!d->preventStealing)
+                setKeepMouseGrab(false);
         }
     }
     d->doubleClick = false;
@@ -825,7 +792,8 @@ void QQuickMouseArea::mouseDoubleClickEvent(QMouseEvent *event)
         emit this->doubleClicked(&me);
         if (!me.isAccepted())
             d->propagate(&me, QQuickMouseAreaPrivate::DoubleClick);
-        d->doubleClick = d->isDoubleClickConnected() || me.isAccepted();
+        if (d->pressed)
+            d->doubleClick = d->isDoubleClickConnected() || me.isAccepted();
     }
     QQuickItem::mouseDoubleClickEvent(event);
 }
@@ -836,7 +804,7 @@ void QQuickMouseArea::hoverEnterEvent(QHoverEvent *event)
     if (!d->enabled && !d->pressed) {
         QQuickItem::hoverEnterEvent(event);
     } else {
-        d->lastPos = event->posF();
+        d->lastPos = event->position();
         d->lastModifiers = event->modifiers();
         setHovered(true);
         QQuickMouseEvent &me = d->quickMouseEvent;
@@ -846,6 +814,9 @@ void QQuickMouseArea::hoverEnterEvent(QHoverEvent *event)
         emit mouseYChanged(&me);
         me.setPosition(d->lastPos);
     }
+
+    // A MouseArea should not block hover events
+    event->ignore();
 }
 
 void QQuickMouseArea::hoverMoveEvent(QHoverEvent *event)
@@ -853,8 +824,8 @@ void QQuickMouseArea::hoverMoveEvent(QHoverEvent *event)
     Q_D(QQuickMouseArea);
     if (!d->enabled && !d->pressed) {
         QQuickItem::hoverMoveEvent(event);
-    } else if (d->lastPos != event->posF()) {
-        d->lastPos = event->posF();
+    } else if (d->lastPos != event->position()) {
+        d->lastPos = event->position();
         d->lastModifiers = event->modifiers();
         QQuickMouseEvent &me = d->quickMouseEvent;
         me.reset(d->lastPos.x(), d->lastPos.y(), Qt::NoButton, Qt::NoButton, d->lastModifiers, false, false);
@@ -864,6 +835,9 @@ void QQuickMouseArea::hoverMoveEvent(QHoverEvent *event)
         me.setPosition(d->lastPos);
         emit positionChanged(&me);
     }
+
+    // A MouseArea should not block hover events
+    event->ignore();
 }
 
 void QQuickMouseArea::hoverLeaveEvent(QHoverEvent *event)
@@ -873,6 +847,9 @@ void QQuickMouseArea::hoverLeaveEvent(QHoverEvent *event)
         QQuickItem::hoverLeaveEvent(event);
     else
         setHovered(false);
+
+    // A MouseArea should not block hover events
+    event->ignore();
 }
 
 #if QT_CONFIG(wheelevent)
@@ -885,8 +862,7 @@ void QQuickMouseArea::wheelEvent(QWheelEvent *event)
     }
 
     QQuickWheelEvent &we = d->quickWheelEvent;
-    we.reset(event->position().x(), event->position().y(), event->angleDelta(), event->pixelDelta(),
-             event->buttons(), event->modifiers(), event->inverted());
+    we.reset(event);
     we.setAccepted(d->isWheelConnected());
     emit wheel(&we);
     if (!we.isAccepted())
@@ -937,13 +913,13 @@ void QQuickMouseArea::touchUngrabEvent()
 bool QQuickMouseArea::sendMouseEvent(QMouseEvent *event)
 {
     Q_D(QQuickMouseArea);
-    QPointF localPos = mapFromScene(event->windowPos());
+    QPointF localPos = mapFromScene(event->scenePosition());
 
     QQuickWindow *c = window();
     QQuickItem *grabber = c ? c->mouseGrabberItem() : nullptr;
     bool stealThisEvent = d->stealMouse;
     if ((stealThisEvent || contains(localPos)) && (!grabber || !grabber->keepMouseGrab())) {
-        QMouseEvent mouseEvent(event->type(), localPos, event->windowPos(), event->screenPos(),
+        QMouseEvent mouseEvent(event->type(), localPos, event->scenePosition(), event->globalPosition(),
                                event->button(), event->buttons(), event->modifiers());
         mouseEvent.setAccepted(false);
 
@@ -1038,17 +1014,10 @@ void QQuickMouseArea::timerEvent(QTimerEvent *event)
     }
 }
 
-void QQuickMouseArea::windowDeactivateEvent()
-{
-    ungrabMouse();
-    QQuickItem::windowDeactivateEvent();
-}
-
-void QQuickMouseArea::geometryChanged(const QRectF &newGeometry,
-                                            const QRectF &oldGeometry)
+void QQuickMouseArea::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     Q_D(QQuickMouseArea);
-    QQuickItem::geometryChanged(newGeometry, oldGeometry);
+    QQuickItem::geometryChange(newGeometry, oldGeometry);
 
     if (d->lastScenePos.isNull)
         d->lastScenePos = mapToScene(d->lastPos);
@@ -1154,7 +1123,7 @@ void QQuickMouseArea::setHovered(bool h)
 {
     Q_D(QQuickMouseArea);
     if (d->hovered != h) {
-        qCDebug(DBG_HOVER_TRACE) << this << d->hovered <<  "->" << h;
+        qCDebug(lcHoverTrace) << this << d->hovered <<  "->" << h;
         d->hovered = h;
         emit hoveredChanged();
         d->hovered ? emit entered() : emit exited();
@@ -1393,6 +1362,8 @@ void QQuickMouseArea::resetPressAndHoldInterval()
     If \c drag.filterChildren is set to true, a drag can override descendant MouseAreas.  This
     enables a parent MouseArea to handle drags, for example, while descendants handle clicks:
 
+    \snippet qml/mousearea/mouseareadragfilter.qml dragfilter
+
     \c drag.threshold determines the threshold in pixels of when the drag operation should
     start. By default this is bound to a platform dependent value. This property was added in
     Qt Quick 2.2.
@@ -1402,9 +1373,6 @@ void QQuickMouseArea::resetPressAndHoldInterval()
     By default, this property is \c true. This property was added in Qt Quick 2.4
 
     See the \l Drag attached property and \l DropArea if you want to make a drop.
-
-    \snippet qml/mousearea/mouseareadragfilter.qml dragfilter
-
 */
 
 #if QT_CONFIG(quick_draganddrop)

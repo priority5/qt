@@ -15,8 +15,12 @@ gfx::Rect OverlayProcessorStub::GetPreviousFrameOverlaysBoundingRect() const {
   return gfx::Rect();
 }
 
-bool OverlayProcessorStub::NeedsSurfaceOccludingDamageRect() const {
+bool OverlayProcessorStub::NeedsSurfaceDamageRectList() const {
   return false;
+}
+
+gfx::CALayerResult OverlayProcessorStub::GetCALayerErrorCode() const {
+  return gfx::kCALayerFailedOverlayDisabled;
 }
 
 }  // namespace viz

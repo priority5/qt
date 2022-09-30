@@ -37,7 +37,6 @@
 #include "third_party/blink/renderer/platform/loader/fetch/text_resource_decoder_options.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 
@@ -46,9 +45,9 @@ namespace blink {
 CSSStyleSheetResource* CSSStyleSheetResource::Fetch(FetchParameters& params,
                                                     ResourceFetcher* fetcher,
                                                     ResourceClient* client) {
-  params.SetRequestContext(mojom::RequestContextType::STYLE);
+  params.SetRequestContext(mojom::blink::RequestContextType::STYLE);
   params.SetRequestDestination(network::mojom::RequestDestination::kStyle);
-  CSSStyleSheetResource* resource = ToCSSStyleSheetResource(
+  auto* resource = To<CSSStyleSheetResource>(
       fetcher->RequestResource(params, CSSStyleSheetResourceFactory(), client));
   return resource;
 }

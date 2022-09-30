@@ -9,7 +9,9 @@
 
 #include <functional>
 #include <type_traits>
+#include <utility>
 
+#include "base/template_util.h"
 #include "mojo/public/cpp/bindings/enum_traits.h"
 #include "mojo/public/cpp/bindings/interface_id.h"
 #include "mojo/public/cpp/bindings/lib/template_util.h"
@@ -167,20 +169,14 @@ T FetchAndReset(T* ptr) {
   return temp;
 }
 
+template <typename T, typename SFINAE = void>
+struct IsUnionDataType : std::false_type {
+  static_assert(sizeof(T), "T must be a complete type.");
+};
+
 template <typename T>
-struct IsUnionDataType {
- private:
-  template <typename U>
-  static YesType Test(const typename U::MojomUnionDataType*);
-
-  template <typename U>
-  static NoType Test(...);
-
-  EnsureTypeIsComplete<T> check_t_;
-
- public:
-  static const bool value =
-      sizeof(Test<T>(0)) == sizeof(YesType) && !IsConst<T>::value;
+struct IsUnionDataType<T, typename T::MojomUnionDataType> {
+  static const bool value = !std::is_const_v<T>;
 };
 
 enum class MojomTypeCategory : uint32_t {
@@ -334,6 +330,23 @@ T ConvertEnumValue(MojomType input) {
   bool result = EnumTraits<MojomType, T>::FromMojom(input, &output);
   DCHECK(result);
   return output;
+}
+
+template <typename MojomType, typename SFINAE = void>
+struct EnumKnownValueTraits {
+  static MojomType ToKnownValue(MojomType in) { return in; }
+};
+
+template <typename MojomType>
+struct EnumKnownValueTraits<
+    MojomType,
+    base::void_t<decltype(ToKnownEnumValue(std::declval<MojomType>()))>> {
+  static MojomType ToKnownValue(MojomType in) { return ToKnownEnumValue(in); }
+};
+
+template <typename MojomType>
+MojomType ToKnownEnumValueHelper(MojomType in) {
+  return EnumKnownValueTraits<MojomType>::ToKnownValue(in);
 }
 
 }  // namespace internal

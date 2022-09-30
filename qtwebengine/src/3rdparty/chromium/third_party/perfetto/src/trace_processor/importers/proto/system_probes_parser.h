@@ -17,6 +17,7 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_SYSTEM_PROBES_PARSER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_SYSTEM_PROBES_PARSER_H_
 
+#include <array>
 #include <set>
 #include <vector>
 
@@ -31,6 +32,7 @@ class TraceProcessorContext;
 class SystemProbesParser {
  public:
   using ConstBytes = protozero::ConstBytes;
+  using ConstChars = protozero::ConstChars;
 
   explicit SystemProbesParser(TraceProcessorContext*);
 
@@ -68,8 +70,9 @@ class SystemProbesParser {
 
   // Maps a proto field number for memcounters in ProcessStats::Process to
   // their StringId. Keep kProcStatsProcessSize equal to 1 + max proto field
-  // id of ProcessStats::Process.
-  static constexpr size_t kProcStatsProcessSize = 11;
+  // id of ProcessStats::Process. Also update the value in
+  // ChromeSystemProbesParser.
+  static constexpr size_t kProcStatsProcessSize = 15;
   std::array<StringId, kProcStatsProcessSize> proc_stats_process_names_{};
 
   uint64_t ms_per_tick_ = 0;

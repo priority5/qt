@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qsgsoftwarethreadedrenderloop_p.h"
 #include "qsgsoftwarecontext_p.h"
@@ -43,6 +7,7 @@
 
 #include <private/qsgrenderer_p.h>
 #include <private/qquickwindow_p.h>
+#include <private/qquickitem_p.h>
 #include <private/qquickprofiler_p.h>
 #include <private/qquickanimatorcontroller_p.h>
 #include <private/qquickprofiler_p.h>
@@ -423,7 +388,7 @@ void QSGSoftwareRenderThread::sync(bool inExpose)
     qCDebug(QSG_RASTER_LOG_RENDERLOOP, "RT - sync");
 
     mutex.lock();
-    Q_ASSERT_X(renderLoop->lockedForSync, "QSGD3D12RenderThread::sync()", "sync triggered with gui not locked");
+    Q_ASSERT_X(renderLoop->lockedForSync, "QSGSoftwareRenderThread::sync()", "sync triggered with gui not locked");
 
     if (exposedWindow) {
         QQuickWindowPrivate *wd = QQuickWindowPrivate::get(exposedWindow);
@@ -471,10 +436,12 @@ void QSGSoftwareRenderThread::syncAndRender()
     syncResultedInChanges = false;
     QQuickWindowPrivate *wd = QQuickWindowPrivate::get(exposedWindow);
 
-    const bool repaintRequested = (pendingUpdate & RepaintRequest) || wd->customRenderStage;
+    const bool repaintRequested = pendingUpdate & RepaintRequest;
     const bool syncRequested = pendingUpdate & SyncRequest;
     const bool exposeRequested = (pendingUpdate & ExposeRequest) == ExposeRequest;
     pendingUpdate = 0;
+
+    emit exposedWindow->beforeFrameBegin();
 
     if (syncRequested)
         sync(exposeRequested);
@@ -513,7 +480,7 @@ void QSGSoftwareRenderThread::syncAndRender()
                                   QQuickProfiler::SceneGraphRenderLoopRender);
         Q_TRACE(QSG_swap_entry);
 
-        if (softwareRenderer && (!wd->customRenderStage || !wd->customRenderStage->swap()))
+        if (softwareRenderer)
             backingStore->flush(softwareRenderer->flushRegion());
 
         // Since there is no V-Sync with QBackingStore, throttle rendering the refresh
@@ -535,6 +502,8 @@ void QSGSoftwareRenderThread::syncAndRender()
     }
 
     qCDebug(QSG_RASTER_LOG_RENDERLOOP, "RT - rendering done");
+
+    emit exposedWindow->afterFrameEnd();
 
     if (exposeRequested) {
         qCDebug(QSG_RASTER_LOG_RENDERLOOP, "RT - wake gui after initial expose");
@@ -1012,7 +981,7 @@ void QSGSoftwareThreadedRenderLoop::polishAndSync(QSGSoftwareThreadedRenderLoop:
                            QQuickProfiler::SceneGraphPolishAndSyncAnimations);
 }
 
+QT_END_NAMESPACE
+
 #include "qsgsoftwarethreadedrenderloop.moc"
 #include "moc_qsgsoftwarethreadedrenderloop_p.cpp"
-
-QT_END_NAMESPACE

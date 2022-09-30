@@ -9,34 +9,36 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "media/base/video_color_space.h"
+#include "ui/gfx/color_space.h"
 
 namespace media {
 
 // The names come from src/third_party/ffmpeg/libavcodec/codec_desc.c
 std::string GetCodecName(VideoCodec codec) {
   switch (codec) {
-    case kUnknownVideoCodec:
+    case VideoCodec::kUnknown:
       return "unknown";
-    case kCodecH264:
+    case VideoCodec::kH264:
       return "h264";
-    case kCodecHEVC:
+    case VideoCodec::kHEVC:
       return "hevc";
-    case kCodecDolbyVision:
+    case VideoCodec::kDolbyVision:
       return "dolbyvision";
-    case kCodecVC1:
+    case VideoCodec::kVC1:
       return "vc1";
-    case kCodecMPEG2:
+    case VideoCodec::kMPEG2:
       return "mpeg2video";
-    case kCodecMPEG4:
+    case VideoCodec::kMPEG4:
       return "mpeg4";
-    case kCodecTheora:
+    case VideoCodec::kTheora:
       return "theora";
-    case kCodecVP8:
+    case VideoCodec::kVP8:
       return "vp8";
-    case kCodecVP9:
+    case VideoCodec::kVP9:
       return "vp9";
-    case kCodecAV1:
+    case VideoCodec::kAV1:
       return "av1";
   }
   NOTREACHED();
@@ -108,6 +110,50 @@ std::string GetProfileName(VideoCodecProfile profile) {
   }
   NOTREACHED();
   return "";
+}
+
+std::string BuildH264MimeSuffix(media::VideoCodecProfile profile,
+                                uint8_t level) {
+  std::string profile_str;
+  switch (profile) {
+    case media::VideoCodecProfile::H264PROFILE_BASELINE:
+      profile_str = "42";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_MAIN:
+      profile_str = "4d";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_SCALABLEBASELINE:
+      profile_str = "53";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_SCALABLEHIGH:
+      profile_str = "56";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_EXTENDED:
+      profile_str = "58";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_HIGH:
+      profile_str = "64";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_HIGH10PROFILE:
+      profile_str = "6e";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_MULTIVIEWHIGH:
+      profile_str = "76";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_HIGH422PROFILE:
+      profile_str = "7a";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_STEREOHIGH:
+      profile_str = "80";
+      break;
+    case media::VideoCodecProfile::H264PROFILE_HIGH444PREDICTIVEPROFILE:
+      profile_str = "f4";
+      break;
+    default:
+      return "";
+  }
+
+  return base::StringPrintf(".%s%04x", profile_str.c_str(), level);
 }
 
 bool ParseNewStyleVp9CodecID(const std::string& codec_id,
@@ -822,7 +868,7 @@ bool ParseDolbyVisionCodecId(const std::string& codec_id,
 #endif
 
 VideoCodec StringToVideoCodec(const std::string& codec_id) {
-  VideoCodec codec = kUnknownVideoCodec;
+  VideoCodec codec = VideoCodec::kUnknown;
   VideoCodecProfile profile = VIDEO_CODEC_PROFILE_UNKNOWN;
   uint8_t level = 0;
   VideoColorSpace color_space;
@@ -838,55 +884,102 @@ void ParseCodec(const std::string& codec_id,
   std::vector<std::string> elem = base::SplitString(
       codec_id, ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (elem.empty()) {
-    codec = kUnknownVideoCodec;
+    codec = VideoCodec::kUnknown;
     return;
   }
 
   if (codec_id == "vp8" || codec_id == "vp8.0") {
-    codec = kCodecVP8;
+    codec = VideoCodec::kVP8;
     return;
   }
   if (ParseNewStyleVp9CodecID(codec_id, &profile, &level, &color_space) ||
       ParseLegacyVp9CodecID(codec_id, &profile, &level)) {
-    codec = kCodecVP9;
+    codec = VideoCodec::kVP9;
     return;
   }
 
 #if BUILDFLAG(ENABLE_AV1_DECODER)
   if (ParseAv1CodecId(codec_id, &profile, &level, &color_space)) {
-    codec = kCodecAV1;
+    codec = VideoCodec::kAV1;
     return;
   }
 #endif
 
   if (codec_id == "theora") {
-    codec = kCodecTheora;
+    codec = VideoCodec::kTheora;
     return;
   }
   if (ParseAVCCodecId(codec_id, &profile, &level)) {
-    codec = kCodecH264;
+    codec = VideoCodec::kH264;
     return;
   }
 #if BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
   if (ParseAVCCodecId(TranslateLegacyAvc1CodecIds(codec_id), &profile,
                       &level)) {
-    codec = kCodecH264;
+    codec = VideoCodec::kH264;
     return;
   }
 #endif
 #if BUILDFLAG(ENABLE_PLATFORM_HEVC)
   if (ParseHEVCCodecId(codec_id, &profile, &level)) {
-    codec = kCodecHEVC;
+    codec = VideoCodec::kHEVC;
     return;
   }
 #endif
 #if BUILDFLAG(ENABLE_PLATFORM_DOLBY_VISION)
   if (ParseDolbyVisionCodecId(codec_id, &profile, &level)) {
-    codec = kCodecDolbyVision;
+    codec = VideoCodec::kDolbyVision;
     return;
   }
 #endif
-  codec = kUnknownVideoCodec;
+  codec = VideoCodec::kUnknown;
+}
+
+VideoCodec VideoCodecProfileToVideoCodec(VideoCodecProfile profile) {
+  switch (profile) {
+    case VIDEO_CODEC_PROFILE_UNKNOWN:
+      return VideoCodec::kUnknown;
+    case H264PROFILE_BASELINE:
+    case H264PROFILE_MAIN:
+    case H264PROFILE_EXTENDED:
+    case H264PROFILE_HIGH:
+    case H264PROFILE_HIGH10PROFILE:
+    case H264PROFILE_HIGH422PROFILE:
+    case H264PROFILE_HIGH444PREDICTIVEPROFILE:
+    case H264PROFILE_SCALABLEBASELINE:
+    case H264PROFILE_SCALABLEHIGH:
+    case H264PROFILE_STEREOHIGH:
+    case H264PROFILE_MULTIVIEWHIGH:
+      return VideoCodec::kH264;
+    case HEVCPROFILE_MAIN:
+    case HEVCPROFILE_MAIN10:
+    case HEVCPROFILE_MAIN_STILL_PICTURE:
+      return VideoCodec::kHEVC;
+    case VP8PROFILE_ANY:
+      return VideoCodec::kVP8;
+    case VP9PROFILE_PROFILE0:
+    case VP9PROFILE_PROFILE1:
+    case VP9PROFILE_PROFILE2:
+    case VP9PROFILE_PROFILE3:
+      return VideoCodec::kVP9;
+    case DOLBYVISION_PROFILE0:
+    case DOLBYVISION_PROFILE4:
+    case DOLBYVISION_PROFILE5:
+    case DOLBYVISION_PROFILE7:
+    case DOLBYVISION_PROFILE8:
+    case DOLBYVISION_PROFILE9:
+      return VideoCodec::kDolbyVision;
+    case THEORAPROFILE_ANY:
+      return VideoCodec::kTheora;
+    case AV1PROFILE_PROFILE_MAIN:
+    case AV1PROFILE_PROFILE_HIGH:
+    case AV1PROFILE_PROFILE_PRO:
+      return VideoCodec::kAV1;
+  }
+}
+
+std::ostream& operator<<(std::ostream& os, const VideoCodec& codec) {
+  return os << GetCodecName(codec);
 }
 
 }  // namespace media

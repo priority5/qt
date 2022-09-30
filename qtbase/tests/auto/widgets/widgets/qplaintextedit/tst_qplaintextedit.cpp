@@ -1,34 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
-
+#include <QTest>
+#include <QSignalSpy>
 
 #include <qtextedit.h>
 #include <qtextcursor.h>
@@ -38,6 +13,7 @@
 #include <qclipboard.h>
 #include <qtextbrowser.h>
 #include <private/qwidgettextcontrol_p.h>
+#include <private/qplaintextedit_p.h>
 #include <qscrollbar.h>
 #include <qtextobject.h>
 #include <qmenu.h>
@@ -135,11 +111,6 @@ private slots:
     void insertAndScrollToBottom();
     void inputMethodQueryImHints_data();
     void inputMethodQueryImHints();
-#ifndef QT_NO_REGEXP
-    void findWithRegExp();
-    void findBackwardWithRegExp();
-    void findWithRegExpReturnsFalseIfNoMoreResults();
-#endif
 #if QT_CONFIG(regularexpression)
     void findWithRegularExpression();
     void findBackwardWithRegularExpression();
@@ -148,14 +119,19 @@ private slots:
     void layoutAfterMultiLineRemove();
     void undoCommandRemovesAndReinsertsBlock();
     void taskQTBUG_43562_lineCountCrash();
-#ifndef QT_NO_CONTEXTMENU
+#if !defined(QT_NO_CONTEXTMENU) && !defined(QT_NO_CLIPBOARD)
     void contextMenu();
 #endif
     void inputMethodCursorRect();
 #if QT_CONFIG(scrollbar)
     void updateAfterChangeCenterOnScroll();
 #endif
+#ifndef QT_NO_CLIPBOARD
     void updateCursorPositionAfterEdit();
+#endif
+    void appendTextWhenInvisible();
+    void placeholderVisibility_data();
+    void placeholderVisibility();
 
 private:
     void createSelection();
@@ -225,18 +201,18 @@ public:
     inline QtTestDocumentLayout(QPlainTextEdit *edit, QTextDocument *doc, int &itCount)
         : QAbstractTextDocumentLayout(doc), useBiggerSize(false), ed(edit), iterationCounter(itCount) {}
 
-    virtual void draw(QPainter *, const QAbstractTextDocumentLayout::PaintContext &)  {}
+    virtual void draw(QPainter *, const QAbstractTextDocumentLayout::PaintContext &) override {}
 
-    virtual int hitTest(const QPointF &, Qt::HitTestAccuracy ) const { return 0; }
+    virtual int hitTest(const QPointF &, Qt::HitTestAccuracy ) const override { return 0; }
 
-    virtual void documentChanged(int, int, int) {}
+    virtual void documentChanged(int, int, int) override {}
 
-    virtual int pageCount() const { return 1; }
+    virtual int pageCount() const override { return 1; }
 
-    virtual QSizeF documentSize() const { return usedSize; }
+    virtual QSizeF documentSize() const override { return usedSize; }
 
-    virtual QRectF frameBoundingRect(QTextFrame *) const { return QRectF(); }
-    virtual QRectF blockBoundingRect(const QTextBlock &) const { return QRectF(); }
+    virtual QRectF frameBoundingRect(QTextFrame *) const override { return QRectF(); }
+    virtual QRectF blockBoundingRect(const QTextBlock &) const override { return QRectF(); }
 
     bool useBiggerSize;
     QSize usedSize;
@@ -1107,15 +1083,15 @@ public:
     mutable int canInsertCallCount;
     mutable int insertCallCount;
 
-    virtual QMimeData *createMimeDataFromSelection() const {
+    virtual QMimeData *createMimeDataFromSelection() const override {
         createMimeDataCallCount++;
         return QPlainTextEdit::createMimeDataFromSelection();
     }
-    virtual bool canInsertFromMimeData(const QMimeData *source) const {
+    virtual bool canInsertFromMimeData(const QMimeData *source) const override {
         canInsertCallCount++;
         return QPlainTextEdit::canInsertFromMimeData(source);
     }
-    virtual void insertFromMimeData(const QMimeData *source) {
+    virtual void insertFromMimeData(const QMimeData *source) override {
         insertCallCount++;
         QPlainTextEdit::insertFromMimeData(source);
     }
@@ -1255,7 +1231,7 @@ public:
     bool resizeEventCalled;
 
 protected:
-    virtual void resizeEvent(QResizeEvent *e)
+    virtual void resizeEvent(QResizeEvent *e) override
     {
         QPlainTextEdit::resizeEvent(e);
         setPlainText("<img src=qtextbrowser-resizeevent.png width=" + QString::number(size().width()) + "><br>Size is " + QString::number(size().width()) + " x " + QString::number(size().height()));
@@ -1370,13 +1346,12 @@ void tst_QPlainTextEdit::adjustScrollbars()
     ed->setFont(ff);
     ed->setMinimumSize(140, 100);
     ed->setMaximumSize(140, 100);
-    ed->show();
+    // We use showNormal() here, because otherwise on Android the widget will
+    // be shown fullscreen, and the scrollbar will not appear.
+    ed->showNormal();
     QLatin1String txt("\nabc def ghi jkl mno pqr stu vwx");
     ed->setPlainText(txt + txt + txt + txt);
 
-#ifdef Q_OS_WINRT
-    QEXPECT_FAIL("", "WinRT does not support setMinimum/MaximumSize", Abort);
-#endif
     QVERIFY(ed->verticalScrollBar()->maximum() > 0);
 
     ed->moveCursor(QTextCursor::End);
@@ -1562,45 +1537,6 @@ void tst_QPlainTextEdit::inputMethodQueryImHints()
     QCOMPARE(static_cast<Qt::InputMethodHints>(value.toInt()), hints);
 }
 
-#ifndef QT_NO_REGEXP
-void tst_QPlainTextEdit::findWithRegExp()
-{
-    ed->setPlainText(QStringLiteral("arbitrary text"));
-    QRegExp rx("\\w{2}xt");
-
-    bool found = ed->find(rx);
-
-    QVERIFY(found);
-    QCOMPARE(ed->textCursor().selectedText(), QStringLiteral("text"));
-}
-
-void tst_QPlainTextEdit::findBackwardWithRegExp()
-{
-    ed->setPlainText(QStringLiteral("arbitrary text"));
-    QTextCursor cursor = ed->textCursor();
-    cursor.movePosition(QTextCursor::End);
-    ed->setTextCursor(cursor);
-    QRegExp rx("a\\w*t");
-
-    bool found = ed->find(rx, QTextDocument::FindBackward);
-
-    QVERIFY(found);
-    QCOMPARE(ed->textCursor().selectedText(), QStringLiteral("arbit"));
-}
-
-void tst_QPlainTextEdit::findWithRegExpReturnsFalseIfNoMoreResults()
-{
-    ed->setPlainText(QStringLiteral("arbitrary text"));
-    QRegExp rx("t.xt");
-    ed->find(rx);
-
-    bool found = ed->find(rx);
-
-    QVERIFY(!found);
-    QCOMPARE(ed->textCursor().selectedText(), QStringLiteral("text"));
-}
-#endif
-
 #if QT_CONFIG(regularexpression)
 void tst_QPlainTextEdit::findWithRegularExpression()
 {
@@ -1740,7 +1676,7 @@ void tst_QPlainTextEdit::taskQTBUG_43562_lineCountCrash()
     disconnect(ed->document(), SIGNAL(contentsChange(int, int, int)), 0, 0);
 }
 
-#ifndef QT_NO_CONTEXTMENU
+#if !defined(QT_NO_CONTEXTMENU) && !defined(QT_NO_CLIPBOARD)
 void tst_QPlainTextEdit::contextMenu()
 {
     ed->appendHtml(QStringLiteral("Hello <a href='http://www.qt.io'>Qt</a>"));
@@ -1774,7 +1710,7 @@ void tst_QPlainTextEdit::contextMenu()
     delete menu;
     QVERIFY(!ed->findChild<QAction *>(QStringLiteral("link-copy")));
 }
-#endif // QT_NO_CONTEXTMENU
+#endif // QT_NO_CONTEXTMENU && QT_NO_CLIPBOARD
 
 // QTBUG-51923: Verify that the cursor rectangle returned by the input
 // method query correctly reflects the viewport offset.
@@ -1784,7 +1720,7 @@ void tst_QPlainTextEdit::inputMethodCursorRect()
     ed->moveCursor(QTextCursor::End);
     const QRectF cursorRect = ed->cursorRect();
     const QVariant cursorRectV = ed->inputMethodQuery(Qt::ImCursorRectangle);
-    QCOMPARE(cursorRectV.type(), QVariant::RectF);
+    QCOMPARE(cursorRectV.userType(), QMetaType::QRectF);
     QCOMPARE(cursorRectV.toRect(), cursorRect.toRect());
 }
 
@@ -1803,6 +1739,7 @@ void tst_QPlainTextEdit::updateAfterChangeCenterOnScroll()
 
 #endif
 
+#ifndef QT_NO_CLIPBOARD
 void tst_QPlainTextEdit::updateCursorPositionAfterEdit()
 {
     QPlainTextEdit plaintextEdit;
@@ -1846,6 +1783,140 @@ void tst_QPlainTextEdit::updateCursorPositionAfterEdit()
 
     // The curser should move back to the end of the copied text
     QCOMPARE(plaintextEdit.textCursor().position(), initialPosition + txt.length());
+}
+#endif
+
+void tst_QPlainTextEdit::appendTextWhenInvisible()
+{
+    QWidget window;
+    window.resize(640, 480);
+
+    QPlainTextEdit *plainTextEdit = new QPlainTextEdit(&window);
+    plainTextEdit->resize(320, 240);
+
+    window.show();
+    QVERIFY(QTest::qWaitForWindowActive(&window));
+
+    // this should be long enough to let vertical scroll bar show up
+    const QString baseText("text\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\ntext");
+    const QString textToAppend("aaa");
+
+    plainTextEdit->setPlainText(baseText + "\n" + textToAppend);
+    const auto maxAfterSet = plainTextEdit->verticalScrollBar()->maximum();
+    // make sure the vertical scroll bar is visible
+    QVERIFY(maxAfterSet != 0);
+
+    plainTextEdit->clear();
+    plainTextEdit->setPlainText(baseText);
+    plainTextEdit->hide();
+    plainTextEdit->appendPlainText(textToAppend);
+    plainTextEdit->show();
+    const auto maxAfterAppend = plainTextEdit->verticalScrollBar()->maximum();
+    QVERIFY(maxAfterAppend != 0);
+
+    QCOMPARE(maxAfterAppend, maxAfterSet);
+}
+
+enum SetupCommand {
+    ClearPlaceHolder, // set empty placeholder text
+    SetPlaceHolder, // set a non-empty placeholder text
+    ClearContent, // set empty text as content
+    SetContent // set non-empty text as content
+};
+
+void tst_QPlainTextEdit::placeholderVisibility_data()
+{
+    QTest::addColumn<QList<SetupCommand>>("setupCommands");
+    QTest::addColumn<bool>("placeholderVisible");
+    QTest::addRow("no placeholder set + no text set")
+            << QList<SetupCommand>{} << true;
+    QTest::addRow("no placeholder set + text set or text set + no placeholder set")
+            << QList<SetupCommand>{ SetContent } << false;
+    QTest::addRow("no placeholder set + text set + empty text set")
+            << QList<SetupCommand>{ SetContent , ClearContent }
+            << false;
+    QTest::addRow("no placeholder set + empty text set + text set")
+            << QList<SetupCommand>{ ClearContent, SetContent }
+            << false;
+    QTest::addRow("empty placeholder set + no text set")
+            << QList<SetupCommand>{ ClearPlaceHolder } << true;
+    QTest::addRow("empty placeholder set + text set")
+            << QList<SetupCommand>{ ClearPlaceHolder, SetContent }
+            << false;
+    QTest::addRow("empty placeholder set + text set + empty text set")
+            << QList<SetupCommand>{ ClearPlaceHolder, SetContent, ClearContent }
+            << false;
+    QTest::addRow("empty placeholder set + empty text set + text set")
+            << QList<SetupCommand>{ ClearPlaceHolder, ClearContent, SetContent }
+            << false;
+    QTest::addRow("placeholder set + no text set")
+            << QList<SetupCommand>{ SetPlaceHolder, ClearContent }
+            << true;
+    QTest::addRow("placeholder set + text set")
+            << QList<SetupCommand>{ SetPlaceHolder, SetContent }
+            << false;
+    QTest::addRow("placeholder set + text set + empty text set")
+            << QList<SetupCommand>{ SetPlaceHolder, SetContent, ClearContent }
+            << true;
+    QTest::addRow("placeholder set + empty text set + text set")
+            << QList<SetupCommand>{ SetPlaceHolder, ClearContent, SetContent }
+            << false;
+    QTest::addRow("placeholder set + text set + empty placeholder set")
+            << QList<SetupCommand>{ SetPlaceHolder, SetContent, ClearPlaceHolder}
+            << false;
+    QTest::addRow("placeholder set + empty placeholder set + text set")
+            << QList<SetupCommand>{ SetPlaceHolder, ClearPlaceHolder, SetContent }
+            << false;
+    QTest::addRow("placeholder set + empty placeholder set + empty text set")
+            << QList<SetupCommand>{ SetPlaceHolder, ClearPlaceHolder, ClearContent }
+            << false;
+    QTest::addRow("placeholder set + empty text set + empty placeholder set")
+            << QList<SetupCommand>{ SetPlaceHolder, ClearContent, ClearPlaceHolder }
+            << false;
+    QTest::addRow("text set + no placeholder set + empty text set")
+            << QList<SetupCommand>{ SetContent, ClearContent }
+            << false;
+    QTest::addRow("text set + empty placeholder set")
+            << QList<SetupCommand>{ SetContent, ClearPlaceHolder }
+            << false;
+    QTest::addRow("text set + placeholder set")
+            << QList<SetupCommand>{ SetContent, SetPlaceHolder }
+            << false;
+    QTest::addRow("text set + placeholder set + empty text set")
+            << QList<SetupCommand>{ SetContent, SetPlaceHolder, ClearContent }
+            << true;
+    QTest::addRow("text set + placeholder set + empty placeholder set")
+            << QList<SetupCommand>{ SetContent, SetPlaceHolder, ClearPlaceHolder }
+            << false;
+}
+
+void tst_QPlainTextEdit::placeholderVisibility()
+{
+    QFETCH(QList<SetupCommand>, setupCommands);
+    QFETCH(bool, placeholderVisible);
+
+    QPlainTextEdit plainTextEdit;
+    for (auto command : setupCommands) {
+        switch (command) {
+        case ClearPlaceHolder:
+            plainTextEdit.setPlaceholderText("");
+            break;
+        case SetPlaceHolder:
+            plainTextEdit.setPlaceholderText("Qt is awesome !");
+            break;
+        case ClearContent:
+            plainTextEdit.setPlainText("");
+            break;
+        case SetContent:
+            plainTextEdit.setPlainText("PlainText...");
+            break;
+        }
+    }
+    auto *plainTextEdit_d = static_cast<QPlainTextEditPrivate *>(qt_widget_private(&plainTextEdit));
+
+    plainTextEdit.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&plainTextEdit));
+    QTRY_VERIFY(plainTextEdit_d->placeholderVisible == placeholderVisible);
 }
 
 QTEST_MAIN(tst_QPlainTextEdit)

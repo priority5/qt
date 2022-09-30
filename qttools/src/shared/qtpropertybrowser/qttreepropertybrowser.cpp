@@ -1,44 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qttreepropertybrowser.h"
 #include <QtCore/QSet>
+#include <QtCore/QMap>
 #include <QtGui/QIcon>
 #include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QItemDelegate>
@@ -125,9 +90,9 @@ public:
         { return itemFromIndex(index); }
 
 protected:
-    void keyPressEvent(QKeyEvent *event);
-    void mousePressEvent(QMouseEvent *event);
-    void drawRow(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const;
+    void keyPressEvent(QKeyEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void drawRow(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
 
 private:
     QtTreePropertyBrowserPrivate *m_editorPrivate;
@@ -197,15 +162,15 @@ void QtPropertyEditorView::keyPressEvent(QKeyEvent *event)
 void QtPropertyEditorView::mousePressEvent(QMouseEvent *event)
 {
     QTreeWidget::mousePressEvent(event);
-    QTreeWidgetItem *item = itemAt(event->pos());
+    QTreeWidgetItem *item = itemAt(event->position().toPoint());
 
     if (item) {
         if ((item != m_editorPrivate->editedItem()) && (event->button() == Qt::LeftButton)
-                && (header()->logicalIndexAt(event->pos().x()) == 1)
+                && (header()->logicalIndexAt(event->position().toPoint().x()) == 1)
                 && ((item->flags() & (Qt::ItemIsEditable | Qt::ItemIsEnabled)) == (Qt::ItemIsEditable | Qt::ItemIsEnabled))) {
             editItem(item, 1);
         } else if (!m_editorPrivate->hasValue(item) && m_editorPrivate->markPropertiesWithoutValue() && !rootIsDecorated()) {
-            if (event->pos().x() + header()->offset() < 20)
+            if (event->position().toPoint().x() + header()->offset() < 20)
                 item->setExpanded(!item->isExpanded());
         }
     }
@@ -224,22 +189,22 @@ public:
         { m_editorPrivate = editorPrivate; }
 
     QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
-            const QModelIndex &index) const;
+            const QModelIndex &index) const override;
 
     void updateEditorGeometry(QWidget *editor, const QStyleOptionViewItem &option,
-            const QModelIndex &index) const;
+            const QModelIndex &index) const override;
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option,
-            const QModelIndex &index) const;
+            const QModelIndex &index) const override;
 
-    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const;
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
 
     void setModelData(QWidget *, QAbstractItemModel *,
-            const QModelIndex &) const {}
+            const QModelIndex &) const  override {}
 
-    void setEditorData(QWidget *, const QModelIndex &) const {}
+    void setEditorData(QWidget *, const QModelIndex &) const override {}
 
-    bool eventFilter(QObject *object, QEvent *event);
+    bool eventFilter(QObject *object, QEvent *event) override;
     void closeEditor(QtProperty *property);
 
     QTreeWidgetItem *editedItem() const { return m_editedItem; }
@@ -540,7 +505,7 @@ void QtTreePropertyBrowserPrivate::propertyInserted(QtBrowserItem *index, QtBrow
     QTreeWidgetItem *afterItem = m_indexToItem.value(afterIndex);
     QTreeWidgetItem *parentItem = m_indexToItem.value(index->parent());
 
-    QTreeWidgetItem *newItem = 0;
+    QTreeWidgetItem *newItem = nullptr;
     if (parentItem) {
         newItem = new QTreeWidgetItem(parentItem, afterItem);
     } else {

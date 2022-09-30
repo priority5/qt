@@ -17,6 +17,8 @@ namespace blink {
 
 // An identifiable surface.
 //
+// See also: ../../../../../docs/privacy_budget/good_identifiable_surface.md
+//
 // This class intends to be a lightweight wrapper over a simple 64-bit integer.
 // It exhibits the following characteristics:
 //
@@ -63,25 +65,6 @@ class IdentifiableSurface {
   // {Type::kReservedInternal, 0} which is not possible for a valid surface.
   static constexpr uint64_t kInvalidHash = 0;
 
-  // HTML canvas readback -- bits [0-3] of the 64-bit input are the context type
-  // (Type::kCanvasReadback), bits [4-6] are skipped ops, sensitive ops, and
-  // partial image ops bits, respectively. The remaining bits are for the canvas
-  // operations digest. If the digest wasn't calculated (there's no digest for
-  // WebGL, for instance), the digest field is 0.
-  enum CanvasTaintBit : uint64_t {
-    // At least one drawing operation didn't update the digest -- this is ether
-    // due to performance or resource consumption reasons.
-    kSkipped = UINT64_C(0x10),
-
-    // At least one drawing operation operated on a sensitive string. Sensitive
-    // strings use a 16-bit hash digest.
-    kSensitive = UINT64_C(0x20),
-
-    // At least one drawing operation was only partially digested, for
-    // performance reasons.
-    kPartiallyDigested = UINT64_C(0x40)
-  };
-
   // Type of identifiable surface.
   //
   // Even though the data type is uint64_t, we can only use 8 bits due to how we
@@ -115,9 +98,7 @@ class IdentifiableSurface {
     // [1]: //blink/public/mojom/web_feature/web_feature.mojom
     kWebFeature = 1,
 
-    // Represents a readback of a canvas. Input is the
-    // CanvasRenderingContextType.
-    kCanvasReadback = 2,
+    // Reserved 2.
 
     // Represents loading a font locally based on a name lookup that is allowed
     // to match either a unique name or a family name. This occurs when a
@@ -184,6 +165,32 @@ class IdentifiableSurface {
     // will key this type on a digest of both the enums' values.
     kWebGLShaderPrecisionFormat = 16,
 
+    // A type for recording reads of the offsetWidth and offsetHeight properties
+    // when we believe it may be trying to detect the size of the scrollbar.
+    // The input for this surface should be a member of `ScrollbarSurface`.
+    kScrollbarSize = 17,
+
+    // WebGL2RenderingContext.getInternal
+    kWebGLInternalFormatParameter = 18,
+
+    // Represents a call to GPU.requestAdapter. Input is the options filter.
+    kGPU_RequestAdapter = 20,
+
+    // For instrumenting HTMLCanvas.getContext() fingerprinting. Some scripts
+    // will iterate through the different possible arguments and record whether
+    // each type of context is supported.
+    // The input should be an instance of CanvasRenderingContext::ContextType.
+    kCanvasRenderingContext = 21,
+
+    // Represents a call to MediaDevices.getUserMedia. Input is the set of
+    // constraints.
+    kMediaDevices_GetUserMedia = 22,
+
+    // NavigatorUAData.getHighEntropyValues() is, shockingly, a high entropy
+    // API to provide more detailed User-Agent data. The output is keyed on
+    // the hint parameter.
+    kNavigatorUAData_GetHighEntropyValues = 24,
+
     // MediaCapabilities.decodingInfo() reveals information about whether
     // media decoding will be supported, smooth and/or power efficient,
     // according to its codec, size, and other parameters. It can further reveal
@@ -199,12 +206,112 @@ class IdentifiableSurface {
     // obtained. Input is the lookup name. Output is a bool.
     kLocalFontExistenceByUniqueNameOnly = 26,
 
+    // Represents a call to Navigator.getUserMedia. Input is the set of
+    // constraints.
+    kNavigator_GetUserMedia = 27,
+
+    // Represents a media query being tested. Input is combination of property
+    // name and the target value. Output is the result --- true or false.
+    kMediaQuery_DEPRECATED = 28,
+
     // Represents loading a font locally. Input is the PostScript name.
     kLocalFontLoadPostScriptName = 29,
+
+    // Getting supported codecs, etc. for WebRTC sender -- key is hash of kind
+    // (audio or video).
+    kRtcRtpSenderGetCapabilities = 31,
+
+    // Getting supported codecs, etc. for WebRTC receiver -- key is hash of kind
+    // (audio or video).
+    kRtcRtpReceiverGetCapabilities = 32,
+
+    // Reserved 33.
+
+    // Metadata that is not reported by the client. Different from
+    // kReservedInternal in that the inputs are not required to be defined in
+    // `ukm.xml`.
+    //
+    // This surface type should not be used in the client (browser). It's meant
+    // to be a reservation for additional surfaces that are determined during
+    // analysis.
+    kReservedMetadata = 34,
+
+    // Represents a readback of a canvas. Input is the
+    // CanvasRenderingContextType.
+    //
+    // Was 2 before change to paint op serialization, then 33 before removing
+    // paint op serialization and using only direct canvas2d instrumentation.
+    kCanvasReadback = 35,
+
+    // Represents a media feature being tested. Input is the feature name.
+    // Output is the feature value
+    kMediaFeature = 36,
 
     // We can use values up to and including |kMax|.
     kMax = (1 << kTypeBits) - 1
   };
+
+  // HTML canvas readback -- bits [0-3] of the 64-bit input are the context type
+  // (Type::kCanvasReadback), bits [4-6] are skipped ops, sensitive ops, and
+  // partial image ops bits, respectively. The remaining bits are for the canvas
+  // operations digest. If the digest wasn't calculated (there's no digest for
+  // WebGL, for instance), the digest field is 0.
+  enum CanvasTaintBit : uint64_t {
+    // At least one drawing operation didn't update the digest -- this is ether
+    // due to performance or resource consumption reasons.
+    kSkipped = UINT64_C(0x10),
+
+    // At least one drawing operation operated on a sensitive string. Sensitive
+    // strings use a 16-bit hash digest.
+    kSensitive = UINT64_C(0x20),
+
+    // At least one drawing operation was only partially digested, for
+    // performance reasons.
+    kPartiallyDigested = UINT64_C(0x40)
+  };
+
+  // Possible inputs for Type::kScrollbarSize.
+  enum class ScrollbarSurface : uint64_t {
+    kScrollingElementWidth = 0,
+    kScrollingElementHeight = 1,
+    kElemScrollbarWidth = 2,
+    kElemScrollbarHeight = 3,
+  };
+
+  // Possible inputs for Type::kMediaFeature.
+  enum class MediaFeatureName : uint64_t {
+    kAnyHover = 0,
+    kAnyPointer = 1,
+    kColorGamut = 2,
+    kForcedColors = 3,
+    kGrid = 4,
+    kHover = 5,
+    kOrientation = 6,
+    kDynamicRange = 7,
+    kDisplayMode = 8,
+    kNavigationControls = 9,
+    kPointer = 10,
+    kPrefersColorScheme = 11,
+    kPrefersContrast = 12,
+    kPrefersReducedMotion = 13,
+    kPrefersReducedData = 14,
+    kTransform3d = 15,
+    kScan = 16,
+    kDevicePosture = 17,
+    kColor = 18,
+    kColorIndex = 19,
+    kMonochrome = 20,
+    kAspectRatio = 21,
+    kResolution = 22,
+    kHorizontalViewportSegments = 23,
+    kVerticalViewportSegments = 24,
+    // We can use enum values up to and including 63, see static_assert below.
+    kMax = kVerticalViewportSegments
+  };
+  static_assert(static_cast<int>(MediaFeatureName::kMax) < 64,
+                "MediaFeatureName only allows values < 64 since we use it in "
+                "a uint64_t bitfield inside document.h to track if a media "
+                "feature has already been sampled");
 
   // Default constructor is invalid.
   IdentifiableSurface() : IdentifiableSurface(kInvalidHash) {}

@@ -1,34 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*
-  tokenizer.h
-*/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
@@ -81,57 +52,16 @@ enum {
     Tok_class,
     Tok_const,
     Tok_double,
-    Tok_enum,
-    Tok_explicit,
-    Tok_friend,
-    Tok_inline,
     Tok_int,
     Tok_long,
-    Tok_namespace,
     Tok_operator,
-    Tok_private,
-    Tok_protected,
-    Tok_public,
     Tok_short,
-    Tok_signals,
     Tok_signed,
-    Tok_slots,
-    Tok_static,
-    Tok_struct,
-    Tok_template,
-    Tok_typedef,
     Tok_typename,
-    Tok_union,
     Tok_unsigned,
-    Tok_using,
-    Tok_virtual,
     Tok_void,
     Tok_volatile,
     Tok_int64,
-    Tok_default,
-    Tok_delete,
-    Tok_final,
-    Tok_override,
-    Tok_Q_OBJECT,
-    Tok_Q_OVERRIDE,
-    Tok_Q_PROPERTY,
-    Tok_Q_PRIVATE_PROPERTY,
-    Tok_Q_DECLARE_SEQUENTIAL_ITERATOR,
-    Tok_Q_DECLARE_MUTABLE_SEQUENTIAL_ITERATOR,
-    Tok_Q_DECLARE_ASSOCIATIVE_ITERATOR,
-    Tok_Q_DECLARE_MUTABLE_ASSOCIATIVE_ITERATOR,
-    Tok_Q_DECLARE_FLAGS,
-    Tok_Q_SIGNALS,
-    Tok_Q_SLOTS,
-    Tok_QT_COMPAT,
-    Tok_QT_COMPAT_CONSTRUCTOR,
-    Tok_QT_DEPRECATED,
-    Tok_QT_MOC_COMPAT,
-    Tok_QT_MODULE,
-    Tok_QT3_SUPPORT,
-    Tok_QT3_SUPPORT_CONSTRUCTOR,
-    Tok_QT3_MOC_SUPPORT,
-    Tok_QDOC_PROPERTY,
     Tok_QPrivateSignal,
     Tok_FirstKeyword = Tok_char,
     Tok_LastKeyword = Tok_QPrivateSignal
@@ -148,26 +78,21 @@ enum {
 
 class Tokenizer
 {
-    Q_DECLARE_TR_FUNCTIONS(QDoc::Tokenizer)
-
 public:
-    Tokenizer(const Location &loc, const QByteArray &in);
+    Tokenizer(const Location &loc, QByteArray in);
     Tokenizer(const Location &loc, QFile &file);
 
     ~Tokenizer();
 
     int getToken();
-    void setParsingFnOrMacro(bool macro) { parsingMacro = macro; }
-    bool parsingFnOrMacro() const { return parsingMacro; }
+    void setParsingFnOrMacro(bool macro) { m_parsingMacro = macro; }
 
-    const Location &location() const { return yyTokLoc; }
-    QString previousLexeme() const;
-    QString lexeme() const;
-    QString version() const { return yyVersion; }
-    int braceDepth() const { return yyBraceDepth; }
-    int parenDepth() const { return yyParenDepth; }
-    int bracketDepth() const { return yyBracketDepth; }
-    Location &tokenLocation() { return yyTokLoc; }
+    [[nodiscard]] const Location &location() const { return m_tokLoc; }
+    [[nodiscard]] QString previousLexeme() const;
+    [[nodiscard]] QString lexeme() const;
+    [[nodiscard]] QString version() const { return m_version; }
+    [[nodiscard]] int parenDepth() const { return m_parenDepth; }
+    [[nodiscard]] int bracketDepth() const { return m_bracketDepth; }
 
     static void initialize();
     static void terminate();
@@ -177,23 +102,36 @@ private:
     void init();
     void start(const Location &loc);
     /*
-      This limit on the length of a lexeme seems fairly high, but a
-      doc comment can be arbitrarily long. The previous 65,536 limit
-      was reached by Mark Summerfield.
-    */
-    enum { yyLexBufSize = 524288 };
+     Represents the maximum amount of characters that a token can be composed
+     of.
 
-    int getch() { return yyPos == yyIn.size() ? EOF : yyIn[yyPos++]; }
+     When a token with more characters than the maximum amount is encountered, a
+     warning is issued and parsing continues, discarding all characters from the
+     currently parsed token that don't fit into the buffer.
+    */
+    enum { yyLexBufSize = 1048576 };
+
+    int getch() { return m_pos == m_in.size() ? EOF : m_in[m_pos++]; }
 
     inline int getChar()
     {
-        if (yyCh == EOF)
+        using namespace Qt::StringLiterals;
+
+        if (m_ch == EOF)
             return EOF;
-        if (yyLexLen < yyLexBufSize - 1) {
-            yyLex[yyLexLen++] = (char)yyCh;
-            yyLex[yyLexLen] = '\0';
+        if (m_lexLen < yyLexBufSize - 1) {
+            m_lex[m_lexLen++] = (char)m_ch;
+            m_lex[m_lexLen] = '\0';
+        } else if (!token_too_long_warning_was_issued) {
+            location().warning(
+                u"The content is too long.\n"_s,
+                u"The maximum amount of characters for this content is %1.\n"_s.arg(yyLexBufSize) +
+                "Consider splitting it or reducing its size."
+            );
+
+            token_too_long_warning_was_issued = true;
         }
-        yyCurLoc.advance(yyCh);
+        m_curLoc.advance(QChar(m_ch));
         int ch = getch();
         if (ch == EOF)
             return EOF;
@@ -207,26 +145,33 @@ private:
     void pushSkipping(bool skip);
     bool popSkipping();
 
-    Location yyTokLoc;
-    Location yyCurLoc;
-    char *yyLexBuf1;
-    char *yyLexBuf2;
-    char *yyPrevLex;
-    char *yyLex;
-    size_t yyLexLen;
-    QStack<bool> yyPreprocessorSkipping;
-    int yyNumPreprocessorSkipping;
-    int yyBraceDepth;
-    int yyParenDepth;
-    int yyBracketDepth;
-    int yyCh;
+    Location m_tokLoc;
+    Location m_curLoc;
+    char *m_lexBuf1 { nullptr };
+    char *m_lexBuf2 { nullptr };
+    char *m_prevLex { nullptr };
+    char *m_lex { nullptr };
+    size_t m_lexLen {};
+    QStack<bool> m_preprocessorSkipping;
+    int m_numPreprocessorSkipping {};
+    int m_braceDepth {};
+    int m_parenDepth {};
+    int m_bracketDepth {};
+    int m_ch {};
 
-    QString yyVersion;
-    bool parsingMacro;
+    QString m_version {};
+    bool m_parsingMacro {};
+
+    // Used to ensure that the warning that is issued when a token is
+    // too long to fit into our fixed sized buffer is not repeated for each
+    // character of that token after the last saved one.
+    // The flag is reset whenever a new token is requested, so as to allow
+    // reporting all such tokens that are too long during a single execution.
+    bool token_too_long_warning_was_issued{false};
 
 protected:
-    QByteArray yyIn;
-    int yyPos;
+    QByteArray m_in {};
+    int m_pos {};
 };
 
 QT_END_NAMESPACE

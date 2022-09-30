@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/cookie_controls/cookie_controls_service.h"
 #include "chrome/browser/ui/cookie_controls/cookie_controls_service_factory.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/content_settings/core/common/cookie_controls_enforcement.h"
 
 namespace {
@@ -50,14 +51,14 @@ void CookieControlsHandler::OnJavascriptDisallowed() {
 }
 
 void CookieControlsHandler::HandleCookieControlsToggleChanged(
-    const base::ListValue* args) {
-  bool checked;
-  CHECK(args->GetBoolean(0, &checked));
+    const base::Value::List& args) {
+  CHECK(!args.empty());
+  const bool checked = args[0].GetBool();
   service_->HandleCookieControlsToggleChanged(checked);
 }
 
 void CookieControlsHandler::HandleObserveCookieControlsSettingsChanges(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
   SendCookieControlsUIChanges();
 }
@@ -90,10 +91,6 @@ void CookieControlsHandler::SendCookieControlsUIChanges() {
   dict.SetBoolKey("checked", service_->GetToggleCheckedValue());
   dict.SetStringKey(
       "icon", GetEnforcementIcon(service_->GetCookieControlsEnforcement()));
-  bool use_new_cookie_page =
-      base::FeatureList::IsEnabled(features::kPrivacySettingsRedesign);
-  dict.SetString("cookieSettingsUrl",
-                 use_new_cookie_page ? "chrome://settings/cookies"
-                                     : "chrome://settings/content/cookies");
+  dict.SetStringKey("cookieSettingsUrl", chrome::kChromeUICookieSettingsURL);
   FireWebUIListener("cookie-controls-changed", dict);
 }

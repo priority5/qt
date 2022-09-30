@@ -28,7 +28,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/network_isolation_key.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "services/network/test/test_dns_util.h"
 
 namespace extensions {
@@ -71,19 +71,17 @@ IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketsTcpCreateGood) {
   ASSERT_EQ(base::Value::Type::DICTIONARY, result->type());
   std::unique_ptr<base::DictionaryValue> value =
       base::DictionaryValue::From(std::move(result));
-  int socketId = -1;
-  EXPECT_TRUE(value->GetInteger("socketId", &socketId));
-  ASSERT_TRUE(socketId > 0);
+  absl::optional<int> socketId = value->FindIntKey("socketId");
+  ASSERT_TRUE(socketId);
+  ASSERT_TRUE(*socketId > 0);
 }
 
 IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketTcpExtension) {
-  std::unique_ptr<net::SpawnedTestServer> test_server(
-      new net::SpawnedTestServer(
-          net::SpawnedTestServer::TYPE_TCP_ECHO,
-          base::FilePath(FILE_PATH_LITERAL("net/data"))));
-  EXPECT_TRUE(test_server->Start());
+  net::EmbeddedTestServer test_server(net::EmbeddedTestServer::TYPE_HTTP);
+  test_server.AddDefaultHandlers();
+  EXPECT_TRUE(test_server.Start());
 
-  net::HostPortPair host_port_pair = test_server->host_port_pair();
+  net::HostPortPair host_port_pair = test_server.host_port_pair();
   int port = host_port_pair.port();
   ASSERT_TRUE(port > 0);
 
@@ -107,8 +105,7 @@ IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketTcpExtension) {
   // Make sure the extension's NetworkIsolationKey was used. Do a cache only DNS
   // lookup using the expected NIK, and make sure the IP address is retrieved.
   network::mojom::NetworkContext* network_context =
-      content::BrowserContext::GetDefaultStoragePartition(browser_context())
-          ->GetNetworkContext();
+      browser_context()->GetDefaultStoragePartition()->GetNetworkContext();
   network::mojom::ResolveHostParametersPtr params =
       network::mojom::ResolveHostParameters::New();
   // Cache only lookup.
@@ -135,23 +132,25 @@ IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketTcpExtension) {
   EXPECT_EQ(net::ERR_NAME_NOT_RESOLVED, result2.error);
 }
 
-IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, SocketTcpExtensionTLS) {
+// TODO(https://crbug.com/1218531): test has a high flake score and fails quite
+// often.
+IN_PROC_BROWSER_TEST_F(SocketsTcpApiTest, DISABLED_SocketTcpExtensionTLS) {
   // Because the network service runs in a utility process, the cert of the
-  // SpawnedTestServer won't be recognized, so inject mock cert verifier through
-  // the test helper interface.
+  // EmbeddedTestServer won't be recognized, so inject mock cert verifier
+  // through the test helper interface.
   mojo::Remote<network::mojom::NetworkServiceTest> network_service_test;
   content::GetNetworkService()->BindTestInterface(
       network_service_test.BindNewPipeAndPassReceiver());
   mojo::ScopedAllowSyncCallForTesting allow_sync_call;
   network_service_test->MockCertVerifierSetDefaultResult(net::OK);
 
-  std::unique_ptr<net::SpawnedTestServer> test_https_server(
-      new net::SpawnedTestServer(
-          net::SpawnedTestServer::TYPE_HTTPS, net::BaseTestServer::SSLOptions(),
-          base::FilePath(FILE_PATH_LITERAL("net/data"))));
-  EXPECT_TRUE(test_https_server->Start());
+  net::EmbeddedTestServer test_https_server(
+      net::EmbeddedTestServer::TYPE_HTTPS);
+  test_https_server.AddDefaultHandlers(
+      base::FilePath(FILE_PATH_LITERAL("net/data")));
+  EXPECT_TRUE(test_https_server.Start());
 
-  net::HostPortPair https_host_port_pair = test_https_server->host_port_pair();
+  net::HostPortPair https_host_port_pair = test_https_server.host_port_pair();
   int https_port = https_host_port_pair.port();
   ASSERT_GT(https_port, 0);
 

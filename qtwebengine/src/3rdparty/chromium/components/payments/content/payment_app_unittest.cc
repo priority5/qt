@@ -4,8 +4,11 @@
 
 #include "components/payments/content/payment_app.h"
 
+#include <memory>
+#include <utility>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
@@ -41,10 +44,20 @@ enum class RequiredPaymentOptions {
   kContactInformationAndShippingAddress,
 };
 
+static const RequiredPaymentOptions kRequiredPaymentOptionsValues[]{
+    RequiredPaymentOptions::kNone, RequiredPaymentOptions::kShippingAddress,
+    RequiredPaymentOptions::kContactInformation,
+    RequiredPaymentOptions::kPayerEmail,
+    RequiredPaymentOptions::kContactInformationAndShippingAddress};
+
 }  // namespace
 
 class PaymentAppTest : public testing::TestWithParam<RequiredPaymentOptions>,
                        public PaymentRequestSpec::Observer {
+ public:
+  PaymentAppTest(const PaymentAppTest&) = delete;
+  PaymentAppTest& operator=(const PaymentAppTest&) = delete;
+
  protected:
   PaymentAppTest()
       : address_(autofill::test::GetFullProfile()),
@@ -53,6 +66,11 @@ class PaymentAppTest : public testing::TestWithParam<RequiredPaymentOptions>,
         required_options_(GetParam()) {
     local_card_.set_billing_address_id(address_.guid());
     CreateSpec();
+  }
+
+  void SetUp() override {
+    // Must be initialized after the ScopedFeatureList of the subclass test
+    // DownRankJustInTimePaymentAppTest (crbug.com/1172599)
     web_contents_ =
         test_web_contents_factory_.CreateWebContents(&browser_context_);
   }
@@ -127,6 +145,10 @@ class PaymentAppTest : public testing::TestWithParam<RequiredPaymentOptions>,
     icon->eraseColor(SK_ColorRED);
   }
 
+  base::test::ScopedFeatureList& scoped_feature_list() {
+    return scoped_feature_list_;
+  }
+
   autofill::CreditCard& local_credit_card() { return local_card_; }
   std::vector<autofill::AutofillProfile*>& billing_profiles() {
     return billing_profiles_;
@@ -167,29 +189,25 @@ class PaymentAppTest : public testing::TestWithParam<RequiredPaymentOptions>,
         std::move(method_data), weak_ptr_factory_.GetWeakPtr(), "en-US");
   }
 
+  // ScopedFeatureList has to be declared before BrowserTaskEnvironment so that
+  // it is destroyed after BrowserTaskEnvironment, to prevent data race errors,
+  // caused by tasks on other threads accessing the ScopedFeatureList.
+  base::test::ScopedFeatureList scoped_feature_list_;
   content::BrowserTaskEnvironment task_environment_;
   content::TestBrowserContext browser_context_;
   content::TestWebContentsFactory test_web_contents_factory_;
-  content::WebContents* web_contents_;
+  raw_ptr<content::WebContents> web_contents_;
   autofill::AutofillProfile address_;
   autofill::CreditCard local_card_;
   std::vector<autofill::AutofillProfile*> billing_profiles_;
   RequiredPaymentOptions required_options_;
   std::unique_ptr<PaymentRequestSpec> spec_;
   base::WeakPtrFactory<PaymentAppTest> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PaymentAppTest);
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    All,
-    PaymentAppTest,
-    ::testing::Values(
-        RequiredPaymentOptions::kNone,
-        RequiredPaymentOptions::kShippingAddress,
-        RequiredPaymentOptions::kContactInformation,
-        RequiredPaymentOptions::kPayerEmail,
-        RequiredPaymentOptions::kContactInformationAndShippingAddress));
+INSTANTIATE_TEST_SUITE_P(All,
+                         PaymentAppTest,
+                         ::testing::ValuesIn(kRequiredPaymentOptionsValues));
 
 TEST_P(PaymentAppTest, SortApps) {
   std::vector<PaymentApp*> apps;
@@ -226,8 +244,7 @@ TEST_P(PaymentAppTest, SortApps) {
   // Add a card with no name.
   autofill::CreditCard card_with_no_name = local_credit_card();
   card_with_no_name.SetInfo(
-      autofill::AutofillType(autofill::CREDIT_CARD_NAME_FULL),
-      base::ASCIIToUTF16(""), "en-US");
+      autofill::AutofillType(autofill::CREDIT_CARD_NAME_FULL), u"", "en-US");
   AutofillPaymentApp cc_app_with_no_name("visa", card_with_no_name,
                                          billing_profiles(), "en-US", nullptr);
   apps.push_back(&cc_app_with_no_name);
@@ -240,7 +257,7 @@ TEST_P(PaymentAppTest, SortApps) {
 
   // Add a card with no number.
   autofill::CreditCard card_with_no_number = local_credit_card();
-  card_with_no_number.SetNumber(base::ASCIIToUTF16(""));
+  card_with_no_number.SetNumber(u"");
   AutofillPaymentApp cc_app_with_no_number(
       "visa", card_with_no_number, billing_profiles(), "en-US", nullptr);
   apps.push_back(&cc_app_with_no_number);
@@ -370,10 +387,19 @@ TEST_P(PaymentAppTest, SortAppsBasedOnSupportedDelegations) {
   }
 }
 
-TEST_P(PaymentAppTest, SortApps_DownRankJustInTimePaymentApp) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kDownRankJustInTimePaymentApp);
+class DownRankJustInTimePaymentAppTest : public PaymentAppTest {
+ public:
+  DownRankJustInTimePaymentAppTest() {
+    scoped_feature_list().InitAndEnableFeature(
+        features::kDownRankJustInTimePaymentApp);
+  }
+};
 
+INSTANTIATE_TEST_SUITE_P(All,
+                         DownRankJustInTimePaymentAppTest,
+                         ::testing::ValuesIn(kRequiredPaymentOptionsValues));
+
+TEST_P(DownRankJustInTimePaymentAppTest, SortApps) {
   std::vector<PaymentApp*> apps;
 
   // Add a card with no billing address.
@@ -392,7 +418,7 @@ TEST_P(PaymentAppTest, SortApps_DownRankJustInTimePaymentApp) {
 
   // Add a card with no number.
   autofill::CreditCard card_with_no_number = local_credit_card();
-  card_with_no_number.SetNumber(base::ASCIIToUTF16(""));
+  card_with_no_number.SetNumber(u"");
   AutofillPaymentApp cc_app_with_no_number(
       "visa", card_with_no_number, billing_profiles(), "en-US", nullptr);
   apps.push_back(&cc_app_with_no_number);
@@ -400,8 +426,7 @@ TEST_P(PaymentAppTest, SortApps_DownRankJustInTimePaymentApp) {
   // Add a card with no name.
   autofill::CreditCard card_with_no_name = local_credit_card();
   card_with_no_name.SetInfo(
-      autofill::AutofillType(autofill::CREDIT_CARD_NAME_FULL),
-      base::ASCIIToUTF16(""), "en-US");
+      autofill::AutofillType(autofill::CREDIT_CARD_NAME_FULL), u"", "en-US");
   AutofillPaymentApp cc_app_with_no_name("visa", card_with_no_name,
                                          billing_profiles(), "en-US", nullptr);
   apps.push_back(&cc_app_with_no_name);

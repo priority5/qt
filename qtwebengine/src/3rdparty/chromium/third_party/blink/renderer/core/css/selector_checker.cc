@@ -32,6 +32,8 @@
 #include "base/auto_reset.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
+#include "third_party/blink/renderer/core/css/has_argument_match_context.h"
+#include "third_party/blink/renderer/core/css/has_matched_cache_scope.h"
 #include "third_party/blink/renderer/core/css/part_names.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -42,7 +44,6 @@
 #include "third_party/blink/renderer/core/dom/nth_index_cache.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/text.h"
-#include "third_party/blink/renderer/core/dom/v0_insertion_point.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/picture_in_picture_controller.h"
@@ -53,8 +54,10 @@
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
+#include "third_party/blink/renderer/core/html/html_dialog_element.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
+#include "third_party/blink/renderer/core/html/html_popup_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
@@ -63,6 +66,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/scrolling/fragment_anchor.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
@@ -123,38 +127,6 @@ static bool MatchesTagName(const Element& element,
          namespace_uri == element.namespaceURI();
 }
 
-static bool MatchesTagNameForVTT(
-    const Element& element,
-    const QualifiedName& tag_q_name,
-    const SelectorChecker::SelectorCheckingContext& context) {
-  if (tag_q_name == AnyQName())
-    return true;
-
-  const AtomicString& local_name = tag_q_name.LocalName();
-
-  // The originating element for the cues has no explicit name.
-  if (!context.in_rightmost_compound && !local_name.IsEmpty() &&
-      local_name != CSSSelector::UniversalSelectorAtom()) {
-    return false;
-  }
-
-  if (local_name != CSSSelector::UniversalSelectorAtom() &&
-      local_name != element.localName()) {
-    if (element.IsHTMLElement() || !IsA<HTMLDocument>(element.GetDocument()))
-      return false;
-
-    // Non-html elements in html documents are normalized to their camel-cased
-    // version during parsing if applicable. Yet, type selectors are lower-cased
-    // for selectors in html documents. Compare the upper case converted names
-    // instead to allow matching SVG elements like foreignObject.
-    if (element.TagQName().LocalNameUpper() != tag_q_name.LocalNameUpper())
-      return false;
-  }
-
-  const AtomicString& namespace_uri = tag_q_name.NamespaceURI();
-  return namespace_uri == g_star_atom || namespace_uri.IsEmpty();
-}
-
 static Element* ParentElement(
     const SelectorChecker::SelectorCheckingContext& context) {
   // - If context.scope is a shadow root, we should walk up to its shadow host.
@@ -183,23 +155,6 @@ static const HTMLSlotElement* FindSlotElementInScope(
       return slot;
   }
   return nullptr;
-}
-
-static bool ScopeContainsLastMatchedElement(
-    const SelectorChecker::SelectorCheckingContext& context) {
-  // If this context isn't scoped, skip checking.
-  if (!context.scope)
-    return true;
-
-  if (context.scope->GetTreeScope() == context.element->GetTreeScope())
-    return true;
-
-  // Because Blink treats a shadow host's TreeScope as a separate one from its
-  // descendent shadow roots, if the last matched element is a shadow host, the
-  // condition above isn't met, even though it should be.
-  return context.element == context.scope->OwnerShadowHost() &&
-         (!context.previous_element ||
-          context.previous_element->IsInDescendantTreeOf(context.element));
 }
 
 static inline bool NextSelectorExceedsScope(
@@ -234,38 +189,37 @@ static bool ShouldMatchHoverOrActive(
   return false;
 }
 
-static bool IsFirstChild(Element& element) {
+static bool IsFirstChild(const Element& element) {
   return !ElementTraversal::PreviousSibling(element);
 }
 
-static bool IsLastChild(Element& element) {
+static bool IsLastChild(const Element& element) {
   return !ElementTraversal::NextSibling(element);
 }
 
-static bool IsFirstOfType(Element& element, const QualifiedName& type) {
+static bool IsFirstOfType(const Element& element, const QualifiedName& type) {
   return !ElementTraversal::PreviousSibling(element, HasTagName(type));
 }
 
-static bool IsLastOfType(Element& element, const QualifiedName& type) {
+static bool IsLastOfType(const Element& element, const QualifiedName& type) {
   return !ElementTraversal::NextSibling(element, HasTagName(type));
 }
 
 bool SelectorChecker::Match(const SelectorCheckingContext& context,
                             MatchResult& result) const {
   DCHECK(context.selector);
-  if (context.is_from_vtt)
-    return MatchVTTBlockSelector(context, result);
+#if DCHECK_IS_ON()
+  DCHECK(!inside_match_) << "Do not re-enter Match: use MatchSelector instead";
+  base::AutoReset<bool> reset_inside_match(&inside_match_, true);
+#endif  // DCHECK_IS_ON()
+
+  if (UNLIKELY(context.vtt_originating_element)) {
+    // A kUAShadow combinator is required for VTT matching.
+    if (context.selector->IsLastInTagHistory())
+      return false;
+  }
+  HasMatchedCacheScope has_matched_cache_scope(&context.element->GetDocument());
   return MatchSelector(context, result) == kSelectorMatches;
-}
-
-bool SelectorChecker::MatchVTTBlockSelector(
-    const SelectorCheckingContext& context,
-    MatchResult& result) const {
-  DCHECK(context.selector);
-  if (context.selector->IsLastInTagHistory())
-    return false;
-
-  return MatchSelectorForVTT(context, result) == kSelectorMatches;
 }
 
 // Recursive check of selectors and combinators
@@ -282,16 +236,13 @@ SelectorChecker::MatchStatus SelectorChecker::MatchSelector(
   if (!CheckOne(context, sub_result))
     return kSelectorFailsLocally;
 
-  if (sub_result.dynamic_pseudo != kPseudoIdNone)
+  if (sub_result.dynamic_pseudo != kPseudoIdNone) {
     result.dynamic_pseudo = sub_result.dynamic_pseudo;
-
-  if (context.selector->IsLastInTagHistory()) {
-    if (ScopeContainsLastMatchedElement(context)) {
-      result.specificity += sub_result.specificity;
-      return kSelectorMatches;
-    }
-    return kSelectorFailsLocally;
+    result.custom_highlight_name = sub_result.custom_highlight_name;
   }
+
+  if (context.selector->IsLastInTagHistory())
+    return kSelectorMatches;
 
   MatchStatus match;
   if (context.selector->Relation() != CSSSelector::kSubSelector) {
@@ -308,46 +259,6 @@ SelectorChecker::MatchStatus SelectorChecker::MatchSelector(
   } else {
     match = MatchForSubSelector(context, result);
   }
-  if (match == kSelectorMatches)
-    result.specificity += sub_result.specificity;
-  return match;
-}
-
-SelectorChecker::MatchStatus SelectorChecker::MatchSelectorForVTT(
-    const SelectorCheckingContext& context,
-    MatchResult& result) const {
-  MatchResult sub_result;
-  if (!CheckOneForVTT(context, sub_result))
-    return kSelectorFailsLocally;
-
-  if (sub_result.dynamic_pseudo != kPseudoIdNone)
-    result.dynamic_pseudo = sub_result.dynamic_pseudo;
-
-  if (context.selector->IsLastInTagHistory()) {
-    if (ScopeContainsLastMatchedElement(context)) {
-      result.specificity += sub_result.specificity;
-      return kSelectorMatches;
-    }
-    return kSelectorFailsLocally;
-  }
-
-  MatchStatus match;
-  if (context.selector->Relation() != CSSSelector::kSubSelector) {
-    if (NextSelectorExceedsScope(context))
-      return kSelectorFailsCompletely;
-
-    if (context.pseudo_id != kPseudoIdNone &&
-        context.pseudo_id != result.dynamic_pseudo)
-      return kSelectorFailsCompletely;
-
-    base::AutoReset<PseudoId> dynamic_pseudo_scope(&result.dynamic_pseudo,
-                                                   kPseudoIdNone);
-    match = MatchForRelationForVTT(context, result);
-  } else {
-    match = MatchForSubSelectorForVTT(context, result);
-  }
-  if (match == kSelectorMatches)
-    result.specificity += sub_result.specificity;
   return match;
 }
 
@@ -386,38 +297,6 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForSubSelector(
   return MatchSelector(next_context, result);
 }
 
-SelectorChecker::MatchStatus SelectorChecker::MatchForSubSelectorForVTT(
-    const SelectorCheckingContext& context,
-    MatchResult& result) const {
-  SelectorCheckingContext next_context = PrepareNextContextForRelation(context);
-  next_context.is_sub_selector = true;
-  return MatchSelectorForVTT(next_context, result);
-}
-
-static inline bool IsV0ShadowRoot(const Node* node) {
-  auto* shadow_root = DynamicTo<ShadowRoot>(node);
-  return shadow_root && shadow_root->GetType() == ShadowRootType::V0;
-}
-
-SelectorChecker::MatchStatus SelectorChecker::MatchForPseudoShadow(
-    const SelectorCheckingContext& context,
-    const ContainerNode* node,
-    MatchResult& result) const {
-  if (!IsV0ShadowRoot(node))
-    return kSelectorFailsCompletely;
-  if (!context.previous_element)
-    return kSelectorFailsCompletely;
-  return MatchSelector(context, result);
-}
-
-static inline Element* ParentOrV0ShadowHostElement(const Element& element) {
-  if (auto* shadow_root = DynamicTo<ShadowRoot>(element.parentNode())) {
-    if (shadow_root->GetType() != ShadowRootType::V0)
-      return nullptr;
-  }
-  return element.ParentOrShadowHostElement();
-}
-
 SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
     const SelectorCheckingContext& context,
     MatchResult& result) const {
@@ -426,14 +305,11 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
   CSSSelector::RelationType relation = context.selector->Relation();
 
   // Disable :visited matching when we see the first link or try to match
-  // anything else than an ancestors.
-  //
-  // FIXME(emilio): This is_sub_selector check is wrong if we allow sub
-  // selectors with combinators somewhere.
-  if (!context.is_sub_selector &&
+  // anything else than an ancestor.
+  if ((!context.is_sub_selector || context.in_nested_complex_selector) &&
       (context.element->IsLink() || (relation != CSSSelector::kDescendant &&
                                      relation != CSSSelector::kChild)))
-    next_context.visited_match_type = kVisitedMatchDisabled;
+    next_context.is_inside_visited_link = false;
 
   next_context.in_rightmost_compound = false;
   next_context.is_sub_selector = false;
@@ -441,10 +317,10 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
   next_context.pseudo_id = kPseudoIdNone;
 
   switch (relation) {
-    case CSSSelector::kShadowDeepAsDescendant:
-      Deprecation::CountDeprecation(context.element->GetExecutionContext(),
-                                    WebFeature::kCSSDeepCombinator);
-      FALLTHROUGH;
+    case CSSSelector::kRelativeDescendant:
+      DCHECK(result.has_argument_leftmost_compound_matches);
+      result.has_argument_leftmost_compound_matches->push_back(context.element);
+      [[fallthrough]];
     case CSSSelector::kDescendant:
       if (next_context.selector->GetPseudoType() == CSSSelector::kPseudoScope) {
         if (next_context.selector->IsLastInTagHistory()) {
@@ -452,21 +328,6 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
             return kSelectorMatches;
         }
       }
-
-      if (context.selector->RelationIsAffectedByPseudoContent()) {
-        for (Element* element = context.element; element;
-             element = element->parentElement()) {
-          if (MatchForPseudoContent(next_context, *element, result) ==
-              kSelectorMatches)
-            return kSelectorMatches;
-        }
-        return kSelectorFailsCompletely;
-      }
-
-      if (next_context.selector->GetPseudoType() == CSSSelector::kPseudoShadow)
-        return MatchForPseudoShadow(
-            next_context, context.element->ContainingShadowRoot(), result);
-
       for (next_context.element = ParentElement(next_context);
            next_context.element;
            next_context.element = ParentElement(next_context)) {
@@ -476,9 +337,13 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
         if (NextSelectorExceedsScope(next_context))
           return kSelectorFailsCompletely;
         if (next_context.element->IsLink())
-          next_context.visited_match_type = kVisitedMatchDisabled;
+          next_context.is_inside_visited_link = false;
       }
       return kSelectorFailsCompletely;
+    case CSSSelector::kRelativeChild:
+      DCHECK(result.has_argument_leftmost_compound_matches);
+      result.has_argument_leftmost_compound_matches->push_back(context.element);
+      [[fallthrough]];
     case CSSSelector::kChild: {
       if (next_context.selector->GetPseudoType() == CSSSelector::kPseudoScope) {
         if (next_context.selector->IsLastInTagHistory()) {
@@ -488,23 +353,16 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
         }
       }
 
-      if (context.selector->RelationIsAffectedByPseudoContent())
-        return MatchForPseudoContent(next_context, *context.element, result);
-
-      if (next_context.selector->GetPseudoType() == CSSSelector::kPseudoShadow)
-        return MatchForPseudoShadow(next_context, context.element->parentNode(),
-                                    result);
-
       next_context.element = ParentElement(next_context);
       if (!next_context.element)
         return kSelectorFailsCompletely;
       return MatchSelector(next_context, result);
     }
+    case CSSSelector::kRelativeDirectAdjacent:
+      DCHECK(result.has_argument_leftmost_compound_matches);
+      result.has_argument_leftmost_compound_matches->push_back(context.element);
+      [[fallthrough]];
     case CSSSelector::kDirectAdjacent:
-      // Shadow roots can't have sibling elements
-      if (next_context.selector->GetPseudoType() == CSSSelector::kPseudoShadow)
-        return kSelectorFailsCompletely;
-
       if (mode_ == kResolvingStyle) {
         if (ContainerNode* parent =
                 context.element->ParentElementOrShadowRoot())
@@ -515,12 +373,11 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
       if (!next_context.element)
         return kSelectorFailsAllSiblings;
       return MatchSelector(next_context, result);
-
+    case CSSSelector::kRelativeIndirectAdjacent:
+      DCHECK(result.has_argument_leftmost_compound_matches);
+      result.has_argument_leftmost_compound_matches->push_back(context.element);
+      [[fallthrough]];
     case CSSSelector::kIndirectAdjacent:
-      // Shadow roots can't have sibling elements
-      if (next_context.selector->GetPseudoType() == CSSSelector::kPseudoShadow)
-        return kSelectorFailsCompletely;
-
       if (mode_ == kResolvingStyle) {
         if (ContainerNode* parent =
                 context.element->ParentElementOrShadowRoot())
@@ -538,15 +395,9 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
       }
       return kSelectorFailsAllSiblings;
 
-    case CSSSelector::kShadowPseudo: {
-      DCHECK(mode_ == kQueryingRules ||
-             context.selector->GetPseudoType() != CSSSelector::kPseudoShadow);
-      if (context.selector->GetPseudoType() == CSSSelector::kPseudoShadow) {
-        UseCounter::Count(context.element->GetDocument(),
-                          WebFeature::kPseudoShadowInStaticProfile);
-      }
+    case CSSSelector::kUAShadow: {
       // If we're in the same tree-scope as the scoping element, then following
-      // a shadow descendant combinator would escape that and thus the scope.
+      // a kUAShadow combinator would escape that and thus the scope.
       if (context.scope && context.scope->OwnerShadowHost() &&
           context.scope->OwnerShadowHost()->GetTreeScope() ==
               context.element->GetTreeScope())
@@ -555,51 +406,12 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
       Element* shadow_host = context.element->OwnerShadowHost();
       if (!shadow_host)
         return kSelectorFailsCompletely;
+      // Match against featureless-like Element described by spec:
+      // https://w3c.github.io/webvtt/#obtaining-css-boxes
+      if (context.vtt_originating_element)
+        shadow_host = context.vtt_originating_element;
       next_context.element = shadow_host;
       return MatchSelector(next_context, result);
-    }
-
-    case CSSSelector::kShadowDeep: {
-      DCHECK(mode_ == kQueryingRules);
-      UseCounter::Count(context.element->GetDocument(),
-                        WebFeature::kDeepCombinatorInStaticProfile);
-      if (ShadowRoot* root = context.element->ContainingShadowRoot()) {
-        if (root->IsUserAgent())
-          return kSelectorFailsCompletely;
-      }
-
-      if (context.selector->RelationIsAffectedByPseudoContent()) {
-        // TODO(kochi): closed mode tree should be handled as well for
-        // ::content.
-        for (Element* element = context.element; element;
-             element = element->ParentOrShadowHostElement()) {
-          if (MatchForPseudoContent(next_context, *element, result) ==
-              kSelectorMatches) {
-            if (context.element->IsInShadowTree()) {
-              UseCounter::Count(context.element->GetDocument(),
-                                WebFeature::kCSSDeepCombinatorAndShadow);
-            }
-            return kSelectorMatches;
-          }
-        }
-        return kSelectorFailsCompletely;
-      }
-
-      for (next_context.element = ParentOrV0ShadowHostElement(*context.element);
-           next_context.element;
-           next_context.element =
-               ParentOrV0ShadowHostElement(*next_context.element)) {
-        MatchStatus match = MatchSelector(next_context, result);
-        if (match == kSelectorMatches && context.element->IsInShadowTree()) {
-          UseCounter::Count(context.element->GetDocument(),
-                            WebFeature::kCSSDeepCombinatorAndShadow);
-        }
-        if (match == kSelectorMatches || match == kSelectorFailsCompletely)
-          return match;
-        if (NextSelectorExceedsScope(next_context))
-          return kSelectorFailsCompletely;
-      }
-      return kSelectorFailsCompletely;
     }
 
     case CSSSelector::kShadowSlot: {
@@ -632,64 +444,6 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
   }
   NOTREACHED();
   return kSelectorFailsCompletely;
-}
-
-SelectorChecker::MatchStatus SelectorChecker::MatchForRelationForVTT(
-    const SelectorCheckingContext& context,
-    MatchResult& result) const {
-  SelectorCheckingContext next_context = PrepareNextContextForRelation(context);
-
-  CSSSelector::RelationType relation = context.selector->Relation();
-
-  // Rules that come from a WebVTT STYLE block apply to a hypothetical
-  // document with a single empty element with no explicit name, no namespace,
-  // no attribute, no classes, no IDs, and unknown primary language that acts
-  // as the originating element for the cue pseudo-elements. This element
-  // must not be generally selectable.
-  if (relation != CSSSelector::kShadowPseudo)
-    return kSelectorFailsCompletely;
-
-  if (!context.is_sub_selector)
-    next_context.visited_match_type = kVisitedMatchDisabled;
-
-  next_context.in_rightmost_compound = false;
-  next_context.is_sub_selector = false;
-  next_context.previous_element = context.element;
-  next_context.pseudo_id = kPseudoIdNone;
-
-  DCHECK(mode_ == kQueryingRules ||
-         context.selector->GetPseudoType() != CSSSelector::kPseudoShadow);
-  if (context.selector->GetPseudoType() == CSSSelector::kPseudoShadow) {
-    UseCounter::Count(context.element->GetDocument(),
-                      WebFeature::kPseudoShadowInStaticProfile);
-  }
-  // If we're in the same tree-scope as the scoping element, then following
-  // a shadow descendant combinator would escape that and thus the scope.
-  if (context.scope && context.scope->OwnerShadowHost() &&
-      context.scope->OwnerShadowHost()->GetTreeScope() ==
-          context.element->GetTreeScope())
-    return kSelectorFailsCompletely;
-
-  Element* shadow_host = context.element->OwnerShadowHost();
-  if (!shadow_host)
-    return kSelectorFailsCompletely;
-  next_context.element = shadow_host;
-  return MatchSelectorForVTT(next_context, result);
-}
-
-SelectorChecker::MatchStatus SelectorChecker::MatchForPseudoContent(
-    const SelectorCheckingContext& context,
-    const Element& element,
-    MatchResult& result) const {
-  HeapVector<Member<V0InsertionPoint>, 8> insertion_points;
-  CollectDestinationInsertionPoints(element, insertion_points);
-  SelectorCheckingContext next_context(context);
-  for (const auto& insertion_point : insertion_points) {
-    next_context.element = insertion_point;
-    if (Match(next_context, result))
-      return kSelectorMatches;
-  }
-  return kSelectorFailsLocally;
 }
 
 static bool AttributeValueMatches(const Attribute& attribute_item,
@@ -773,7 +527,8 @@ static bool AnyAttributeMatches(Element& element,
 
   const AtomicString& selector_value = selector.Value();
   TextCaseSensitivity case_sensitivity =
-      (selector.AttributeMatch() == CSSSelector::kCaseInsensitive)
+      (selector.AttributeMatch() ==
+       CSSSelector::AttributeMatchType::kCaseInsensitive)
           ? kTextCaseASCIIInsensitive
           : kTextCaseSensitive;
 
@@ -787,6 +542,9 @@ static bool AnyAttributeMatches(Element& element,
       // are lower-cased for selectors in html documents. Compare the selector
       // and the attribute local name insensitively to e.g. allow matching SVG
       // attributes like viewBox.
+      //
+      // NOTE: If changing this behavior, be sure to also update the bucketing
+      // in ElementRuleCollector::CollectMatchingRules() accordingly.
       if (!attribute_item.MatchesCaseInsensitive(selector_attr))
         continue;
     }
@@ -813,6 +571,14 @@ static bool AnyAttributeMatches(Element& element,
     if (legacy_case_insensitive &&
         AttributeValueMatches(attribute_item, match, selector_value,
                               kTextCaseASCIIInsensitive)) {
+      // If the `s` modifier is in the attribute selector, return false
+      // despite of legacy_case_insensitive.
+      if (selector.AttributeMatch() ==
+          CSSSelector::AttributeMatchType::kCaseSensitiveAlways) {
+        DCHECK(RuntimeEnabledFeatures::CSSCaseSensitiveSelectorEnabled());
+        return false;
+      }
+
       UseCounter::Count(element.GetDocument(),
                         WebFeature::kCaseInsensitiveAttrSelectorMatch);
       return true;
@@ -871,83 +637,308 @@ bool SelectorChecker::CheckOne(const SelectorCheckingContext& context,
   }
 }
 
-bool SelectorChecker::CheckOneForVTT(const SelectorCheckingContext& context,
-                                     MatchResult& result) const {
-  DCHECK(context.element);
-  Element& element = *context.element;
-  DCHECK(context.selector);
-  const CSSSelector& selector = *context.selector;
-
-  switch (selector.Match()) {
-    case CSSSelector::kTag:
-      return MatchesTagNameForVTT(element, selector.TagQName(), context);
-    // Attribute selectors
-    case CSSSelector::kAttributeExact:
-    case CSSSelector::kAttributeSet:
-    case CSSSelector::kAttributeHyphen:
-    case CSSSelector::kAttributeList:
-    case CSSSelector::kAttributeContain:
-    case CSSSelector::kAttributeBegin:
-    case CSSSelector::kAttributeEnd:
-      return AnyAttributeMatches(element, selector.Match(), selector);
-    case CSSSelector::kPseudoClass:
-      return CheckPseudoClassForVTT(context, result);
-    case CSSSelector::kPseudoElement:
-      return CheckPseudoElementForVTT(context, result);
-
-    default:
-      return false;
-  }
-}
-
 bool SelectorChecker::CheckPseudoNot(const SelectorCheckingContext& context,
                                      MatchResult& result) const {
   const CSSSelector& selector = *context.selector;
-
+  DCHECK(selector.SelectorList());
   SelectorCheckingContext sub_context(context);
   sub_context.is_sub_selector = true;
-  DCHECK(selector.SelectorList());
+  sub_context.in_nested_complex_selector = true;
+  sub_context.pseudo_id = kPseudoIdNone;
   for (sub_context.selector = selector.SelectorList()->First();
        sub_context.selector;
-       sub_context.selector = sub_context.selector->TagHistory()) {
-    // :not cannot nest. I don't really know why this is a
-    // restriction in CSS3, but it is, so let's honor it.
-    // the parser enforces that this never occurs
-    DCHECK_NE(sub_context.selector->GetPseudoType(), CSSSelector::kPseudoNot);
-    // We select between :visited and :link when applying. We don't know which
-    // one applied (or not) yet.
-    if (sub_context.selector->GetPseudoType() == CSSSelector::kPseudoVisited ||
-        (sub_context.selector->GetPseudoType() == CSSSelector::kPseudoLink &&
-         sub_context.visited_match_type == kVisitedMatchEnabled))
-      return true;
-    if (!CheckOne(sub_context, result))
-      return true;
+       sub_context.selector = CSSSelectorList::Next(*sub_context.selector)) {
+    MatchResult sub_result;
+    if (MatchSelector(sub_context, sub_result) == kSelectorMatches)
+      return false;
   }
-  return false;
+  return true;
 }
 
-bool SelectorChecker::CheckPseudoNotForVTT(
-    const SelectorCheckingContext& context,
-    MatchResult& result) const {
-  const CSSSelector& selector = *context.selector;
-  SelectorCheckingContext sub_context(context);
-  sub_context.is_sub_selector = true;
-  DCHECK(selector.SelectorList());
-  for (sub_context.selector = selector.SelectorList()->First();
-       sub_context.selector;
-       sub_context.selector = sub_context.selector->TagHistory()) {
-    // :not cannot nest. I don't really know why this is a
-    // restriction in CSS3, but it is, so let's honor it.
-    // the parser enforces that this never occurs
-    DCHECK_NE(sub_context.selector->GetPseudoType(), CSSSelector::kPseudoNot);
-    // We select between :visited and :link when applying. We don't know which
-    // one applied (or not) yet.
-    if (sub_context.selector->GetPseudoType() == CSSSelector::kPseudoVisited ||
-        (sub_context.selector->GetPseudoType() == CSSSelector::kPseudoLink &&
-         sub_context.visited_match_type == kVisitedMatchEnabled))
-      return true;
-    if (!CheckOneForVTT(sub_context, result))
-      return true;
+namespace {
+
+Element* TraverseToParent(Element* element) {
+  return element->parentElement();
+}
+
+Element* TraverseToPreviousSibling(Element* element) {
+  return ElementTraversal::PreviousSibling(*element);
+}
+
+inline bool CacheMatchedElementsAndReturnMatchedResultForIndirectRelation(
+    Element* has_scope_element,
+    HeapVector<Member<Element>>& has_argument_leftmost_compound_matches,
+    HasMatchedCacheScope::Context& has_matched_cache_scope_context,
+    Element* (*next)(Element*)) {
+  bool selector_matched = false;
+  for (auto leftmost : has_argument_leftmost_compound_matches) {
+    for (Element* has_matched_element = next(leftmost); has_matched_element;
+         has_matched_element = next(has_matched_element)) {
+      if (has_matched_element == has_scope_element)
+        selector_matched = true;
+      uint8_t old_result =
+          has_matched_cache_scope_context.SetMatchedAndGetOldResult(
+              has_matched_element);
+      if (old_result == kNotCached)
+        continue;
+      if (old_result & kMatched)
+        break;
+    }
+  }
+  return selector_matched;
+}
+
+inline bool CacheMatchedElementsAndReturnMatchedResultForDirectRelation(
+    Element* has_scope_element,
+    HeapVector<Member<Element>>& has_argument_leftmost_compound_matches,
+    HasMatchedCacheScope::Context& has_matched_cache_scope_context,
+    Element* (*next)(Element*)) {
+  bool selector_matched = false;
+  for (auto leftmost : has_argument_leftmost_compound_matches) {
+    if (Element* has_matched_element = next(leftmost)) {
+      has_matched_cache_scope_context.SetMatchedAndGetOldResult(
+          has_matched_element);
+      if (has_matched_element == has_scope_element)
+        selector_matched = true;
+    }
+  }
+  return selector_matched;
+}
+
+inline void SetAffectedByHasFlag(Element* element,
+                                 bool is_sibling_of_has_scope) {
+  if (is_sibling_of_has_scope)
+    element->SetSiblingsAffectedByHas();
+  else
+    element->SetAncestorsOrAncestorSiblingsAffectedByHas();
+}
+
+inline bool ContextForSubjectHasInMatchesArgument(
+    const SelectorChecker::SelectorCheckingContext& has_checking_context) {
+  return has_checking_context.element == has_checking_context.scope &&
+         has_checking_context.in_rightmost_compound;
+}
+
+uint8_t SetHasScopeElementAsCheckedAndGetOldResult(
+    const SelectorChecker::SelectorCheckingContext& has_checking_context,
+    HasMatchedCacheScope::Context& has_matched_cache_scope_context) {
+  DCHECK_EQ(has_checking_context.selector->GetPseudoType(),
+            CSSSelector::kPseudoHas);
+  Element* has_scope_element = has_checking_context.element;
+  uint8_t previous_result =
+      has_matched_cache_scope_context.GetResult(has_scope_element);
+  if (previous_result & kChecked)
+    return previous_result;
+
+  // If the selector matching context is for the subject ':has()' in the
+  // argument of the JavaScript 'matches()' API, skip to check whether the
+  // :has() scope element was already checked or not.
+  if (!ContextForSubjectHasInMatchesArgument(has_checking_context) &&
+      has_matched_cache_scope_context.AlreadyChecked(has_scope_element)) {
+    // If the element already have cache item, set the element as checked.
+    // Otherwise, skip to set to prevent increasing unnecessary cache item.
+    if (previous_result != kNotCached)
+      has_matched_cache_scope_context.SetChecked(has_scope_element);
+
+    // If the :has() scope element was already checked by the previous matching,
+    // return the previous result with the kChecked flag set.
+    return previous_result | kChecked;
+  }
+
+  has_matched_cache_scope_context.SetChecked(has_scope_element);
+  return previous_result;
+}
+
+}  // namespace
+
+bool SelectorChecker::CheckPseudoHas(const SelectorCheckingContext& context,
+                                     MatchResult& result) const {
+  Element* has_scope_element = context.element;
+  Document& document = has_scope_element->GetDocument();
+  DCHECK(document.GetHasMatchedCacheScope());
+  SelectorCheckingContext sub_context(has_scope_element);
+  // TODO(blee@igalia.com) Need to clarify the :scope dependency in relative
+  // selector definition.
+  // - spec : https://www.w3.org/TR/selectors-4/#relative
+  // - csswg issue : https://github.com/w3c/csswg-drafts/issues/6399
+  sub_context.scope = context.scope;
+  // sub_context.is_inside_visited_link is false (by default) to disable
+  // :visited matching when it is in the :has argument
+  sub_context.is_inside_has_pseudo_class = true;
+  sub_context.pseudo_has_in_rightmost_compound = context.in_rightmost_compound;
+
+  DCHECK(context.selector->SelectorList());
+  for (const CSSSelector* selector = context.selector->SelectorList()->First();
+       selector; selector = CSSSelectorList::Next(*selector)) {
+    HasArgumentMatchContext has_argument_match_context(selector);
+    CSSSelector::RelationType leftmost_relation =
+        has_argument_match_context.LeftmostRelation();
+    HasMatchedCacheScope::Context has_matched_cache_scope_context(
+        &document, has_argument_match_context);
+
+    // Get the cache item of matching ':has(<selector>)' on the element
+    // to skip argument matching on the subtree elements
+    //  - If the element was already marked as matched, return true.
+    //  - If the element was already checked but not matched,
+    //    move to the next argument selector.
+    uint8_t previous_result = SetHasScopeElementAsCheckedAndGetOldResult(
+        context, has_matched_cache_scope_context);
+
+    if (previous_result & kChecked) {
+      if (mode_ == kResolvingStyle) {
+        // The SiblingsAffectedByHas flag is set only when an element is a
+        // sibling of the :has() scope element during the subselector
+        // matching. But during the matching, the matching status of some
+        // elements are cached and those element cannot be a sibling of the
+        // :has() scope element in case that the subselector starts with
+        // adjacent combinator.
+        // 1. MatchSelector() gives some possibly matched elements, and those
+        //    are cached as matched.
+        // 2. If an element is not matched, then it is cached as not matched.
+        // We need to set missing SiblingAffectedByHas flags for the cached
+        // elements before returning early.
+        switch (leftmost_relation) {
+          case CSSSelector::kRelativeDirectAdjacent:
+            if (Element* next_sibling =
+                    ElementTraversal::NextSibling(*has_scope_element))
+              next_sibling->SetSiblingsAffectedByHas();
+            break;
+          case CSSSelector::kRelativeIndirectAdjacent:
+            for (Element* next_sibling =
+                     ElementTraversal::NextSibling(*has_scope_element);
+                 next_sibling && !next_sibling->SiblingsAffectedByHas();
+                 next_sibling = ElementTraversal::NextSibling(*next_sibling)) {
+              next_sibling->SetSiblingsAffectedByHas();
+            }
+            break;
+          default:
+            break;
+        }
+      }
+      if (previous_result & kMatched)
+        return true;
+      continue;
+    }
+
+    sub_context.selector = selector;
+    sub_context.relative_leftmost_element = has_scope_element;
+
+    bool selector_matched = false;
+    Element* last_traversed_element = nullptr;
+    int last_traversed_depth = -1;
+    for (HasArgumentSubtreeIterator iterator(*has_scope_element,
+                                             has_argument_match_context);
+         !iterator.AtEnd(); ++iterator) {
+      if (has_argument_match_context.DepthFixed() && !iterator.AtFixedDepth()) {
+        // We can skip subselector matching on some elements at a certain depth
+        // when the subselector doesn't have descendant combinator. (e.g. For
+        // the style rule '.a:has(> .b > .c) {}', we don't need to match the
+        // subselector '> .b > .c' on the child of '.a' or the great-grand-child
+        // of '.a'.)
+        // But this can break the upward tree walk because the 'affected-by'
+        // flags of the skipped elements will not set.
+        // To prevent this, marks the flags of skipped elements if those are
+        // under the depth limit.
+        if (mode_ == kResolvingStyle && iterator.UnderDepthLimit()) {
+          SetAffectedByHasFlag(iterator.CurrentElement(),
+                               iterator.AtSiblingOfHasScope());
+        }
+        continue;
+      }
+
+      if (mode_ == kResolvingStyle) {
+        SetAffectedByHasFlag(iterator.CurrentElement(),
+                             iterator.AtSiblingOfHasScope());
+      }
+
+      if (has_argument_match_context.DepthLimit() > 0 && iterator.Depth() == 0)
+        continue;
+
+      sub_context.element = iterator.CurrentElement();
+      HeapVector<Member<Element>> has_argument_leftmost_compound_matches;
+      MatchResult sub_result;
+      sub_result.has_argument_leftmost_compound_matches =
+          &has_argument_leftmost_compound_matches;
+
+      MatchSelector(sub_context, sub_result);
+
+      last_traversed_element = iterator.CurrentElement();
+      last_traversed_depth = iterator.Depth();
+
+      switch (leftmost_relation) {
+        case CSSSelector::kRelativeDescendant:
+          selector_matched =
+              CacheMatchedElementsAndReturnMatchedResultForIndirectRelation(
+                  has_scope_element, has_argument_leftmost_compound_matches,
+                  has_matched_cache_scope_context, TraverseToParent);
+          break;
+        case CSSSelector::kRelativeChild:
+          selector_matched =
+              CacheMatchedElementsAndReturnMatchedResultForDirectRelation(
+                  has_scope_element, has_argument_leftmost_compound_matches,
+                  has_matched_cache_scope_context, TraverseToParent);
+          break;
+        case CSSSelector::kRelativeDirectAdjacent:
+          selector_matched =
+              CacheMatchedElementsAndReturnMatchedResultForDirectRelation(
+                  has_scope_element, has_argument_leftmost_compound_matches,
+                  has_matched_cache_scope_context, TraverseToPreviousSibling);
+          break;
+        case CSSSelector::kRelativeIndirectAdjacent:
+          selector_matched =
+              CacheMatchedElementsAndReturnMatchedResultForIndirectRelation(
+                  has_scope_element, has_argument_leftmost_compound_matches,
+                  has_matched_cache_scope_context, TraverseToPreviousSibling);
+          break;
+        default:
+          NOTREACHED();
+          break;
+      }
+
+      if (selector_matched) {
+        has_matched_cache_scope_context.SetAllTraversedElementsAsChecked(
+            last_traversed_element, last_traversed_depth);
+
+        if (mode_ == kResolvingStyle) {
+          // Need to traverse to ancestors or siblings to set the affected-by-
+          // has flags ('AncestorsOrAncestorSiblingsAffectedByHas' or
+          // 'SiblingsAffectedByHas') so that the StyleEngine can traverse to
+          // ancestors or siblings to find the elements affected by subject or
+          // non-subject :has().
+          //
+          // StyleEngine tries to find elements affected by :has() by traversing
+          // siblings or ancestors of a mutated element only when an element has
+          // the flags set. If an element doesn't have those flags set, then the
+          // StyleEngine will stop the traversal at the element.
+          //
+          // HasArgumentSubtreeIterator traverses the subtree in the reversed
+          // DOM tree walk order to prevent duplicated subtree traversal caused
+          // by the multiple elements affected by :has(). Due to this traversal
+          // order, this early returning can break the traversal to ancestors or
+          // siblings.
+          //
+          // To prevent the problem, traverse to ancestors or siblings until
+          // reach to the scope element and marks elements as
+          // 'AncestorsOrAncestorSiblingsAffectedByHas' or
+          // 'SiblingsAffectedByHas' before returning.
+          //
+          // Similar to the DynamicRestyleFlags in the ContainerNode, these
+          // flags will never be reset.
+          for (AffectedByHasIterator affected_by_has_iterator(iterator);
+               !affected_by_has_iterator.AtEnd(); ++affected_by_has_iterator) {
+            SetAffectedByHasFlag(
+                affected_by_has_iterator.CurrentElement(),
+                affected_by_has_iterator.AtSiblingOfHasScope());
+          }
+        }
+        return true;
+      }
+    }
+
+    if (last_traversed_element) {
+      has_matched_cache_scope_context.SetAllTraversedElementsAsChecked(
+          last_traversed_element, last_traversed_depth);
+    }
   }
   return false;
 }
@@ -1094,13 +1085,21 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
         return false;
       return selector.MatchNth(NthIndexCache::NthLastOfTypeIndex(element));
     }
+    case CSSSelector::kPseudoSelectorFragmentAnchor:
+      return MatchesSelectorFragmentAnchorPseudoClass(element);
     case CSSSelector::kPseudoTarget:
+      probe::ForcePseudoState(&element, CSSSelector::kPseudoTarget,
+                              &force_pseudo_state);
+      if (force_pseudo_state)
+        return true;
       return element == element.GetDocument().CssTarget();
     case CSSSelector::kPseudoIs:
     case CSSSelector::kPseudoWhere:
     case CSSSelector::kPseudoAny: {
       SelectorCheckingContext sub_context(context);
       sub_context.is_sub_selector = true;
+      sub_context.in_nested_complex_selector = true;
+      sub_context.pseudo_id = kPseudoIdNone;
       if (!selector.SelectorList())
         break;
       for (sub_context.selector = selector.SelectorList()->First();
@@ -1111,7 +1110,8 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
           return true;
       }
     } break;
-    case CSSSelector::kPseudoAutofill: {
+    case CSSSelector::kPseudoAutofill:
+    case CSSSelector::kPseudoWebKitAutofill: {
       auto* html_form_element = DynamicTo<HTMLFormControlElement>(&element);
       return html_form_element && html_form_element->IsAutofilled();
     }
@@ -1122,16 +1122,15 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     }
     case CSSSelector::kPseudoAutofillSelected: {
       auto* html_form_element = DynamicTo<HTMLFormControlElement>(&element);
-      return html_form_element && html_form_element->GetAutofillState() ==
-                                      WebAutofillState::kAutofilled;
+      return html_form_element && html_form_element->HighlightAutofilled();
     }
     case CSSSelector::kPseudoAnyLink:
     case CSSSelector::kPseudoWebkitAnyLink:
-    case CSSSelector::kPseudoLink:
       return element.IsLink();
+    case CSSSelector::kPseudoLink:
+      return element.IsLink() && !context.is_inside_visited_link;
     case CSSSelector::kPseudoVisited:
-      return element.IsLink() &&
-             context.visited_match_type == kVisitedMatchEnabled;
+      return element.IsLink() && context.is_inside_visited_link;
     case CSSSelector::kPseudoDrag:
       if (mode_ == kResolvingStyle) {
         if (context.in_rightmost_compound)
@@ -1141,19 +1140,35 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       }
       return element.IsDragged();
     case CSSSelector::kPseudoFocus:
-      if (mode_ == kResolvingStyle && !context.in_rightmost_compound)
-        element.SetChildrenOrSiblingsAffectedByFocus();
+      if (mode_ == kResolvingStyle) {
+        if (UNLIKELY(context.is_inside_has_pseudo_class)) {
+          element.SetAncestorsOrSiblingsAffectedByFocusInHas();
+        } else {
+          if (!context.in_rightmost_compound)
+            element.SetChildrenOrSiblingsAffectedByFocus();
+        }
+      }
       return MatchesFocusPseudoClass(element);
     case CSSSelector::kPseudoFocusVisible:
-      if (mode_ == kResolvingStyle && !context.in_rightmost_compound)
-        element.SetChildrenOrSiblingsAffectedByFocusVisible();
+      if (mode_ == kResolvingStyle) {
+        if (UNLIKELY(context.is_inside_has_pseudo_class)) {
+          element.SetAncestorsOrSiblingsAffectedByFocusVisibleInHas();
+        } else {
+          if (!context.in_rightmost_compound)
+            element.SetChildrenOrSiblingsAffectedByFocusVisible();
+        }
+      }
       return MatchesFocusVisiblePseudoClass(element);
     case CSSSelector::kPseudoFocusWithin:
       if (mode_ == kResolvingStyle) {
-        if (context.in_rightmost_compound)
-          element_style_->SetAffectedByFocusWithin();
-        else
-          element.SetChildrenOrSiblingsAffectedByFocusWithin();
+        if (UNLIKELY(context.is_inside_has_pseudo_class)) {
+          element.SetAncestorsOrSiblingsAffectedByFocusInHas();
+        } else {
+          if (context.in_rightmost_compound)
+            element_style_->SetAffectedByFocusWithin();
+          else
+            element.SetChildrenOrSiblingsAffectedByFocusWithin();
+        }
       }
       probe::ForcePseudoState(&element, CSSSelector::kPseudoFocusWithin,
                               &force_pseudo_state);
@@ -1162,10 +1177,14 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       return element.HasFocusWithin();
     case CSSSelector::kPseudoHover:
       if (mode_ == kResolvingStyle) {
-        if (context.in_rightmost_compound)
-          element_style_->SetAffectedByHover();
-        else
-          element.SetChildrenOrSiblingsAffectedByHover();
+        if (UNLIKELY(context.is_inside_has_pseudo_class)) {
+          element.SetAncestorsOrSiblingsAffectedByHoverInHas();
+        } else {
+          if (context.in_rightmost_compound)
+            element_style_->SetAffectedByHover();
+          else
+            element.SetChildrenOrSiblingsAffectedByHover();
+        }
       }
       if (!ShouldMatchHoverOrActive(context))
         return false;
@@ -1176,10 +1195,14 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       return element.IsHovered();
     case CSSSelector::kPseudoActive:
       if (mode_ == kResolvingStyle) {
-        if (context.in_rightmost_compound)
-          element_style_->SetAffectedByActive();
-        else
-          element.SetChildrenOrSiblingsAffectedByActive();
+        if (UNLIKELY(context.is_inside_has_pseudo_class)) {
+          element.SetAncestorsOrSiblingsAffectedByActiveInHas();
+        } else {
+          if (context.in_rightmost_compound)
+            element_style_->SetAffectedByActive();
+          else
+            element.SetChildrenOrSiblingsAffectedByActive();
+        }
       }
       if (!ShouldMatchHoverOrActive(context))
         return false;
@@ -1243,14 +1266,49 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
         break;
       return true;
     }
+    case CSSSelector::kPseudoDir: {
+      const AtomicString& argument = selector.Argument();
+      if (argument.IsEmpty())
+        break;
+
+      TextDirection direction;
+      if (EqualIgnoringASCIICase(argument, "ltr"))
+        direction = TextDirection::kLtr;
+      else if (EqualIgnoringASCIICase(argument, "rtl"))
+        direction = TextDirection::kRtl;
+      else
+        break;
+
+      if (auto* html_element = DynamicTo<HTMLElement>(element)) {
+        return html_element->CachedDirectionality() == direction;
+      }
+      break;
+    }
+    case CSSSelector::kPseudoPopupOpen:
+      if (auto* popup_element = DynamicTo<HTMLPopupElement>(element))
+        return popup_element->open();
+      if (element.HasValidPopupAttribute()) {
+        return element.popupOpen();
+      }
+      return false;
     case CSSSelector::kPseudoFullscreen:
     // fall through
     case CSSSelector::kPseudoFullScreen:
       return Fullscreen::IsFullscreenElement(element);
     case CSSSelector::kPseudoFullScreenAncestor:
       return element.ContainsFullScreenElement();
+    case CSSSelector::kPseudoPaused: {
+      DCHECK(RuntimeEnabledFeatures::CSSPseudoPlayingPausedEnabled());
+      auto* media_element = DynamicTo<HTMLMediaElement>(element);
+      return media_element && media_element->paused();
+    }
     case CSSSelector::kPseudoPictureInPicture:
       return PictureInPictureController::IsElementInPictureInPicture(&element);
+    case CSSSelector::kPseudoPlaying: {
+      DCHECK(RuntimeEnabledFeatures::CSSPseudoPlayingPausedEnabled());
+      auto* media_element = DynamicTo<HTMLMediaElement>(element);
+      return media_element && !media_element->paused();
+    }
     case CSSSelector::kPseudoVideoPersistent: {
       DCHECK(is_ua_rule_);
       auto* video_element = DynamicTo<HTMLVideoElement>(element);
@@ -1285,17 +1343,15 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       if (auto* shadow_root = DynamicTo<ShadowRoot>(context.scope))
         return element == shadow_root->host();
       return context.scope == &element;
-    case CSSSelector::kPseudoUnresolved:
-      return !element.IsDefined() && element.IsUnresolvedV0CustomElement();
     case CSSSelector::kPseudoDefined:
-      return element.IsDefined() || element.IsUpgradedV0CustomElement();
+      return element.IsDefined();
     case CSSSelector::kPseudoHostContext:
       UseCounter::Count(
           context.element->GetDocument(),
           mode_ == kQueryingRules
               ? WebFeature::kCSSSelectorHostContextInSnapshotProfile
               : WebFeature::kCSSSelectorHostContextInLiveProfile);
-      FALLTHROUGH;
+      [[fallthrough]];
     case CSSSelector::kPseudoHost:
       return CheckPseudoHost(context, result);
     case CSSSelector::kPseudoSpatialNavigationFocus:
@@ -1331,7 +1387,7 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       return !element.GetDocument().GetPage()->GetFocusController().IsActive();
     case CSSSelector::kPseudoState: {
       return element.DidAttachInternals() &&
-             element.EnsureElementInternals().HasState(selector.Argument());
+             element.EnsureElementInternals().HasState(selector.Value());
     }
     case CSSSelector::kPseudoHorizontal:
     case CSSSelector::kPseudoVertical:
@@ -1344,6 +1400,31 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoNoButton:
     case CSSSelector::kPseudoCornerPresent:
       return false;
+    case CSSSelector::kPseudoModal:
+      DCHECK(is_ua_rule_);
+      if (const auto* dialog_element = DynamicTo<HTMLDialogElement>(element))
+        return dialog_element->IsModal();
+      return false;
+    case CSSSelector::kPseudoHas:
+      if (mode_ == kResolvingStyle) {
+        // Set 'AffectedBySubjectHas' or 'AffectedByNonSubjectHas' flag to
+        // indicate that the element is affected by a subject or non-subject
+        // ':has()' state change. It means that, when we have a mutation on
+        // an element in the downward subtree of the element, we may need to
+        // invalidate the style of the element because the mutation can affect
+        // the state of this ':has()' selector.
+        if (context.in_rightmost_compound)
+          element_style_->SetAffectedBySubjectHas();
+        else
+          element.SetAffectedByNonSubjectHas();
+
+        if (selector.ContainsPseudoInsideHasPseudoClass())
+          element.SetAffectedByPseudoInHas();
+      }
+      return CheckPseudoHas(context, result);
+    case CSSSelector::kPseudoRelativeLeftmost:
+      DCHECK(context.relative_leftmost_element);
+      return context.relative_leftmost_element == &element;
     case CSSSelector::kPseudoUnknown:
     default:
       NOTREACHED();
@@ -1352,34 +1433,9 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
   return false;
 }
 
-bool SelectorChecker::CheckPseudoClassForVTT(
-    const SelectorCheckingContext& context,
-    MatchResult& result) const {
-  const CSSSelector& selector = *context.selector;
-
-  switch (selector.GetPseudoType()) {
-    case CSSSelector::kPseudoNot:
-      return CheckPseudoNotForVTT(context, result);
-    case CSSSelector::kPseudoAny: {
-      SelectorCheckingContext sub_context(context);
-      sub_context.is_sub_selector = true;
-      DCHECK(selector.SelectorList());
-      for (sub_context.selector = selector.SelectorList()->First();
-           sub_context.selector; sub_context.selector = CSSSelectorList::Next(
-                                     *sub_context.selector)) {
-        MatchResult sub_result;
-        if (MatchSelectorForVTT(sub_context, sub_result) == kSelectorMatches)
-          return true;
-      }
-    } break;
-    case CSSSelector::kPseudoHostContext:
-      FALLTHROUGH;
-    case CSSSelector::kPseudoHost:
-      return false;
-    default:
-      return CheckPseudoClass(context, result);
-  }
-  return false;
+static bool MatchesUAShadowElement(Element& element, const AtomicString& id) {
+  ShadowRoot* root = element.ContainingShadowRoot();
+  return root && root->IsUserAgent() && element.ShadowPseudoId() == id;
 }
 
 bool SelectorChecker::CheckPseudoElement(const SelectorCheckingContext& context,
@@ -1410,35 +1466,17 @@ bool SelectorChecker::CheckPseudoElement(const SelectorCheckingContext& context,
           return false;
       }
       return true;
+    case CSSSelector::kPseudoFileSelectorButton:
+      return MatchesUAShadowElement(
+          element, shadow_element_names::kPseudoFileUploadButton);
     case CSSSelector::kPseudoPlaceholder:
-      if (ShadowRoot* root = element.ContainingShadowRoot()) {
-        return root->IsUserAgent() &&
-               element.ShadowPseudoId() ==
-                   shadow_element_names::kPseudoInputPlaceholder;
-      }
-      return false;
-    case CSSSelector::kPseudoWebKitCustomElement: {
-      if (ShadowRoot* root = element.ContainingShadowRoot()) {
-        if (!root->IsUserAgent())
-          return false;
-        if (element.ShadowPseudoId() != selector.Value())
-          return false;
-        if (!is_ua_rule_ &&
-            selector.Value() ==
-                shadow_element_names::kPseudoWebKitDetailsMarker) {
-          UseCounter::Count(element.GetDocument(),
-                            WebFeature::kCSSSelectorPseudoWebKitDetailsMarker);
-        }
-        return true;
-      }
-      return false;
-    }
+      return MatchesUAShadowElement(
+          element, shadow_element_names::kPseudoInputPlaceholder);
+    case CSSSelector::kPseudoWebKitCustomElement:
+      return MatchesUAShadowElement(element, selector.Value());
     case CSSSelector::kPseudoBlinkInternalElement:
       DCHECK(is_ua_rule_);
-      if (ShadowRoot* root = element.ContainingShadowRoot())
-        return root->IsUserAgent() &&
-               element.ShadowPseudoId() == selector.Value();
-      return false;
+      return MatchesUAShadowElement(element, selector.Value());
     case CSSSelector::kPseudoSlotted: {
       SelectorCheckingContext sub_context(context);
       sub_context.is_sub_selector = true;
@@ -1450,55 +1488,47 @@ bool SelectorChecker::CheckPseudoElement(const SelectorCheckingContext& context,
       DCHECK(!CSSSelectorList::Next(*selector.SelectorList()->First()));
       sub_context.selector = selector.SelectorList()->First();
       MatchResult sub_result;
-      if (!Match(sub_context, sub_result))
+      if (MatchSelector(sub_context, sub_result) != kSelectorMatches)
         return false;
-      result.specificity += sub_context.selector->Specificity() +
-                            sub_result.specificity +
-                            CSSSelector::kTagSpecificity;
       return true;
     }
-    case CSSSelector::kPseudoContent:
-      return element.IsInShadowTree() && element.IsV0InsertionPoint();
-    case CSSSelector::kPseudoShadow:
-      return element.IsInShadowTree() && context.previous_element;
+    case CSSSelector::kPseudoHighlight: {
+      result.dynamic_pseudo = PseudoId::kPseudoIdHighlight;
+      // A null pseudo_argument_ means we are matching rules on the originating
+      // element. We keep track of which pseudo elements may match for the
+      // element through result.dynamic_pseudo. For ::highlight() pseudo
+      // elements we have a single flag for tracking whether an element may
+      // match _any_ ::highlight() element (kPseudoIdHighlight).
+      if (!pseudo_argument_ || pseudo_argument_ == selector.Argument()) {
+        result.custom_highlight_name = selector.Argument();
+        return true;
+      }
+      return false;
+    }
+    case CSSSelector::kPseudoPageTransitionContainer:
+    case CSSSelector::kPseudoPageTransitionImageWrapper:
+    case CSSSelector::kPseudoPageTransitionOutgoingImage:
+    case CSSSelector::kPseudoPageTransitionIncomingImage: {
+      if (CSSSelector::GetPseudoId(selector.GetPseudoType()) !=
+          context.pseudo_id) {
+        return false;
+      }
+      result.dynamic_pseudo = context.pseudo_id;
+      return selector.Argument() == CSSSelector::UniversalSelectorAtom() ||
+             selector.Argument() == pseudo_argument_;
+    }
+    case CSSSelector::kPseudoTargetText:
+      if (!is_ua_rule_) {
+        UseCounter::Count(context.element->GetDocument(),
+                          WebFeature::kCSSSelectorTargetText);
+      }
+      [[fallthrough]];
     default:
       DCHECK_NE(mode_, kQueryingRules);
       result.dynamic_pseudo =
           CSSSelector::GetPseudoId(selector.GetPseudoType());
       DCHECK_NE(result.dynamic_pseudo, kPseudoIdNone);
       return true;
-  }
-}
-
-bool SelectorChecker::CheckPseudoElementForVTT(
-    const SelectorCheckingContext& context,
-    MatchResult& result) const {
-  const CSSSelector& selector = *context.selector;
-  Element& element = *context.element;
-  switch (selector.GetPseudoType()) {
-    case CSSSelector::kPseudoCue: {
-      SelectorCheckingContext sub_context(context);
-      sub_context.is_sub_selector = true;
-      sub_context.scope = nullptr;
-      sub_context.treat_shadow_host_as_normal_scope = false;
-
-      for (sub_context.selector = selector.SelectorList()->First();
-           sub_context.selector; sub_context.selector = CSSSelectorList::Next(
-                                     *sub_context.selector)) {
-        MatchResult sub_result;
-        if (MatchSelectorForVTT(sub_context, sub_result) == kSelectorMatches)
-          return true;
-      }
-      return false;
-    }
-    case CSSSelector::kPseudoWebKitCustomElement: {
-      if (ShadowRoot* root = element.ContainingShadowRoot())
-        return root->IsUserAgent() &&
-               element.ShadowPseudoId() == selector.Value();
-      return false;
-    }
-    default:
-      return false;
   }
 }
 
@@ -1516,59 +1546,36 @@ bool SelectorChecker::CheckPseudoHost(const SelectorCheckingContext& context,
     return false;
   DCHECK(IsShadowHost(element));
   DCHECK(element.GetShadowRoot());
-  bool is_v1_shadow = element.GetShadowRoot()->IsV1();
 
   // For the case with no parameters, i.e. just :host.
-  if (!selector.SelectorList()) {
-    if (is_v1_shadow)
-      result.specificity += CSSSelector::kClassLikeSpecificity;
+  if (!selector.SelectorList())
     return true;
-  }
+
+  DCHECK(selector.SelectorList()->HasOneSelector());
 
   SelectorCheckingContext sub_context(context);
   sub_context.is_sub_selector = true;
+  sub_context.selector = selector.SelectorList()->First();
+  sub_context.treat_shadow_host_as_normal_scope = true;
+  sub_context.scope = context.scope;
+  // Use FlatTreeTraversal to traverse a composed ancestor list of a given
+  // element.
+  Element* next_element = &element;
+  SelectorCheckingContext host_context(sub_context);
+  do {
+    MatchResult sub_result;
+    host_context.element = next_element;
+    if (MatchSelector(host_context, sub_result) == kSelectorMatches)
+      return true;
+    host_context.treat_shadow_host_as_normal_scope = false;
+    host_context.scope = nullptr;
 
-  bool matched = false;
-  unsigned max_specificity = 0;
+    if (selector.GetPseudoType() == CSSSelector::kPseudoHost)
+      break;
 
-  // If one of simple selectors matches an element, returns SelectorMatches.
-  // Just "OR".
-  for (sub_context.selector = selector.SelectorList()->First();
-       sub_context.selector;
-       sub_context.selector = CSSSelectorList::Next(*sub_context.selector)) {
-    sub_context.treat_shadow_host_as_normal_scope = true;
-    sub_context.scope = context.scope;
-    // Use FlatTreeTraversal to traverse a composed ancestor list of a given
-    // element.
-    Element* next_element = &element;
-    SelectorCheckingContext host_context(sub_context);
-    do {
-      MatchResult sub_result;
-      host_context.element = next_element;
-      if (Match(host_context, sub_result)) {
-        matched = true;
-        // Consider div:host(div:host(div:host(div:host...))).
-        max_specificity =
-            std::max(max_specificity, host_context.selector->Specificity() +
-                                          sub_result.specificity);
-        break;
-      }
-      host_context.treat_shadow_host_as_normal_scope = false;
-      host_context.scope = nullptr;
-
-      if (selector.GetPseudoType() == CSSSelector::kPseudoHost)
-        break;
-
-      host_context.in_rightmost_compound = false;
-      next_element = FlatTreeTraversal::ParentElement(*next_element);
-    } while (next_element);
-  }
-  if (matched) {
-    result.specificity += max_specificity;
-    if (is_v1_shadow)
-      result.specificity += CSSSelector::kClassLikeSpecificity;
-    return true;
-  }
+    host_context.in_rightmost_compound = false;
+    next_element = FlatTreeTraversal::ParentElement(*next_element);
+  } while (next_element);
 
   // FIXME: this was a fallthrough condition.
   return false;
@@ -1660,6 +1667,16 @@ bool SelectorChecker::CheckScrollbarPseudoClass(
   }
 }
 
+bool SelectorChecker::MatchesSelectorFragmentAnchorPseudoClass(
+    const Element& element) {
+  return element == element.GetDocument().CssTarget() &&
+         element.GetDocument().View()->GetFragmentAnchor() &&
+         element.GetDocument()
+             .View()
+             ->GetFragmentAnchor()
+             ->IsSelectorFragmentAnchor();
+}
+
 bool SelectorChecker::MatchesFocusPseudoClass(const Element& element) {
   bool force_pseudo_state = false;
   probe::ForcePseudoState(const_cast<Element*>(&element),
@@ -1681,6 +1698,11 @@ bool SelectorChecker::MatchesFocusVisiblePseudoClass(const Element& element) {
     return false;
 
   const Document& document = element.GetDocument();
+  // Exclude shadow hosts with non-UA ShadowRoot.
+  if (document.FocusedElement() != element && element.GetShadowRoot() &&
+      !element.GetShadowRoot()->IsUserAgent())
+    return false;
+
   const Settings* settings = document.GetSettings();
   bool always_show_focus = settings->GetAccessibilityAlwaysShowFocus();
   bool is_text_input = element.MayTriggerVirtualKeyboard();

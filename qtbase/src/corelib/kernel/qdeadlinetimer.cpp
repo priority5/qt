@@ -1,47 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qdeadlinetimer.h"
 #include "qdeadlinetimer_p.h"
 #include "private/qnumeric_p.h"
 
 QT_BEGIN_NAMESPACE
+
+QT_IMPL_METATYPE_EXTERN(QDeadlineTimer)
 
 namespace {
     class TimeReference
@@ -190,7 +156,7 @@ bool TimeReference::addSecsAndNSecs(qint64 addSecs, qint64 addNSecs)
  */
 bool TimeReference::adjust(const qint64 t1, const unsigned t2, qint64 carrySeconds)
 {
-    Q_STATIC_ASSERT(QDeadlineTimerNanosecondsInT2);
+    static_assert(QDeadlineTimerNanosecondsInT2);
     nsecs += t2;
     if (nsecs >= ugiga) {
         nsecs -= ugiga;
@@ -291,7 +257,7 @@ inline bool TimeReference::addSecsAndNSecs(qint64 addSecs, qint64 addNSecs)
 
 inline bool TimeReference::adjust(const qint64 t1, const unsigned t2, qint64 carrySeconds)
 {
-    Q_STATIC_ASSERT(!QDeadlineTimerNanosecondsInT2);
+    static_assert(!QDeadlineTimerNanosecondsInT2);
     Q_UNUSED(t2);
     Q_UNUSED(carrySeconds);
 
@@ -873,8 +839,7 @@ QDeadlineTimer QDeadlineTimer::addNSecs(QDeadlineTimer dt, qint64 nsecs) noexcep
 */
 
 /*!
-    \fn bool operator==(QDeadlineTimer d1, QDeadlineTimer d2)
-    \relates QDeadlineTimer
+    \fn bool QDeadlineTimer::operator==(QDeadlineTimer d1, QDeadlineTimer d2)
 
     Returns true if the deadline on \a d1 and the deadline in \a d2 are the
     same, false otherwise. The timer type used to create the two deadlines is
@@ -887,11 +852,10 @@ QDeadlineTimer QDeadlineTimer::addNSecs(QDeadlineTimer dt, qint64 nsecs) noexcep
 */
 
 /*!
-    \fn bool operator!=(QDeadlineTimer d1, QDeadlineTimer d2)
-    \relates QDeadlineTimer
+    \fn bool QDeadlineTimer::operator!=(QDeadlineTimer d1, QDeadlineTimer d2)
 
     Returns true if the deadline on \a d1 and the deadline in \a d2 are
-    diferent, false otherwise. The timer type used to create the two deadlines
+    different, false otherwise. The timer type used to create the two deadlines
     is ignored. This function is equivalent to:
 
     \snippet code/src_corelib_kernel_qdeadlinetimer.cpp 9
@@ -901,8 +865,7 @@ QDeadlineTimer QDeadlineTimer::addNSecs(QDeadlineTimer dt, qint64 nsecs) noexcep
 */
 
 /*!
-    \fn bool operator<(QDeadlineTimer d1, QDeadlineTimer d2)
-    \relates QDeadlineTimer
+    \fn bool QDeadlineTimer::operator<(QDeadlineTimer d1, QDeadlineTimer d2)
 
     Returns true if the deadline on \a d1 is earlier than the deadline in \a
     d2, false otherwise. The timer type used to create the two deadlines is
@@ -915,8 +878,7 @@ QDeadlineTimer QDeadlineTimer::addNSecs(QDeadlineTimer dt, qint64 nsecs) noexcep
 */
 
 /*!
-    \fn bool operator<=(QDeadlineTimer d1, QDeadlineTimer d2)
-    \relates QDeadlineTimer
+    \fn bool QDeadlineTimer::operator<=(QDeadlineTimer d1, QDeadlineTimer d2)
 
     Returns true if the deadline on \a d1 is earlier than or the same as the
     deadline in \a d2, false otherwise. The timer type used to create the two
@@ -929,8 +891,7 @@ QDeadlineTimer QDeadlineTimer::addNSecs(QDeadlineTimer dt, qint64 nsecs) noexcep
 */
 
 /*!
-    \fn bool operator>(QDeadlineTimer d1, QDeadlineTimer d2)
-    \relates QDeadlineTimer
+    \fn bool QDeadlineTimer::operator>(QDeadlineTimer d1, QDeadlineTimer d2)
 
     Returns true if the deadline on \a d1 is later than the deadline in \a
     d2, false otherwise. The timer type used to create the two deadlines is
@@ -943,8 +904,7 @@ QDeadlineTimer QDeadlineTimer::addNSecs(QDeadlineTimer dt, qint64 nsecs) noexcep
 */
 
 /*!
-    \fn bool operator>=(QDeadlineTimer d1, QDeadlineTimer d2)
-    \relates QDeadlineTimer
+    \fn bool QDeadlineTimer::operator>=(QDeadlineTimer d1, QDeadlineTimer d2)
 
     Returns true if the deadline on \a d1 is later than or the same as the
     deadline in \a d2, false otherwise. The timer type used to create the two
@@ -957,8 +917,7 @@ QDeadlineTimer QDeadlineTimer::addNSecs(QDeadlineTimer dt, qint64 nsecs) noexcep
 */
 
 /*!
-    \fn QDeadlineTimer operator+(QDeadlineTimer dt, qint64 msecs)
-    \relates QDeadlineTimer
+    \fn QDeadlineTimer QDeadlineTimer::operator+(QDeadlineTimer dt, qint64 msecs)
 
     Returns a QDeadlineTimer object whose deadline is \a msecs later than the
     deadline stored in \a dt. If \a dt is set to never expire, this function
@@ -981,8 +940,7 @@ QDeadlineTimer operator+(QDeadlineTimer dt, qint64 msecs)
 }
 
 /*!
-    \fn QDeadlineTimer operator+(qint64 msecs, QDeadlineTimer dt)
-    \relates QDeadlineTimer
+    \fn QDeadlineTimer QDeadlineTimer::operator+(qint64 msecs, QDeadlineTimer dt)
 
     Returns a QDeadlineTimer object whose deadline is \a msecs later than the
     deadline stored in \a dt. If \a dt is set to never expire, this function
@@ -992,8 +950,7 @@ QDeadlineTimer operator+(QDeadlineTimer dt, qint64 msecs)
 */
 
 /*!
-    \fn QDeadlineTimer operator-(QDeadlineTimer dt, qint64 msecs)
-    \relates QDeadlineTimer
+    \fn QDeadlineTimer QDeadlineTimer::operator-(QDeadlineTimer dt, qint64 msecs)
 
     Returns a QDeadlineTimer object whose deadline is \a msecs before the
     deadline stored in \a dt. If \a dt is set to never expire, this function

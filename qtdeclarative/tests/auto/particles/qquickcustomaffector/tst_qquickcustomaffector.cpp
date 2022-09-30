@@ -1,46 +1,20 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QtTest/QtTest>
 #include "../shared/particlestestsshared.h"
 #include <private/qquickparticlesystem_p.h>
 #include <private/qabstractanimation_p.h>
-
-#include "../../shared/util.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
 
 class tst_qquickcustomaffector : public QQmlDataTest
 {
     Q_OBJECT
 public:
-    tst_qquickcustomaffector() {}
+    tst_qquickcustomaffector() : QQmlDataTest(QT_QMLTEST_DATADIR) {}
 
 private slots:
-    void initTestCase();
+    void initTestCase() override;
     void test_basic();
     void test_move();
     void test_affectedSignal();
@@ -75,7 +49,7 @@ void tst_qquickcustomaffector::test_basic()
         QCOMPARE(d->lifeSpan, 0.5f);
         QCOMPARE(d->size, 100.f);
         QCOMPARE(d->endSize, 100.f);
-        QCOMPARE(d->autoRotate, 1.f);
+        QCOMPARE(d->autoRotate, (uchar)1);
         QCOMPARE(d->color.r, (uchar)0);
         QCOMPARE(d->color.g, (uchar)255);
         QCOMPARE(d->color.b, (uchar)0);

@@ -91,8 +91,8 @@ int MapOpenSSLErrorSSL(uint32_t error_code) {
     case SSL_R_SSLV3_ALERT_CERTIFICATE_EXPIRED:
     case SSL_R_SSLV3_ALERT_CERTIFICATE_UNKNOWN:
     case SSL_R_TLSV1_ALERT_ACCESS_DENIED:
+    case SSL_R_TLSV1_ALERT_CERTIFICATE_REQUIRED:
     case SSL_R_TLSV1_ALERT_UNKNOWN_CA:
-    case SSL_R_TLSV1_CERTIFICATE_REQUIRED:
       return ERR_BAD_SSL_CLIENT_AUTH_CERT;
     case SSL_R_SSLV3_ALERT_DECOMPRESSION_FAILURE:
       return ERR_SSL_DECOMPRESSION_FAILURE_ALERT;
@@ -108,6 +108,8 @@ int MapOpenSSLErrorSSL(uint32_t error_code) {
       return ERR_WRONG_VERSION_ON_EARLY_DATA;
     case SSL_R_TLS13_DOWNGRADE:
       return ERR_TLS13_DOWNGRADE_DETECTED;
+    case SSL_R_ECH_REJECTED:
+      return ERR_ECH_NOT_NEGOTIATED;
     // SSL_R_SSLV3_ALERT_HANDSHAKE_FAILURE may be returned from the server after
     // receiving ClientHello if there's no common supported cipher. Map that
     // specific case to ERR_SSL_VERSION_OR_CIPHER_MISMATCH to match the NSS

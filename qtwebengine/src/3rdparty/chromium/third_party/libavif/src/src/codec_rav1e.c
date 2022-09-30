@@ -3,7 +3,7 @@
 
 #include "avif/internal.h"
 
-#include "rav1e/rav1e.h"
+#include "rav1e.h"
 
 #include <string.h>
 
@@ -21,14 +21,6 @@ static void rav1eCodecDestroyInternal(avifCodec * codec)
         codec->internal->rav1eContext = NULL;
     }
     avifFree(codec->internal);
-}
-
-static avifBool rav1eCodecOpen(struct avifCodec * codec, uint32_t firstSampleIndex)
-{
-    (void)firstSampleIndex; // Codec is encode-only, this isn't used
-
-    codec->internal->rav1eContext = NULL;
-    return AVIF_TRUE;
 }
 
 // Official support wasn't added until v0.4.0
@@ -175,13 +167,13 @@ static avifResult rav1eCodecEncodeImage(avifCodec * codec,
 
     int byteWidth = (image->depth > 8) ? 2 : 1;
     if (alpha) {
-        rav1e_frame_fill_plane(rav1eFrame, 0, image->alphaPlane, image->alphaRowBytes * image->height, image->alphaRowBytes, byteWidth);
+        rav1e_frame_fill_plane(rav1eFrame, 0, image->alphaPlane, (size_t)image->alphaRowBytes * image->height, image->alphaRowBytes, byteWidth);
     } else {
-        rav1e_frame_fill_plane(rav1eFrame, 0, image->yuvPlanes[0], image->yuvRowBytes[0] * image->height, image->yuvRowBytes[0], byteWidth);
+        rav1e_frame_fill_plane(rav1eFrame, 0, image->yuvPlanes[0], (size_t)image->yuvRowBytes[0] * image->height, image->yuvRowBytes[0], byteWidth);
         if (image->yuvFormat != AVIF_PIXEL_FORMAT_YUV400) {
             uint32_t uvHeight = (image->height + codec->internal->yShift) >> codec->internal->yShift;
-            rav1e_frame_fill_plane(rav1eFrame, 1, image->yuvPlanes[1], image->yuvRowBytes[1] * uvHeight, image->yuvRowBytes[1], byteWidth);
-            rav1e_frame_fill_plane(rav1eFrame, 2, image->yuvPlanes[2], image->yuvRowBytes[2] * uvHeight, image->yuvRowBytes[2], byteWidth);
+            rav1e_frame_fill_plane(rav1eFrame, 1, image->yuvPlanes[1], (size_t)image->yuvRowBytes[1] * uvHeight, image->yuvRowBytes[1], byteWidth);
+            rav1e_frame_fill_plane(rav1eFrame, 2, image->yuvPlanes[2], (size_t)image->yuvRowBytes[2] * uvHeight, image->yuvRowBytes[2], byteWidth);
         }
     }
 
@@ -273,7 +265,6 @@ avifCodec * avifCodecCreateRav1e(void)
 {
     avifCodec * codec = (avifCodec *)avifAlloc(sizeof(avifCodec));
     memset(codec, 0, sizeof(struct avifCodec));
-    codec->open = rav1eCodecOpen;
     codec->encodeImage = rav1eCodecEncodeImage;
     codec->encodeFinish = rav1eCodecEncodeFinish;
     codec->destroyInternal = rav1eCodecDestroyInternal;

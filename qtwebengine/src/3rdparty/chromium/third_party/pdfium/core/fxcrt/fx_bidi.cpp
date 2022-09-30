@@ -9,14 +9,14 @@
 #include <algorithm>
 
 #include "core/fxcrt/fx_unicode.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/check.h"
 
 CFX_BidiChar::CFX_BidiChar()
     : m_CurrentSegment({0, 0, NEUTRAL}), m_LastSegment({0, 0, NEUTRAL}) {}
 
 bool CFX_BidiChar::AppendChar(wchar_t wch) {
   Direction direction;
-  switch (FX_GetBidiClass(wch)) {
+  switch (pdfium::unicode::GetBidiClass(wch)) {
     case FX_BIDICLASS::kL:
     case FX_BIDICLASS::kAN:
     case FX_BIDICLASS::kEN:
@@ -77,7 +77,7 @@ CFX_BidiString::CFX_BidiString(const WideString& str) : m_Str(str) {
 CFX_BidiString::~CFX_BidiString() = default;
 
 CFX_BidiChar::Direction CFX_BidiString::OverallDirection() const {
-  ASSERT(m_eOverallDirection != CFX_BidiChar::NEUTRAL);
+  DCHECK(m_eOverallDirection != CFX_BidiChar::NEUTRAL);
   return m_eOverallDirection;
 }
 

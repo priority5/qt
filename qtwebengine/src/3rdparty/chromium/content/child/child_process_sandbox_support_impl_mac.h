@@ -22,6 +22,10 @@ namespace content {
 class WebSandboxSupportMac : public blink::WebSandboxSupport {
  public:
   WebSandboxSupportMac();
+
+  WebSandboxSupportMac(const WebSandboxSupportMac&) = delete;
+  WebSandboxSupportMac& operator=(const WebSandboxSupportMac&) = delete;
+
   ~WebSandboxSupportMac() override;
 
   // blink::WebSandboxSupport:
@@ -29,15 +33,13 @@ class WebSandboxSupportMac : public blink::WebSandboxSupport {
                 base::ScopedCFTypeRef<CTFontDescriptorRef>* out_descriptor,
                 uint32_t* font_id) override;
   SkColor GetSystemColor(blink::MacSystemColorID color_id,
-                         blink::ColorScheme color_scheme) override;
+                         blink::mojom::ColorScheme color_scheme) override;
 
  private:
   void OnGotSystemColors(base::ReadOnlySharedMemoryRegion region);
 
   mojo::Remote<mojom::SandboxSupportMac> sandbox_support_;
   base::ReadOnlySharedMemoryMapping color_map_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebSandboxSupportMac);
 };
 
 }  // namespace content

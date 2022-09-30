@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 // some versions of CALayer.h use 'slots' as an identifier
 #define QT_NO_KEYWORDS
@@ -34,7 +9,7 @@
 #include <QtWidgets/qlineedit.h>
 #include <QtWidgets/qpushbutton.h>
 #include <QtWidgets>
-#include <QtTest>
+#include <QTest>
 #include <unistd.h>
 
 #import <AppKit/AppKit.h>
@@ -86,6 +61,7 @@ QDebug operator<<(QDebug dbg, AXErrorTag err)
         return false; \
     } \
 
+#define TRY_EXPECT(cond) EXPECT(QTest::qWaitFor([&]{ return (cond); }))
 
 @interface TestAXObject : NSObject
 {
@@ -546,21 +522,17 @@ bool notifications(QWidget *w)
 
     EXPECT(notificationList.length() == 0);
     le2->setFocus();
-    QCoreApplication::processEvents();
-    EXPECT(notificationList.length() == 1);
-    EXPECT(notificationList.at(0) == QAccessible::Focus);
+    TRY_EXPECT(notificationList.length() == 1);
+    TRY_EXPECT(notificationList.at(0) == QAccessible::Focus);
     le1->setFocus();
-    QCoreApplication::processEvents();
-    EXPECT(notificationList.length() == 2);
-    EXPECT(notificationList.at(1) == QAccessible::Focus);
+    TRY_EXPECT(notificationList.length() == 2);
+    TRY_EXPECT(notificationList.at(1) == QAccessible::Focus);
     le1->setText("hello");
-    QCoreApplication::processEvents();
-    EXPECT(notificationList.length() == 3);
-    EXPECT(notificationList.at(2) == QAccessible::ValueChanged);
+    TRY_EXPECT(notificationList.length() == 3);
+    TRY_EXPECT(notificationList.at(2) == QAccessible::ValueChanged);
     le1->setText("foo");
-    QCoreApplication::processEvents();
-    EXPECT(notificationList.length() == 4);
-    EXPECT(notificationList.at(3) == QAccessible::ValueChanged);
+    TRY_EXPECT(notificationList.length() == 4);
+    TRY_EXPECT(notificationList.at(3) == QAccessible::ValueChanged);
 
     return true;
 }

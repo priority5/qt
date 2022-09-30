@@ -1,34 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #define Q_TEST_QPIXMAPCACHE
 
-#include <QtTest/QtTest>
+#include <QTest>
 
 
 #include <qpixmapcache.h>
@@ -107,24 +82,15 @@ void tst_QPixmapCache::setCacheLimit()
     QPixmap res;
     QPixmap *p1 = new QPixmap(2, 3);
     QPixmapCache::insert("P1", *p1);
-#if QT_DEPRECATED_SINCE(5, 13)
-    QVERIFY(QPixmapCache::find("P1") != 0);
-#endif
     QVERIFY(QPixmapCache::find("P1", &res));
     delete p1;
 
     QPixmapCache::setCacheLimit(0);
-#if QT_DEPRECATED_SINCE(5, 13)
-    QVERIFY(!QPixmapCache::find("P1"));
-#endif
     QVERIFY(!QPixmapCache::find("P1", &res));
 
     p1 = new QPixmap(2, 3);
     QPixmapCache::setCacheLimit(1000);
     QPixmapCache::insert("P1", *p1);
-#if QT_DEPRECATED_SINCE(5, 13)
-    QVERIFY(QPixmapCache::find("P1") != 0);
-#endif
     QVERIFY(QPixmapCache::find("P1", &res));
 
     delete p1;
@@ -210,17 +176,6 @@ void tst_QPixmapCache::find()
     QVERIFY(QPixmapCache::insert("P1", p1));
 
     QPixmap p2;
-#if QT_DEPRECATED_SINCE(5, 13)
-    QVERIFY(QPixmapCache::find("P1", p2));
-    QCOMPARE(p2.width(), 10);
-    QCOMPARE(p2.height(), 10);
-    QCOMPARE(p1, p2);
-
-    // obsolete
-    QPixmap *p3 = QPixmapCache::find("P1");
-    QVERIFY(p3);
-    QCOMPARE(p1, *p3);
-#endif
 
     QVERIFY(QPixmapCache::find("P1", &p2));
     QCOMPARE(p2.width(), 10);
@@ -278,16 +233,6 @@ void tst_QPixmapCache::insert()
     }
 
     int num = 0;
-#if QT_DEPRECATED_SINCE(5, 13)
-    for (int k = 0; k < numberOfKeys; ++k) {
-        if (QPixmapCache::find(QString::number(k)))
-            ++num;
-    }
-
-    if (QPixmapCache::find("0"))
-        ++num;
-    num = 0;
-#endif
     QPixmap res;
     for (int k = 0; k < numberOfKeys; ++k) {
         if (QPixmapCache::find(QString::number(k), &res))

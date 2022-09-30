@@ -103,7 +103,9 @@ bool TracingControllerAndroid::StartTracing(
       base::trace_event::TraceConfig(), /*privacy_filtering_enabled=*/false,
       /*convert_to_legacy_json=*/!use_protobuf);
   delete g_tracing_session;
-  g_tracing_session = perfetto::Tracing::NewTrace().release();
+  g_tracing_session =
+      perfetto::Tracing::NewTrace(perfetto::BackendType::kCustomBackend)
+          .release();
   g_tracing_session->Setup(perfetto_config);
   g_tracing_session->Start();
   return true;
@@ -161,12 +163,13 @@ void TracingControllerAndroid::StopTracing(
   session->data->Stop();
 }
 
-void TracingControllerAndroid::GenerateTracingFilePath(
-    base::FilePath* file_path) {
+base::FilePath TracingControllerAndroid::GenerateTracingFilePath(
+    const std::string& basename) {
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jstring> jfilename =
-      Java_TracingControllerAndroidImpl_generateTracingFilePath(env);
-  *file_path = base::FilePath(
+      Java_TracingControllerAndroidImpl_generateTracingFilePath(
+          env, base::android::ConvertUTF8ToJavaString(env, basename));
+  return base::FilePath(
       base::android::ConvertJavaStringToUTF8(env, jfilename.obj()));
 }
 
@@ -194,7 +197,7 @@ void TracingControllerAndroid::OnKnownCategoriesReceived(
     const std::set<std::string>& categories_received) {
   base::ListValue category_list;
   for (const std::string& category : categories_received)
-    category_list.AppendString(category);
+    category_list.Append(category);
   std::string received_category_list;
   base::JSONWriter::Write(category_list, &received_category_list);
 

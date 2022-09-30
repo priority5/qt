@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-assert(is_chromeos)
+import("//build/config/chromeos/ui_mode.gni")
+
+assert(is_chromeos_ash)
 
 component("util") {
   output_name = "assistant_util"
@@ -26,10 +28,10 @@ component("util") {
 
   deps = [
     "//ash/assistant/model",
+    "//ash/constants",
     "//ash/public/cpp",
     "//base",
     "//base:i18n",
-    "//chromeos/constants",
     "//chromeos/services/assistant/public/cpp",
     "//chromeos/services/assistant/public/mojom",
     "//chromeos/ui/vector_icons",

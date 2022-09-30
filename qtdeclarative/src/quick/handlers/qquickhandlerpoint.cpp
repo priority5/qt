@@ -1,47 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickhandlerpoint_p.h"
 #include "private/qquickevents_p_p.h"
 
 QT_BEGIN_NAMESPACE
-Q_DECLARE_LOGGING_CATEGORY(DBG_TOUCH_TARGET)
+Q_DECLARE_LOGGING_CATEGORY(lcTouchTarget)
 
 /*!
     \qmltype HandlerPoint
@@ -49,7 +13,7 @@ Q_DECLARE_LOGGING_CATEGORY(DBG_TOUCH_TARGET)
     \inqmlmodule QtQuick
     \brief An event point.
 
-    A QML representation of a QQuickEventPoint.
+    A QML representation of a QEventPoint.
 
     It's possible to make bindings to properties of a handler's current
     \l {SinglePointHandler::point}{point} or
@@ -82,7 +46,8 @@ void QQuickHandlerPoint::localize(QQuickItem *item)
 
 void QQuickHandlerPoint::reset()
 {
-    m_id = 0;
+    m_id = -1;
+    m_device = QPointingDevice::primaryPointingDevice();
     m_uniqueId = QPointingDeviceUniqueId();
     m_position = QPointF();
     m_scenePosition = QPointF();
@@ -97,45 +62,41 @@ void QQuickHandlerPoint::reset()
     m_pressedModifiers = Qt::NoModifier;
 }
 
-void QQuickHandlerPoint::reset(const QQuickEventPoint *point)
+void QQuickHandlerPoint::reset(const QPointerEvent *event, const QEventPoint &point)
 {
-    m_id = point->pointId();
-    const QQuickPointerEvent *event = point->pointerEvent();
-    switch (point->state()) {
-    case QQuickEventPoint::Pressed:
-        m_pressPosition = point->position();
-        m_scenePressPosition = point->scenePosition();
-        m_pressedButtons = event->buttons();
-        break;
-    default:
-        break;
+    const bool isTouch = QQuickDeliveryAgentPrivate::isTouchEvent(event);
+    m_id = point.id();
+    m_device = event->pointingDevice();
+    const auto state = (isTouch ? static_cast<const QTouchEvent *>(event)->touchPointStates() : point.state());
+    if (state.testFlag(QEventPoint::Pressed)) {
+        m_pressPosition = point.position();
+        m_scenePressPosition = point.scenePosition();
     }
-    m_scenePressPosition = point->scenePressPosition();
-    m_pressedButtons = event->buttons();
+    if (!isTouch)
+        m_pressedButtons = static_cast<const QSinglePointEvent *>(event)->buttons();
     m_pressedModifiers = event->modifiers();
-    if (event->asPointerTouchEvent()) {
-        const QQuickEventTouchPoint *tp = static_cast<const QQuickEventTouchPoint *>(point);
-        m_uniqueId = tp->uniqueId();
-        m_rotation = tp->rotation();
-        m_pressure = tp->pressure();
-        m_ellipseDiameters = tp->ellipseDiameters();
+    if (isTouch) {
+        m_uniqueId = point.uniqueId();
+        m_rotation = point.rotation();
+        m_pressure = point.pressure();
+        m_ellipseDiameters = point.ellipseDiameters();
 #if QT_CONFIG(tabletevent)
-    } else if (event->asPointerTabletEvent()) {
-        m_uniqueId = event->device()->uniqueId();
-        m_rotation = static_cast<const QQuickEventTabletPoint *>(point)->rotation();
-        m_pressure = static_cast<const QQuickEventTabletPoint *>(point)->pressure();
+    } else if (QQuickDeliveryAgentPrivate::isTabletEvent(event)) {
+        m_uniqueId = event->pointingDevice()->uniqueId();
+        m_rotation = point.rotation();
+        m_pressure = point.pressure();
         m_ellipseDiameters = QSizeF();
 #endif
     } else {
-        m_uniqueId = event->device()->uniqueId();
+        m_uniqueId = event->pointingDevice()->uniqueId();
         m_rotation = 0;
-        m_pressure = event->buttons() ? 1 : 0;
+        m_pressure = m_pressedButtons ? 1 : 0;
         m_ellipseDiameters = QSizeF();
     }
-    m_position = point->position();
-    m_scenePosition = point->scenePosition();
-    if (point->state() == QQuickEventPoint::Updated)
-        m_velocity = point->velocity();
+    m_position = point.position();
+    m_scenePosition = point.scenePosition();
+    if (point.state() == QEventPoint::Updated)
+        m_velocity = point.velocity();
 }
 
 void QQuickHandlerPoint::reset(const QVector<QQuickHandlerPoint> &points)
@@ -165,7 +126,8 @@ void QQuickHandlerPoint::reset(const QVector<QQuickHandlerPoint> &points)
         pressureSum += point.pressure();
         ellipseDiameterSum += point.ellipseDiameters();
     }
-    m_id = 0;
+    m_id = -1;
+    m_device = nullptr;
     m_uniqueId = QPointingDeviceUniqueId();
     // all points are required to be from the same event, so pressed buttons and modifiers should be the same
     m_pressedButtons = points.first().pressedButtons();
@@ -195,12 +157,12 @@ void QQuickHandlerPoint::reset(const QVector<QQuickHandlerPoint> &points)
     sequential. Such an assumption is often false due to the way the underlying
     drivers work.
 
-    \sa QTouchEvent::TouchPoint::id
+    \sa QEventPoint::id
 */
 
 /*!
     \readonly
-    \qmlproperty PointingDeviceUniqueId QtQuick::HandlerPoint::uniqueId
+    \qmlproperty pointingDeviceUniqueId QtQuick::HandlerPoint::uniqueId
     \brief The unique ID of the point, if any
 
     This is normally empty, because touchscreens cannot uniquely identify fingers.
@@ -217,7 +179,7 @@ void QQuickHandlerPoint::reset(const QVector<QQuickHandlerPoint> &points)
     Interpreting the contents of this ID requires knowledge of the hardware and
     drivers in use.
 
-    \sa QTabletEvent::uniqueId, QtQuick::TouchPoint::uniqueId, QtQuick::EventTouchPoint::uniqueId
+    \sa QTabletEvent::uniqueId, QtQuick::TouchPoint::uniqueId
 */
 
 /*!
@@ -294,7 +256,7 @@ void QQuickHandlerPoint::reset(const QVector<QQuickHandlerPoint> &points)
     nonzero when this point is in motion. It holds the average recent velocity:
     how fast and in which direction the event point has been moving recently.
 
-    \sa QtQuick::EventPoint::velocity, QtQuick::TouchPoint::velocity, QTouchEvent::TouchPoint::velocity
+    \sa QtQuick::TouchPoint::velocity, QEventPoint::velocity
 */
 
 /*!
@@ -344,7 +306,9 @@ void QQuickHandlerPoint::reset(const QVector<QQuickHandlerPoint> &points)
     If the contact patch is unknown, or the device is not a touchscreen,
     these values will be zero.
 
-    \sa QtQuick::EventTouchPoint::ellipseDiameters, QtQuick::TouchPoint::ellipseDiameters, QTouchEvent::TouchPoint::ellipseDiameters
+    \sa QtQuick::TouchPoint::ellipseDiameters, QEventPoint::ellipseDiameters
 */
 
 QT_END_NAMESPACE
+
+#include "moc_qquickhandlerpoint_p.cpp"

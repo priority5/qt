@@ -46,22 +46,18 @@ bool OutputPresenter::Image::Initialize(
   return true;
 }
 
-void OutputPresenter::Image::BeginWriteSkia() {
+void OutputPresenter::Image::BeginWriteSkia(int sample_count) {
   DCHECK(!scoped_skia_write_access_);
-  DCHECK(!present_count());
+  DCHECK(!GetPresentCount());
   DCHECK(end_semaphores_.empty());
 
   std::vector<GrBackendSemaphore> begin_semaphores;
-  // LegacyFontHost will get LCD text and skia figures out what type to use.
-  SkSurfaceProps surface_props(0 /* flags */,
-                               SkSurfaceProps::kLegacyFontHost_InitType);
+  SkSurfaceProps surface_props{0, kUnknown_SkPixelGeometry};
 
   // Buffer queue is internal to GPU proc and handles texture initialization,
   // so allow uncleared access.
-  // TODO(vasilyt): Props and MSAA
   scoped_skia_write_access_ = skia_representation_->BeginScopedWriteAccess(
-      0 /* final_msaa_count */, surface_props, &begin_semaphores,
-      &end_semaphores_,
+      sample_count, surface_props, &begin_semaphores, &end_semaphores_,
       gpu::SharedImageRepresentation::AllowUnclearedAccess::kYes);
   DCHECK(scoped_skia_write_access_);
   if (!begin_semaphores.empty()) {
@@ -84,11 +80,11 @@ OutputPresenter::Image::TakeEndWriteSkiaSemaphores() {
   return result;
 }
 
-void OutputPresenter::Image::EndWriteSkia() {
+void OutputPresenter::Image::EndWriteSkia(bool force_flush) {
   // The Flush now takes place in finishPaintCurrentBuffer on the CPU side.
-  // check if end_semaphores is not empty then flash here
+  // check if end_semaphores is not empty then flush here
   DCHECK(scoped_skia_write_access_);
-  if (!end_semaphores_.empty()) {
+  if (!end_semaphores_.empty() || force_flush) {
     GrFlushInfo flush_info = {
         .fNumSemaphores = end_semaphores_.size(),
         .fSignalSemaphores = end_semaphores_.data(),
@@ -113,6 +109,17 @@ void OutputPresenter::Image::PreGrContextSubmit() {
     scoped_skia_write_access_->surface()->flush(
         {}, scoped_skia_write_access_->end_state());
   }
+}
+
+std::unique_ptr<OutputPresenter::Image> OutputPresenter::AllocateSingleImage(
+    gfx::ColorSpace color_space,
+    gfx::Size image_size) {
+  return nullptr;
+}
+
+void OutputPresenter::ScheduleOneOverlay(const OverlayCandidate& overlay,
+                                         ScopedOverlayAccess* access) {
+  NOTREACHED();
 }
 
 }  // namespace viz

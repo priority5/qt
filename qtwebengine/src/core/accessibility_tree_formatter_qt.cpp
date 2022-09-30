@@ -1,78 +1,39 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
-#include "content/browser/accessibility/accessibility_tree_formatter_base.h"
+#include "ui/accessibility/platform/inspect/ax_tree_formatter_base.h"
 
 #include <utility>
 
-#include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "content/browser/accessibility/accessibility_tree_formatter_blink.h"
+#include "content/browser/accessibility/browser_accessibility.h"
+#include "content/public/browser/ax_inspect_factory.h"
+#include "ui/accessibility/platform/inspect/ax_event_recorder.h"
 
 #include "browser_accessibility_qt.h"
+
+#include <QtGui/qaccessible.h>
 
 namespace content {
 
 #if QT_CONFIG(accessibility)
-class AccessibilityTreeFormatterQt : public AccessibilityTreeFormatterBase {
+class AccessibilityTreeFormatterQt : public ui::AXTreeFormatterBase {
 public:
     explicit AccessibilityTreeFormatterQt();
     ~AccessibilityTreeFormatterQt() override;
 
-   std::unique_ptr<base::DictionaryValue> BuildAccessibilityTreeForSelector(const content::AccessibilityTreeFormatter::TreeSelector &)
-   { return nullptr; }
-   std::unique_ptr<base::DictionaryValue> BuildAccessibilityTreeForWindow(gfx::AcceleratedWidget) override { return nullptr; }
-   std::unique_ptr<base::DictionaryValue> BuildAccessibilityTree(content::BrowserAccessibility *) override;
+   base::Value BuildTree(ui::AXPlatformNodeDelegate *start) const override;
+   base::Value BuildTreeForSelector(const AXTreeSelector &selector) const override
+   {
+       return base::Value{};
+   }
 
 private:
-    base::FilePath::StringType GetExpectedFileSuffix() override;
-    const std::string GetAllowEmptyString() override;
-    const std::string GetAllowString() override;
-    const std::string GetDenyString() override;
-    const std::string GetDenyNodeString() override;
-    const std::string GetRunUntilEventString() override;
-    void RecursiveBuildAccessibilityTree(const content::BrowserAccessibility &node, base::DictionaryValue *dict) const;
+    void RecursiveBuildAccessibilityTree(const BrowserAccessibility &node, base::DictionaryValue *dict) const;
     void AddProperties(const BrowserAccessibility &node, base::DictionaryValue *dict) const;
-    std::string ProcessTreeForOutput(const base::DictionaryValue &node, base::DictionaryValue * = nullptr) override;
+    std::string ProcessTreeForOutput(const base::DictionaryValue &node) const override;
 };
 
 AccessibilityTreeFormatterQt::AccessibilityTreeFormatterQt()
@@ -83,10 +44,12 @@ AccessibilityTreeFormatterQt::~AccessibilityTreeFormatterQt()
 {
 }
 
-std::unique_ptr<base::DictionaryValue> AccessibilityTreeFormatterQt::BuildAccessibilityTree(content::BrowserAccessibility *root)
+base::Value AccessibilityTreeFormatterQt::BuildTree(ui::AXPlatformNodeDelegate *start) const
 {
-    std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
-    RecursiveBuildAccessibilityTree(*root, dict.get());
+    BrowserAccessibility *root_internal =
+        BrowserAccessibility::FromAXPlatformNodeDelegate(start);
+    base::Value dict(base::Value::Type::DICTIONARY);
+    RecursiveBuildAccessibilityTree(*root_internal, static_cast<base::DictionaryValue *>(&dict));
     return dict;
 }
 
@@ -109,11 +72,11 @@ void AccessibilityTreeFormatterQt::RecursiveBuildAccessibilityTree(const Browser
 void AccessibilityTreeFormatterQt::AddProperties(const BrowserAccessibility &node, base::DictionaryValue *dict) const
 {
     dict->SetInteger("id", node.GetId());
-    const BrowserAccessibilityQt *acc_node = ToBrowserAccessibilityQt(&node);
+    const QAccessibleInterface *iface = toQAccessibleInterface(&node);
 
-    dict->SetString("role", qAccessibleRoleString(acc_node->role()));
+    dict->SetString("role", qAccessibleRoleString(iface->role()));
 
-    QAccessible::State state = acc_node->state();
+    QAccessible::State state = iface->state();
 
     std::vector<base::Value> states;
     if (state.busy)
@@ -122,7 +85,7 @@ void AccessibilityTreeFormatterQt::AddProperties(const BrowserAccessibility &nod
         states.push_back(base::Value("checkable"));
     if (state.checked)
         states.push_back(base::Value("checked"));
-    if (acc_node->IsClickable())
+    if (node.IsClickable())
         states.push_back(base::Value("clickable"));
     if (state.collapsed)
         states.push_back(base::Value("collapsed"));
@@ -168,11 +131,11 @@ void AccessibilityTreeFormatterQt::AddProperties(const BrowserAccessibility &nod
         states.push_back(base::Value("traversed"));
     dict->SetKey("states", base::Value(states));
 
-    dict->SetString("name", acc_node->text(QAccessible::Name).toStdString());
-    dict->SetString("description", acc_node->text(QAccessible::Description).toStdString());
+    dict->SetString("name", iface->text(QAccessible::Name).toStdString());
+    dict->SetString("description", iface->text(QAccessible::Description).toStdString());
 }
 
-std::string AccessibilityTreeFormatterQt::ProcessTreeForOutput(const base::DictionaryValue &node, base::DictionaryValue *)
+std::string AccessibilityTreeFormatterQt::ProcessTreeForOutput(const base::DictionaryValue &node) const
 {
     std::string error_value;
     if (node.GetString("error", &error_value))
@@ -185,12 +148,10 @@ std::string AccessibilityTreeFormatterQt::ProcessTreeForOutput(const base::Dicti
         WriteAttribute(true, base::StringPrintf("%s", role_value.c_str()), &line);
 
     const base::ListValue *states_value = nullptr;
-    node.GetList("states", &states_value);
-    if (states_value) {
-        for (const auto &state : *states_value) {
-            std::string state_value;
-            if (state.GetAsString(&state_value))
-                WriteAttribute(true, state_value, &line);
+    if (node.GetList("states", &states_value)) {
+        for (const auto &state : states_value->GetList()) {
+            if (auto *state_value = state.GetIfString())
+                WriteAttribute(false, *state_value, &line);
         }
     }
 
@@ -209,46 +170,54 @@ std::string AccessibilityTreeFormatterQt::ProcessTreeForOutput(const base::Dicti
     return line + "\n";
 }
 
-base::FilePath::StringType AccessibilityTreeFormatterQt::GetExpectedFileSuffix()
-{
-    return FILE_PATH_LITERAL("-expected-qt.txt");
-}
-
-const std::string AccessibilityTreeFormatterQt::GetAllowEmptyString()
-{
-    return "@QT-ALLOW-EMPTY:";
-}
-
-const std::string AccessibilityTreeFormatterQt::GetAllowString()
-{
-    return "@QT-ALLOW:";
-}
-
-const std::string AccessibilityTreeFormatterQt::GetDenyString()
-{
-    return "@QT-DENY:";
-}
-
-const std::string AccessibilityTreeFormatterQt::GetDenyNodeString()
-{
-    return "@QT-DENY-NODE:";
-}
-
-const std::string AccessibilityTreeFormatterQt::GetRunUntilEventString()
-{
-    return "@QT-RUN-UNTIL-EVENT:";
-}
-
 #endif // QT_CONFIG(accessibility)
 
 // static
-std::unique_ptr<AccessibilityTreeFormatter> AccessibilityTreeFormatter::Create()
+std::unique_ptr<ui::AXTreeFormatter>
+AXInspectFactory::CreatePlatformFormatter()
 {
+    return AXInspectFactory::CreateFormatter(ui::AXApiType::kQt);
+}
+
+// static
+std::unique_ptr<ui::AXEventRecorder> AXInspectFactory::CreatePlatformRecorder(BrowserAccessibilityManager *manager,
+                                                                              base::ProcessId pid,
+                                                                              const ui::AXTreeSelector &selector)
+{
+    return AXInspectFactory::CreateRecorder(ui::AXApiType::kQt, manager, pid, selector);
+}
+
+// static
+std::unique_ptr<ui::AXTreeFormatter> AXInspectFactory::CreateFormatter(ui::AXApiType::Type type)
+{
+    switch (type) {
+    case ui::AXApiType::kBlink:
+        return std::make_unique<AccessibilityTreeFormatterBlink>();
+    case ui::AXApiType::kQt:
 #if QT_CONFIG(accessibility)
-    return std::unique_ptr<AccessibilityTreeFormatter>(new AccessibilityTreeFormatterQt());
+        return std::make_unique<AccessibilityTreeFormatterQt>();
 #else
-    return nullptr;
+        return nullptr;
 #endif
+    default:
+        NOTREACHED() << "Unsupported inspect type " << type;
+    }
+    return nullptr;
+}
+
+// static
+std::unique_ptr<ui::AXEventRecorder> AXInspectFactory::CreateRecorder(ui::AXApiType::Type type,
+                                                                      BrowserAccessibilityManager *manager,
+                                                                      base::ProcessId pid,
+                                                                      const ui::AXTreeSelector &selector)
+{
+    switch (type) {
+    case ui::AXApiType::kQt:
+        return std::make_unique<ui::AXEventRecorder>();
+    default:
+        NOTREACHED() << "Unsupported inspect type " << type;
+    }
+    return nullptr;
 }
 
 } // namespace content

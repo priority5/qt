@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qquickwidget_plugin.h"
 
@@ -34,6 +9,9 @@
 #include <QtCore/qplugin.h>
 #include <QtCore/qdebug.h>
 #include <QtQuickWidgets/qquickwidget.h>
+
+#include <QtQuick/QQuickWindow>
+
 
 QT_BEGIN_NAMESPACE
 
@@ -79,6 +57,13 @@ bool QQuickWidgetPlugin::isContainer() const
 
 QWidget *QQuickWidgetPlugin::createWidget(QWidget *parent)
 {
+    const auto graphicsApi = QQuickWindow::graphicsApi();
+    if (graphicsApi != QSGRendererInterface::OpenGL) {
+        qWarning("Qt Designer: The QQuickWidget custom widget plugin is disabled because it requires OpenGL RHI (current: %d).",
+             int(graphicsApi));
+        return {};
+    }
+
     QQuickWidget *result = new QQuickWidget(parent);
     connect(result, &QQuickWidget::sceneGraphError,
             this, &QQuickWidgetPlugin::sceneGraphError);
@@ -100,22 +85,26 @@ void QQuickWidgetPlugin::initialize(QDesignerFormEditorInterface * /*core*/)
 
 QString QQuickWidgetPlugin::domXml() const
 {
-    return QStringLiteral("\
-    <ui language=\"c++\">\
-        <widget class=\"QQuickWidget\" name=\"quickWidget\">\
-            <property name=\"resizeMode\">\
-                <enum>QQuickWidget::SizeRootObjectToView</enum>\
-            </property>\
-            <property name=\"geometry\">\
-                <rect>\
-                    <x>0</x>\
-                    <y>0</y>\
-                    <width>300</width>\
-                    <height>200</height>\
-                </rect>\
-            </property>\
-        </widget>\
-    </ui>");
+    if (QQuickWindow::graphicsApi() != QSGRendererInterface::OpenGL)
+        return {};
+
+    return QStringLiteral(R"(
+<ui language="c++">
+    <widget class="QQuickWidget" name="quickWidget">
+        <property name="resizeMode">
+            <enum>QQuickWidget::SizeRootObjectToView</enum>
+        </property>
+        <property name="geometry">
+            <rect>
+                <x>0</x>
+                <y>0</y>
+                <width>300</width>
+                <height>200</height>
+            </rect>
+        </property>
+    </widget>
+</ui>
+)");
 }
 
 void QQuickWidgetPlugin::sceneGraphError(QQuickWindow::SceneGraphError, const QString &message)

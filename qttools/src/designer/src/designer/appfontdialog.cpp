@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "appfontdialog.h"
 
@@ -32,23 +7,24 @@
 
 #include <QtDesigner/abstractsettings.h>
 
-#include <QtWidgets/qtreeview.h>
-#include <QtWidgets/qtoolbutton.h>
-#include <QtWidgets/qboxlayout.h>
-#include <QtWidgets/qlayoutitem.h>
-#include <QtWidgets/qfiledialog.h>
-#include <QtGui/qstandarditemmodel.h>
-#include <QtWidgets/qmessagebox.h>
 #include <QtGui/qfontdatabase.h>
-#include <QtWidgets/qdialogbuttonbox.h>
+#include <QtGui/qstandarditemmodel.h>
 
-#include <QtCore/qsettings.h>
-#include <QtCore/qcoreapplication.h>
-#include <QtCore/qstringlist.h>
-#include <QtCore/qfileinfo.h>
+#include <QtWidgets/qboxlayout.h>
+#include <QtWidgets/qdialogbuttonbox.h>
+#include <QtWidgets/qfiledialog.h>
+#include <QtWidgets/qlayoutitem.h>
+#include <QtWidgets/qmessagebox.h>
+#include <QtWidgets/qtoolbutton.h>
+#include <QtWidgets/qtreeview.h>
+
 #include <QtCore/qalgorithms.h>
-#include <QtCore/qvector.h>
+#include <QtCore/qcoreapplication.h>
 #include <QtCore/qdebug.h>
+#include <QtCore/qfileinfo.h>
+#include <QtCore/qlist.h>
+#include <QtCore/qsettings.h>
+#include <QtCore/qstringlist.h>
 
 #include <algorithm>
 
@@ -82,7 +58,7 @@ public:
 
     // Store loaded fonts as pair of file name and Id
     using FileNameFontIdPair = QPair<QString,int>;
-    using FileNameFontIdPairs = QVector<FileNameFontIdPair>;
+    using FileNameFontIdPairs = QList<FileNameFontIdPair>;
     const FileNameFontIdPairs &fonts() const;
 
 private:
@@ -336,7 +312,7 @@ static void removeFonts(const QModelIndexList &selectedIndexes, AppFontModel *mo
 
     // Reverse sort top level rows and remove
     AppFontManager &fmgr = AppFontManager::instance();
-    QVector<int> rows;
+    QList<int> rows;
     rows.reserve(selectedIndexes.size());
 
     QString errorMessage;

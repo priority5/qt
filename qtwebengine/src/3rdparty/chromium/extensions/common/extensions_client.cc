@@ -102,14 +102,14 @@ std::set<base::FilePath> ExtensionsClient::GetBrowserImagePaths(
   return paths;
 }
 
-bool ExtensionsClient::ExtensionAPIEnabledInExtensionServiceWorkers() const {
-  return false;
-}
-
 void ExtensionsClient::AddOriginAccessPermissions(
     const Extension& extension,
     bool is_extension_active,
     std::vector<network::mojom::CorsOriginPatternPtr>* origin_patterns) const {}
+
+absl::optional<int> ExtensionsClient::GetExtensionExtendedErrorCode() const {
+  return absl::nullopt;
+}
 
 void ExtensionsClient::DoInitialize() {
   initialize_called_ = true;
@@ -127,8 +127,7 @@ void ExtensionsClient::DoInitialize() {
 
   UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
       "Extensions.ChromeExtensionsClientInitTime2", timer.Elapsed(),
-      base::TimeDelta::FromMicroseconds(1), base::TimeDelta::FromSeconds(10),
-      50);
+      base::Microseconds(1), base::Seconds(10), 50);
 }
 
 }  // namespace extensions

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qv4globalobject_p.h"
 #include <private/qv4mm_p.h>
@@ -80,13 +44,13 @@ static QString escape(const QString &input)
                 || (uc == 0x5F)) {
                 output.append(QChar(uc));
             } else {
-                output.append('%');
+                output.append(u'%');
                 output.append(QLatin1Char(toHexUpper(uc >> 4)));
                 output.append(QLatin1Char(toHexUpper(uc)));
             }
         } else {
-            output.append('%');
-            output.append('u');
+            output.append(u'%');
+            output.append(u'u');
             output.append(QLatin1Char(toHexUpper(uc >> 12)));
             output.append(QLatin1Char(toHexUpper(uc >> 8)));
             output.append(QLatin1Char(toHexUpper(uc >> 4)));
@@ -104,9 +68,9 @@ static QString unescape(const QString &input)
     const int length = input.length();
     while (i < length) {
         QChar c = input.at(i++);
-        if ((c == '%') && (i + 1 < length)) {
+        if ((c == u'%') && (i + 1 < length)) {
             QChar a = input.at(i);
-            if ((a == 'u') && (i + 4 < length)) {
+            if ((a == u'u') && (i + 4 < length)) {
                 int d3 = fromHex(input.at(i+1).unicode());
                 int d2 = fromHex(input.at(i+2).unicode());
                 int d1 = fromHex(input.at(i+3).unicode());
@@ -122,7 +86,7 @@ static QString unescape(const QString &input)
                 int d1 = fromHex(a.unicode());
                 int d0 = fromHex(input.at(i+1).unicode());
                 if ((d1 != -1) && (d0 != -1)) {
-                    c = (d1 << 4) | d0;
+                    c = QChar((d1 << 4) | d0);
                     i += 2;
                 }
                 result.append(c);
@@ -304,7 +268,7 @@ static QString decode(const QString &input, DecodeMode decodeMode, bool *ok)
                         ++r;
                     }
                     if (*r)
-                        output.append(input.midRef(start, i - start + 1));
+                        output.append(QStringView{input}.mid(start, i - start + 1));
                     else
                         output.append(QChar(b));
                 } else {

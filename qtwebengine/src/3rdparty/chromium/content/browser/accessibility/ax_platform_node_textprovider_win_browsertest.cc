@@ -6,6 +6,7 @@
 #include "ui/accessibility/platform/ax_platform_node_textprovider_win.h"
 #include "ui/accessibility/platform/ax_platform_node_textrangeprovider_win.h"
 
+#include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_safearray.h"
@@ -20,6 +21,7 @@
 #include "net/base/escape.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
+#include "ui/accessibility/accessibility_switches.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -49,6 +51,11 @@ namespace content {
 
 class AXPlatformNodeTextProviderWinBrowserTest : public ContentBrowserTest {
  protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        ::switches::kEnableExperimentalUIAutomation);
+  }
+
   void LoadInitialAccessibilityTreeFromUrl(
       const GURL& url,
       ui::AXMode accessibility_mode = ui::kAXModeComplete) {
@@ -130,14 +137,14 @@ class AXPlatformNodeTextProviderWinBrowserTest : public ContentBrowserTest {
                                           const std::string& name_or_value) {
     const std::string& name =
         node.GetStringAttribute(ax::mojom::StringAttribute::kName);
-    // Note that in the case of a text field, "BrowserAccessibility::GetValue"
-    // has the added functionality of computing the value of an ARIA text box
-    // from its inner text.
+    // Note that in the case of a text field,
+    // "BrowserAccessibility::GetValueForControl" has the added functionality
+    // of computing the value of an ARIA text box from its inner text.
     //
     // <div contenteditable="true" role="textbox">Hello world.</div>
     // Will expose no HTML value attribute, but some screen readers, such as
     // Jaws, VoiceOver and Talkback, require one to be computed.
-    const std::string& value = base::UTF16ToUTF8(node.GetValue());
+    const std::string value = base::UTF16ToUTF8(node.GetValueForControl());
     if (node.GetRole() == role &&
         (name == name_or_value || value == name_or_value)) {
       return &node;
@@ -172,7 +179,7 @@ IN_PROC_BROWSER_TEST_F(AXPlatformNodeTextProviderWinBrowserTest,
   auto* node =
       FindNode(ax::mojom::Role::kStaticText, "AAA BBB\nCCCCCC\nDDDDDD");
   ASSERT_NE(nullptr, node);
-  EXPECT_TRUE(node->PlatformIsLeaf());
+  EXPECT_TRUE(node->IsLeaf());
   EXPECT_EQ(0u, node->PlatformChildCount());
 
   ComPtr<ITextProvider> text_provider;

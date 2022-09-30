@@ -11,16 +11,19 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/observer_list.h"
 #include "base/system/sys_info.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/gpu/context_lost_observer.h"
 #include "components/viz/common/gpu/context_lost_reason.h"
 #include "components/viz/common/resources/platform_color.h"
 #include "components/viz/common/viz_utils.h"
+#include "components/viz/service/display/display_compositor_memory_and_task_controller.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
@@ -49,7 +52,7 @@ gpu::ContextCreationAttribs CreateAttributes(
   gpu::ContextCreationAttribs attributes;
   attributes.alpha_size = requires_alpha_channel ? 8 : -1;
   attributes.depth_size = 0;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Chrome OS uses surfaceless when running on a real device and stencil
   // buffers can then be added dynamically so supporting them does not have an
   // impact on normal usage. If we are not running on a real Chrome OS device
@@ -65,7 +68,7 @@ gpu::ContextCreationAttribs CreateAttributes(
   attributes.fail_if_major_perf_caveat = false;
   attributes.lose_context_when_out_of_memory = true;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (renderer_settings.color_space == gfx::ColorSpace::CreateSRGB()) {
     attributes.color_space = gpu::COLOR_SPACE_SRGB;
   } else if (renderer_settings.color_space ==
@@ -86,7 +89,7 @@ gpu::ContextCreationAttribs CreateAttributes(
   }
 
   attributes.enable_swap_timestamps_if_supported = true;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   return attributes;
 }
@@ -97,7 +100,7 @@ void UmaRecordContextLost(ContextLostReason reason) {
 
 gpu::SharedMemoryLimits SharedMemoryLimitsForRendererSettings(
     const RendererSettings& renderer_settings) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return gpu::SharedMemoryLimits::ForDisplayCompositor(
       renderer_settings.initial_screen_size);
 #else
@@ -113,12 +116,13 @@ VizProcessContextProvider::VizProcessContextProvider(
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     gpu::ImageFactory* image_factory,
     gpu::GpuChannelManagerDelegate* gpu_channel_manager_delegate,
+    DisplayCompositorMemoryAndTaskController* display_controller,
     const RendererSettings& renderer_settings)
     : attributes_(CreateAttributes(renderer_settings.requires_alpha_channel,
                                    renderer_settings)) {
   InitializeContext(std::move(task_executor), surface_handle,
                     gpu_memory_buffer_manager, image_factory,
-                    gpu_channel_manager_delegate,
+                    gpu_channel_manager_delegate, display_controller,
                     SharedMemoryLimitsForRendererSettings(renderer_settings));
 
   if (context_result_ == gpu::ContextResult::kSuccess) {
@@ -242,11 +246,12 @@ void VizProcessContextProvider::InitializeContext(
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     gpu::ImageFactory* image_factory,
     gpu::GpuChannelManagerDelegate* gpu_channel_manager_delegate,
+    DisplayCompositorMemoryAndTaskController* display_controller,
     const gpu::SharedMemoryLimits& mem_limits) {
   const bool is_offscreen = surface_handle == gpu::kNullSurfaceHandle;
+  DCHECK(display_controller);
+  gpu_task_scheduler_helper_ = display_controller->gpu_task_scheduler();
 
-  gpu_task_scheduler_helper_ =
-      base::MakeRefCounted<gpu::GpuTaskSchedulerHelper>(task_executor);
   command_buffer_ = std::make_unique<gpu::InProcessCommandBuffer>(
       task_executor,
       GURL("chrome://gpu/VizProcessContextProvider::InitializeContext"));
@@ -254,7 +259,8 @@ void VizProcessContextProvider::InitializeContext(
       /*surface=*/nullptr, is_offscreen, surface_handle, attributes_,
       gpu_memory_buffer_manager, image_factory, gpu_channel_manager_delegate,
       base::ThreadTaskRunnerHandle::Get(),
-      gpu_task_scheduler_helper_->GetTaskSequence(), nullptr, nullptr);
+      gpu_task_scheduler_helper_->GetTaskSequence(),
+      display_controller->controller_on_gpu(), nullptr, nullptr);
   if (context_result_ != gpu::ContextResult::kSuccess) {
     DLOG(ERROR) << "Failed to initialize InProcessCommmandBuffer";
     return;
@@ -269,7 +275,8 @@ void VizProcessContextProvider::InitializeContext(
     return;
   }
 
-  gpu_task_scheduler_helper_->Initialize(gles2_helper_.get());
+  if (gpu_task_scheduler_helper_)
+    gpu_task_scheduler_helper_->Initialize(gles2_helper_.get());
 
   transfer_buffer_ = std::make_unique<gpu::TransferBuffer>(gles2_helper_.get());
 
@@ -332,19 +339,6 @@ bool VizProcessContextProvider::OnMemoryDump(
 
 base::ScopedClosureRunner VizProcessContextProvider::GetCacheBackBufferCb() {
   return command_buffer_->GetCacheBackBufferCb();
-}
-
-scoped_refptr<gpu::GpuTaskSchedulerHelper>
-VizProcessContextProvider::GetGpuTaskSchedulerHelper() {
-  return gpu_task_scheduler_helper_;
-}
-
-gpu::SharedImageManager* VizProcessContextProvider::GetSharedImageManager() {
-  return command_buffer_->GetSharedImageManager();
-}
-
-gpu::MemoryTracker* VizProcessContextProvider::GetMemoryTracker() {
-  return command_buffer_->GetMemoryTracker();
 }
 
 void VizProcessContextProvider::SetNeedsMeasureNextDrawLatency() {

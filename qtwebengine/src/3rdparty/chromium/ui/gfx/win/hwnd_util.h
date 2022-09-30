@@ -5,17 +5,21 @@
 #ifndef UI_GFX_WIN_HWND_UTIL_H_
 #define UI_GFX_WIN_HWND_UTIL_H_
 
+#include <shobjidl.h>  // Must be before propkey.
 #include <windows.h>
+#include <wrl/client.h>
 
-#include "base/strings/string16.h"
+#include <string>
+
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/gfx_export.h"
 
 namespace gfx {
 class Size;
 
 // A version of the GetClassNameW API that returns the class name in an
-// base::string16. An empty result indicates a failure to get the class name.
-GFX_EXPORT base::string16 GetClassName(HWND hwnd);
+// std::wstring. An empty result indicates a failure to get the class name.
+GFX_EXPORT std::wstring GetClassName(HWND hwnd);
 
 // Useful for subclassing a HWND.  Returns the previous window procedure.
 GFX_EXPORT WNDPROC SetWindowProc(HWND hwnd, WNDPROC wndproc);
@@ -28,6 +32,13 @@ GFX_EXPORT void* GetWindowUserData(HWND hwnd);
 // Returns true if the specified window is the current active top window or one
 // of its children.
 GFX_EXPORT bool DoesWindowBelongToActiveWindow(HWND window);
+
+// Returns true if `window` is on the current virtual desktop, false if isn't,
+// and absl::nullopt if a COM method fails. Since this calls COM methods,
+// it can only be called from a COM thread.
+GFX_EXPORT absl::optional<bool> IsWindowOnCurrentVirtualDesktop(
+    HWND window,
+    Microsoft::WRL::ComPtr<IVirtualDesktopManager> virtual_desktop_manager);
 
 // Sizes the window to have a window size of |pref|, then centers the window
 // over |parent|, ensuring the window fits on screen.

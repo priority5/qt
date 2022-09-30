@@ -40,7 +40,7 @@ InstalledScriptsManager::ScriptData::ScriptData(
 
 ContentSecurityPolicyResponseHeaders
 InstalledScriptsManager::ScriptData::GetContentSecurityPolicyResponseHeaders() {
-  return ContentSecurityPolicyResponseHeaders(headers_);
+  return ContentSecurityPolicyResponseHeaders(headers_, script_url_);
 }
 
 String InstalledScriptsManager::ScriptData::GetReferrerPolicy() {
@@ -48,7 +48,9 @@ String InstalledScriptsManager::ScriptData::GetReferrerPolicy() {
 }
 
 String InstalledScriptsManager::ScriptData::GetHttpContentType() {
-  return headers_.Get(http_names::kContentType);
+  // Strip charset parameters from the MIME type since MIMETypeRegistry does
+  // not expect them to be present.
+  return ExtractMIMETypeFromMediaType(headers_.Get(http_names::kContentType));
 }
 
 std::unique_ptr<Vector<String>>

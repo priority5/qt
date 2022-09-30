@@ -1,33 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "debugutil_p.h"
-#include "../../../shared/util.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
 
 #include <private/qqmlbinding_p.h>
 #include <private/qqmlboundsignal_p.h>
@@ -91,7 +66,7 @@ class JsonTest : public QObject
    Q_PROPERTY(QJsonObject data READ data WRITE setData NOTIFY dataChanged)
 
 public:
-   JsonTest(QObject *parent = 0) : QObject(parent)
+   JsonTest(QObject *parent = nullptr) : QObject(parent)
    {
       m_data["foo"] = QJsonValue(12);
       m_data["ttt"] = QJsonArray({4, 5, 4, 3, 2});
@@ -119,11 +94,16 @@ private:
 };
 
 
-class tst_QQmlEngineDebugService : public QObject
+class tst_QQmlEngineDebugService : public QQmlDataTest
 {
     Q_OBJECT
 public:
-    tst_QQmlEngineDebugService() : m_conn(nullptr), m_dbg(nullptr), m_engine(nullptr), m_rootItem(nullptr) {}
+    tst_QQmlEngineDebugService()
+         : QQmlDataTest(QT_QMLTEST_DATADIR)
+         , m_conn(nullptr)
+         , m_dbg(nullptr)
+         , m_engine(nullptr)
+         , m_rootItem(nullptr) {}
 
 private:
     QQmlEngineDebugObjectReference findRootObject(int context = 0,
@@ -146,7 +126,7 @@ private:
     QObjectList m_components;
 
 private slots:
-    void initTestCase();
+    void initTestCase() override;
     void cleanupTestCase();
 
     void watch_property();
@@ -155,6 +135,7 @@ private slots:
     void watch_expression_data();
     void watch_context();
     void watch_file();
+    void debuggerCrashOnAttach();
 
     void queryAvailableEngines();
     void queryRootContexts();
@@ -282,7 +263,11 @@ void tst_QQmlEngineDebugService::recursiveObjectTest(
             }
         } else if (pmeta.userType() < QMetaType::User && pmeta.userType() != QMetaType::QVariant) {
             const QVariant expected = pmeta.read(o);
-            QVERIFY2(p.value == expected, QString::fromLatin1("%1 != %2. Details: %3/%4/%5/%6")
+            QVariant value = p.value;
+            QMetaType expectedType = expected.metaType();
+            if (value != expected && p.value.canConvert(expectedType))
+               value.convert(expectedType);
+            QVERIFY2(value == expected, QString::fromLatin1("%1 != %2. Details: %3/%4/%5/%6")
                      .arg(QTest::toString(p.value)).arg(QTest::toString(expected)).arg(p.name)
                      .arg(p.valueTypeName).arg(pmeta.userType()).arg(pmeta.userType()).toUtf8());
         }
@@ -323,93 +308,35 @@ void tst_QQmlEngineDebugService::getContexts()
 
 void tst_QQmlEngineDebugService::initTestCase()
 {
+    QQmlDataTest::initTestCase();
+
     qmlRegisterType<NonScriptProperty>("Test", 1, 0, "NonScriptPropertyElement");
 
     QTest::ignoreMessage(QtDebugMsg, "QML Debugger: Waiting for connection on port 3768...");
     m_engine = new QQmlEngine(this);
 
-    QList<QByteArray> qml;
-    qml << "import QtQuick 2.0\n"
-           "import Test 1.0\n"
-           "Item {"
-                "id: root\n"
-                "width: 10; height: 20; scale: blueRect.scale;"
-                "Rectangle { id: blueRect; width: 500; height: 600; color: \"blue\"; }"
-                "Text { font.bold: true; color: blueRect.color; }"
-                "MouseArea {"
-                    "onEntered: { console.log('hello') }"
-                "}"
-                "property variant varObj\n"
-                "property variant varObjList: []\n"
-                "property variant varObjMap\n"
-                "property variant simpleVar: 10.05\n"
-                "Component.onCompleted: {\n"
-                    "varObj = blueRect;\n"
-                    "var list = varObjList;\n"
-                    "list[0] = blueRect;\n"
-                    "varObjList = list;\n"
-                    "var map = new Object;\n"
-                    "map.rect = blueRect;\n"
-                    "varObjMap = map;\n"
-                "}\n"
-                "NonScriptPropertyElement {\n"
-                "}\n"
-            "}";
-
-    // add second component to test multiple root contexts
-    qml << "import QtQuick 2.0\n"
-            "Item {}";
-
-    // and a third to test methods
-    qml << "import QtQuick 2.0\n"
-            "Item {"
-                "function myMethodNoArgs() { return 3; }\n"
-                "function myMethod(a) { return a + 9; }\n"
-                "function myMethodIndirect() { myMethod(3); }\n"
-            "}";
-
-    // and a fourth to test states
-    qml << "import QtQuick 2.0\n"
-           "Rectangle {\n"
-                "id:rootRect\n"
-                "width:100\n"
-                "states: [\n"
-                    "State {\n"
-                        "name:\"state1\"\n"
-                        "PropertyChanges {\n"
-                            "target:rootRect\n"
-                            "width:200\n"
-                        "}\n"
-                    "}\n"
-                "]\n"
-                "transitions: [\n"
-                    "Transition {\n"
-                        "from:\"*\"\n"
-                        "to:\"state1\"\n"
-                        "PropertyAnimation {\n"
-                            "target:rootRect\n"
-                            "property:\"width\"\n"
-                            "duration:100\n"
-                        "}\n"
-                    "}\n"
-                "]\n"
-           "}\n"
-           ;
-
-    // test non-streamable properties
     qmlRegisterType<CustomTypes>("Backend", 1, 0, "CustomTypes");
-    qml << "import Backend 1.0\n"
-           "CustomTypes {}"
-           ;
-
     qmlRegisterType<JsonTest>("JsonTest", 1, 0, "JsonTest");
-    qml << "import JsonTest 1.0\n"
-           "JsonTest {}"
-           ;
 
-    for (int i=0; i<qml.count(); i++) {
-        QQmlComponent component(m_engine);
-        component.setData(qml[i], QUrl::fromLocalFile(""));
+    // The contents of these files was previously hardcoded as QList<QByteArray>
+    // directly in this test, but that fails on Android, because the required
+    // dependencies are not deployed. When the contents is moved to separate
+    // files, qmlimportscanner is capable of providing all the necessary
+    // dependencies.
+    // Note that the order of the files in this list matters! The test-cases
+    // expect Qml components to be created is certain order.
+    constexpr const char *fileNames[] = {
+        "complexItem.qml",
+        "emptyItem.qml",
+        "itemWithFunctions.qml",
+        "rectangleWithTransitions.qml",
+        "customTypes.qml",
+        "jsonTest.qml",
+        "debuggerCrashOnAttach.qml"
+    };
+
+    for (auto file : fileNames) {
+        QQmlComponent component(m_engine, testFileUrl(file));
         QVERIFY(component.isReady());  // fails if bad syntax
         m_components << qobject_cast<QQuickItem*>(component.create());
     }
@@ -553,6 +480,7 @@ void tst_QQmlEngineDebugService::watch_object()
 
     int origWidth = m_rootItem->property("width").toInt();
     int origHeight = m_rootItem->property("height").toInt();
+
     m_rootItem->setProperty("width", origWidth*2);
     QVERIFY(QQmlDebugTest::waitForSignal(m_dbg, SIGNAL(valueChanged(QByteArray,QVariant))));
     m_rootItem->setProperty("height", origHeight*2);
@@ -720,7 +648,7 @@ void tst_QQmlEngineDebugService::queryRootContexts()
     // root context query sends only root object data - it doesn't fill in
     // the children or property info
     QCOMPARE(context.objects.count(), 0);
-    QCOMPARE(context.contexts.count(), 7);
+    QCOMPARE(context.contexts.count(), 8);
     QVERIFY(context.contexts[0].debugId >= 0);
     QCOMPARE(context.contexts[0].name, QString("tst_QQmlDebug_childContext"));
 }
@@ -748,8 +676,8 @@ void tst_QQmlEngineDebugService::queryObject()
 
     // check source as defined in main()
     QQmlEngineDebugFileReference source = obj.source;
-    QCOMPARE(source.url, QUrl::fromLocalFile(""));
-    QCOMPARE(source.lineNumber, 3);
+    QCOMPARE(source.url, testFileUrl("complexItem.qml"));
+    QCOMPARE(source.lineNumber, 6); // because of license header
     QCOMPARE(source.columnNumber, 1);
 
     // generically test all properties, children and childrens' properties
@@ -774,9 +702,9 @@ void tst_QQmlEngineDebugService::queryObject()
         // test specific property values
         QCOMPARE(findProperty(rect.properties, "width").value, QVariant::fromValue(500));
         QCOMPARE(findProperty(rect.properties, "height").value, QVariant::fromValue(600));
-        QCOMPARE(findProperty(rect.properties, "color").value, QVariant::fromValue(QColor("blue")));
-
-        QCOMPARE(findProperty(text.properties, "color").value, QVariant::fromValue(QColor("blue")));
+        QVariant expected = findProperty(rect.properties, "color").value;
+        expected.convert(QMetaType::fromType<QColor>());
+        QCOMPARE(expected , QVariant::fromValue(QColor("blue")));
     } else {
         foreach (const QQmlEngineDebugObjectReference &child, obj.children) {
             QVERIFY(!child.className.isEmpty());
@@ -827,7 +755,7 @@ void tst_QQmlEngineDebugService::queryObjectsForLocation()
 
     // check source as defined in main()
     QQmlEngineDebugFileReference source = obj.source;
-    QCOMPARE(source.url, QUrl(fileName));
+    QCOMPARE(source.url, testFileUrl(fileName));
     QCOMPARE(source.lineNumber, lineNumber);
     QCOMPARE(source.columnNumber, columnNumber);
 
@@ -853,9 +781,11 @@ void tst_QQmlEngineDebugService::queryObjectsForLocation()
         // test specific property values
         QCOMPARE(findProperty(rect.properties, "width").value, QVariant::fromValue(500));
         QCOMPARE(findProperty(rect.properties, "height").value, QVariant::fromValue(600));
-        QCOMPARE(findProperty(rect.properties, "color").value, QVariant::fromValue(QColor("blue")));
-
-        QCOMPARE(findProperty(text.properties, "color").value, QVariant::fromValue(QColor("blue")));
+        QVariant expected = findProperty(rect.properties, "color").value;
+        QMetaType colorMetatype = QMetaType::fromType<QColor>();
+        QVERIFY(expected.canConvert(colorMetatype));
+        expected.convert(colorMetatype);
+        QCOMPARE(expected , QVariant::fromValue(QColor("blue")));
     } else {
         foreach (const QQmlEngineDebugObjectReference &child, obj.children) {
             QVERIFY(!child.className.isEmpty());
@@ -1395,15 +1325,12 @@ void tst_QQmlEngineDebugService::invalidContexts()
     QQmlContext context(m_engine);
     getContexts();
     QCOMPARE(m_dbg->rootContext().contexts.count(), base + 1);
-    QQmlContextData *contextData = QQmlContextData::get(&context);
+    QQmlRefPointer<QQmlContextData> contextData = QQmlContextData::get(&context);
     contextData->invalidate();
     getContexts();
     QCOMPARE(m_dbg->rootContext().contexts.count(), base);
-    QQmlContextData *rootData = QQmlContextData::get(m_engine->rootContext());
+    QQmlRefPointer<QQmlContextData> rootData = QQmlContextData::get(m_engine->rootContext());
     rootData->invalidate();
-    getContexts();
-    QCOMPARE(m_dbg->rootContext().contexts.count(), 0);
-    contextData->setParent(rootData); // makes context valid again, but not root.
     getContexts();
     QCOMPARE(m_dbg->rootContext().contexts.count(), 0);
 }
@@ -1429,6 +1356,18 @@ void tst_QQmlEngineDebugService::createObjectOnDestruction()
     // Doesn't crash and doesn't give us another signal for the object created on destruction.
     QTest::qWait(500);
     QCOMPARE(spy.count(), 2);
+}
+
+void tst_QQmlEngineDebugService::debuggerCrashOnAttach() {
+    QQmlEngineDebugObjectReference obj = findRootObject(6);
+    QVERIFY(!obj.className.isEmpty());
+
+    bool success;
+
+    m_dbg->addWatch(obj, &success);
+    QVERIFY(success);
+    QVERIFY(QQmlDebugTest::waitForSignal(m_dbg, SIGNAL(result())));
+    QCOMPARE(m_dbg->valid(), true);
 }
 
 int main(int argc, char *argv[])

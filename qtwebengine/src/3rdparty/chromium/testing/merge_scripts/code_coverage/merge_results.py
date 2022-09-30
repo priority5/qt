@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright 2019 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -20,10 +20,9 @@ import sys
 
 import merge_lib as profile_merger
 
-
 def _MergeAPIArgumentParser(*args, **kwargs):
   """Parameters passed to this merge script, as per:
-  https://chromium.googlesource.com/chromium/tools/build/+/master/scripts/slave/recipe_modules/swarming/resources/merge_api.py
+  https://chromium.googlesource.com/chromium/tools/build/+/main/scripts/slave/recipe_modules/swarming/resources/merge_api.py
   """
   parser = argparse.ArgumentParser(*args, **kwargs)
   parser.add_argument('--build-properties', help=argparse.SUPPRESS)
@@ -51,6 +50,12 @@ def _MergeAPIArgumentParser(*args, **kwargs):
   parser.add_argument(
       '--merged-jacoco-filename',
       help='filename used to uniquely name the merged exec file.')
+  parser.add_argument(
+      '--javascript-coverage-dir',
+      help='directory for JavaScript coverage data')
+  parser.add_argument(
+      '--merged-js-cov-filename', help='filename to uniquely identify merged '
+                                       'json coverage data')
   parser.add_argument(
       '--per-cl-coverage',
       action='store_true',
@@ -90,6 +95,28 @@ def main():
     profile_merger.merge_java_exec_files(
         params.task_output_dir, output_path, params.jacococli_path)
 
+  failed = False
+
+  if params.javascript_coverage_dir:
+    current_dir = os.path.dirname(__file__)
+    merge_js_results_script = os.path.join(current_dir, 'merge_js_results.py')
+    args = [
+      sys.executable,
+      merge_js_results_script,
+      '--task-output-dir',
+      params.task_output_dir,
+      '--javascript-coverage-dir',
+      params.javascript_coverage_dir,
+      '--merged-js-cov-filename',
+      params.merged_js_cov_filename,
+    ]
+
+    rc = subprocess.call(args)
+    if rc != 0:
+      failed = True
+      logging.warning('%s exited with %s' %
+                      (merge_js_results_script, rc))
+
   # Name the output profdata file name as {test_target}.profdata or
   # default.profdata.
   output_prodata_filename = (params.test_target_name or 'default') + '.profdata'
@@ -118,8 +145,6 @@ def main():
     with open(os.path.join(params.profdata_dir, 'invalid_profiles.json'),
               'w') as f:
       json.dump(invalid_profiles, f)
-
-  failed = False
 
   # If given, always run the additional merge script, even if we only have one
   # output json. Merge scripts sometimes upload artifacts to cloud storage, or

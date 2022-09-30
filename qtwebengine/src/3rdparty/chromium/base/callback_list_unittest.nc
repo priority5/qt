@@ -11,7 +11,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 
 namespace base {
 
@@ -43,8 +43,8 @@ class FooListener {
 // first callback has been run.
 void WontCompile() {
   FooListener f;
-  CallbackList<void(std::unique_ptr<Foo>)> c1;
-  std::unique_ptr<CallbackList<void(std::unique_ptr<Foo>)>::Subscription> sub =
+  RepeatingCallbackList<void(std::unique_ptr<Foo>)> c1;
+  CallbackListSubscription sub =
       c1.Add(BindRepeating(&FooListener::GotAScopedFoo, Unretained(&f)));
   c1.Notify(std::unique_ptr<Foo>(new Foo()));
 }

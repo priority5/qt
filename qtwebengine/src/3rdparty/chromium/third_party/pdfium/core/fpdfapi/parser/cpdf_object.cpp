@@ -14,9 +14,23 @@
 #include "core/fpdfapi/parser/cpdf_parser.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fxcrt/fx_string.h"
-#include "third_party/base/logging.h"
+#include "third_party/base/notreached.h"
 
 CPDF_Object::~CPDF_Object() = default;
+
+static_assert(sizeof(uint64_t) >= sizeof(CPDF_Object*),
+              "Need a bigger type for cache keys");
+
+static_assert(CPDF_Parser::kMaxObjectNumber < static_cast<uint32_t>(1) << 31,
+              "Need a smaller kMaxObjNumber for cache keys");
+
+uint64_t CPDF_Object::KeyForCache() const {
+  if (IsInline())
+    return (static_cast<uint64_t>(1) << 63) | reinterpret_cast<uint64_t>(this);
+
+  return (static_cast<uint64_t>(m_ObjNum) << 32) |
+         static_cast<uint64_t>(m_GenNum);
+}
 
 CPDF_Object* CPDF_Object::GetDirect() {
   return this;

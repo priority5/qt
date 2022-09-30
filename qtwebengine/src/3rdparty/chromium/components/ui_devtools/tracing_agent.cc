@@ -5,6 +5,7 @@
 #include "components/ui_devtools/tracing_agent.h"
 
 #include <algorithm>
+#include <memory>
 #include <unordered_set>
 #include <vector>
 
@@ -115,7 +116,7 @@ class TracingAgent::PerfettoTracingSession
     consumer_host_->EnableTracing(
         tracing_session_host_.BindNewPipeAndPassReceiver(),
         std::move(tracing_session_client), std::move(perfetto_config),
-        tracing::mojom::TracingClientPriority::kUserInitiated);
+        base::File());
 
     tracing_session_host_.set_disconnect_handler(
         base::BindOnce(&PerfettoTracingSession::OnTracingSessionFailed,
@@ -128,10 +129,9 @@ class TracingAgent::PerfettoTracingSession
     }
   }
 
-  void OnTracingDisabled() override {
+  void OnTracingDisabled(bool) override {
     // Since we're converting the tracing data to JSON, we will receive the
     // tracing data via ConsumerHost::DisableTracingAndEmitJson().
-    return;
   }
 
   void DisableTracing(
@@ -153,7 +153,7 @@ class TracingAgent::PerfettoTracingSession
     mojo::ScopedDataPipeConsumerHandle consumer_handle;
 
     MojoResult result =
-        mojo::CreateDataPipe(nullptr, &producer_handle, &consumer_handle);
+        mojo::CreateDataPipe(nullptr, producer_handle, consumer_handle);
     if (result != MOJO_RESULT_OK) {
       OnTracingSessionFailed();
       return;
@@ -201,7 +201,11 @@ class TracingAgent::PerfettoTracingSession
     last_config_for_perfetto_ = std::move(processfilter_stripped_config);
 #endif
 
-    return tracing::GetDefaultPerfettoConfig(chrome_config);
+    return tracing::GetDefaultPerfettoConfig(
+        chrome_config,
+        /*privacy_filtering_enabled=*/false,
+        /*convert_to_legacy_json=*/false,
+        perfetto::protos::gen::ChromeConfig::USER_INITIATED);
   }
 
   void OnTracingSessionFailed() {
@@ -459,8 +463,8 @@ void TracingAgent::SetupTimer(double usage_reporting_interval) {
     usage_reporting_interval = kMinimumReportingInterval;
 
   base::TimeDelta interval =
-      base::TimeDelta::FromMilliseconds(std::ceil(usage_reporting_interval));
-  buffer_usage_poll_timer_.reset(new base::RepeatingTimer());
+      base::Milliseconds(std::ceil(usage_reporting_interval));
+  buffer_usage_poll_timer_ = std::make_unique<base::RepeatingTimer>();
   buffer_usage_poll_timer_->Start(
       FROM_HERE, interval,
       base::BindRepeating(&TracingAgent::UpdateBufferUsage,

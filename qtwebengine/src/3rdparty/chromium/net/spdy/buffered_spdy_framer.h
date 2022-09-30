@@ -11,23 +11,28 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
 #include "net/log/net_log_source.h"
 #include "net/spdy/header_coalescer.h"
-#include "net/third_party/quiche/src/spdy/core/http2_frame_decoder_adapter.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_alt_svc_wire_format.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_framer.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_header_block.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/http2_frame_decoder_adapter.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_alt_svc_wire_format.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_framer.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_header_block.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_protocol.h"
 
 namespace net {
 
 class NET_EXPORT_PRIVATE BufferedSpdyFramerVisitorInterface {
  public:
   BufferedSpdyFramerVisitorInterface() {}
+
+  BufferedSpdyFramerVisitorInterface(
+      const BufferedSpdyFramerVisitorInterface&) = delete;
+  BufferedSpdyFramerVisitorInterface& operator=(
+      const BufferedSpdyFramerVisitorInterface&) = delete;
 
   // Called if an error is detected in the spdy::SpdySerializedFrame protocol.
   virtual void OnError(
@@ -44,7 +49,7 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramerVisitorInterface {
                          spdy::SpdyStreamId parent_stream_id,
                          bool exclusive,
                          bool fin,
-                         spdy::SpdyHeaderBlock headers,
+                         spdy::Http2HeaderBlock headers,
                          base::TimeTicks recv_first_byte_time) = 0;
 
   // Called when a data frame header is received.
@@ -101,7 +106,7 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramerVisitorInterface {
   // Called when a PUSH_PROMISE frame has been parsed.
   virtual void OnPushPromise(spdy::SpdyStreamId stream_id,
                              spdy::SpdyStreamId promised_stream_id,
-                             spdy::SpdyHeaderBlock headers) = 0;
+                             spdy::Http2HeaderBlock headers) = 0;
 
   // Called when an ALTSVC frame has been parsed.
   virtual void OnAltSvc(
@@ -119,9 +124,6 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramerVisitorInterface {
 
  protected:
   virtual ~BufferedSpdyFramerVisitorInterface() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(BufferedSpdyFramerVisitorInterface);
 };
 
 class NET_EXPORT_PRIVATE BufferedSpdyFramer
@@ -133,6 +135,10 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramer
                      const NetLogWithSource& net_log,
                      TimeFunc time_func = base::TimeTicks::Now);
   BufferedSpdyFramer() = delete;
+
+  BufferedSpdyFramer(const BufferedSpdyFramer&) = delete;
+  BufferedSpdyFramer& operator=(const BufferedSpdyFramer&) = delete;
+
   ~BufferedSpdyFramer() override;
 
   // Sets callbacks to be called from the buffered spdy framer.  A visitor must
@@ -192,13 +198,14 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramer
                   spdy::SpdyStreamId parent_stream_id,
                   int weight,
                   bool exclusive) override {}
+  void OnPriorityUpdate(spdy::SpdyStreamId prioritized_stream_id,
+                        absl::string_view priority_field_value) override {}
   bool OnUnknownFrame(spdy::SpdyStreamId stream_id,
                       uint8_t frame_type) override;
 
   // spdy::SpdyFramer methods.
   size_t ProcessInput(const char* data, size_t len);
   void UpdateHeaderDecoderTableSize(uint32_t value);
-  void Reset();
   http2::Http2DecoderAdapter::SpdyFramerError spdy_framer_error() const;
   http2::Http2DecoderAdapter::SpdyState state() const;
   bool MessageFullyRead();
@@ -237,13 +244,10 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramer
   // Returns the maximum size of the header encoder compression table.
   uint32_t header_encoder_table_size() const;
 
-  // Returns the estimate of dynamically allocated memory in bytes.
-  size_t EstimateMemoryUsage() const;
-
  private:
   spdy::SpdyFramer spdy_framer_;
   http2::Http2DecoderAdapter deframer_;
-  BufferedSpdyFramerVisitorInterface* visitor_;
+  raw_ptr<BufferedSpdyFramerVisitorInterface> visitor_;
 
   int frames_received_ = 0;
 
@@ -272,9 +276,6 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramer
     spdy::SpdyStreamId last_accepted_stream_id;
     spdy::SpdyErrorCode error_code;
     std::string debug_data;
-
-    // Returns the estimate of dynamically allocated memory in bytes.
-    size_t EstimateMemoryUsage() const;
   };
   std::unique_ptr<GoAwayFields> goaway_fields_;
 
@@ -283,8 +284,6 @@ class NET_EXPORT_PRIVATE BufferedSpdyFramer
   const uint32_t max_header_list_size_;
   NetLogWithSource net_log_;
   TimeFunc time_func_;
-
-  DISALLOW_COPY_AND_ASSIGN(BufferedSpdyFramer);
 };
 
 }  // namespace net

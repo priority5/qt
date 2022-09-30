@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {NUM} from '../../common/query_result';
 import {
   TrackController,
   trackControllerRegistry
@@ -27,13 +28,16 @@ class CpuProfileTrackController extends TrackController<Config, Data> {
   static readonly kind = CPU_PROFILE_TRACK_KIND;
   async onBoundsChange(start: number, end: number, resolution: number):
       Promise<Data> {
-    const query = `select id, ts from cpu_profile_stack_sample
-        where utid = ${this.config.utid}
-        order by ts`;
+    const query = `select
+        id,
+        ts,
+        callsite_id as callsiteId
+      from cpu_profile_stack_sample
+      where utid = ${this.config.utid}
+      order by ts`;
 
     const result = await this.query(query);
-
-    const numRows = +result.numRecords;
+    const numRows = result.numRows();
     const data: Data = {
       start,
       end,
@@ -41,11 +45,14 @@ class CpuProfileTrackController extends TrackController<Config, Data> {
       length: numRows,
       ids: new Float64Array(numRows),
       tsStarts: new Float64Array(numRows),
+      callsiteId: new Uint32Array(numRows),
     };
 
-    for (let row = 0; row < numRows; row++) {
-      data.ids[row] = +result.columns[0].longValues![row];
-      data.tsStarts[row] = +result.columns[1].longValues![row];
+    const it = result.iter({id: NUM, ts: NUM, callsiteId: NUM});
+    for (let row = 0; it.valid(); it.next(), ++row) {
+      data.ids[row] = it.id;
+      data.tsStarts[row] = it.ts;
+      data.callsiteId[row] = it.callsiteId;
     }
 
     return data;

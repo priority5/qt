@@ -29,7 +29,7 @@
 #include "net/spdy/spdy_log_util.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_config.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_header_block.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_header_block.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "url/gurl.h"
 
@@ -37,24 +37,25 @@ namespace net {
 
 namespace {
 
-base::Value NetLogHeadersParams(const spdy::SpdyHeaderBlock* headers,
+base::Value NetLogHeadersParams(const spdy::Http2HeaderBlock* headers,
                                 NetLogCaptureMode capture_mode) {
-  base::DictionaryValue dict;
-  dict.SetKey("headers", ElideSpdyHeaderBlockForNetLog(*headers, capture_mode));
-  return std::move(dict);
+  base::Value dict(base::Value::Type::DICTIONARY);
+  dict.SetKey("headers",
+              ElideHttp2HeaderBlockForNetLog(*headers, capture_mode));
+  return dict;
 }
 
 base::Value NetLogParams(const GURL& url,
                          const std::string& method,
                          const HttpRequestHeaders* headers,
                          NetLogCaptureMode capture_mode) {
-  base::DictionaryValue dict;
-  dict.SetString("url", url.possibly_invalid_spec());
-  dict.SetString("method", method);
+  base::Value dict(base::Value::Type::DICTIONARY);
+  dict.SetStringKey("url", url.possibly_invalid_spec());
+  dict.SetStringKey("method", method);
   std::string empty;
   base::Value headers_param(headers->NetLogParams(empty, capture_mode));
   dict.SetKey("headers", std::move(headers_param));
-  return std::move(dict);
+  return dict;
 }
 
 }  // namespace
@@ -112,10 +113,7 @@ BidirectionalStream::BidirectionalStream(
     return;
   }
 
-  SSLConfig ssl_config;
-  session->GetAlpnProtos(&ssl_config.alpn_protos);
-
-  StartRequest(ssl_config);
+  StartRequest(SSLConfig());
 }
 
 BidirectionalStream::~BidirectionalStream() {
@@ -237,9 +235,9 @@ void BidirectionalStream::OnStreamReady(bool request_headers_sent) {
 }
 
 void BidirectionalStream::OnHeadersReceived(
-    const spdy::SpdyHeaderBlock& response_headers) {
+    const spdy::Http2HeaderBlock& response_headers) {
   HttpResponseInfo response_info;
-  if (!SpdyHeadersToHttpResponse(response_headers, &response_info)) {
+  if (SpdyHeadersToHttpResponse(response_headers, &response_info) != OK) {
     DLOG(WARNING) << "Invalid headers";
     NotifyFailed(ERR_FAILED);
     return;
@@ -310,7 +308,7 @@ void BidirectionalStream::OnDataSent() {
 }
 
 void BidirectionalStream::OnTrailersReceived(
-    const spdy::SpdyHeaderBlock& trailers) {
+    const spdy::Http2HeaderBlock& trailers) {
   if (net_log_.IsCapturing()) {
     net_log_.AddEvent(NetLogEventType::BIDIRECTIONAL_STREAM_RECV_TRAILERS,
                       [&](NetLogCaptureMode capture_mode) {

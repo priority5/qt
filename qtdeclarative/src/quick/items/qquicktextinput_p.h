@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QQUICKTEXTINPUT_P_H
 #define QQUICKTEXTINPUT_P_H
@@ -52,6 +16,7 @@
 //
 
 #include "qquickimplicitsizeitem_p.h"
+#include "qquicktextinterface_p.h"
 #include <QtGui/qtextoption.h>
 #include <QtGui/qvalidator.h>
 
@@ -59,9 +24,10 @@ QT_BEGIN_NAMESPACE
 
 class QQuickTextInputPrivate;
 class QValidator;
-class Q_QUICK_PRIVATE_EXPORT QQuickTextInput : public QQuickImplicitSizeItem
+class Q_QUICK_PRIVATE_EXPORT QQuickTextInput : public QQuickImplicitSizeItem, public QQuickTextInterface
 {
     Q_OBJECT
+    Q_INTERFACES(QQuickTextInterface)
 
     Q_PROPERTY(QString text READ text WRITE setText NOTIFY textChanged)
     Q_PROPERTY(int length READ length NOTIFY textChanged)
@@ -93,9 +59,9 @@ class Q_QUICK_PRIVATE_EXPORT QQuickTextInput : public QQuickImplicitSizeItem
     Q_PROPERTY(EchoMode echoMode READ echoMode WRITE setEchoMode NOTIFY echoModeChanged)
     Q_PROPERTY(bool activeFocusOnPress READ focusOnPress WRITE setFocusOnPress NOTIFY activeFocusOnPressChanged)
     Q_PROPERTY(QString passwordCharacter READ passwordCharacter WRITE setPasswordCharacter NOTIFY passwordCharacterChanged)
-    Q_PROPERTY(int passwordMaskDelay READ passwordMaskDelay WRITE setPasswordMaskDelay RESET resetPasswordMaskDelay NOTIFY passwordMaskDelayChanged REVISION 4)
+    Q_PROPERTY(int passwordMaskDelay READ passwordMaskDelay WRITE setPasswordMaskDelay RESET resetPasswordMaskDelay NOTIFY passwordMaskDelayChanged REVISION(2, 4))
     Q_PROPERTY(QString displayText READ displayText NOTIFY displayTextChanged)
-    Q_PROPERTY(QString preeditText READ preeditText NOTIFY preeditTextChanged REVISION 7)
+    Q_PROPERTY(QString preeditText READ preeditText NOTIFY preeditTextChanged REVISION(2, 7))
     Q_PROPERTY(bool autoScroll READ autoScroll WRITE setAutoScroll NOTIFY autoScrollChanged)
     Q_PROPERTY(bool selectByMouse READ selectByMouse WRITE setSelectByMouse NOTIFY selectByMouseChanged)
     Q_PROPERTY(SelectionMode mouseSelectionMode READ mouseSelectionMode WRITE setMouseSelectionMode NOTIFY mouseSelectionModeChanged)
@@ -108,12 +74,16 @@ class Q_QUICK_PRIVATE_EXPORT QQuickTextInput : public QQuickImplicitSizeItem
     Q_PROPERTY(qreal contentHeight READ contentHeight NOTIFY contentSizeChanged)
     Q_PROPERTY(RenderType renderType READ renderType WRITE setRenderType NOTIFY renderTypeChanged)
 
-    Q_PROPERTY(qreal padding READ padding WRITE setPadding RESET resetPadding NOTIFY paddingChanged REVISION 6)
-    Q_PROPERTY(qreal topPadding READ topPadding WRITE setTopPadding RESET resetTopPadding NOTIFY topPaddingChanged REVISION 6)
-    Q_PROPERTY(qreal leftPadding READ leftPadding WRITE setLeftPadding RESET resetLeftPadding NOTIFY leftPaddingChanged REVISION 6)
-    Q_PROPERTY(qreal rightPadding READ rightPadding WRITE setRightPadding RESET resetRightPadding NOTIFY rightPaddingChanged REVISION 6)
-    Q_PROPERTY(qreal bottomPadding READ bottomPadding WRITE setBottomPadding RESET resetBottomPadding NOTIFY bottomPaddingChanged REVISION 6)
+    Q_PROPERTY(qreal padding READ padding WRITE setPadding RESET resetPadding NOTIFY paddingChanged REVISION(2, 6))
+    Q_PROPERTY(qreal topPadding READ topPadding WRITE setTopPadding RESET resetTopPadding NOTIFY topPaddingChanged REVISION(2, 6))
+    Q_PROPERTY(qreal leftPadding READ leftPadding WRITE setLeftPadding RESET resetLeftPadding NOTIFY leftPaddingChanged REVISION(2, 6))
+    Q_PROPERTY(qreal rightPadding READ rightPadding WRITE setRightPadding RESET resetRightPadding NOTIFY rightPaddingChanged REVISION(2, 6))
+    Q_PROPERTY(qreal bottomPadding READ bottomPadding WRITE setBottomPadding RESET resetBottomPadding NOTIFY bottomPaddingChanged REVISION(2, 6))
     QML_NAMED_ELEMENT(TextInput)
+    QML_ADDED_IN_VERSION(2, 0)
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+    QML_ADDED_IN_VERSION(6, 4)
+#endif
 
 public:
     QQuickTextInput(QQuickItem * parent=nullptr);
@@ -242,7 +212,7 @@ public:
     void resetPasswordMaskDelay();
 
     QString displayText() const;
-    Q_REVISION(7) QString preeditText() const;
+    Q_REVISION(2, 7) QString preeditText() const;
 
     QQmlComponent* cursorDelegate() const;
     void setCursorDelegate(QQmlComponent*);
@@ -269,7 +239,7 @@ public:
 
 #if QT_CONFIG(im)
     QVariant inputMethodQuery(Qt::InputMethodQuery property) const override;
-    Q_REVISION(4) Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery query, const QVariant &argument) const;
+    Q_REVISION(2, 4) Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery query, const QVariant &argument) const;
 #endif
 
     QRectF boundingRect() const override;
@@ -310,6 +280,8 @@ public:
     void setBottomPadding(qreal padding);
     void resetBottomPadding();
 
+    void invalidate() override;
+
 Q_SIGNALS:
     void textChanged();
     void cursorPositionChanged();
@@ -319,8 +291,8 @@ Q_SIGNALS:
     void selectedTextChanged();
     void accepted();
     void acceptableInputChanged();
-    Q_REVISION(2) void editingFinished();
-    Q_REVISION(9) void textEdited();
+    Q_REVISION(2, 2) void editingFinished();
+    Q_REVISION(2, 9) void textEdited();
     void colorChanged();
     void selectionColorChanged();
     void selectedTextColorChanged();
@@ -337,9 +309,9 @@ Q_SIGNALS:
     void inputMaskChanged(const QString &inputMask);
     void echoModeChanged(QQuickTextInput::EchoMode echoMode);
     void passwordCharacterChanged();
-    Q_REVISION(4) void passwordMaskDelayChanged(int delay);
+    Q_REVISION(2, 4) void passwordMaskDelayChanged(int delay);
     void displayTextChanged();
-    Q_REVISION(7) void preeditTextChanged();
+    Q_REVISION(2, 7) void preeditTextChanged();
     void activeFocusOnPressChanged(bool activeFocusOnPress);
     void autoScrollChanged(bool autoScroll);
     void selectByMouseChanged(bool selectByMouse);
@@ -353,11 +325,11 @@ Q_SIGNALS:
     void contentSizeChanged();
     void inputMethodHintsChanged();
     void renderTypeChanged();
-    Q_REVISION(6) void paddingChanged();
-    Q_REVISION(6) void topPaddingChanged();
-    Q_REVISION(6) void leftPaddingChanged();
-    Q_REVISION(6) void rightPaddingChanged();
-    Q_REVISION(6) void bottomPaddingChanged();
+    Q_REVISION(2, 6) void paddingChanged();
+    Q_REVISION(2, 6) void topPaddingChanged();
+    Q_REVISION(2, 6) void leftPaddingChanged();
+    Q_REVISION(2, 6) void rightPaddingChanged();
+    Q_REVISION(2, 6) void bottomPaddingChanged();
 
 private:
     void invalidateFontCaches();
@@ -365,9 +337,11 @@ private:
 
 protected:
     QQuickTextInput(QQuickTextInputPrivate &dd, QQuickItem *parent = nullptr);
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+    void setOldSelectionDefault();
+#endif
 
-    void geometryChanged(const QRectF &newGeometry,
-                                 const QRectF &oldGeometry) override;
+    void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
 
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -400,8 +374,8 @@ public Q_SLOTS:
     void redo();
     void insert(int position, const QString &text);
     void remove(int start, int end);
-    Q_REVISION(4) void ensureVisible(int position);
-    Q_REVISION(7) void clear();
+    Q_REVISION(2, 4) void ensureVisible(int position);
+    Q_REVISION(2, 7) void clear();
 
 private Q_SLOTS:
     void selectionChanged();
@@ -420,6 +394,17 @@ private:
 
     Q_DECLARE_PRIVATE(QQuickTextInput)
 };
+
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+class QQuickPre64TextInput : public QQuickTextInput {
+    Q_OBJECT
+    QML_NAMED_ELEMENT(TextInput)
+    QML_ADDED_IN_VERSION(2, 0)
+    QML_REMOVED_IN_VERSION(6, 4)
+public:
+    QQuickPre64TextInput(QQuickItem *parent = nullptr);
+};
+#endif
 
 QT_END_NAMESPACE
 

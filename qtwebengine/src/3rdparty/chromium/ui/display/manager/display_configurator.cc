@@ -8,10 +8,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/syslog_logging.h"
 #include "base/time/time.h"
 #include "chromeos/system/devicemode.h"
 #include "ui/display/display.h"
@@ -112,6 +112,10 @@ class DisplayConfigurator::DisplayLayoutManagerImpl
     : public DisplayLayoutManager {
  public:
   explicit DisplayLayoutManagerImpl(DisplayConfigurator* configurator);
+
+  DisplayLayoutManagerImpl(const DisplayLayoutManagerImpl&) = delete;
+  DisplayLayoutManagerImpl& operator=(const DisplayLayoutManagerImpl&) = delete;
+
   ~DisplayLayoutManagerImpl() override;
 
   // DisplayLayoutManager:
@@ -158,8 +162,6 @@ class DisplayConfigurator::DisplayLayoutManagerImpl
                                    bool preserve_native_aspect_ratio) const;
 
   DisplayConfigurator* configurator_;  // Not owned.
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayLayoutManagerImpl);
 };
 
 DisplayConfigurator::DisplayLayoutManagerImpl::DisplayLayoutManagerImpl(
@@ -199,6 +201,12 @@ DisplayConfigurator::DisplayLayoutManagerImpl::ParseDisplays(
     display_state.selected_mode = GetUserSelectedMode(*snapshot);
     cached_displays.push_back(display_state);
   }
+
+  // Hardware mirroring is now disabled by default until it is decided whether
+  // to permanently remove hardware mirroring support. See crbug.com/1161556 for
+  // details.
+  if (!features::IsHardwareMirrorModeEnabled())
+    return cached_displays;
 
   // Hardware mirroring doesn't work on desktop-linux Chrome OS's fake displays.
   // Skip mirror mode setup in that case to fall back on software mirroring.
@@ -323,8 +331,9 @@ bool DisplayConfigurator::DisplayLayoutManagerImpl::GetDisplayLayout(
 
       const DisplayMode* mode_info = states[0].mirror_mode;
       if (!mode_info) {
-        LOG(WARNING) << "No mirror mode when configuring display: "
-                     << states[0].display->ToString();
+        SYSLOG(INFO) << "Either hardware mirroring was disabled or no common "
+                        "mode between the available displays was found to "
+                        "support it. Using software mirroring instead.";
         return false;
       }
       size = mode_info->size();
@@ -759,7 +768,9 @@ bool DisplayConfigurator::SetGammaCorrection(
                                                       gamma_lut);
 }
 
-void DisplayConfigurator::SetPrivacyScreen(int64_t display_id, bool enabled) {
+void DisplayConfigurator::SetPrivacyScreen(int64_t display_id,
+                                           bool enabled,
+                                           ConfigurationCallback callback) {
 #if DCHECK_IS_ON()
   DisplaySnapshot* internal_display = nullptr;
   for (DisplaySnapshot* display : cached_displays_) {
@@ -774,7 +785,8 @@ void DisplayConfigurator::SetPrivacyScreen(int64_t display_id, bool enabled) {
   DCHECK(internal_display->current_mode());
 #endif
 
-  native_display_delegate_->SetPrivacyScreen(display_id, enabled);
+  native_display_delegate_->SetPrivacyScreen(display_id, enabled,
+                                             std::move(callback));
 }
 
 chromeos::DisplayPowerState DisplayConfigurator::GetRequestedPowerState()
@@ -869,9 +881,8 @@ void DisplayConfigurator::OnConfigurationChanged() {
 
   // Configure displays with |kConfigureDelayMs| delay,
   // so that time-consuming ConfigureDisplays() won't be called multiple times.
-  configure_timer_.Start(FROM_HERE,
-                         base::TimeDelta::FromMilliseconds(kConfigureDelayMs),
-                         this, &DisplayConfigurator::ConfigureDisplays);
+  configure_timer_.Start(FROM_HERE, base::Milliseconds(kConfigureDelayMs), this,
+                         &DisplayConfigurator::ConfigureDisplays);
 }
 
 void DisplayConfigurator::OnDisplaySnapshotsInvalidated() {
@@ -922,8 +933,7 @@ void DisplayConfigurator::ResumeDisplays() {
     // before configuration is performed, so we won't immediately resize the
     // desktops and the windows on it to fit on a single display.
     configure_timer_.Start(
-        FROM_HERE,
-        base::TimeDelta::FromMilliseconds(kResumeConfigureMultiDisplayDelayMs),
+        FROM_HERE, base::Milliseconds(kResumeConfigureMultiDisplayDelayMs),
         this, &DisplayConfigurator::ConfigureDisplays);
   }
 
@@ -1002,8 +1012,7 @@ void DisplayConfigurator::OnConfigured(
 
   if (success && !configure_timer_.IsRunning() &&
       ShouldRunConfigurationTask()) {
-    configure_timer_.Start(FROM_HERE,
-                           base::TimeDelta::FromMilliseconds(kConfigureDelayMs),
+    configure_timer_.Start(FROM_HERE, base::Milliseconds(kConfigureDelayMs),
                            this, &DisplayConfigurator::RunPendingConfiguration);
   } else {
     // If a new configuration task isn't scheduled respond to all queued

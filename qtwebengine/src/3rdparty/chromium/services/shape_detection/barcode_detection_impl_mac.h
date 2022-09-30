@@ -18,10 +18,14 @@
 
 namespace shape_detection {
 
-class API_AVAILABLE(macosx(10.10)) BarcodeDetectionImplMac
+class BarcodeDetectionImplMac
     : public shape_detection::mojom::BarcodeDetection {
  public:
   BarcodeDetectionImplMac();
+
+  BarcodeDetectionImplMac(const BarcodeDetectionImplMac&) = delete;
+  BarcodeDetectionImplMac& operator=(const BarcodeDetectionImplMac&) = delete;
+
   ~BarcodeDetectionImplMac() override;
 
   void Detect(const SkBitmap& bitmap,
@@ -33,8 +37,6 @@ class API_AVAILABLE(macosx(10.10)) BarcodeDetectionImplMac
 
  private:
   base::scoped_nsobject<CIDetector> detector_;
-
-  DISALLOW_COPY_AND_ASSIGN(BarcodeDetectionImplMac);
 };
 
 }  // namespace shape_detection

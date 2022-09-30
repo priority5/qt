@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <qtest.h>
 #include <QtTest/QSignalSpy>
 #include <QTextDocument>
@@ -35,6 +10,7 @@
 #include <QtQuick/private/qquickmousearea_p.h>
 #include <QtQuickTest/QtQuickTest>
 #include <private/qquicktext_p_p.h>
+#include <private/qquicktextnode_p.h>
 #include <private/qquicktextdocument_p.h>
 #include <private/qquickvaluetypes_p.h>
 #include <QFontMetrics>
@@ -44,8 +20,9 @@
 #include <private/qguiapplication_p.h>
 #include <limits.h>
 #include <QtGui/QMouseEvent>
-#include "../../shared/util.h"
-#include "testhttpserver.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include <QtQuickTestUtils/private/testhttpserver_p.h>
+#include <QtQuickTestUtils/private/viewtestutils_p.h>
 
 DEFINE_BOOL_CONFIG_OPTION(qmlDisableDistanceField, QML_DISABLE_DISTANCEFIELD)
 
@@ -54,6 +31,8 @@ Q_DECLARE_METATYPE(QQuickText::TextFormat)
 QT_BEGIN_NAMESPACE
 extern void qt_setQtEnableTestFont(bool value);
 QT_END_NAMESPACE
+
+Q_LOGGING_CATEGORY(lcTests, "qt.quick.tests")
 
 class tst_qquicktext : public QQmlDataTest
 {
@@ -118,6 +97,8 @@ private slots:
     void boundingRect_data();
     void boundingRect();
     void clipRect();
+    void largeTextObservesViewport_data();
+    void largeTextObservesViewport();
     void lineLaidOut();
     void lineLaidOutRelayout();
     void lineLaidOutHAlign();
@@ -153,6 +134,7 @@ private slots:
     void growFromZeroWidth();
 
     void padding();
+    void paddingInLoader();
 
     void hintingPreference();
 
@@ -198,6 +180,7 @@ void tst_qquicktext::cleanup()
 }
 
 tst_qquicktext::tst_qquicktext()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
 {
     standard << "the quick brown fox jumped over the lazy dog"
             << "the quick brown fox\n jumped over the lazy dog";
@@ -1021,9 +1004,6 @@ static inline QByteArray msgNotLessThan(int n1, int n2)
 
 void tst_qquicktext::hAlignImplicitWidth()
 {
-#ifdef Q_OS_MACOS
-    QSKIP("this test currently crashes on MacOS. See QTBUG-68047");
-#endif
     QQuickView view(testFileUrl("hAlignImplicitWidth.qml"));
     view.setFlags(view.flags() | Qt::WindowStaysOnTopHint); // Prevent being obscured by other windows.
     view.show();
@@ -1047,9 +1027,8 @@ void tst_qquicktext::hAlignImplicitWidth()
     const int centeredSection3End = centeredSection3 + sectionWidth;
 
     {
-        if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-            || (QGuiApplication::platformName() == QLatin1String("minimal")))
-            QEXPECT_FAIL("", "Failure due to grabWindow not functional on offscreen/minimal platforms", Abort);
+        if (QGuiApplication::platformName() == QLatin1String("minimal"))
+            QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
         // Left Align
         QImage image = view.grabWindow();
@@ -1511,18 +1490,18 @@ void tst_qquicktext::weight()
         QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
         QVERIFY(textObject != nullptr);
-        QCOMPARE((int)textObject->font().weight(), (int)QQuickFontValueType::Normal);
+        QCOMPARE((int)textObject->font().weight(), int(QQuickFontEnums::Normal));
 
         delete textObject;
     }
     {
-        QString componentStr = "import QtQuick 2.0\nText { font.weight: \"Bold\"; text: \"Hello world!\" }";
+        QString componentStr = "import QtQuick 2.0\nText { font.weight: Font.Bold; text: \"Hello world!\" }";
         QQmlComponent textComponent(&engine);
         textComponent.setData(componentStr.toLatin1(), QUrl::fromLocalFile(""));
         QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
         QVERIFY(textObject != nullptr);
-        QCOMPARE((int)textObject->font().weight(), (int)QQuickFontValueType::Bold);
+        QCOMPARE((int)textObject->font().weight(), int(QQuickFontEnums::Bold));
 
         delete textObject;
     }
@@ -1576,7 +1555,7 @@ void tst_qquicktext::capitalization()
         QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
         QVERIFY(textObject != nullptr);
-        QCOMPARE((int)textObject->font().capitalization(), (int)QQuickFontValueType::MixedCase);
+        QCOMPARE((int)textObject->font().capitalization(), int(QQuickFontEnums::MixedCase));
 
         delete textObject;
     }
@@ -1587,7 +1566,7 @@ void tst_qquicktext::capitalization()
         QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
         QVERIFY(textObject != nullptr);
-        QCOMPARE((int)textObject->font().capitalization(), (int)QQuickFontValueType::AllUppercase);
+        QCOMPARE((int)textObject->font().capitalization(), int(QQuickFontEnums::AllUppercase));
 
         delete textObject;
     }
@@ -1598,7 +1577,7 @@ void tst_qquicktext::capitalization()
         QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
         QVERIFY(textObject != nullptr);
-        QCOMPARE((int)textObject->font().capitalization(), (int)QQuickFontValueType::AllLowercase);
+        QCOMPARE((int)textObject->font().capitalization(), int(QQuickFontEnums::AllLowercase));
 
         delete textObject;
     }
@@ -1609,7 +1588,7 @@ void tst_qquicktext::capitalization()
         QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
         QVERIFY(textObject != nullptr);
-        QCOMPARE((int)textObject->font().capitalization(), (int)QQuickFontValueType::SmallCaps);
+        QCOMPARE((int)textObject->font().capitalization(), int(QQuickFontEnums::SmallCaps));
 
         delete textObject;
     }
@@ -1620,7 +1599,7 @@ void tst_qquicktext::capitalization()
         QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
         QVERIFY(textObject != nullptr);
-        QCOMPARE((int)textObject->font().capitalization(), (int)QQuickFontValueType::Capitalize);
+        QCOMPARE((int)textObject->font().capitalization(), int(QQuickFontEnums::Capitalize));
 
         delete textObject;
     }
@@ -2099,11 +2078,12 @@ void tst_qquicktext::linkInteraction()
     QVERIFY(mousePositions.count() > 0);
 
     QPointF mousePosition = mousePositions.first();
+    auto globalPos = textObject->mapToGlobal(mousePosition);
     {
-        QHoverEvent he(QEvent::HoverEnter, mousePosition, QPointF());
+        QHoverEvent he(QEvent::HoverEnter, mousePosition, globalPos, QPointF());
         static_cast<EventSender*>(static_cast<QQuickItem*>(textObject))->sendEvent(&he);
 
-        QMouseEvent me(QEvent::MouseButtonPress, mousePosition, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QMouseEvent me(QEvent::MouseButtonPress, mousePosition, globalPos, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
         static_cast<EventSender*>(static_cast<QQuickItem*>(textObject))->sendEvent(&me);
     }
 
@@ -2113,11 +2093,12 @@ void tst_qquicktext::linkInteraction()
 
     for (int i = 1; i < mousePositions.count(); ++i) {
         mousePosition = mousePositions.at(i);
+        auto globalPos = textObject->mapToGlobal(mousePosition);
 
-        QHoverEvent he(QEvent::HoverMove, mousePosition, QPointF());
+        QHoverEvent he(QEvent::HoverMove, mousePosition, globalPos, QPointF());
         static_cast<EventSender*>(static_cast<QQuickItem*>(textObject))->sendEvent(&he);
 
-        QMouseEvent me(QEvent::MouseMove, mousePosition, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QMouseEvent me(QEvent::MouseMove, mousePosition, globalPos, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
         static_cast<EventSender*>(static_cast<QQuickItem*>(textObject))->sendEvent(&me);
     }
 
@@ -2126,10 +2107,10 @@ void tst_qquicktext::linkInteraction()
     QCOMPARE(textObject->linkAt(mousePosition.x(), mousePosition.y()), hoverMoveLink);
 
     {
-        QHoverEvent he(QEvent::HoverLeave, mousePosition, QPointF());
+        QHoverEvent he(QEvent::HoverLeave, mousePosition, globalPos, QPointF());
         static_cast<EventSender*>(static_cast<QQuickItem*>(textObject))->sendEvent(&he);
 
-        QMouseEvent me(QEvent::MouseButtonRelease, mousePosition, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QMouseEvent me(QEvent::MouseButtonRelease, mousePosition, globalPos, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
         static_cast<EventSender*>(static_cast<QQuickItem*>(textObject))->sendEvent(&me);
     }
 
@@ -2303,8 +2284,12 @@ void tst_qquicktext::lineHeight()
     QCOMPARE(myText->lineHeightMode(), QQuickText::ProportionalHeight);
 
     qreal h = myText->height();
+    QVERIFY(myText->lineCount() != 0);
+    const qreal h1stLine = h / myText->lineCount();
+
     myText->setLineHeight(1.5);
     QCOMPARE(myText->height(), qreal(qCeil(h)) * 1.5);
+    QCOMPARE(myText->contentHeight(), qreal(qCeil(h)) * 1.5);
 
     myText->setLineHeightMode(QQuickText::FixedHeight);
     myText->setLineHeight(20);
@@ -2316,11 +2301,21 @@ void tst_qquicktext::lineHeight()
 
     qreal h2 = myText->height();
     myText->setLineHeight(2.0);
-    QVERIFY(myText->height() == h2 * 2.0);
+    QCOMPARE(myText->height(), h2 * 2.0);
 
     myText->setLineHeightMode(QQuickText::FixedHeight);
     myText->setLineHeight(10);
-    QCOMPARE(myText->height(), myText->lineCount() * 10.0);
+    QVERIFY(myText->lineCount() > 1);
+    QCOMPARE(myText->height(), h1stLine + (myText->lineCount() - 1) * 10.0);
+    QCOMPARE(myText->contentHeight(), h1stLine + (myText->lineCount() - 1) * 10.0);
+    QCOMPARE(myText->implicitHeight(), h1stLine + (myText->lineCount() - 1) * 10.0);
+
+    myText->setLineHeightMode(QQuickText::ProportionalHeight);
+    myText->setLineHeight(0.5);
+    const qreal reducedHeight = h1stLine + (myText->lineCount() - 1) * h1stLine * 0.5;
+    QVERIFY(qAbs(myText->height() - reducedHeight) < 1.0); // allow a deviation of one pixel because the exact height depends on the font.
+    QVERIFY(qAbs(myText->contentHeight() - reducedHeight) < 1.0);
+    QVERIFY(qAbs(myText->implicitHeight() - reducedHeight) < 1.0);
 }
 
 void tst_qquicktext::implicitSize_data()
@@ -2350,6 +2345,10 @@ void tst_qquicktext::implicitSize_data()
 
 void tst_qquicktext::implicitSize()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("This segfaults on Android, QTBUG-103096");
+#endif
+
     QFETCH(QString, text);
     QFETCH(QString, width);
     QFETCH(QString, format);
@@ -2810,6 +2809,15 @@ void tst_qquicktext::boundingRect()
     QCOMPARE(text->boundingRect().x(), qreal(0));
     QCOMPARE(text->boundingRect().y(), qreal(0));
     QCOMPARE(text->boundingRect().width(), line.naturalTextWidth());
+
+    QFontMetricsF fontMetrics(QGuiApplication::font());
+    qreal leading = fontMetrics.leading();
+    qreal ascent = fontMetrics.ascent();
+    qreal descent = fontMetrics.descent();
+
+    bool leadingOverflow = text->textFormat() == QQuickText::RichText && qCeil(ascent + descent) < qCeil(ascent + descent + leading);
+    if (leadingOverflow)
+        QEXPECT_FAIL("", "See QTBUG-82954", Continue);
     QCOMPARE(text->boundingRect().height(), line.height());
 
     // the size of the bounding rect shouldn't be bounded by the size of item.
@@ -2817,30 +2825,45 @@ void tst_qquicktext::boundingRect()
     QCOMPARE(text->boundingRect().x(), qreal(0));
     QCOMPARE(text->boundingRect().y(), qreal(0));
     QCOMPARE(text->boundingRect().width(), line.naturalTextWidth());
+
+    if (leadingOverflow)
+        QEXPECT_FAIL("", "See QTBUG-82954", Continue);
     QCOMPARE(text->boundingRect().height(), line.height());
 
     text->setHeight(text->height() * 2);
     QCOMPARE(text->boundingRect().x(), qreal(0));
     QCOMPARE(text->boundingRect().y(), qreal(0));
     QCOMPARE(text->boundingRect().width(), line.naturalTextWidth());
+
+    if (leadingOverflow)
+        QEXPECT_FAIL("", "See QTBUG-82954", Continue);
     QCOMPARE(text->boundingRect().height(), line.height());
 
     text->setHAlign(QQuickText::AlignRight);
     QCOMPARE(text->boundingRect().x(), text->width() - line.naturalTextWidth());
     QCOMPARE(text->boundingRect().y(), qreal(0));
     QCOMPARE(text->boundingRect().width(), line.naturalTextWidth());
+
+    if (leadingOverflow)
+        QEXPECT_FAIL("", "See QTBUG-82954", Continue);
     QCOMPARE(text->boundingRect().height(), line.height());
 
     QQuickItemPrivate::get(text)->setLayoutMirror(true);
     QCOMPARE(text->boundingRect().x(), qreal(0));
     QCOMPARE(text->boundingRect().y(), qreal(0));
     QCOMPARE(text->boundingRect().width(), line.naturalTextWidth());
+
+    if (leadingOverflow)
+        QEXPECT_FAIL("", "See QTBUG-82954", Continue);
     QCOMPARE(text->boundingRect().height(), line.height());
 
     text->setHAlign(QQuickText::AlignLeft);
     QCOMPARE(text->boundingRect().x(), text->width() - line.naturalTextWidth());
     QCOMPARE(text->boundingRect().y(), qreal(0));
     QCOMPARE(text->boundingRect().width(), line.naturalTextWidth());
+
+    if (leadingOverflow)
+        QEXPECT_FAIL("", "See QTBUG-82954", Continue);
     QCOMPARE(text->boundingRect().height(), line.height());
 
     text->setWrapMode(QQuickText::Wrap);
@@ -2898,6 +2921,105 @@ void tst_qquicktext::clipRect()
     QCOMPARE(text->clipRect().y(), qreal(0));
     QCOMPARE(text->clipRect().width(), text->width() + 2);
     QCOMPARE(text->clipRect().height(), text->height() + 2);
+}
+
+void tst_qquicktext::largeTextObservesViewport_data()
+{
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<QQuickText::TextFormat>("textFormat");
+    QTest::addColumn<int>("linesAboveViewport");
+    QTest::addColumn<bool>("parentIsViewport");
+
+    QString text;
+    {
+        QStringList lines;
+        // "line 100" is 8 characters; many lines are longer, some are shorter
+        // so we populate 1250 lines, 11389 characters
+        const int lineCount = QQuickTextPrivate::largeTextSizeThreshold / 8;
+        lines.reserve(lineCount);
+        for (int i = 0; i < lineCount; ++i)
+            lines << QLatin1String("line ") + QString::number(i);
+        text = lines.join('\n');
+    }
+    Q_ASSERT(text.size() > QQuickTextPrivate::largeTextSizeThreshold);
+
+    // by default, the root item acts as the viewport:
+    // QQuickTextNode doesn't populate lines of text beyond the bottom of the window
+    QTest::newRow("default plain text") << text << QQuickText::PlainText << 0 << false;
+    // make the rectangle into a viewport item, and move the text upwards:
+    // QQuickTextNode doesn't populate lines of text beyond the bottom of the viewport rectangle
+    QTest::newRow("clipped plain text") << text << QQuickText::PlainText << 10 << true;
+
+    {
+        QStringList lines;
+        // "line 100" is 8 characters; many lines are longer, some are shorter
+        // so we populate 1250 lines, 11389 characters
+        const int lineCount = QQuickTextPrivate::largeTextSizeThreshold / 8;
+        lines.reserve(lineCount);
+        for (int i = 0; i < lineCount; ++i) {
+            if (i > 0 && i % 50 == 0)
+                lines << QLatin1String("<h1>chapter ") + QString::number(i / 50) + QLatin1String("</h1>");
+            lines << QLatin1String("<p>line ") + QString::number(i) + QLatin1String("</p>");
+        }
+        text = lines.join('\n');
+    }
+    Q_ASSERT(text.size() > QQuickTextPrivate::largeTextSizeThreshold);
+
+    // by default, the root item acts as the viewport:
+    // QQuickTextNodeEngine doesn't populate blocks beyond the bottom of the window
+    QTest::newRow("default styled text") << text << QQuickText::StyledText << 0 << false;
+    // make the rectangle into a viewport item, and move the text upwards:
+    // QQuickTextNodeEngine doesn't populate blocks that don't intersect the viewport rectangle
+    QTest::newRow("clipped styled text") << text << QQuickText::StyledText << 10 << true;
+    // get a chapter heading into the viewport
+    QTest::newRow("heading visible") << text << QQuickText::StyledText << 90 << true;
+}
+
+void tst_qquicktext::largeTextObservesViewport()
+{
+    QFETCH(QString, text);
+    QFETCH(QQuickText::TextFormat, textFormat);
+    QFETCH(int, linesAboveViewport);
+    QFETCH(bool, parentIsViewport);
+
+    QQuickView window;
+    QByteArray errorMessage;
+    QVERIFY2(QQuickTest::initView(window, testFileUrl("viewport.qml"), true, &errorMessage), errorMessage.constData());
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QQuickText *textItem = window.rootObject()->findChild<QQuickText*>();
+    QVERIFY(textItem);
+    QQuickItem *viewportItem = textItem->parentItem();
+    QQuickTextPrivate *textPriv = QQuickTextPrivate::get(textItem);
+    QQuickTextNode *node = static_cast<QQuickTextNode *>(textPriv->paintNode);
+    QFontMetricsF fm(textItem->font());
+    const qreal expectedTextHeight = (parentIsViewport ? viewportItem->height() : window.height() - viewportItem->y());
+    const qreal lineSpacing = qCeil(fm.height());
+    // A paragraph break is the same as an extra line break; so since our "lines" are paragraphs in StyledText,
+    // visually, with StyledText we skip down 10 "lines", but the first paragraph you see says "line 5".
+    // It's OK anyway for the test, because QQuickTextNode::addTextLayout() treats the paragraph breaks like lines of text.
+    const int expectedLastLine = linesAboveViewport + int(expectedTextHeight / lineSpacing);
+
+    viewportItem->setFlag(QQuickItem::ItemIsViewport, parentIsViewport);
+    textItem->setY(lineSpacing * -linesAboveViewport);
+    textItem->setTextFormat(textFormat);
+    textItem->setText(text);
+    qCDebug(lcTests) << "text size" << textItem->text().size() << "lines" << textItem->lineCount() << "font" << textItem->font();
+    Q_ASSERT(textItem->text().size() > QQuickTextPrivate::largeTextSizeThreshold);
+    QVERIFY(textItem->flags().testFlag(QQuickItem::ItemObservesViewport)); // large text sets this flag automatically
+    QCOMPARE(textItem->viewportItem(), parentIsViewport ? viewportItem : viewportItem->parentItem());
+    QTRY_VERIFY(node->renderedLineRange().first >= 0); // wait for rendering
+    auto renderedLineRange = node->renderedLineRange();
+    qCDebug(lcTests) << "first line rendered" << renderedLineRange.first
+                     << "expected" << linesAboveViewport
+                     << "first line past viewport" << renderedLineRange.second
+                     << "expected last line" << expectedLastLine
+                     << "based on available height" << expectedTextHeight
+                     << "and line height" << lineSpacing << "rather than spacing" << fm.lineSpacing();
+//    QTest::qWait(2000); // uncomment for visual check
+    QCOMPARE(renderedLineRange.first, linesAboveViewport);
+    // if linesAboveViewport == 90, a chapter heading is visible, and those take more space
+    QVERIFY(qAbs(renderedLineRange.second - (expectedLastLine + 1)) < (linesAboveViewport > 80 ? 4 : 2));
 }
 
 void tst_qquicktext::lineLaidOut()
@@ -3127,12 +3249,12 @@ void tst_qquicktext::imgTagsAlign_data()
     QTest::addColumn<QString>("src");
     QTest::addColumn<int>("imgHeight");
     QTest::addColumn<QString>("align");
-    QTest::newRow("heart-bottom") << "data/images/heart200.png" << 181 <<  "bottom";
-    QTest::newRow("heart-middle") << "data/images/heart200.png" << 181 <<  "middle";
-    QTest::newRow("heart-top") << "data/images/heart200.png" << 181 <<  "top";
-    QTest::newRow("starfish-bottom") << "data/images/starfish_2.png" << 217 <<  "bottom";
-    QTest::newRow("starfish-middle") << "data/images/starfish_2.png" << 217 <<  "middle";
-    QTest::newRow("starfish-top") << "data/images/starfish_2.png" << 217 <<  "top";
+    QTest::newRow("heart-bottom") << "images/heart200.png" << 181 <<  "bottom";
+    QTest::newRow("heart-middle") << "images/heart200.png" << 181 <<  "middle";
+    QTest::newRow("heart-top") << "images/heart200.png" << 181 <<  "top";
+    QTest::newRow("starfish-bottom") << "images/starfish_2.png" << 217 <<  "bottom";
+    QTest::newRow("starfish-middle") << "images/starfish_2.png" << 217 <<  "middle";
+    QTest::newRow("starfish-top") << "images/starfish_2.png" << 217 <<  "top";
 }
 
 void tst_qquicktext::imgTagsAlign()
@@ -3142,7 +3264,7 @@ void tst_qquicktext::imgTagsAlign()
     QFETCH(QString, align);
     QString componentStr = "import QtQuick 2.0\nText { text: \"This is a test <img src=\\\"" + src + "\\\" align=\\\"" + align + "\\\"> of image.\" }";
     QQmlComponent textComponent(&engine);
-    textComponent.setData(componentStr.toLatin1(), QUrl::fromLocalFile("."));
+    textComponent.setData(componentStr.toLatin1(), testFileUrl("."));
     QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
     QVERIFY(textObject != nullptr);
@@ -3164,10 +3286,10 @@ void tst_qquicktext::imgTagsAlign()
 
 void tst_qquicktext::imgTagsMultipleImages()
 {
-    QString componentStr = "import QtQuick 2.0\nText { text: \"This is a starfish<img src=\\\"data/images/starfish_2.png\\\" width=\\\"60\\\" height=\\\"60\\\" > and another one<img src=\\\"data/images/heart200.png\\\" width=\\\"85\\\" height=\\\"85\\\">.\" }";
+    QString componentStr = "import QtQuick 2.0\nText { text: \"This is a starfish<img src=\\\"images/starfish_2.png\\\" width=\\\"60\\\" height=\\\"60\\\" > and another one<img src=\\\"images/heart200.png\\\" width=\\\"85\\\" height=\\\"85\\\">.\" }";
 
     QQmlComponent textComponent(&engine);
-    textComponent.setData(componentStr.toLatin1(), QUrl::fromLocalFile("."));
+    textComponent.setData(componentStr.toLatin1(), testFileUrl("."));
     QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
     QVERIFY(textObject != nullptr);
@@ -3223,11 +3345,15 @@ void tst_qquicktext::imgTagsUpdates()
 
 void tst_qquicktext::imgTagsError()
 {
-    QString componentStr = "import QtQuick 2.0\nText { text: \"This is a starfish<img src=\\\"data/images/starfish_2.pn\\\" width=\\\"60\\\" height=\\\"60\\\">.\" }";
+    QString componentStr = "import QtQuick 2.0\nText { text: \"This is a starfish<img src=\\\"images/starfish_2.pn\\\" width=\\\"60\\\" height=\\\"60\\\">.\" }";
 
     QQmlComponent textComponent(&engine);
-    QTest::ignoreMessage(QtWarningMsg, "<Unknown File>:2:1: QML Text: Cannot open: file:data/images/starfish_2.pn");
-    textComponent.setData(componentStr.toLatin1(), QUrl("file:"));
+    const QString expectedMessage(
+            testFileUrl(".").toString()
+            + ":2:1: QML Text: Cannot open: "
+            + testFileUrl("images/starfish_2.pn").toString());
+    QTest::ignoreMessage(QtWarningMsg, expectedMessage.toLatin1());
+    textComponent.setData(componentStr.toLatin1(), testFileUrl("."));
     QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
 
     QVERIFY(textObject != nullptr);
@@ -3252,7 +3378,7 @@ void tst_qquicktext::fontSizeMode()
     QVERIFY(myText != nullptr);
 
     myText->setText(text);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     qreal originalWidth = myText->contentWidth();
     qreal originalHeight = myText->contentHeight();
@@ -3266,7 +3392,7 @@ void tst_qquicktext::fontSizeMode()
 
     myText->setFont(font);
     myText->setFontSizeMode(QQuickText::HorizontalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Font size reduced to fit within the width of the item.
     qreal horizontalFitWidth = myText->contentWidth();
     qreal horizontalFitHeight = myText->contentHeight();
@@ -3275,28 +3401,28 @@ void tst_qquicktext::fontSizeMode()
 
     // Elide won't affect the size with HorizontalFit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideLeft);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideMiddle);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::VerticalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Font size increased to fill the height of the item.
     qreal verticalFitHeight = myText->contentHeight();
     QVERIFY(myText->contentWidth() > myText->width());
@@ -3305,57 +3431,57 @@ void tst_qquicktext::fontSizeMode()
 
     // Elide won't affect the height of a single line with VerticalFit but will crop the width.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(myText->truncated());
     QVERIFY(myText->contentWidth() <= myText->width() + 2);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideLeft);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(myText->truncated());
     QVERIFY(myText->contentWidth() <= myText->width() + 2);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideMiddle);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(myText->truncated());
     QVERIFY(myText->contentWidth() <= myText->width() + 2);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::Fit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Should be the same as HorizontalFit with no wrapping.
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     // Elide won't affect the size with Fit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideLeft);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideMiddle);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::FixedSize);
     myText->setWrapMode(QQuickText::Wrap);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     originalWidth = myText->contentWidth();
     originalHeight = myText->contentHeight();
@@ -3365,7 +3491,7 @@ void tst_qquicktext::fontSizeMode()
     QVERIFY(originalHeight > myText->height());
 
     myText->setFontSizeMode(QQuickText::HorizontalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // HorizontalFit should reduce the font size to minimize wrapping, which brings it back to the
     // same size as without text wrapping.
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
@@ -3373,16 +3499,16 @@ void tst_qquicktext::fontSizeMode()
 
     // Elide won't affect the size with HorizontalFit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::VerticalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // VerticalFit should reduce the size to the wrapped text within the vertical height.
     verticalFitHeight = myText->contentHeight();
     qreal verticalFitWidth = myText->contentWidth();
@@ -3392,40 +3518,40 @@ void tst_qquicktext::fontSizeMode()
 
     // Elide won't affect the height or width of a wrapped text with VerticalFit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::Fit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Should be the same as VerticalFit with wrapping.
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     // Elide won't affect the size with Fit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::FixedSize);
     myText->setMaximumLineCount(2);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     // The original text wrapped should exceed the height of the item.
     QVERIFY(originalWidth <= myText->width() + 2);
     QVERIFY(originalHeight > myText->height());
 
     myText->setFontSizeMode(QQuickText::HorizontalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // HorizontalFit should reduce the font size to minimize wrapping, which brings it back to the
     // same size as without text wrapping.
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
@@ -3433,16 +3559,16 @@ void tst_qquicktext::fontSizeMode()
 
     // Elide won't affect the size with HorizontalFit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::VerticalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // VerticalFit should reduce the size to the wrapped text within the vertical height.
     verticalFitHeight = myText->contentHeight();
     verticalFitWidth = myText->contentWidth();
@@ -3452,29 +3578,29 @@ void tst_qquicktext::fontSizeMode()
 
     // Elide won't affect the height or width of a wrapped text with VerticalFit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::Fit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Should be the same as VerticalFit with wrapping.
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     // Elide won't affect the size with Fit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 }
 
 void tst_qquicktext::fontSizeModeMultiline_data()
@@ -3495,7 +3621,7 @@ void tst_qquicktext::fontSizeModeMultiline()
     QVERIFY(myText != nullptr);
 
     myText->setText(text);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     qreal originalWidth = myText->contentWidth();
     qreal originalHeight = myText->contentHeight();
@@ -3510,7 +3636,7 @@ void tst_qquicktext::fontSizeModeMultiline()
 
     myText->setFont(font);
     myText->setFontSizeMode(QQuickText::HorizontalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Font size reduced to fit within the width of the item.
     QCOMPARE(myText->lineCount(), 2);
     qreal horizontalFitWidth = myText->contentWidth();
@@ -3520,7 +3646,7 @@ void tst_qquicktext::fontSizeModeMultiline()
 
     // Right eliding will remove the last line
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(myText->truncated());
     QCOMPARE(myText->lineCount(), 1);
     QVERIFY(myText->contentWidth() <= myText->width() + 2);
@@ -3528,22 +3654,22 @@ void tst_qquicktext::fontSizeModeMultiline()
 
     // Left or middle eliding wont have any effect.
     myText->setElideMode(QQuickText::ElideLeft);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideMiddle);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
     QCOMPARE(myText->contentHeight(), horizontalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::VerticalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Font size reduced to fit within the height of the item.
     qreal verticalFitWidth = myText->contentWidth();
     qreal verticalFitHeight = myText->contentHeight();
@@ -3552,58 +3678,58 @@ void tst_qquicktext::fontSizeModeMultiline()
 
     // Elide will have no effect.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QVERIFY(myText->contentWidth() <= myText->width() + 2);
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideLeft);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideMiddle);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::Fit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Should be the same as VerticalFit with no wrapping.
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     // Elide won't affect the size with Fit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideLeft);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideMiddle);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::FixedSize);
     myText->setWrapMode(QQuickText::Wrap);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     originalWidth = myText->contentWidth();
     originalHeight = myText->contentHeight();
@@ -3613,7 +3739,7 @@ void tst_qquicktext::fontSizeModeMultiline()
     QVERIFY(originalHeight > myText->height());
 
     myText->setFontSizeMode(QQuickText::HorizontalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // HorizontalFit should reduce the font size to minimize wrapping, which brings it back to the
     // same size as without text wrapping.
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
@@ -3621,16 +3747,16 @@ void tst_qquicktext::fontSizeModeMultiline()
 
     // Text will be elided vertically with HorizontalFit
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(myText->truncated());
     QVERIFY(myText->contentWidth() <= myText->width() + 2);
     QVERIFY(myText->contentHeight() <= myText->height() + 2);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::VerticalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // VerticalFit should reduce the size to the wrapped text within the vertical height.
     verticalFitHeight = myText->contentHeight();
     verticalFitWidth = myText->contentWidth();
@@ -3640,40 +3766,40 @@ void tst_qquicktext::fontSizeModeMultiline()
 
     // Elide won't affect the height or width of a wrapped text with VerticalFit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::Fit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Should be the same as VerticalFit with wrapping.
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     // Elide won't affect the size with Fit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::FixedSize);
     myText->setMaximumLineCount(2);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     // The original text wrapped should exceed the height of the item.
     QVERIFY(originalWidth <= myText->width() + 2);
     QVERIFY(originalHeight > myText->height());
 
     myText->setFontSizeMode(QQuickText::HorizontalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // HorizontalFit should reduce the font size to minimize wrapping, which brings it back to the
     // same size as without text wrapping.
     QCOMPARE(myText->contentWidth(), horizontalFitWidth);
@@ -3681,16 +3807,16 @@ void tst_qquicktext::fontSizeModeMultiline()
 
     // Elide won't affect the size with HorizontalFit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(myText->truncated());
     QVERIFY(myText->contentWidth() <= myText->width() + 2);
     QVERIFY(myText->contentHeight() <= myText->height() + 2);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::VerticalFit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // VerticalFit should reduce the size to the wrapped text within the vertical height.
     verticalFitHeight = myText->contentHeight();
     verticalFitWidth = myText->contentWidth();
@@ -3700,29 +3826,29 @@ void tst_qquicktext::fontSizeModeMultiline()
 
     // Elide won't affect the height or width of a wrapped text with VerticalFit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     myText->setFontSizeMode(QQuickText::Fit);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     // Should be the same as VerticalFit with wrapping.
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     // Elide won't affect the size with Fit.
     myText->setElideMode(QQuickText::ElideRight);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     QVERIFY(!myText->truncated());
     QCOMPARE(myText->contentWidth(), verticalFitWidth);
     QCOMPARE(myText->contentHeight(), verticalFitHeight);
 
     myText->setElideMode(QQuickText::ElideNone);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 }
 
 void tst_qquicktext::multilengthStrings_data()
@@ -3747,17 +3873,17 @@ void tst_qquicktext::multilengthStrings()
     const QString shortText = "fox jumped dog";
 
     myText->setText(longText);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     const qreal longWidth = myText->contentWidth();
     const qreal longHeight = myText->contentHeight();
 
     myText->setText(mediumText);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     const qreal mediumWidth = myText->contentWidth();
     const qreal mediumHeight = myText->contentHeight();
 
     myText->setText(shortText);
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
     const qreal shortWidth = myText->contentWidth();
     const qreal shortHeight = myText->contentHeight();
 
@@ -3765,21 +3891,21 @@ void tst_qquicktext::multilengthStrings()
     myText->setText(longText + QLatin1Char('\x9c') + mediumText + QLatin1Char('\x9c') + shortText);
 
     myText->setSize(QSizeF(longWidth, longHeight));
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     QCOMPARE(myText->contentWidth(), longWidth);
     QCOMPARE(myText->contentHeight(), longHeight);
     QCOMPARE(myText->truncated(), false);
 
     myText->setSize(QSizeF(mediumWidth, mediumHeight));
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     QCOMPARE(myText->contentWidth(), mediumWidth);
     QCOMPARE(myText->contentHeight(), mediumHeight);
     QCOMPARE(myText->truncated(), true);
 
     myText->setSize(QSizeF(shortWidth, shortHeight));
-    QVERIFY(QQuickTest::qWaitForItemPolished(myText));
+    QVERIFY(QQuickTest::qWaitForPolish(myText));
 
     QCOMPARE(myText->contentWidth(), shortWidth);
     QCOMPARE(myText->contentHeight(), shortHeight);
@@ -3813,13 +3939,11 @@ void tst_qquicktext::fontFormatSizes()
     QFETCH(QString, textWithTag);
     QFETCH(bool, fontIsBigger);
 
-    QQuickView *view = new QQuickView;
     {
-        view->setSource(testFileUrl("pointFontSizes.qml"));
-        view->show();
-
-        QQuickText *qtext = view->rootObject()->findChild<QQuickText*>("text");
-        QQuickText *qtextWithTag = view->rootObject()->findChild<QQuickText*>("textWithTag");
+        QQuickView view;
+        QVERIFY(QQuickTest::showView(view, testFileUrl("pointFontSizes.qml")));
+        QQuickText *qtext = view.rootObject()->findChild<QQuickText*>("text");
+        QQuickText *qtextWithTag = view.rootObject()->findChild<QQuickText*>("textWithTag");
         QVERIFY(qtext != nullptr);
         QVERIFY(qtextWithTag != nullptr);
 
@@ -3827,7 +3951,7 @@ void tst_qquicktext::fontFormatSizes()
         qtextWithTag->setText(textWithTag);
 
         for (int size = 6; size < 100; size += 4) {
-            view->rootObject()->setProperty("pointSize", size);
+            view.rootObject()->setProperty("pointSize", size);
             if (fontIsBigger)
                 QVERIFY(qtext->height() <= qtextWithTag->height());
             else
@@ -3836,9 +3960,10 @@ void tst_qquicktext::fontFormatSizes()
     }
 
     {
-        view->setSource(testFileUrl("pixelFontSizes.qml"));
-        QQuickText *qtext = view->rootObject()->findChild<QQuickText*>("text");
-        QQuickText *qtextWithTag = view->rootObject()->findChild<QQuickText*>("textWithTag");
+        QQuickView view;
+        QVERIFY(QQuickTest::showView(view, testFileUrl("pixelFontSizes.qml")));
+        QQuickText *qtext = view.rootObject()->findChild<QQuickText*>("text");
+        QQuickText *qtextWithTag = view.rootObject()->findChild<QQuickText*>("textWithTag");
         QVERIFY(qtext != nullptr);
         QVERIFY(qtextWithTag != nullptr);
 
@@ -3846,14 +3971,13 @@ void tst_qquicktext::fontFormatSizes()
         qtextWithTag->setText(textWithTag);
 
         for (int size = 6; size < 100; size += 4) {
-            view->rootObject()->setProperty("pixelSize", size);
+            view.rootObject()->setProperty("pixelSize", size);
             if (fontIsBigger)
                 QVERIFY(qtext->height() <= qtextWithTag->height());
             else
                 QVERIFY(qtext->height() >= qtextWithTag->height());
         }
     }
-    delete view;
 }
 
 typedef qreal (*ExpectedBaseline)(QQuickText *item);
@@ -3905,7 +4029,11 @@ static qreal expectedBaselineScaled(QQuickText *item)
 {
     QFont font = item->font();
     QTextLayout layout(item->text().replace(QLatin1Char('\n'), QChar::LineSeparator));
-    do {
+
+    qreal low = 0;
+    qreal high = 10000;
+
+    while (low < high) {
         layout.setFont(font);
         qreal width = 0;
         layout.beginLayout();
@@ -3915,12 +4043,23 @@ static qreal expectedBaselineScaled(QQuickText *item)
         }
         layout.endLayout();
 
-        if (width < item->width()) {
-            QFontMetricsF fm(layout.font());
-            return fm.ascent() + item->topPadding();
+        if (width > item->width()) {
+            high = font.pointSizeF();
+            font.setPointSizeF((high + low) / 2);
+        } else {
+            low = font.pointSizeF();
+
+            // When fontSizeMode != FixedSize, the font size will be scaled to a value
+            // The goal is to find a pointSize that uses as much space as possible while
+            // still fitting inside the available space. 0.01 is chosen as the threshold.
+            if ((high - low) < qreal(0.01)) {
+                QFontMetricsF fm(layout.font());
+                return fm.ascent() + item->topPadding();
+            }
+
+            font.setPointSizeF((high + low) / 2);
         }
-        font.setPointSize(font.pointSize() - 1);
-    } while (font.pointSize() > 0);
+    }
     return item->topPadding();
 }
 
@@ -4342,6 +4481,20 @@ void tst_qquicktext::padding()
     obj->setElideMode(QQuickText::ElideRight);
     QCOMPARE(obj->implicitWidth(), cw + obj->leftPadding() + obj->rightPadding());
     QCOMPARE(obj->implicitHeight(), ch + obj->topPadding() + obj->bottomPadding());
+
+    obj->setLeftPadding(0);
+    QCOMPARE(obj->implicitWidth(), cw + obj->leftPadding() + obj->rightPadding());
+
+    obj->setWidth(cw);
+    obj->setRightPadding(cw);
+    QCOMPARE(obj->contentWidth(), 0);
+
+    for (int incr = 1; incr < 50 && qFuzzyIsNull(obj->contentWidth()); ++incr)
+        obj->setWidth(cw + incr);
+    QVERIFY(obj->contentWidth() > 0);
+    qCDebug(lcTests) << "increasing Text width from" << cw << "to" << obj->width()
+                     << "rendered a character: contentWidth now" << obj->contentWidth();
+
     obj->setElideMode(QQuickText::ElideNone);
     obj->resetWidth();
 
@@ -4384,6 +4537,32 @@ void tst_qquicktext::padding()
     QCOMPARE(obj->bottomPadding(), 0.0);
 
     delete root;
+}
+
+void tst_qquicktext::paddingInLoader() // QTBUG-83413
+{
+    QQuickView view;
+    QVERIFY(QQuickTest::showView(view, testFileUrl("paddingInLoader.qml")));
+    QQuickText *qtext = view.rootObject()->findChild<QQuickText*>();
+    QVERIFY(qtext);
+    QQuickTextPrivate *textPrivate = QQuickTextPrivate::get(qtext);
+    QVERIFY(textPrivate);
+    QCOMPARE(qtext->contentWidth(), 0); // does not render text, because width == rightPadding
+    QCOMPARE(textPrivate->availableWidth(), 0);
+
+    qtext->setLeftPadding(qtext->width());
+    qtext->setRightPadding(0);
+    QCOMPARE(qtext->contentWidth(), 0); // does not render text, because width == leftPadding
+    QCOMPARE(textPrivate->availableWidth(), 0);
+
+    qtext->setRightPadding(qtext->width());
+    QCOMPARE(qtext->contentWidth(), 0); // does not render text: available space is negative
+    QCOMPARE(textPrivate->availableWidth(), -qtext->width());
+
+    qtext->setLeftPadding(2);
+    qtext->setRightPadding(2);
+    QVERIFY(qtext->contentWidth() > 0); // finally space is available to render text
+    QCOMPARE(textPrivate->availableWidth(), qtext->width() - 4);
 }
 
 void tst_qquicktext::hintingPreference()
@@ -4538,9 +4717,8 @@ void tst_qquicktext::verticallyAlignedImageInTable()
 
 void tst_qquicktext::transparentBackground()
 {
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabToImage not functional on offscreen/minimal platforms");
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
     QScopedPointer<QQuickView> window(new QQuickView);
     window->setSource(testFileUrl("transparentBackground.qml"));
@@ -4559,9 +4737,8 @@ void tst_qquicktext::transparentBackground()
 
 void tst_qquicktext::displaySuperscriptedTag()
 {
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabToImage not functional on offscreen/minimal platforms");
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
     QScopedPointer<QQuickView> window(new QQuickView);
     window->setSource(testFileUrl("displaySuperscriptedTag.qml"));

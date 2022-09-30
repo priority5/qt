@@ -1,44 +1,18 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Kurt Pattyn <pattyn.kurt@gmail.com>.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Kurt Pattyn <pattyn.kurt@gmail.com>.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <QString>
 #include <QtTest>
 #include <QNetworkProxy>
 #include <QTcpSocket>
 #include <QTcpServer>
 #include <QtCore/QScopedPointer>
-#ifndef QT_NO_OPENSSL
 #include <QtNetwork/qsslpresharedkeyauthenticator.h>
-#endif
 #ifndef QT_NO_SSL
 #include <QtNetwork/qsslcipher.h>
 #include <QtNetwork/qsslkey.h>
 #include <QtNetwork/qsslsocket.h>
 #endif
+#include <QtWebSockets/QWebSocketHandshakeOptions>
 #include <QtWebSockets/QWebSocketServer>
 #include <QtWebSockets/QWebSocket>
 #include <QtWebSockets/QWebSocketCorsAuthenticator>
@@ -54,7 +28,6 @@ Q_DECLARE_METATYPE(QWebSocketCorsAuthenticator *)
 Q_DECLARE_METATYPE(QSslError)
 #endif
 
-#ifndef QT_NO_OPENSSL
 // Use this cipher to force PSK key sharing.
 static const QString PSK_CIPHER_WITHOUT_AUTH = QStringLiteral("PSK-AES256-CBC-SHA");
 static const QByteArray PSK_CLIENT_PRESHAREDKEY = QByteArrayLiteral("\x1a\x2b\x3c\x4d\x5e\x6f");
@@ -93,7 +66,6 @@ public slots:
         }
     }
 };
-#endif
 
 class tst_QWebSocketServer : public QObject
 {
@@ -110,6 +82,8 @@ private Q_SLOTS:
     void tst_settersAndGetters();
     void tst_listening();
     void tst_connectivity();
+    void tst_protocols_data();
+    void tst_protocols();
     void tst_preSharedKey();
     void tst_maxPendingConnections();
     void tst_serverDestroyedWhileSocketConnected();
@@ -137,9 +111,7 @@ void tst_QWebSocketServer::init()
     qRegisterMetaType<QWebSocketCorsAuthenticator *>("QWebSocketCorsAuthenticator *");
 #ifndef QT_NO_SSL
     qRegisterMetaType<QSslError>("QSslError");
-#ifndef QT_NO_OPENSSL
     qRegisterMetaType<QSslPreSharedKeyAuthenticator *>();
-#endif
 #endif
 }
 
@@ -196,11 +168,7 @@ void tst_QWebSocketServer::tst_initialisation()
         QCOMPARE(server.maxPendingConnections(), 30);
         QCOMPARE(server.serverPort(), quint16(0));
         QCOMPARE(server.serverAddress(), QHostAddress());
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
         QCOMPARE(server.socketDescriptor(), -1);
-#else // ### Qt 6: Remove leftovers
-        QCOMPARE(server.nativeDescriptor(), -1);
-#endif // (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
         QVERIFY(!server.hasPendingConnections());
         QVERIFY(!server.nextPendingConnection());
         QCOMPARE(server.error(), QWebSocketProtocol::CloseCodeNormal);
@@ -225,11 +193,7 @@ void tst_QWebSocketServer::tst_initialisation()
         QCOMPARE(server.maxPendingConnections(), 30);
         QCOMPARE(server.serverPort(), quint16(0));
         QCOMPARE(server.serverAddress(), QHostAddress());
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
         QCOMPARE(server.socketDescriptor(), -1);
-#else // ### Qt 6: Remove leftovers
-        QCOMPARE(server.nativeDescriptor(), -1);
-#endif // (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
         QVERIFY(!server.hasPendingConnections());
         QVERIFY(!server.nextPendingConnection());
         QCOMPARE(server.error(), QWebSocketProtocol::CloseCodeNormal);
@@ -265,13 +229,8 @@ void tst_QWebSocketServer::tst_settersAndGetters()
     server.setMaxPendingConnections(INT_MAX);
     QCOMPARE(server.maxPendingConnections(), INT_MAX);
 
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
     QVERIFY(!server.setSocketDescriptor(-2));
     QCOMPARE(server.socketDescriptor(), -1);
-#else // ### Qt 6: Remove leftovers
-    QVERIFY(!server.setNativeDescriptor(-2));
-    QCOMPARE(server.nativeDescriptor(), -1);
-#endif // (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
 
     server.setServerName(QStringLiteral("Qt WebSocketServer"));
     QCOMPARE(server.serverName(), QStringLiteral("Qt WebSocketServer"));
@@ -394,12 +353,56 @@ void tst_QWebSocketServer::tst_connectivity()
     QCOMPARE(serverErrorSpy.count(), 0);
 }
 
+void tst_QWebSocketServer::tst_protocols_data()
+{
+    QTest::addColumn<QStringList>("clientProtocols");
+    QTest::addColumn<QString>("expectedProtocol");
+    QTest::addRow("none") << QStringList {} << QString {};
+    QTest::addRow("same order as server")
+            << QStringList { "chat", "superchat" } << QStringLiteral("chat");
+    QTest::addRow("different order from server")
+            << QStringList { "superchat", "chat" } << QStringLiteral("superchat");
+    QTest::addRow("unsupported protocol") << QStringList { "foo" } << QString {};
+    QTest::addRow("mixed supported/unsupported protocol")
+            << QStringList { "foo", "chat" } << QStringLiteral("chat");
+}
+
+void tst_QWebSocketServer::tst_protocols()
+{
+    QFETCH(QStringList, clientProtocols);
+    QFETCH(QString, expectedProtocol);
+
+    QWebSocketServer server(QString(), QWebSocketServer::NonSecureMode);
+    server.setSupportedSubprotocols({ QStringLiteral("chat"), QStringLiteral("superchat") });
+
+    QSignalSpy newConnectionSpy(&server, &QWebSocketServer::newConnection);
+
+    QVERIFY(server.listen());
+
+    QWebSocketHandshakeOptions opt;
+    opt.setSubprotocols(clientProtocols);
+    QWebSocket client;
+    client.open(server.serverUrl(), opt);
+
+    QTRY_COMPARE(client.state(), QAbstractSocket::ConnectedState);
+    QTRY_COMPARE(newConnectionSpy.count(), 1);
+
+    auto *serverSocket = server.nextPendingConnection();
+    QVERIFY(serverSocket);
+
+    QCOMPARE(client.subprotocol(), expectedProtocol);
+    QCOMPARE(serverSocket->subprotocol(), expectedProtocol);
+    QCOMPARE(serverSocket->handshakeOptions().subprotocols(), clientProtocols);
+}
+
 void tst_QWebSocketServer::tst_preSharedKey()
 {
     if (m_shouldSkipUnsupportedIpv6Test)
         QSKIP("Syscalls needed for ipv6 sockoptions missing functionality");
 
-#ifndef QT_NO_OPENSSL
+    if (QSslSocket::activeBackend() != u"openssl")
+        QSKIP("OpenSSL required");
+
     QWebSocketServer server(QString(), QWebSocketServer::SecureMode);
 
     bool cipherFound = false;
@@ -419,8 +422,7 @@ void tst_QWebSocketServer::tst_preSharedKey()
     list << cipher;
 
     QSslConfiguration config = QSslConfiguration::defaultConfiguration();
-    if (QSslSocket::sslLibraryVersionNumber() >= 0x10101000L)
-        config.setProtocol(QSsl::TlsV1_2); // With TLS 1.3 there are some issues with PSK, force 1.2
+    config.setProtocol(QSsl::TlsV1_2); // With TLS 1.3 there are some issues with PSK, force 1.2
     config.setCiphers(list);
     config.setPeerVerifyMode(QSslSocket::VerifyNone);
     config.setPreSharedKeyIdentityHint(PSK_SERVER_IDENTITY_HINT);
@@ -474,7 +476,6 @@ void tst_QWebSocketServer::tst_preSharedKey()
     QTRY_COMPARE(serverClosedSpy.count(), 1);
     QCOMPARE(sslErrorsSpy.count(), 0);
     QCOMPARE(serverErrorSpy.count(), 0);
-#endif
 }
 
 void tst_QWebSocketServer::tst_maxPendingConnections()

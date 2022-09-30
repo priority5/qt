@@ -5,18 +5,20 @@
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_SURFACE_DEPENDENCY_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_SURFACE_DEPENDENCY_H_
 
-#include <vector>
+#include <memory>
 
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "components/viz/service/display/display_compositor_memory_and_task_controller.h"
 #include "components/viz/service/viz_service_export.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/service/sequence_id.h"
 #include "gpu/config/gpu_preferences.h"
 #include "gpu/ipc/common/surface_handle.h"
+#include "third_party/skia/include/core/SkSurfaceCharacterization.h"
 #include "ui/gl/gl_surface_format.h"
 
 class GURL;
@@ -94,7 +96,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependency {
   // called only from GPU Thread.
   virtual void ScheduleDelayedGPUTaskFromGPUThread(base::OnceClosure task) = 0;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   virtual void DidCreateAcceleratedSurfaceChildWindow(
       gpu::SurfaceHandle parent_window,
       gpu::SurfaceHandle child_window) = 0;

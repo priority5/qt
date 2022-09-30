@@ -4,9 +4,10 @@
 
 #include "base/profiler/module_cache.h"
 
-#include <algorithm>
 #include <iterator>
 #include <utility>
+
+#include "base/ranges/algorithm.h"
 
 namespace base {
 
@@ -30,15 +31,21 @@ struct ModuleAddressCompare {
 }  // namespace
 
 ModuleCache::ModuleCache() = default;
-ModuleCache::~ModuleCache() = default;
+
+ModuleCache::~ModuleCache() {
+  DCHECK_EQ(auxiliary_module_provider_, nullptr);
+}
 
 const ModuleCache::Module* ModuleCache::GetModuleForAddress(uintptr_t address) {
   if (const ModuleCache::Module* module = GetExistingModuleForAddress(address))
     return module;
 
   std::unique_ptr<const Module> new_module = CreateModuleForAddress(address);
+  if (!new_module && auxiliary_module_provider_)
+    new_module = auxiliary_module_provider_->TryCreateModuleForAddress(address);
   if (!new_module)
     return nullptr;
+
   const auto result = native_modules_.insert(std::move(new_module));
   // TODO(https://crbug.com/1131769): Reintroduce DCHECK(result.second) after
   // fixing the issue that is causing it to fail.
@@ -69,8 +76,8 @@ void ModuleCache::UpdateNonNativeModules(
   //
   // stable_partition is O(m*log(r)) where m is the number of current modules
   // and r is the number of modules to remove. insert and erase are both O(r).
-  auto first_module_defunct_modules = std::stable_partition(
-      non_native_modules_.begin(), non_native_modules_.end(),
+  auto first_module_defunct_modules = ranges::stable_partition(
+      non_native_modules_,
       [&defunct_modules_set](const std::unique_ptr<const Module>& module) {
         return defunct_modules_set.find(module.get()) ==
                defunct_modules_set.end();
@@ -123,6 +130,18 @@ const ModuleCache::Module* ModuleCache::GetExistingModuleForAddress(
     return native_module_loc->get();
 
   return nullptr;
+}
+
+void ModuleCache::RegisterAuxiliaryModuleProvider(
+    AuxiliaryModuleProvider* auxiliary_module_provider) {
+  DCHECK(!auxiliary_module_provider_);
+  auxiliary_module_provider_ = auxiliary_module_provider;
+}
+
+void ModuleCache::UnregisterAuxiliaryModuleProvider(
+    AuxiliaryModuleProvider* auxiliary_module_provider) {
+  DCHECK_EQ(auxiliary_module_provider_, auxiliary_module_provider);
+  auxiliary_module_provider_ = nullptr;
 }
 
 bool ModuleCache::ModuleAndAddressCompare::operator()(

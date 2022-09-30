@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
-#include "base/no_destructor.h"
 #include "content/public/utility/utility_thread.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/service_factory.h"
@@ -48,14 +47,11 @@ HeadlessContentUtilityClient::HeadlessContentUtilityClient(
 
 HeadlessContentUtilityClient::~HeadlessContentUtilityClient() = default;
 
-mojo::ServiceFactory*
-HeadlessContentUtilityClient::GetMainThreadServiceFactory() {
-  static base::NoDestructor<mojo::ServiceFactory> factory {
+void HeadlessContentUtilityClient::RegisterMainThreadServices(
+    mojo::ServiceFactory& services) {
 #if BUILDFLAG(ENABLE_PRINTING)
-    RunPrintCompositor,
+  services.Add(RunPrintCompositor);
 #endif
-  };
-  return factory.get();
 }
 
 void HeadlessContentUtilityClient::RegisterNetworkBinders(

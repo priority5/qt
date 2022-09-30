@@ -1,36 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-#include <QtTest/QtTest>
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+#include <QTest>
+#include <QSignalSpy>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QLayout>
 #include <QtWidgets/QDialog>
-#include <QtWidgets/QAction>
+#include <QtGui/QAction>
 #include <qdialogbuttonbox.h>
 #include <limits.h>
 
@@ -191,7 +167,7 @@ void tst_QDialogButtonBox::testConstructor3()
 
     QDialogButtonBox buttonBox(buttons, (Qt::Orientation)orientation);
     QCOMPARE(int(buttonBox.orientation()), orientation);
-    QTEST(buttonBox.buttons().count(), "buttonCount");
+    QTEST(int(buttonBox.buttons().count()), "buttonCount");
 }
 
 void tst_QDialogButtonBox::testConstructor4_data()
@@ -226,7 +202,7 @@ void tst_QDialogButtonBox::testConstructor4()
 
     QDialogButtonBox buttonBox(buttons);
     QCOMPARE(buttonBox.orientation(), Qt::Horizontal);
-    QTEST(buttonBox.buttons().count(), "buttonCount");
+    QTEST(int(buttonBox.buttons().count()), "buttonCount");
 }
 
 void tst_QDialogButtonBox::setOrientation_data()
@@ -292,9 +268,9 @@ void tst_QDialogButtonBox::addButton1()
     QCOMPARE(buttonBox.buttons().count(), 0);
     QPushButton *button = new QPushButton();
     buttonBox.addButton(button, role);
-    QTEST(buttonBox.buttons().count(), "totalCount");
+    QTEST(int(buttonBox.buttons().count()), "totalCount");
     QList<QAbstractButton *> children = buttonBox.findChildren<QAbstractButton *>();
-    QTEST(children.count(), "totalCount");
+    QTEST(int(children.count()), "totalCount");
     delete button;
 }
 
@@ -319,9 +295,9 @@ void tst_QDialogButtonBox::addButton2()
     QDialogButtonBox buttonBox;
     QCOMPARE(buttonBox.buttons().count(), 0);
     buttonBox.addButton(text, role);
-    QTEST(buttonBox.buttons().count(), "totalCount");
+    QTEST(int(buttonBox.buttons().count()), "totalCount");
     QList<QAbstractButton *> children = buttonBox.findChildren<QAbstractButton *>();
-    QTEST(children.count(), "totalCount");
+    QTEST(int(children.count()), "totalCount");
 }
 
 void tst_QDialogButtonBox::addButton3_data()
@@ -346,9 +322,9 @@ void tst_QDialogButtonBox::addButton3()
     QDialogButtonBox buttonBox;
     QCOMPARE(buttonBox.buttons().count(), 0);
     buttonBox.addButton(button);
-    QTEST(buttonBox.buttons().count(), "totalCount");
+    QTEST(int(buttonBox.buttons().count()), "totalCount");
     QList<QAbstractButton *> children = buttonBox.findChildren<QAbstractButton *>();
-    QTEST(children.count(), "totalCount");
+    QTEST(int(children.count()), "totalCount");
 }
 
 void tst_QDialogButtonBox::clear_data()
@@ -389,7 +365,7 @@ void tst_QDialogButtonBox::removeButton()
     QCOMPARE(buttonBox.buttons().count(), 0);
     QPushButton *button = new QPushButton("RemoveButton test");
     buttonBox.addButton(button, roleToAdd);
-    QTEST(buttonBox.buttons().count(), "expectedCount");
+    QTEST(int(buttonBox.buttons().count()), "expectedCount");
 
     buttonBox.removeButton(button);
     QCOMPARE(buttonBox.buttons().count(), 0);
@@ -622,9 +598,9 @@ void tst_QDialogButtonBox::testSignals()
     if (clicked2.count() > 0)
         QCOMPARE(qvariant_cast<QAbstractButton *>(clicked2.at(0).at(0)), clickMe);
 
-    QTEST(accept.count(), "acceptCount");
-    QTEST(reject.count(), "rejectCount");
-    QTEST(helpRequested.count(), "helpRequestedCount");
+    QTEST(int(accept.count()), "acceptCount");
+    QTEST(int(reject.count()), "rejectCount");
+    QTEST(int(helpRequested.count()), "helpRequestedCount");
 }
 
 void tst_QDialogButtonBox::testSignalOrder()

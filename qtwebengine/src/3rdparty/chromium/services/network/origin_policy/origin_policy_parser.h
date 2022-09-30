@@ -9,8 +9,7 @@
 #include <string>
 
 #include "base/component_export.h"
-#include "base/macros.h"
-#include "services/network/public/mojom/origin_policy_manager.mojom.h"
+#include "services/network/public/cpp/origin_policy.h"
 
 namespace base {
 class Value;
@@ -21,6 +20,9 @@ namespace network {
 // https://wicg.github.io/origin-policy/#parsing
 class COMPONENT_EXPORT(NETWORK_SERVICE) OriginPolicyParser {
  public:
+  OriginPolicyParser(const OriginPolicyParser&) = delete;
+  OriginPolicyParser& operator=(const OriginPolicyParser&) = delete;
+
   // Parse the given origin policy. Returns an empty policy if parsing is not
   // successful.
   static OriginPolicyContentsPtr Parse(base::StringPiece);
@@ -38,13 +40,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) OriginPolicyParser {
   bool ParseIds(const base::Value&);
   void ParseContentSecurity(const base::Value&);
   void ParseFeatures(const base::Value&);
-  void ParseIsolation(const base::Value&);
 
   static bool IsValidOriginPolicyId(const std::string&);
 
   OriginPolicyContentsPtr policy_contents_;
-
-  DISALLOW_COPY_AND_ASSIGN(OriginPolicyParser);
 };
 
 }  // namespace network

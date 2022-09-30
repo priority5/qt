@@ -31,7 +31,7 @@ class PhpGenerator : public BaseGenerator {
  public:
   PhpGenerator(const Parser &parser, const std::string &path,
                const std::string &file_name)
-      : BaseGenerator(parser, path, file_name, "\\", "\\") {}
+      : BaseGenerator(parser, path, file_name, "\\", "\\", "php") {}
   bool generate() {
     if (!GenerateEnums()) return false;
     if (!GenerateStructs()) return false;
@@ -401,7 +401,7 @@ class PhpGenerator : public BaseGenerator {
     code += Indent + Indent + "$o = $this->__offset(" +
             NumToString(field.value.offset) + ");\n";
 
-    if (field.value.type.VectorType().base_type == BASE_TYPE_STRING) {
+    if (IsString(field.value.type.VectorType())) {
       code += Indent + Indent;
       code += "return $o != 0 ? $this->__string($this->__vector($o) + $j * ";
       code += NumToString(InlineSize(vectortype)) + ") : ";
@@ -536,7 +536,7 @@ class PhpGenerator : public BaseGenerator {
     for (auto it = struct_def.fields.vec.begin();
          it != struct_def.fields.vec.end(); ++it) {
       auto &field = **it;
-      if (!field.deprecated && field.required) {
+      if (!field.deprecated && field.IsRequired()) {
         code += Indent + Indent + "$builder->required($o, ";
         code += NumToString(field.value.offset);
         code += ");  // " + field.name + "\n";
@@ -645,7 +645,7 @@ class PhpGenerator : public BaseGenerator {
     for (auto it = struct_def.fields.vec.begin();
          it != struct_def.fields.vec.end(); ++it) {
       auto &field = **it;
-      if (!field.deprecated && field.required) {
+      if (!field.deprecated && field.IsRequired()) {
         code += Indent + Indent + "$builder->required($o, ";
         code += NumToString(field.value.offset);
         code += ");  // " + field.name + "\n";
@@ -705,7 +705,7 @@ class PhpGenerator : public BaseGenerator {
         default: FLATBUFFERS_ASSERT(0);
       }
     }
-    if (field.value.type.base_type == BASE_TYPE_VECTOR) {
+    if (IsVector(field.value.type)) {
       GetVectorLen(field, code_ptr);
       if (field.value.type.element == BASE_TYPE_UCHAR) {
         GetUByte(field, code_ptr);
@@ -735,9 +735,7 @@ class PhpGenerator : public BaseGenerator {
       } else {
         BuildFieldOfTable(field, offset, code_ptr);
       }
-      if (field.value.type.base_type == BASE_TYPE_VECTOR) {
-        BuildVectorOfTable(field, code_ptr);
-      }
+      if (IsVector(field.value.type)) { BuildVectorOfTable(field, code_ptr); }
     }
 
     GetEndOffsetOnTable(struct_def, code_ptr);
@@ -860,15 +858,15 @@ class PhpGenerator : public BaseGenerator {
   }
 
   static std::string GenTypeBasic(const Type &type) {
-    static const char *ctypename[] = {
     // clang-format off
-        #define FLATBUFFERS_TD(ENUM, IDLTYPE, \
-            CTYPE, JTYPE, GTYPE, NTYPE, PTYPE, RTYPE, KTYPE) \
-            #NTYPE,
-                FLATBUFFERS_GEN_TYPES(FLATBUFFERS_TD)
-        #undef FLATBUFFERS_TD
-      // clang-format on
+    static const char *ctypename[] = {
+      #define FLATBUFFERS_TD(ENUM, IDLTYPE, \
+              CTYPE, JTYPE, GTYPE, NTYPE, ...) \
+        #NTYPE,
+        FLATBUFFERS_GEN_TYPES(FLATBUFFERS_TD)
+      #undef FLATBUFFERS_TD
     };
+    // clang-format on
     return ctypename[type.base_type];
   }
 

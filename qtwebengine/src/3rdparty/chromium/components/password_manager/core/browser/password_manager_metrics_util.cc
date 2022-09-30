@@ -4,11 +4,9 @@
 
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 
-#include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/strcat.h"
 #include "components/autofill/core/common/password_generation_util.h"
-#include "components/password_manager/core/common/password_manager_features.h"
 
 using autofill::password_generation::PasswordGenerationType;
 
@@ -60,7 +58,8 @@ void LogGeneralUIDismissalReason(UIDismissalReason reason) {
 
 void LogSaveUIDismissalReason(
     UIDismissalReason reason,
-    base::Optional<PasswordAccountStorageUserState> user_state) {
+    autofill::mojom::SubmissionIndicatorEvent submission_event,
+    absl::optional<PasswordAccountStorageUserState> user_state) {
   base::UmaHistogramEnumeration("PasswordManager.SaveUIDismissalReason", reason,
                                 NUM_UI_RESPONSES);
 
@@ -71,24 +70,37 @@ void LogSaveUIDismissalReason(
         "PasswordManager.SaveUIDismissalReason." + suffix, reason,
         NUM_UI_RESPONSES);
   }
+
+  if (submission_event ==
+      autofill::mojom::SubmissionIndicatorEvent::CHANGE_PASSWORD_FORM_CLEARED) {
+    base::UmaHistogramEnumeration(
+        "PasswordManager.SaveUIOnClearedPasswordChangeFormDismissalReason",
+        reason, NUM_UI_RESPONSES);
+  }
 }
 
-void LogSaveUIDismissalReasonAfterUnblacklisting(UIDismissalReason reason) {
+void LogSaveUIDismissalReasonAfterUnblocklisting(UIDismissalReason reason) {
   base::UmaHistogramEnumeration(
       "PasswordManager.SaveUIDismissalReasonAfterUnblacklisting", reason,
       NUM_UI_RESPONSES);
 }
 
-void LogUpdateUIDismissalReason(UIDismissalReason reason) {
+void LogUpdateUIDismissalReason(
+    UIDismissalReason reason,
+    autofill::mojom::SubmissionIndicatorEvent submission_event) {
   base::UmaHistogramEnumeration("PasswordManager.UpdateUIDismissalReason",
                                 reason, NUM_UI_RESPONSES);
+
+  if (submission_event ==
+      autofill::mojom::SubmissionIndicatorEvent::CHANGE_PASSWORD_FORM_CLEARED) {
+    base::UmaHistogramEnumeration(
+        "PasswordManager.UpdateUIOnClearedPasswordChangeFormDismissalReason",
+        reason, NUM_UI_RESPONSES);
+  }
 }
 
 void LogMoveUIDismissalReason(UIDismissalReason reason,
                               PasswordAccountStorageUserState user_state) {
-  DCHECK(base::FeatureList::IsEnabled(
-      password_manager::features::kEnablePasswordsAccountStorage));
-
   base::UmaHistogramEnumeration("PasswordManager.MoveUIDismissalReason", reason,
                                 NUM_UI_RESPONSES);
 
@@ -111,6 +123,8 @@ void LogLeakDialogTypeAndDismissalReason(LeakDialogType type,
         return "Change";
       case LeakDialogType::kCheckupAndChange:
         return "CheckupAndChange";
+      case LeakDialogType::kChangeAutomatically:
+        return "ChangeAutomatically";
     }
   };
 
@@ -135,8 +149,7 @@ void LogFilledCredentialIsFromAndroidApp(bool from_android) {
 }
 
 void LogPasswordSyncState(PasswordSyncState state) {
-  base::UmaHistogramEnumeration("PasswordManager.PasswordSyncState", state,
-                                NUM_SYNC_STATES);
+  base::UmaHistogramEnumeration("PasswordManager.PasswordSyncState2", state);
 }
 
 void LogApplySyncChangesState(ApplySyncChangesState state) {
@@ -188,13 +201,10 @@ void LogCredentialManagerGetResult(CredentialManagerGetResult result,
   }
 }
 
-void LogPasswordReuse(int password_length,
-                      int saved_passwords,
+void LogPasswordReuse(int saved_passwords,
                       int number_matches,
                       bool password_field_detected,
                       PasswordType reused_password_type) {
-  base::UmaHistogramCounts100("PasswordManager.PasswordReuse.PasswordLength",
-                              password_length);
   base::UmaHistogramCounts1000("PasswordManager.PasswordReuse.TotalPasswords",
                                saved_passwords);
   base::UmaHistogramCounts1000("PasswordManager.PasswordReuse.NumberOfMatches",
@@ -248,6 +258,20 @@ void LogPasswordsCountFromAccountStoreAfterUnlock(
       account_store_passwords_count);
 }
 
+void LogDownloadedPasswordsCountFromAccountStoreAfterUnlock(
+    int account_store_passwords_count) {
+  base::UmaHistogramCounts100(
+      "PasswordManager.AccountStoreCredentialsAfterOptIn",
+      account_store_passwords_count);
+}
+
+void LogDownloadedBlocklistedEntriesCountFromAccountStoreAfterUnlock(
+    int blocklist_entries_count) {
+  base::UmaHistogramCounts100(
+      "PasswordManager.AccountStoreBlocklistedEntriesAfterOptIn",
+      blocklist_entries_count);
+}
+
 void LogPasswordSettingsReauthResult(ReauthResult result) {
   base::UmaHistogramEnumeration(
       "PasswordManager.ReauthToAccessPasswordInSettings", result);
@@ -284,7 +308,6 @@ void LogGenerationDialogChoice(GenerationDialogChoice choice,
   };
 }  // namespace metrics_util
 
-#if defined(PASSWORD_REUSE_DETECTION_ENABLED)
 void LogGaiaPasswordHashChange(GaiaPasswordHashChange event,
                                bool is_sync_password) {
   if (is_sync_password) {
@@ -308,14 +331,10 @@ void LogIsSyncPasswordHashSaved(IsSyncPasswordHashSaved state,
 }
 
 void LogProtectedPasswordHashCounts(size_t gaia_hash_count,
-                                    size_t enterprise_hash_count,
                                     bool does_primary_account_exists,
                                     bool is_signed_in) {
   base::UmaHistogramCounts100("PasswordManager.SavedGaiaPasswordHashCount",
                               static_cast<int>(gaia_hash_count));
-  base::UmaHistogramCounts100(
-      "PasswordManager.SavedEnterprisePasswordHashCount",
-      static_cast<int>(enterprise_hash_count));
 
   // Log parallel metrics for sync and signed-in non-sync accounts in addition
   // to above to be able to tell what fraction of signed-in non-sync users we
@@ -332,7 +351,6 @@ void LogProtectedPasswordHashCounts(size_t gaia_hash_count,
 }
 
 void LogProtectedPasswordReuse(PasswordType reused_password_type) {}
-#endif
 
 void LogPasswordEditResult(IsUsernameChanged username_changed,
                            IsPasswordChanged password_changed) {
@@ -348,6 +366,14 @@ void LogPasswordEditResult(IsUsernameChanged username_changed,
   }
   base::UmaHistogramEnumeration("PasswordManager.PasswordEditUpdatedValues",
                                 values);
+}
+
+void LogUserInteractionsWhenAddingCredentialFromSettings(
+    AddCredentialFromSettingsUserInteractions
+        add_credential_from_settings_user_interaction) {
+  base::UmaHistogramEnumeration(
+      "PasswordManager.AddCredentialFromSettings.UserAction",
+      add_credential_from_settings_user_interaction);
 }
 
 }  // namespace metrics_util

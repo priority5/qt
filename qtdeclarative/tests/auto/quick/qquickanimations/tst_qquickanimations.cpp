@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <QtTest/QtTest>
 #include <QtQml/qqmlengine.h>
 #include <QtQml/qqmlcomponent.h>
@@ -41,21 +16,22 @@
 #include <QtQuick/private/qquickpathinterpolator_p.h>
 #include <QtQuick/private/qquickitem_p.h>
 #include <QtQuick/private/qquicklistview_p.h>
+#include <QtQuick/private/qquickframeanimation_p.h>
 #include <QEasingCurve>
 
 #include <limits.h>
 #include <math.h>
 
-#include "../../shared/util.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
 
 class tst_qquickanimations : public QQmlDataTest
 {
     Q_OBJECT
 public:
-    tst_qquickanimations() {}
+    tst_qquickanimations() : QQmlDataTest(QT_QMLTEST_DATADIR) {}
 
 private slots:
-    void initTestCase()
+    void initTestCase() override
     {
         QQmlEngine engine;  // ensure types are registered
         QQmlDataTest::initTestCase();
@@ -116,6 +92,12 @@ private slots:
     void fastFlickingBug();
     void opacityAnimationFromZero();
     void alwaysRunToEndInSequentialAnimationBug();
+    void cleanupWhenRenderThreadStops();
+    void changePropertiesDuringAnimation_data();
+    void changePropertiesDuringAnimation();
+    void infiniteLoopsWithoutFrom();
+    void frameAnimation1();
+    void frameAnimation2();
 };
 
 #define QTIMED_COMPARE(lhs, rhs) do { \
@@ -217,7 +199,7 @@ void tst_qquickanimations::simpleColor()
     QVERIFY(animation.isPaused());
     animation.setCurrentTime(125);
     QCOMPARE(animation.currentTime(), 125);
-    QCOMPARE(rect.color(), QColor::fromRgbF(0.498039, 0, 0.498039, 1));
+    QCOMPARE(rect.color(), QColor::fromRgbF(0.498039f, 0, 0.498039f, 1));
 
     rect.setColor(QColor("green"));
     animation.setFrom(QColor("blue"));
@@ -228,7 +210,7 @@ void tst_qquickanimations::simpleColor()
     QCOMPARE(rect.color(), QColor("blue"));
     QVERIFY(animation.isRunning());
     animation.setCurrentTime(125);
-    QCOMPARE(rect.color(), QColor::fromRgbF(0.498039, 0, 0.498039, 1));
+    QCOMPARE(rect.color(), QColor::fromRgbF(0.498039f, 0, 0.498039f, 1));
 }
 
 void tst_qquickanimations::simpleRotation()
@@ -1235,7 +1217,7 @@ void tst_qquickanimations::easingProperties()
 
     {
         QQmlEngine engine;
-        QString componentStr = "import QtQuick 2.0\nPropertyAnimation { easing.type: \"Bezier\"; easing.bezierCurve: [0.5, 0.2, 0.13, 0.65, 1.0, 1.0] }";
+        QString componentStr = "import QtQuick 2.0\nPropertyAnimation { easing.type: \"BezierSpline\"; easing.bezierCurve: [0.5, 0.2, 0.13, 0.65, 1.0, 1.0] }";
         QQmlComponent animationComponent(&engine);
         animationComponent.setData(componentStr.toLatin1(), QUrl::fromLocalFile(""));
         QScopedPointer<QObject> obj(animationComponent.create());
@@ -1543,7 +1525,7 @@ void tst_qquickanimations::loopingBug()
     QVERIFY(anim != nullptr);
     QCOMPARE(anim->qtAnimation()->totalDuration(), 300);
     QCOMPARE(anim->isRunning(), true);
-    QTRY_COMPARE(static_cast<QAnimationGroupJob*>(anim->qtAnimation())->firstChild()->currentLoop(), 2);
+    QTRY_COMPARE(static_cast<QAnimationGroupJob*>(anim->qtAnimation())->children()->first()->currentLoop(), 2);
     QTRY_COMPARE(anim->isRunning(), false);
 
     QQuickRectangle *rect = obj->findChild<QQuickRectangle*>();
@@ -1862,9 +1844,8 @@ void tst_qquickanimations::fastFlickingBug()
 
 void tst_qquickanimations::opacityAnimationFromZero()
 {
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
     // not easy to verify this in threaded render loop
     // since it's difficult to capture the first frame when scene graph
@@ -1898,7 +1879,7 @@ void tst_qquickanimations::opacityAnimationFromZero()
 
 void tst_qquickanimations::alwaysRunToEndInSequentialAnimationBug()
 {
-    QQuickView view(QUrl::fromLocalFile("data/alwaysRunToEndInSequentialAnimationBug.qml"));
+    QQuickView view(testFileUrl("alwaysRunToEndInSequentialAnimationBug.qml"));
     view.show();
 
     QVERIFY(QTest::qWaitForWindowExposed(&view));
@@ -1996,6 +1977,239 @@ void tst_qquickanimations::alwaysRunToEndInSequentialAnimationBug()
     QVERIFY(root->property("onStoppedCalled").value<bool>());
     QVERIFY(root->property("onFinishedCalled").value<bool>());
     QCOMPARE(whiteRect->property("opacity").value<qreal>(),1.0);
+}
+
+void tst_qquickanimations::cleanupWhenRenderThreadStops()
+{
+    QQuickView view(testFileUrl("cleanupWhenRenderThreadStops.qml"));
+    view.show();
+    view.setPersistentGraphics(false);
+    view.setPersistentSceneGraph(false);
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTest::qWait(50);
+    view.hide();
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+}
+
+// This will be called each frame and should return true for the test to pass.
+typedef std::function<bool(QQuickItem *, QString &)> PropertyValidatorFunc;
+Q_DECLARE_METATYPE(PropertyValidatorFunc)
+
+void tst_qquickanimations::changePropertiesDuringAnimation_data()
+{
+    QTest::addColumn<int>("loops");
+    QTest::addColumn<QString>("propertyName");
+    QTest::addColumn<qreal>("newValue");
+    QTest::addColumn<PropertyValidatorFunc>("propertyValidatorFunc");
+
+    // Use a value large enough to ensure that the animation is running for the duration of
+    // the test. We test both infinite and non-infinite loop counts.
+    const int largeLoopCount = 100;
+
+    const auto fromValidator = PropertyValidatorFunc([](QQuickItem *rect, QString &failureMessage){
+        if (rect->x() >= 0)
+            return true;
+        QDebug(&failureMessage) << "Expected x of rect to never go below new \"from\" value of 0, but it's" << rect->x();
+        return false;
+    });
+    QTest::newRow("from") << largeLoopCount << "from" << 0.0 << fromValidator;
+    QTest::newRow("from,infinite") << int(QQuickAbstractAnimation::Infinite) << "from" << 0.0 << fromValidator;
+
+    const auto toValidator = PropertyValidatorFunc([](QQuickItem *rect, QString &failureMessage){
+        if (rect->x() <= 100)
+            return true;
+        QDebug(&failureMessage) << "Expected x of rect to never go above new \"to\" value of 100, but it's" << rect->x();
+        return false;
+    });
+    QTest::newRow("to") << largeLoopCount << "to" << 100.0 << toValidator;
+    QTest::newRow("to,infinite") << int(QQuickAbstractAnimation::Infinite) << "to" << 100.0 << toValidator;
+
+    // Duration and easing.type would be difficult/flaky to test in CI so they're left out here.
+}
+
+// Tests that changing a NumberAnimation's properties while it's running will result
+// in those changes being picked up on the next loop. This is new behavior introduced
+// in Qt 6.4.
+void tst_qquickanimations::changePropertiesDuringAnimation()
+{
+    QFETCH(int, loops);
+    QFETCH(QString, propertyName);
+    QFETCH(qreal, newValue);
+    QFETCH(PropertyValidatorFunc, propertyValidatorFunc);
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("changePropertiesDuringAnimation.qml"));
+    QScopedPointer<QQuickItem> rootItem(qobject_cast<QQuickItem*>(component.createWithInitialProperties({{ "loops", loops }})));
+    QVERIFY2(!component.isError(), qPrintable(component.errorString()));
+
+    auto numberAnimation = rootItem->property("numberAnimation").value<QQuickNumberAnimation*>();
+    QVERIFY(numberAnimation);
+    QCOMPARE(numberAnimation->from(), -100);
+    QCOMPARE(numberAnimation->to(), rootItem->width());
+
+    // Start the animation.
+    numberAnimation->start();
+    QVERIFY(numberAnimation->isRunning());
+
+    int loopCountBeforeModification = 0;
+    // Ensure that it's past the first loop so that we can check that it resumes
+    // from that loop after "restarting".
+    QTRY_VERIFY(numberAnimation->qtAnimation()->currentLoop() >= 1);
+    loopCountBeforeModification = numberAnimation->qtAnimation()->currentLoop();
+
+    QSignalSpy startedSpy(numberAnimation, SIGNAL(started()));
+    QVERIFY(startedSpy.isValid());
+    QSignalSpy stoppedSpy(numberAnimation, SIGNAL(stopped()));
+    QVERIFY(stoppedSpy.isValid());
+
+    // Modify the property.
+    // QQuickPropertyAnimation has a setProperty function of its own, and we don't want to call it, hence the cast.
+    QVERIFY(static_cast<QObject*>(numberAnimation)->setProperty(propertyName.toLatin1().constData(), QVariant(newValue)));
+
+    // Make sure we've reached the end of the animation.
+    auto rect = rootItem->property("rect").value<QQuickItem*>();
+    QVERIFY(rect);
+    // Ensure that we've passed the loop on which we modified the property, while also checking
+    // that currentLoop never gets reset to 0. We can't just use QTRY_VERIFY
+    // for this, because it could start at 0 and then pass loopCountBeforeModification;
+    // we need to ensure that it never goes below loopCountBeforeModification.
+    while (numberAnimation->qtAnimation()->currentLoop() < loopCountBeforeModification + 1) {
+        QVERIFY2(numberAnimation->qtAnimation()->currentLoop() >= loopCountBeforeModification,
+            qPrintable(QString::fromLatin1("Expected currentLoop to be larger than %1, but it's %2")
+                .arg(loopCountBeforeModification).arg(numberAnimation->qtAnimation()->currentLoop())));
+        QTest::qWait(0);
+    }
+
+    // Now that we know the modification should have been taken into account,
+    // check that the animated property never gets set to a value that we wouldn't expect after the change.
+    const int previousLoop = numberAnimation->qtAnimation()->currentLoop();
+    QString failureMessage;
+    while (numberAnimation->qtAnimation()->currentLoop() < previousLoop + 1) {
+        if (!propertyValidatorFunc(rect, failureMessage))
+            QFAIL(qPrintable(failureMessage));
+        QTest::qWait(0);
+    }
+
+    // The started and stopped signals should not be emitted when adapting to changes
+    // mid-animation.
+    if (loops != QQuickAbstractAnimation::Infinite)
+        QVERIFY(numberAnimation->qtAnimation()->currentLoop() < numberAnimation->loops());
+    QCOMPARE(startedSpy.count(), 0);
+    QCOMPARE(stoppedSpy.count(), 0);
+}
+
+void tst_qquickanimations::infiniteLoopsWithoutFrom()
+{
+    // This test checks QTBUG-84375
+    QQuickView view(testFileUrl("infiniteAnimationWithoutFrom.qml"));
+    view.show();
+
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QVERIFY(view.rootObject());
+
+    QObject *root = view.rootObject();
+    QQuickAbstractAnimation *animation = root->findChild<QQuickAbstractAnimation *>("anim");
+    QVERIFY(animation);
+    QQuickRectangle *rectangle = root->findChild<QQuickRectangle *>("rect");
+    QVERIFY(rectangle);
+
+    qreal prevRotation = rectangle->rotation();
+    int numsCrossedZero = 0;
+    connect(rectangle, &QQuickRectangle::rotationChanged, this, [&]() {
+        const auto rotation = rectangle->rotation();
+        // We take a large range of (180; 360] here, because the animation in
+        // the test runs for a short time, and so there can be huge gaps between
+        // rotation values.
+        const bool prevRotationOldLoop = prevRotation > 180.0 && prevRotation <= 360.0;
+        const bool currRotationNewLoop = rotation >= 0.0 && rotation <= 180.0;
+        if (prevRotationOldLoop && currRotationNewLoop)
+            numsCrossedZero++;
+        prevRotation = rotation;
+    });
+
+    // The logic in lamdba function above requires at least two positions in
+    // a rotation animation - one in [0; 180] range, and another in (180; 360]
+    // range
+    animation->start();
+    animation->pause();
+    QCOMPARE(numsCrossedZero, 0);
+    animation->setCurrentTime(40);
+    animation->setCurrentTime(90);
+    QCOMPARE(numsCrossedZero, 0);
+    animation->setCurrentTime(140);
+    animation->setCurrentTime(190);
+    QCOMPARE(numsCrossedZero, 1);
+    animation->setCurrentTime(240);
+    animation->setCurrentTime(290);
+    QCOMPARE(numsCrossedZero, 2);
+
+    animation->stop();
+}
+
+void tst_qquickanimations::frameAnimation1()
+{
+    QQuickFrameAnimation frameAnimation;
+    QVERIFY(!frameAnimation.isRunning());
+    QVERIFY(!frameAnimation.isPaused());
+    QCOMPARE(frameAnimation.currentFrame(), 0);
+    QCOMPARE(frameAnimation.frameTime(), 0);
+    QCOMPARE(frameAnimation.smoothFrameTime(), 0);
+    QCOMPARE(frameAnimation.elapsedTime(), 0);
+
+    frameAnimation.start();
+    QVERIFY(frameAnimation.isRunning());
+    QVERIFY(!frameAnimation.isPaused());
+    frameAnimation.pause();
+    QVERIFY(frameAnimation.isRunning());
+    QVERIFY(frameAnimation.isPaused());
+    frameAnimation.resume();
+    QVERIFY(frameAnimation.isRunning());
+    QVERIFY(!frameAnimation.isPaused());
+    frameAnimation.stop();
+    QVERIFY(!frameAnimation.isRunning());
+    QVERIFY(!frameAnimation.isPaused());
+    frameAnimation.restart();
+    QVERIFY(frameAnimation.isRunning());
+    QVERIFY(!frameAnimation.isPaused());
+}
+
+void tst_qquickanimations::frameAnimation2()
+{
+    QQmlEngine engine;
+    QQmlComponent c(&engine, testFileUrl("frameAnimation.qml"));
+    QScopedPointer<QObject> obj(c.create());
+    auto *root = qobject_cast<QQuickRectangle*>(obj.data());
+    QVERIFY(root);
+
+    QQuickFrameAnimation *frameAnimation = root->findChild<QQuickFrameAnimation*>();
+    QVERIFY(frameAnimation);
+    QSignalSpy spy(frameAnimation, SIGNAL(triggered()));
+
+    // Start the animation and wait at least 1 frame
+    frameAnimation->start();
+    QVERIFY(frameAnimation->isRunning());
+    QVERIFY(spy.wait(500));
+    QVERIFY(frameAnimation->currentFrame() > 0);
+    QVERIFY(frameAnimation->frameTime() > 0);
+    QVERIFY(frameAnimation->smoothFrameTime() > 0);
+    QVERIFY(frameAnimation->elapsedTime() > 0);
+
+    // Stopping and reseting should return currentFrame back to 0
+    frameAnimation->stop();
+    frameAnimation->reset();
+    QCOMPARE(frameAnimation->currentFrame(), 0);
+
+    // Start and wait so the animation runs into frame 3 and pauses
+    frameAnimation->start();
+    QTRY_VERIFY(frameAnimation->isPaused());
+    QVERIFY(frameAnimation->currentFrame() >= 3);
+
+    // Then resume the animation
+    frameAnimation->resume();
+    QVERIFY(!frameAnimation->isPaused());
+    QVERIFY(spy.wait(500));
+    QVERIFY(frameAnimation->currentFrame() > 3);
 }
 
 QTEST_MAIN(tst_qquickanimations)

@@ -5,7 +5,10 @@
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_SURFACE_DEPENDENCY_IMPL_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_SURFACE_DEPENDENCY_IMPL_H_
 
-#include "base/macros.h"
+#include <memory>
+
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "components/viz/service/display_embedder/skia_output_surface_dependency.h"
 
@@ -20,8 +23,15 @@ class GpuServiceImpl;
 class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependencyImpl
     : public SkiaOutputSurfaceDependency {
  public:
-  SkiaOutputSurfaceDependencyImpl(GpuServiceImpl* gpu_service_impl,
-                                  gpu::SurfaceHandle surface_handle);
+  SkiaOutputSurfaceDependencyImpl(
+      GpuServiceImpl* gpu_service_impl,
+      gpu::SurfaceHandle surface_handle);
+
+  SkiaOutputSurfaceDependencyImpl(const SkiaOutputSurfaceDependencyImpl&) =
+      delete;
+  SkiaOutputSurfaceDependencyImpl& operator=(
+      const SkiaOutputSurfaceDependencyImpl&) = delete;
+
   ~SkiaOutputSurfaceDependencyImpl() override;
 
   std::unique_ptr<gpu::SingleTaskSequence> CreateSequence() override;
@@ -46,7 +56,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependencyImpl
   void ScheduleGrContextCleanup() override;
   void ScheduleDelayedGPUTaskFromGPUThread(base::OnceClosure task) override;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   void DidCreateAcceleratedSurfaceChildWindow(
       gpu::SurfaceHandle parent_window,
       gpu::SurfaceHandle child_window) override;
@@ -61,11 +71,9 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependencyImpl
   bool NeedsSupportForExternalStencil() override;
 
  private:
-  GpuServiceImpl* const gpu_service_impl_;
+  const raw_ptr<GpuServiceImpl> gpu_service_impl_;
   const gpu::SurfaceHandle surface_handle_;
   scoped_refptr<base::SingleThreadTaskRunner> client_thread_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(SkiaOutputSurfaceDependencyImpl);
 };
 
 }  // namespace viz

@@ -22,6 +22,7 @@
 #include "avcodec.h"
 #include "internal.h"
 #include "bytestream.h"
+#include "codec_internal.h"
 #include "libavutil/imgutils.h"
 
 static int pgx_get_number(AVCodecContext *avctx, GetByteContext *g, int *number) {
@@ -95,14 +96,14 @@ error:
 }
 
 #define WRITE_FRAME(D, PIXEL, suffix)                                                       \
-    static inline void write_frame_ ##D(AVPacket *avpkt, AVFrame *frame, GetByteContext *g, \
+    static inline void write_frame_ ##D(AVFrame *frame, GetByteContext *g, \
                                         int width, int height, int sign, int depth)         \
     {                                                                                       \
         int i, j;                                                                           \
         for (i = 0; i < height; i++) {                                                      \
             PIXEL *line = (PIXEL*)frame->data[0] + i*frame->linesize[0]/sizeof(PIXEL);      \
             for (j = 0; j < width; j++) {                                                   \
-                int val;                                                                    \
+                unsigned val;                                                               \
                 if (sign)                                                                   \
                     val = (PIXEL)bytestream2_get_ ##suffix(g) + (1 << (depth - 1));         \
                 else                                                                        \
@@ -133,14 +134,14 @@ static int pgx_decode_frame(AVCodecContext *avctx, void *data,
     if ((ret = ff_set_dimensions(avctx, width, height)) < 0)
         return ret;
 
-    if (depth <= 8) {
+    if (depth > 0 && depth <= 8) {
         avctx->pix_fmt = AV_PIX_FMT_GRAY8;
         bpp = 8;
-    } else if (depth <= 16) {
+    } else if (depth > 0 && depth <= 16) {
         avctx->pix_fmt = AV_PIX_FMT_GRAY16;
         bpp = 16;
     } else {
-        av_log(avctx, AV_LOG_ERROR, "Maximum depth of 16 bits supported.\n");
+        av_log(avctx, AV_LOG_ERROR, "depth %d is invalid or unsupported.\n", depth);
         return AVERROR_PATCHWELCOME;
     }
     if (bytestream2_get_bytes_left(&g) < width * height * (bpp >> 3))
@@ -151,18 +152,18 @@ static int pgx_decode_frame(AVCodecContext *avctx, void *data,
     p->key_frame = 1;
     avctx->bits_per_raw_sample = depth;
     if (bpp == 8)
-        write_frame_8(avpkt, p, &g, width, height, sign, depth);
+        write_frame_8(p, &g, width, height, sign, depth);
     else if (bpp == 16)
-        write_frame_16(avpkt, p, &g, width, height, sign, depth);
+        write_frame_16(p, &g, width, height, sign, depth);
     *got_frame = 1;
     return 0;
 }
 
-AVCodec ff_pgx_decoder = {
-    .name           = "pgx",
-    .long_name      = NULL_IF_CONFIG_SMALL("PGX (JPEG2000 Test Format)"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_PGX,
+const FFCodec ff_pgx_decoder = {
+    .p.name         = "pgx",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("PGX (JPEG2000 Test Format)"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_PGX,
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .decode         = pgx_decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
 };

@@ -29,6 +29,7 @@
 #include "perfetto/ext/base/string_view.h"
 #include "src/trace_processor/sqlite/sqlite_utils.h"
 #include "src/trace_processor/tp_metatrace.h"
+#include "src/trace_processor/util/status_macros.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -53,7 +54,34 @@ base::Optional<std::string> HasDuplicateColumns(
   return base::nullopt;
 }
 
-inline std::string EscapedSqliteValueAsString(sqlite3_value* value) {
+std::string OpToString(int op) {
+  switch (op) {
+    case SQLITE_INDEX_CONSTRAINT_EQ:
+      return "=";
+    case SQLITE_INDEX_CONSTRAINT_NE:
+      return "!=";
+    case SQLITE_INDEX_CONSTRAINT_GE:
+      return ">=";
+    case SQLITE_INDEX_CONSTRAINT_GT:
+      return ">";
+    case SQLITE_INDEX_CONSTRAINT_LE:
+      return "<=";
+    case SQLITE_INDEX_CONSTRAINT_LT:
+      return "<";
+    case SQLITE_INDEX_CONSTRAINT_LIKE:
+      return "like";
+    case SQLITE_INDEX_CONSTRAINT_ISNULL:
+      // The "null" will be added below in EscapedSqliteValueAsString.
+      return " is ";
+    case SQLITE_INDEX_CONSTRAINT_ISNOTNULL:
+      // The "null" will be added below in EscapedSqliteValueAsString.
+      return " is not";
+    default:
+      PERFETTO_FATAL("Operator to string conversion not impemented for %d", op);
+  }
+}
+
+std::string EscapedSqliteValueAsString(sqlite3_value* value) {
   switch (sqlite3_value_type(value)) {
     case SQLITE_INTEGER:
       return std::to_string(sqlite3_value_int64(value));
@@ -66,6 +94,8 @@ inline std::string EscapedSqliteValueAsString(sqlite3_value* value) {
           reinterpret_cast<const char*>(sqlite3_value_text(value));
       return "'" + base::ReplaceAll(str, "'", "''") + "'";
     }
+    case SQLITE_NULL:
+      return " null";
     default:
       PERFETTO_FATAL("Unknown value type %d", sqlite3_value_type(value));
   }
@@ -115,10 +145,6 @@ util::Status SpanJoinOperatorTable::Init(int argc,
     partitioning_ = t1_desc.IsPartitioned()
                         ? PartitioningType::kSamePartitioning
                         : PartitioningType::kNoPartitioning;
-    if (partitioning_ == PartitioningType::kNoPartitioning && IsOuterJoin()) {
-      return util::ErrStatus(
-          "SPAN_JOIN: Outer join not supported for no partition tables");
-    }
   } else if (t1_desc.IsPartitioned() && t2_desc.IsPartitioned()) {
     return util::ErrStatus(
         "SPAN_JOIN: mismatching partitions between the two tables; "
@@ -126,10 +152,6 @@ util::Status SpanJoinOperatorTable::Init(int argc,
         t1_desc.partition_col.c_str(), t1_desc.name.c_str(),
         t2_desc.partition_col.c_str(), t2_desc.name.c_str());
   } else {
-    if (IsOuterJoin()) {
-      return util::ErrStatus(
-          "SPAN_JOIN: Outer join not supported for mixed partitioned tables");
-    }
     partitioning_ = PartitioningType::kMixedPartitioning;
   }
 
@@ -181,7 +203,7 @@ util::Status SpanJoinOperatorTable::Init(int argc,
   // Check if any column has : in its name. This often happens when SELECT *
   // is used to create a view with the same column name in two joined tables.
   for (const auto& col : cols) {
-    if (col.name().find(':') != std::string::npos) {
+    if (base::Contains(col.name(), ':')) {
       return util::ErrStatus("SPAN_JOIN: column %s has illegal character :",
                              col.name().c_str());
     }
@@ -275,7 +297,7 @@ SpanJoinOperatorTable::ComputeSqlConstraintsForDefinition(
   for (size_t i = 0; i < qc.constraints().size(); i++) {
     const auto& cs = qc.constraints()[i];
     auto col_name = GetNameForGlobalColumnIndex(defn, cs.column);
-    if (col_name == "")
+    if (col_name.empty())
       continue;
 
     // Le constraints can be passed straight to the child tables as they won't
@@ -291,8 +313,13 @@ SpanJoinOperatorTable::ComputeSqlConstraintsForDefinition(
     if (col_name == kDurColumnName && cs.op != kSourceGeqOpCode)
       continue;
 
-    auto op = sqlite_utils::OpToString(
-        cs.op == kSourceGeqOpCode ? SQLITE_INDEX_CONSTRAINT_GE : cs.op);
+    // If we're emitting shadow slices, don't propogate any constraints
+    // on this table as this will break the shadow slice computation.
+    if (defn.ShouldEmitPresentPartitionShadow())
+      continue;
+
+    auto op = OpToString(cs.op == kSourceGeqOpCode ? SQLITE_INDEX_CONSTRAINT_GE
+                                                   : cs.op);
     auto value = EscapedSqliteValueAsString(argv[i]);
 
     constraints.emplace_back("`" + col_name + "`" + op + value);
@@ -387,11 +414,24 @@ int SpanJoinOperatorTable::Cursor::Filter(const QueryConstraints& qc,
                                           FilterHistory) {
   PERFETTO_TP_TRACE("SPAN_JOIN_XFILTER");
 
-  util::Status status = t1_.Initialize(qc, argv);
+  bool t1_partitioned_mixed =
+      t1_.definition()->IsPartitioned() &&
+      table_->partitioning_ == PartitioningType::kMixedPartitioning;
+  auto t1_eof = table_->IsOuterJoin() && !t1_partitioned_mixed
+                    ? Query::InitialEofBehavior::kTreatAsMissingPartitionShadow
+                    : Query::InitialEofBehavior::kTreatAsEof;
+  util::Status status = t1_.Initialize(qc, argv, t1_eof);
   if (!status.ok())
     return SQLITE_ERROR;
 
-  status = t2_.Initialize(qc, argv);
+  bool t2_partitioned_mixed =
+      t2_.definition()->IsPartitioned() &&
+      table_->partitioning_ == PartitioningType::kMixedPartitioning;
+  auto t2_eof =
+      (table_->IsLeftJoin() || table_->IsOuterJoin()) && !t2_partitioned_mixed
+          ? Query::InitialEofBehavior::kTreatAsMissingPartitionShadow
+          : Query::InitialEofBehavior::kTreatAsEof;
+  status = t2_.Initialize(qc, argv, t2_eof);
   if (!status.ok())
     return SQLITE_ERROR;
 
@@ -469,7 +509,7 @@ util::Status SpanJoinOperatorTable::Cursor::FindOverlappingSpan() {
     // Find which slice finishes first.
     next_query_ = FindEarliestFinishQuery();
 
-    // If the current span is overlapping, just finsh there to emit the current
+    // If the current span is overlapping, just finish there to emit the current
     // slice.
     if (IsOverlappingSpan())
       break;
@@ -581,17 +621,23 @@ SpanJoinOperatorTable::Query::~Query() = default;
 
 util::Status SpanJoinOperatorTable::Query::Initialize(
     const QueryConstraints& qc,
-    sqlite3_value** argv) {
+    sqlite3_value** argv,
+    InitialEofBehavior eof_behavior) {
   *this = Query(table_, definition(), db_);
   sql_query_ = CreateSqlQuery(
       table_->ComputeSqlConstraintsForDefinition(*defn_, qc, argv));
-  return Rewind();
+  util::Status status = Rewind();
+  if (!status.ok())
+    return status;
+  if (eof_behavior == InitialEofBehavior::kTreatAsMissingPartitionShadow &&
+      IsEof()) {
+    state_ = State::kMissingPartitionShadow;
+  }
+  return status;
 }
 
 util::Status SpanJoinOperatorTable::Query::Next() {
-  util::Status status = NextSliceState();
-  if (!status.ok())
-    return status;
+  RETURN_IF_ERROR(NextSliceState());
   return FindNextValidSlice();
 }
 
@@ -624,9 +670,7 @@ util::Status SpanJoinOperatorTable::Query::FindNextValidSlice() {
   // This has proved to be a lot cleaner to implement than trying to choose
   // when to emit and not emit shadows directly.
   while (!IsEof() && !IsValidSlice()) {
-    util::Status status = NextSliceState();
-    if (!status.ok())
-      return status;
+    RETURN_IF_ERROR(NextSliceState());
   }
   return util::OkStatus();
 }
@@ -635,9 +679,7 @@ util::Status SpanJoinOperatorTable::Query::NextSliceState() {
   switch (state_) {
     case State::kReal: {
       // Forward the cursor to figure out where the next slice should be.
-      util::Status status = CursorNext();
-      if (!status.ok())
-        return status;
+      RETURN_IF_ERROR(CursorNext());
 
       // Depending on the next slice, we can do two things here:
       // 1. If the next slice is on the same partition, we can just emit a
@@ -716,9 +758,7 @@ util::Status SpanJoinOperatorTable::Query::Rewind() {
   if (res != SQLITE_OK)
     return util::ErrStatus("%s", sqlite3_errmsg(db_));
 
-  util::Status status = CursorNext();
-  if (!status.ok())
-    return status;
+  RETURN_IF_ERROR(CursorNext());
 
   // Setup the first slice as a missing partition shadow from the lowest
   // partition until the first slice partition. We will handle finding the real
@@ -751,13 +791,17 @@ util::Status SpanJoinOperatorTable::Query::CursorNext() {
       res = sqlite3_step(stmt);
       row_type = sqlite3_column_type(stmt, partition_idx);
     } while (res == SQLITE_ROW && row_type == SQLITE_NULL);
+
+    if (res == SQLITE_ROW && row_type != SQLITE_INTEGER) {
+      return util::ErrStatus("SPAN_JOIN: partition is not an int");
+    }
   } else {
     res = sqlite3_step(stmt);
   }
   cursor_eof_ = res != SQLITE_ROW;
   return res == SQLITE_ROW || res == SQLITE_DONE
              ? util::OkStatus()
-             : util::ErrStatus("%s", sqlite3_errmsg(db_));
+             : util::ErrStatus("SPAN_JOIN: %s", sqlite3_errmsg(db_));
 }
 
 std::string SpanJoinOperatorTable::Query::CreateSqlQuery(

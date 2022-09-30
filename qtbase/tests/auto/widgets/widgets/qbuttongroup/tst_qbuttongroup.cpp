@@ -1,34 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
-
+#include <QTest>
+#include <QSignalSpy>
 
 #include "qbuttongroup.h"
 #include <qaction.h>
@@ -51,7 +26,7 @@ public:
     { }
 
 protected:
-    void focusInEvent(QFocusEvent *)
+    void focusInEvent(QFocusEvent *) override
     {
         QCoreApplication::postEvent(this, new QKeyEvent(QEvent::KeyPress,
                                                         Qt::Key_Down, Qt::NoModifier));
@@ -457,7 +432,6 @@ void tst_QButtonGroup::task106609()
 
     qRegisterMetaType<QAbstractButton*>("QAbstractButton*");
     QSignalSpy spy1(buttons, SIGNAL(buttonClicked(QAbstractButton*)));
-    QSignalSpy spy2(buttons, SIGNAL(buttonClicked(int)));
 
     QApplication::setActiveWindow(&dlg);
     QTRY_COMPARE(QApplication::activeWindow(), static_cast<QWidget*>(&dlg));
@@ -466,8 +440,6 @@ void tst_QButtonGroup::task106609()
     radio1->setChecked(true);
     QTestEventLoop::instance().enterLoop(1);
 
-    //qDebug() << "int:" << spy2.count() << "QAbstractButton*:" << spy1.count();
-    QCOMPARE(spy2.count(), 2);
     QCOMPARE(spy1.count(), 2);
 }
 
@@ -512,11 +484,12 @@ public:
         : group(group)
         , deleteButton(deleteButton)
     {
-        connect(group, SIGNAL(buttonClicked(int)), SLOT(buttonClicked(int)));
+        connect(group, &QButtonGroup::buttonClicked,
+                this, &task209485_ButtonDeleter::buttonClicked);
     }
 
 private slots:
-    void buttonClicked(int)
+    void buttonClicked()
     {
         if (deleteButton)
             group->removeButton(group->buttons().first());
@@ -532,7 +505,7 @@ void tst_QButtonGroup::task209485_removeFromGroupInEventHandler_data()
     QTest::addColumn<bool>("deleteButton");
     QTest::addColumn<int>("signalCount");
     QTest::newRow("buttonPress 1") << true << 1;
-    QTest::newRow("buttonPress 2") << false << 2;
+    QTest::newRow("buttonPress 2") << false << 1;
 }
 
 void tst_QButtonGroup::task209485_removeFromGroupInEventHandler()
@@ -548,12 +521,11 @@ void tst_QButtonGroup::task209485_removeFromGroupInEventHandler()
     task209485_ButtonDeleter buttonDeleter(&group, deleteButton);
 
     QSignalSpy spy1(&group, SIGNAL(buttonClicked(QAbstractButton*)));
-    QSignalSpy spy2(&group, SIGNAL(buttonClicked(int)));
 
     // NOTE: Reintroducing the bug of this task will cause the following line to crash:
     QTest::mouseClick(button, Qt::LeftButton);
 
-    QCOMPARE(spy1.count() + spy2.count(), signalCount);
+    QCOMPARE(spy1.count(), signalCount);
 }
 
 void tst_QButtonGroup::autoIncrementId()

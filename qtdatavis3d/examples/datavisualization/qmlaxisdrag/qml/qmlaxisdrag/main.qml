@@ -1,34 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Data Visualization module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
-import QtQuick 2.1
+import QtQuick
 import QtDataVisualization 1.1
+import QtQuick.Controls
 import "."
 
 Item {
@@ -185,7 +160,7 @@ Item {
             //! [1]
 
             //! [3]
-            onPositionChanged: {
+            onPositionChanged: (mouse)=> {
                 currentMouseX = mouse.x;
                 currentMouseY = mouse.y;
                 //! [3]
@@ -200,7 +175,7 @@ Item {
             //! [4]
 
             //! [2]
-            onPressed: {
+            onPressed: (mouse)=> {
                 scatterGraph.scene.selectionQueryPosition = Qt.point(mouse.x, mouse.y);
             }
             //! [2]
@@ -270,7 +245,7 @@ Item {
     }
     //! [7]
 
-    NewButton {
+    Button {
         id: rangeToggle
         width: parent.width / 3 // We're adding 3 buttons and want to divide them equally
         text: "Use Preset Range"
@@ -299,7 +274,7 @@ Item {
     }
 
     //! [8]
-    NewButton {
+    Button {
         id: orthoToggle
         width: parent.width / 3
         text: "Display Orthographic"
@@ -318,11 +293,11 @@ Item {
     }
     //! [8]
 
-    NewButton {
+    Button {
         id: exitButton
         width: parent.width / 3
         text: "Quit"
         anchors.left: orthoToggle.right
-        onClicked: Qt.quit(0);
+        onClicked: Qt.quit();
     }
 }

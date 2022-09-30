@@ -39,23 +39,16 @@ static const VkPresentModeKHR presentModes[] = {
 
 namespace vk {
 
-VkResult PresentImage::allocateImage(VkDevice device, const VkImageCreateInfo &createInfo)
+VkResult PresentImage::createImage(VkDevice device, const VkImageCreateInfo &createInfo)
 {
-	VkImage *vkImagePtr = reinterpret_cast<VkImage *>(allocate(sizeof(VkImage), REQUIRED_MEMORY_ALIGNMENT, DEVICE_MEMORY));
-	if(!vkImagePtr)
-	{
-		return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-	}
-
-	VkResult status = vkCreateImage(device, &createInfo, nullptr, vkImagePtr);
+	VkImage image;
+	VkResult status = vkCreateImage(device, &createInfo, nullptr, &image);
 	if(status != VK_SUCCESS)
 	{
-		deallocate(vkImagePtr, DEVICE_MEMORY);
 		return status;
 	}
 
-	image = Cast(*vkImagePtr);
-	deallocate(vkImagePtr, DEVICE_MEMORY);
+	this->image = Cast(image);
 
 	return status;
 }
@@ -64,30 +57,22 @@ VkResult PresentImage::allocateAndBindImageMemory(VkDevice device, const VkMemor
 {
 	ASSERT(image);
 
-	VkDeviceMemory *vkDeviceMemoryPtr = reinterpret_cast<VkDeviceMemory *>(
-	    allocate(sizeof(VkDeviceMemory), REQUIRED_MEMORY_ALIGNMENT, DEVICE_MEMORY));
-	if(!vkDeviceMemoryPtr)
-	{
-		return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-	}
-
-	VkResult status = vkAllocateMemory(device, &allocateInfo, nullptr, vkDeviceMemoryPtr);
+	VkDeviceMemory deviceMemory;
+	VkResult status = vkAllocateMemory(device, &allocateInfo, nullptr, &deviceMemory);
 	if(status != VK_SUCCESS)
 	{
-		deallocate(vkDeviceMemoryPtr, DEVICE_MEMORY);
+		release();
 		return status;
 	}
 
-	imageMemory = Cast(*vkDeviceMemoryPtr);
-	vkBindImageMemory(device, *image, *vkDeviceMemoryPtr, 0);
-
+	imageMemory = Cast(deviceMemory);
+	vkBindImageMemory(device, *image, deviceMemory, 0);
 	imageStatus = AVAILABLE;
-	deallocate(vkDeviceMemoryPtr, DEVICE_MEMORY);
 
-	return status;
+	return VK_SUCCESS;
 }
 
-void PresentImage::clear()
+void PresentImage::release()
 {
 	if(imageMemory)
 	{
@@ -107,23 +92,6 @@ void PresentImage::clear()
 VkImage PresentImage::asVkImage() const
 {
 	return image ? static_cast<VkImage>(*image) : VkImage({ VK_NULL_HANDLE });
-}
-
-void SurfaceKHR::getSurfaceCapabilities(VkSurfaceCapabilitiesKHR *pSurfaceCapabilities) const
-{
-	pSurfaceCapabilities->minImageCount = 1;
-	pSurfaceCapabilities->maxImageCount = 0;
-
-	pSurfaceCapabilities->maxImageArrayLayers = 1;
-
-	pSurfaceCapabilities->supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-	pSurfaceCapabilities->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-	pSurfaceCapabilities->supportedCompositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-	pSurfaceCapabilities->supportedUsageFlags =
-	    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-	    VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-	    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-	    VK_IMAGE_USAGE_SAMPLED_BIT;
 }
 
 uint32_t SurfaceKHR::getSurfaceFormatsCount() const
@@ -212,6 +180,25 @@ VkResult SurfaceKHR::getPresentRectangles(uint32_t *pRectCount, VkRect2D *pRects
 	*pRectCount = 1;
 
 	return VK_SUCCESS;
+}
+
+void SurfaceKHR::setCommonSurfaceCapabilities(VkSurfaceCapabilitiesKHR *pSurfaceCapabilities)
+{
+	pSurfaceCapabilities->minImageCount = 1;
+	pSurfaceCapabilities->maxImageCount = 0;
+
+	pSurfaceCapabilities->maxImageArrayLayers = 1;
+
+	pSurfaceCapabilities->supportedTransforms = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	pSurfaceCapabilities->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	pSurfaceCapabilities->supportedCompositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	pSurfaceCapabilities->supportedUsageFlags =
+	    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+	    VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
+	    VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+	    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+	    VK_IMAGE_USAGE_SAMPLED_BIT |
+	    VK_IMAGE_USAGE_STORAGE_BIT;
 }
 
 }  // namespace vk

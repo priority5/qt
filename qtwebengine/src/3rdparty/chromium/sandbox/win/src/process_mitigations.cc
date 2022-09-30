@@ -9,6 +9,7 @@
 #include <wow64apiset.h>
 
 #include <algorithm>
+#include <ostream>
 
 #include "base/check_op.h"
 #include "base/files/file_path.h"
@@ -20,6 +21,14 @@
 #include "sandbox/win/src/restricted_token_utils.h"
 #include "sandbox/win/src/sandbox_rand.h"
 #include "sandbox/win/src/win_utils.h"
+
+// These are missing in 10.0.19551.0 but are in 10.0.19041.0 and 10.0.20226.0.
+#ifndef PROCESS_CREATION_MITIGATION_POLICY2_CET_USER_SHADOW_STACKS_STRICT_MODE
+#define PROCESS_CREATION_MITIGATION_POLICY2_CET_USER_SHADOW_STACKS_STRICT_MODE \
+  (0x00000003ui64 << 28)
+#define PROCESS_CREATION_MITIGATION_POLICY2_CET_DYNAMIC_APIS_OUT_OF_PROC_ONLY_ALWAYS_OFF \
+  (0x00000002ui64 << 48)
+#endif
 
 namespace {
 
@@ -494,12 +503,36 @@ void ConvertProcessMitigationsToPolicy(MitigationFlags flags,
     //       2018 security updates and any applicable firmware updates from the
     //       OEM device manufacturer.
     // Note: Applying this mitigation attribute on creation will succeed, even
-    // if
-    //       the underlying hardware does not support the implementation.
+    //       if the underlying hardware does not support the implementation.
     //       Windows just does its best under the hood for the given hardware.
     if (flags & MITIGATION_RESTRICT_INDIRECT_BRANCH_PREDICTION) {
       *policy_value_2 |=
           PROCESS_CREATION_MITIGATION_POLICY2_RESTRICT_INDIRECT_BRANCH_PREDICTION_ALWAYS_ON;
+    }
+  }
+
+  // Mitigations >= Win10 20H1
+  //----------------------------------------------------------------------------
+  if (version >= base::win::Version::WIN10_20H1) {
+    if (flags & MITIGATION_CET_DISABLED) {
+      *policy_value_2 |=
+          PROCESS_CREATION_MITIGATION_POLICY2_CET_USER_SHADOW_STACKS_ALWAYS_OFF;
+    }
+
+    if (flags & MITIGATION_CET_STRICT_MODE) {
+      DCHECK(!(flags & MITIGATION_CET_DISABLED))
+          << "Cannot enable CET strict mode if CET is disabled.";
+      *policy_value_2 |=
+          PROCESS_CREATION_MITIGATION_POLICY2_CET_USER_SHADOW_STACKS_STRICT_MODE;
+    }
+
+    if (flags & MITIGATION_CET_ALLOW_DYNAMIC_APIS) {
+      DCHECK(!(flags & MITIGATION_CET_DISABLED))
+          << "Cannot enable in-process CET apis if CET is disabled.";
+      DCHECK(!(flags & MITIGATION_DYNAMIC_CODE_DISABLE))
+          << "Cannot enable in-process CET apis if dynamic code is disabled.";
+      *policy_value_2 |=
+          PROCESS_CREATION_MITIGATION_POLICY2_CET_DYNAMIC_APIS_OUT_OF_PROC_ONLY_ALWAYS_OFF;
     }
   }
 
@@ -518,6 +551,14 @@ void ConvertProcessMitigationsToPolicy(MitigationFlags flags,
   }
 
   return;
+}
+
+void ConvertProcessMitigationsToComponentFilter(MitigationFlags flags,
+                                                COMPONENT_FILTER* filter) {
+  filter->ComponentFlags = 0;
+  if (flags & MITIGATION_KTM_COMPONENT) {
+    filter->ComponentFlags = COMPONENT_KTM;
+  }
 }
 
 MitigationFlags FilterPostStartupProcessMitigations(MitigationFlags flags) {

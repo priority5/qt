@@ -14,9 +14,7 @@
 
 #include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/cpu.h"
-#include "base/no_destructor.h"
-#include "base/stl_util.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/display/display.h"
@@ -78,12 +76,18 @@ ManagedDisplayInfo::ManagedDisplayModeList GetModeListWithAllRefreshRates(
   return display_mode_list;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // Constructs the raster DisplayColorSpaces out of |snapshot_color_space|,
 // including the HDR ones if present and |allow_high_bit_depth| is set.
-gfx::DisplayColorSpaces FillDisplayColorSpaces(
+gfx::DisplayColorSpaces CreateDisplayColorSpaces(
     const gfx::ColorSpace& snapshot_color_space,
-    bool allow_high_bit_depth) {
+    bool allow_high_bit_depth,
+    const absl::optional<gfx::HDRStaticMetadata>& hdr_static_metadata) {
+  if (Display::HasForceDisplayColorProfile()) {
+    return gfx::DisplayColorSpaces(Display::GetForcedDisplayColorProfile(),
+                                   DisplaySnapshot::PrimaryFormat());
+  }
+
   // ChromeOS VMs (e.g. amd64-generic or betty) have INVALID Primaries; just
   // pass the color space along.
   if (!snapshot_color_space.IsValid()) {
@@ -102,20 +106,13 @@ gfx::DisplayColorSpaces FillDisplayColorSpaces(
   gfx::ColorSpace sdr_color_space;
   if (primary_id == gfx::ColorSpace::PrimaryID::CUSTOM) {
     sdr_color_space = gfx::ColorSpace::CreateCustom(
-        primary_matrix, gfx::ColorSpace::TransferID::IEC61966_2_1);
+        primary_matrix, gfx::ColorSpace::TransferID::SRGB);
   } else {
     sdr_color_space =
-        gfx::ColorSpace(primary_id, gfx::ColorSpace::TransferID::IEC61966_2_1);
+        gfx::ColorSpace(primary_id, gfx::ColorSpace::TransferID::SRGB);
   }
   gfx::DisplayColorSpaces display_color_spaces = gfx::DisplayColorSpaces(
       sdr_color_space, DisplaySnapshot::PrimaryFormat());
-
-  // AMD Chromebooks have issues playing back and scanning out high bit depth
-  // content. TODO(b/169576243, b/165825264): remove this provision when fixed.
-  static const base::NoDestructor<base::CPU> cpuid;
-  static const bool is_amd = cpuid->vendor_name() == "AuthenticAMD";
-  if (is_amd)
-    return display_color_spaces;
 
   if (allow_high_bit_depth && snapshot_color_space.IsHDR()) {
     constexpr float kSDRJoint = 0.75;
@@ -135,6 +132,12 @@ gfx::DisplayColorSpaces FillDisplayColorSpaces(
     display_color_spaces.SetOutputColorSpaceAndBufferFormat(
         gfx::ContentColorUsage::kHDR, true /* needs_alpha */, hdr_color_space,
         gfx::BufferFormat::RGBA_1010102);
+
+    // TODO(https://crbug.com/1286074): Populate maximum luminance based on
+    // `hdr_static_metadata`. For now, assume that the HDR maximum luminance
+    // is 1,000% of the SDR maximum luminance.
+    constexpr float kHDRMaxLuminanceRelative = 10.f;
+    display_color_spaces.SetHDRMaxLuminanceRelative(kHDRMaxLuminanceRelative);
   }
   return display_color_spaces;
 }
@@ -393,7 +396,7 @@ ManagedDisplayInfo DisplayChangeObserver::CreateManagedDisplayInfo(
   if (dpi)
     new_info.set_device_dpi(dpi);
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   // TODO(crbug.com/1012846): This should configure the HDR color spaces.
   gfx::DisplayColorSpaces display_color_spaces(
       snapshot->color_space(), DisplaySnapshot::PrimaryFormat());
@@ -405,7 +408,8 @@ ManagedDisplayInfo DisplayChangeObserver::CreateManagedDisplayInfo(
   const bool allow_high_bit_depth =
       base::FeatureList::IsEnabled(features::kUseHDRTransferFunction);
   new_info.set_display_color_spaces(
-      FillDisplayColorSpaces(snapshot->color_space(), allow_high_bit_depth));
+      CreateDisplayColorSpaces(snapshot->color_space(), allow_high_bit_depth,
+                               snapshot->hdr_static_metadata()));
   constexpr int32_t kNormalBitDepth = 8;
   new_info.set_bits_per_channel(
       allow_high_bit_depth ? snapshot->bits_per_channel() : kNormalBitDepth);
@@ -429,12 +433,19 @@ float DisplayChangeObserver::FindDeviceScaleFactor(
     float dpi,
     const gfx::Size& size_in_pixels) {
   // Nocturne has special scale factor 3000/1332=2.252.. for the panel 3kx2k.
-  constexpr gfx::Size k225DisplaySizeHack(3000, 2000);
+  constexpr gfx::Size k225DisplaySizeHackNocturne(3000, 2000);
+  // Keep the Chell's scale factor 2.252 until we make decision.
+  constexpr gfx::Size k2DisplaySizeHackChell(3200, 1800);
+  constexpr gfx::Size k18DisplaySizeHackCoachZ(2160, 1440);
 
-  if (size_in_pixels == k225DisplaySizeHack)
+  if (size_in_pixels == k225DisplaySizeHackNocturne) {
     return kDsf_2_252;
-  else {
-    for (size_t i = 0; i < base::size(kThresholdTableForInternal); ++i) {
+  } else if (size_in_pixels == k2DisplaySizeHackChell) {
+    return 2.f;
+  } else if (size_in_pixels == k18DisplaySizeHackCoachZ) {
+    return kDsf_1_8;
+  } else {
+    for (size_t i = 0; i < std::size(kThresholdTableForInternal); ++i) {
       if (dpi >= kThresholdTableForInternal[i].dpi)
         return kThresholdTableForInternal[i].device_scale_factor;
     }

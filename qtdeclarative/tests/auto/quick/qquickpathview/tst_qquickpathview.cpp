@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QtTest/QtTest>
 #include <QtQuick/qquickview.h>
@@ -44,17 +19,18 @@
 #include <QtGui/qstandarditemmodel.h>
 #include <QStringListModel>
 #include <QFile>
+#include <QEvent>
 
-#include "../../shared/util.h"
-#include "../shared/viewtestutil.h"
-#include "../shared/visualtestutil.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include <QtQuickTestUtils/private/viewtestutils_p.h>
+#include <QtQuickTestUtils/private/visualtestutils_p.h>
 
 #include <math.h>
 
 Q_LOGGING_CATEGORY(lcTests, "qt.quick.tests")
 
-using namespace QQuickViewTestUtil;
-using namespace QQuickVisualTestUtil;
+using namespace QQuickViewTestUtils;
+using namespace QQuickVisualTestUtils;
 
 Q_DECLARE_METATYPE(QQuickPathView::HighlightRangeMode)
 Q_DECLARE_METATYPE(QQuickPathView::PositionMode)
@@ -153,6 +129,10 @@ private slots:
     void objectModelMove();
     void requiredPropertiesInDelegate();
     void requiredPropertiesInDelegatePreventUnrelated();
+    void touchMove();
+
+private:
+    QScopedPointer<QPointingDevice> touchDevice = QScopedPointer<QPointingDevice>(QTest::createTouchDevice());
 };
 
 class TestObject : public QObject
@@ -186,6 +166,7 @@ private:
 };
 
 tst_QQuickPathView::tst_QQuickPathView()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
 {
 }
 
@@ -720,13 +701,13 @@ void tst_QQuickPathView::consecutiveModelChanges()
                 pathview->setCurrentIndex(changes[i].index);
                 break;
         case ListChange::Polish:
-                QQuickTest::qWaitForItemPolished(pathview);
+                QQuickTest::qWaitForPolish(pathview);
                 break;
             default:
                 continue;
         }
     }
-    QQuickTest::qWaitForItemPolished(pathview);
+    QQuickTest::qWaitForPolish(pathview);
 
     QCOMPARE(findItems<QQuickItem>(pathview, "wrapper").count(), count);
     QCOMPARE(pathview->count(), count);
@@ -1389,8 +1370,7 @@ void tst_QQuickPathView::package()
     QVERIFY(window);
     window->setSource(testFileUrl("pathview_package.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathView = window->rootObject()->findChild<QQuickPathView*>("photoPathView");
     QVERIFY(pathView);
@@ -1399,7 +1379,7 @@ void tst_QQuickPathView::package()
     QSKIP("QTBUG-27170 view does not reliably receive polish without a running animation");
 #endif
 
-    QQuickTest::qWaitForItemPolished(pathView);
+    QQuickTest::qWaitForPolish(pathView);
     QQuickItem *item = findItem<QQuickItem>(pathView, "pathItem");
     QVERIFY(item);
     QVERIFY(item->scale() != 1.0);
@@ -1515,12 +1495,10 @@ void tst_QQuickPathView::undefinedPath()
 void tst_QQuickPathView::mouseDrag()
 {
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("dragpath.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -1538,7 +1516,8 @@ void tst_QQuickPathView::mouseDrag()
     QTest::qWait(100);
 
     {
-        QMouseEvent mv(QEvent::MouseMove, QPoint(50,100), Qt::LeftButton, Qt::LeftButton,Qt::NoModifier);
+        QMouseEvent mv(QEvent::MouseMove, QPoint(50,100), window->mapToGlobal(QPoint(50,100)),
+                       Qt::LeftButton, Qt::LeftButton,Qt::NoModifier);
         QGuiApplication::sendEvent(window.data(), &mv);
     }
     // first move beyond threshold does not trigger drag
@@ -1552,7 +1531,8 @@ void tst_QQuickPathView::mouseDrag()
     QCOMPARE(dragEndedSpy.count(), 0);
 
     {
-        QMouseEvent mv(QEvent::MouseMove, QPoint(90,100), Qt::LeftButton, Qt::LeftButton,Qt::NoModifier);
+        QMouseEvent mv(QEvent::MouseMove, QPoint(90,100), window->mapToGlobal(QPoint(90,100)),
+                       Qt::LeftButton, Qt::LeftButton,Qt::NoModifier);
         QGuiApplication::sendEvent(window.data(), &mv);
     }
     // next move beyond threshold does trigger drag
@@ -1585,13 +1565,10 @@ void tst_QQuickPathView::mouseDrag()
 void tst_QQuickPathView::nestedMouseAreaDrag()
 {
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("nestedmousearea.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
-
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -1608,12 +1585,10 @@ void tst_QQuickPathView::nestedMouseAreaDrag()
 void tst_QQuickPathView::flickNClick() // QTBUG-77173
 {
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("nestedmousearea2.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -1640,7 +1615,7 @@ void tst_QQuickPathView::flickNClick() // QTBUG-77173
         flickStartedSpy.clear();
         flickEndedSpy.clear();
         // Dragging the child mouse area should animate the PathView (MA has no drag target)
-        flick(window.data(), QPoint(200,200), QPoint(400,200), duration);
+        flick(window.data(), QPoint(199,199), QPoint(399,199), duration);
         QVERIFY(pathview->isMoving());
         QCOMPARE(movingChangedSpy.count(), 1);
         QCOMPARE(draggingSpy.count(), 2);
@@ -1672,13 +1647,12 @@ void tst_QQuickPathView::flickNClick() // QTBUG-77173
 
 void tst_QQuickPathView::treeModel()
 {
-    QScopedPointer<QQuickView> window(createView());
-    window->show();
-
     QStandardItemModel model;
     initStandardTreeModel(&model);
-    window->engine()->rootContext()->setContextProperty("myModel", &model);
+    qmlRegisterSingletonInstance("Qt.treemodel", 1, 0, "TreeModelCpp", &model);
 
+    QScopedPointer<QQuickView> window(createView());
+    window->show();
     window->setSource(testFileUrl("treemodel.qml"));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
@@ -1703,9 +1677,7 @@ void tst_QQuickPathView::changePreferredHighlight()
     window->setGeometry(0,0,400,200);
     window->setSource(testFileUrl("dragpath.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -1841,7 +1813,7 @@ void tst_QQuickPathView::asynchronous()
 
     QQuickPathView *pathview = nullptr;
     while (!pathview) {
-        bool b = false;
+        std::atomic<bool> b = false;
         controller.incubateWhile(&b);
         pathview = rootObject->findChild<QQuickPathView*>("view");
     }
@@ -1851,14 +1823,14 @@ void tst_QQuickPathView::asynchronous()
         QVERIFY(findItem<QQuickItem>(pathview, "wrapper", i) == nullptr);
         QQuickItem *item = nullptr;
         while (!item) {
-            bool b = false;
+            std::atomic<bool> b = false;
             controller.incubateWhile(&b);
             item = findItem<QQuickItem>(pathview, "wrapper", i);
         }
     }
 
     {
-        bool b = true;
+        std::atomic<bool> b = true;
         controller.incubateWhile(&b);
     }
 
@@ -1904,11 +1876,9 @@ void tst_QQuickPathView::cancelDrag()
 {
     QScopedPointer<QQuickView> window(createView());
     window->setSource(testFileUrl("dragpath.qml"));
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -1931,8 +1901,11 @@ void tst_QQuickPathView::cancelDrag()
     QCOMPARE(dragEndedSpy.count(), 0);
 
     // steal mouse grab - cancels PathView dragging
-    QQuickItem *item = window->rootObject()->findChild<QQuickItem*>("text");
-    item->grabMouse();
+    auto mouse = QPointingDevice::primaryPointingDevice();
+    auto mousePriv = QPointingDevicePrivate::get(const_cast<QPointingDevice *>(mouse));
+    QMouseEvent fakeMouseEv(QEvent::MouseMove, QPoint(130, 100), QPoint(130, 100),
+                            Qt::NoButton, Qt::LeftButton, Qt::NoModifier, mouse);
+    mousePriv->setExclusiveGrabber(&fakeMouseEv, fakeMouseEv.points().first(), nullptr);
 
     // returns to a snap point.
     QTRY_COMPARE(pathview->offset(), qreal(qFloor(pathview->offset())));
@@ -1943,18 +1916,15 @@ void tst_QQuickPathView::cancelDrag()
     QCOMPARE(dragEndedSpy.count(), 1);
 
     QTest::mouseRelease(window.data(), Qt::LeftButton, Qt::NoModifier, QPoint(40,100));
-
 }
 
 void tst_QQuickPathView::maximumFlickVelocity()
 {
     QScopedPointer<QQuickView> window(createView());
     window->setSource(testFileUrl("dragpath.qml"));
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -1996,12 +1966,10 @@ void tst_QQuickPathView::snapToItem()
     QFETCH(bool, enforceRange);
 
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("panels.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = window->rootObject()->findChild<QQuickPathView*>("view");
     QVERIFY(pathview != nullptr);
@@ -2040,12 +2008,10 @@ void tst_QQuickPathView::snapOneItem()
     QFETCH(bool, enforceRange);
 
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("panels.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = window->rootObject()->findChild<QQuickPathView*>("view");
     QVERIFY(pathview != nullptr);
@@ -2096,9 +2062,7 @@ void tst_QQuickPathView::positionViewAtIndex()
     QScopedPointer<QQuickView> window(createView());
     window->setSource(testFileUrl("pathview3.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -2159,9 +2123,7 @@ void tst_QQuickPathView::indexAt_itemAt()
     QScopedPointer<QQuickView> window(createView());
     window->setSource(testFileUrl("pathview3.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -2227,7 +2189,7 @@ void tst_QQuickPathView::cacheItemCount()
         QVERIFY(findItem<QQuickItem>(pathview, "wrapper", cached[i]) == nullptr);
         QQuickItem *item = nullptr;
         while (!item) {
-            bool b = false;
+            std::atomic<bool> b = false;
             controller.incubateWhile(&b);
             item = findItem<QQuickItem>(pathview, "wrapper", cached[i]);
         }
@@ -2235,7 +2197,7 @@ void tst_QQuickPathView::cacheItemCount()
     }
 
     {
-        bool b = true;
+        std::atomic<bool> b = true;
         controller.incubateWhile(&b);
     }
 
@@ -2255,13 +2217,13 @@ void tst_QQuickPathView::cacheItemCount()
     QVERIFY(findItem<QQuickItem>(pathview, "wrapper", 5) == nullptr);
     QQuickItem *item = nullptr;
     while (!item) {
-        bool b = false;
+        std::atomic<bool> b = false;
         controller.incubateWhile(&b);
         item = findItem<QQuickItem>(pathview, "wrapper", 5);
     }
 
     {
-        bool b = true;
+        std::atomic<bool> b = true;
         controller.incubateWhile(&b);
     }
 }
@@ -2285,8 +2247,7 @@ void tst_QQuickPathView::changePathDuringRefill()
 
     window->setSource(testFileUrl("changePathDuringRefill.qml"));
     window->show();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathView = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathView != nullptr);
@@ -2309,12 +2270,10 @@ void tst_QQuickPathView::changePathDuringRefill()
 void tst_QQuickPathView::nestedinFlickable()
 {
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("nestedInFlickable.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = findItem<QQuickPathView>(window->rootObject(), "pathView");
     QVERIFY(pathview != nullptr);
@@ -2368,13 +2327,13 @@ void tst_QQuickPathView::nestedinFlickable()
     fflickStartedSpy.clear();
     fflickEndedSpy.clear();
     int shortInterval = 2;
-    QTest::mousePress(window.data(), Qt::LeftButton, 0, QPoint(23,216));
+    QTest::mousePress(window.data(), Qt::LeftButton, {}, QPoint(23,216));
     QTest::mouseMove(window.data(), QPoint(48,216), shortInterval);
-    QTest::mouseRelease(window.data(), Qt::LeftButton, 0, QPoint(73,217));
+    QTest::mouseRelease(window.data(), Qt::LeftButton, {}, QPoint(73,217));
     QVERIFY(pathview->isMoving());
-    QTest::mousePress(window.data(), Qt::LeftButton, 0, QPoint(21,216));
+    QTest::mousePress(window.data(), Qt::LeftButton, {}, QPoint(21,216));
     QTest::mouseMove(window.data(), QPoint(46,216), shortInterval);
-    QTest::mouseRelease(window.data(), Qt::LeftButton, 0, QPoint(71,217));
+    QTest::mouseRelease(window.data(), Qt::LeftButton, {}, QPoint(71,217));
     QVERIFY(pathview->isMoving());
     // moveEndedSpy.count() and moveStartedSpy.count() should be exactly 1
     // but in CI we sometimes see a scheduling issue being hit which
@@ -2417,12 +2376,10 @@ void tst_QQuickPathView::nestedinFlickable()
 void tst_QQuickPathView::ungrabNestedinFlickable()
 {
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("ungrabNestedinFlickable.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = findItem<QQuickPathView>(window->rootObject(), "pathView");
     QVERIFY(pathview != nullptr);
@@ -2430,14 +2387,14 @@ void tst_QQuickPathView::ungrabNestedinFlickable()
     double pathviewOffsetBefore = pathview->offset();
 
     // Drag slowly upwards so that it does not flick, release, and let it start snapping back
-    QTest::mousePress(window.data(), Qt::LeftButton, 0, QPoint(200, 350));
+    QTest::mousePress(window.data(), Qt::LeftButton, {}, QPoint(200, 350));
     for (int i = 0; i < 4; ++i)
         QTest::mouseMove(window.data(), QPoint(200, 325 - i * 25), 500);
-    QTest::mouseRelease(window.data(), Qt::LeftButton, 0,  QPoint(200, 250));
+    QTest::mouseRelease(window.data(), Qt::LeftButton, {}, QPoint(200, 250));
     QCOMPARE(pathview->isMoving(), true);
 
     // Press again to stop moving
-    QTest::mousePress(window.data(), Qt::LeftButton, 0, QPoint(200, 350));
+    QTest::mousePress(window.data(), Qt::LeftButton, {}, QPoint(200, 350));
     QTRY_COMPARE(pathview->isMoving(), false);
 
     // Cancel the grab, wait for movement to stop, and expect it to snap to
@@ -2445,18 +2402,16 @@ void tst_QQuickPathView::ungrabNestedinFlickable()
     pathview->ungrabMouse();
     QTRY_COMPARE(pathview->offset(), pathviewOffsetBefore);
     QCOMPARE(pathview->isMoving(), false);
-    QTest::mouseRelease(window.data(), Qt::LeftButton, 0, QPoint(200, 350));
+    QTest::mouseRelease(window.data(), Qt::LeftButton, {}, QPoint(200, 350));
 }
 
 void tst_QQuickPathView::flickableDelegate()
 {
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("flickableDelegate.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
     QVERIFY(pathview != nullptr);
@@ -2536,8 +2491,7 @@ void tst_QQuickPathView::qtbug37815()
 
     window->setSource(testFileUrl("qtbug37815.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     // cache items will be created async. Let's wait...
     QTest::qWait(1000);
@@ -2567,8 +2521,7 @@ void tst_QQuickPathView::qtbug42716()
 
     window->setSource(testFileUrl("qtbug42716.qml"));
     window->show();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathView = findItem<QQuickPathView>(window->rootObject(), "pathView");
     QVERIFY(pathView != nullptr);
@@ -2609,8 +2562,7 @@ void tst_QQuickPathView::qtbug53464()
 
     window->setSource(testFileUrl("qtbug53464.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathView = findItem<QQuickPathView>(window->rootObject(), "pathView");
     QVERIFY(pathView != nullptr);
@@ -2684,12 +2636,10 @@ void tst_QQuickPathView::movementDirection()
     QFETCH(qreal, tooffset);
 
     QScopedPointer<QQuickView> window(createView());
-    QQuickViewTestUtil::moveMouseAway(window.data());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
     window->setSource(testFileUrl("movementDirection.qml"));
     window->show();
-    window->requestActivate();
-    QVERIFY(QTest::qWaitForWindowActive(window.data()));
-    QCOMPARE(window.data(), qGuiApp->focusWindow());
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
 
     QQuickPathView *pathview = window->rootObject()->findChild<QQuickPathView*>("view");
     QVERIFY(pathview != nullptr);
@@ -2742,7 +2692,7 @@ void tst_QQuickPathView::objectModelMove()
     QVector<QString> itemObjectNames;
     itemObjectNames << QLatin1String("red") << QLatin1String("green") << QLatin1String("blue");
     QVector<QQuickItem*> childItems;
-    for (const QString itemObjectName : qAsConst(itemObjectNames)) {
+    for (const QString &itemObjectName : qAsConst(itemObjectNames)) {
         QQuickItem *childItem = findItem<QQuickItem>(pathView, itemObjectName);
         QVERIFY(childItem);
         childItems.append(childItem);
@@ -2779,7 +2729,6 @@ void tst_QQuickPathView::requiredPropertiesInDelegate()
     }
     {
         QScopedPointer<QQuickView> window(createView());
-        QTest::ignoreMessage(QtMsgType::QtWarningMsg, QRegularExpression("Writing to \"name\" broke the binding to the underlying model"));
         window->setSource(testFileUrl("delegateWithRequiredProperties.3.qml"));
         window->show();
         QTRY_VERIFY(window->rootObject()->property("working").toBool());
@@ -2794,6 +2743,112 @@ void tst_QQuickPathView::requiredPropertiesInDelegatePreventUnrelated()
     QScopedPointer<QQuickView> window(createView());
     window->setSource(testFileUrl("delegatewithUnrelatedRequiredPreventsAccessToModel.qml"));
     window->show();
+}
+
+void tst_QQuickPathView::touchMove()
+{
+    QScopedPointer<QQuickView> window(createView());
+    QQuickVisualTestUtils::moveMouseAway(window.data());
+    window->setSource(testFileUrl("dragpath.qml"));
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
+
+    QQuickPathView *pathview = qobject_cast<QQuickPathView*>(window->rootObject());
+    QVERIFY(pathview != nullptr);
+
+    QSignalSpy movingSpy(pathview, SIGNAL(movingChanged()));
+    QSignalSpy moveStartedSpy(pathview, SIGNAL(movementStarted()));
+    QSignalSpy moveEndedSpy(pathview, SIGNAL(movementEnded()));
+    QSignalSpy draggingSpy(pathview, SIGNAL(draggingChanged()));
+    QSignalSpy dragStartedSpy(pathview, SIGNAL(dragStarted()));
+    QSignalSpy dragEndedSpy(pathview, SIGNAL(dragEnded()));
+    QSignalSpy flickStartedSpy(pathview, SIGNAL(flickStarted()));
+    QSignalSpy flickEndedSpy(pathview, SIGNAL(flickEnded()));
+
+    int current = pathview->currentIndex();
+
+    // touch move from left to right
+    QPoint from(250, 100);
+    QPoint to(10, 100);
+
+    QTest::touchEvent(window.data(), touchDevice.data()).press(0, from, window.data());
+    QQuickTouchUtils::flush(window.data());
+
+    QVERIFY(!pathview->isMoving());
+    QVERIFY(!pathview->isDragging());
+    QCOMPARE(movingSpy.count(), 0);
+    QCOMPARE(moveStartedSpy.count(), 0);
+    QCOMPARE(moveEndedSpy.count(), 0);
+    QCOMPARE(draggingSpy.count(), 0);
+    QCOMPARE(dragStartedSpy.count(), 0);
+    QCOMPARE(dragEndedSpy.count(), 0);
+    QCOMPARE(flickStartedSpy.count(), 0);
+    QCOMPARE(flickEndedSpy.count(), 0);
+
+    from -= QPoint(QGuiApplication::styleHints()->startDragDistance() + 1, 0);
+    QTest::touchEvent(window.data(), touchDevice.data()).move(0, from, window.data());
+    QQuickTouchUtils::flush(window.data());
+
+    // first move does not trigger move/drag
+    QVERIFY(!pathview->isMoving());
+    QVERIFY(!pathview->isDragging());
+    QCOMPARE(movingSpy.count(), 0);
+    QCOMPARE(moveStartedSpy.count(), 0);
+    QCOMPARE(moveEndedSpy.count(), 0);
+    QCOMPARE(draggingSpy.count(), 0);
+    QCOMPARE(dragStartedSpy.count(), 0);
+    QCOMPARE(dragEndedSpy.count(), 0);
+    QCOMPARE(flickStartedSpy.count(), 0);
+    QCOMPARE(flickEndedSpy.count(), 0);
+
+    QPoint diff = from - to;
+    int moveCount = 4;
+    for (int i = 1; i <= moveCount; ++i) {
+        QTest::touchEvent(window.data(), touchDevice.data()).move(0, from - i * diff / moveCount, window.data());
+        QQuickTouchUtils::flush(window.data());
+
+        QVERIFY(pathview->isMoving());
+        QVERIFY(pathview->isDragging());
+        QCOMPARE(movingSpy.count(), 1);
+        QCOMPARE(moveStartedSpy.count(), 1);
+        QCOMPARE(moveEndedSpy.count(), 0);
+        QCOMPARE(draggingSpy.count(), 1);
+        QCOMPARE(dragStartedSpy.count(), 1);
+        QCOMPARE(dragEndedSpy.count(), 0);
+        QCOMPARE(flickStartedSpy.count(), 0);
+        QCOMPARE(flickEndedSpy.count(), 0);
+    }
+    QVERIFY(pathview->currentIndex() != current);
+
+    QTest::touchEvent(window.data(), touchDevice.data()).release(0, to, window.data());
+    QQuickTouchUtils::flush(window.data());
+
+    QVERIFY(pathview->isMoving());
+    QVERIFY(!pathview->isDragging());
+    QCOMPARE(movingSpy.count(), 1);
+    QCOMPARE(moveStartedSpy.count(), 1);
+    QCOMPARE(moveEndedSpy.count(), 0);
+    QCOMPARE(draggingSpy.count(), 2);
+    QCOMPARE(dragStartedSpy.count(), 1);
+    QCOMPARE(dragEndedSpy.count(), 1);
+    QCOMPARE(flickStartedSpy.count(), 1);
+    QCOMPARE(flickEndedSpy.count(), 0);
+
+    // Wait for the flick to finish
+    QVERIFY(QTest::qWaitFor([&]()
+        { return !pathview->isFlicking(); }
+    ));
+    QVERIFY(!pathview->isMoving());
+    QVERIFY(!pathview->isDragging());
+    QCOMPARE(movingSpy.count(), 2);
+    QCOMPARE(moveStartedSpy.count(), 1);
+    QCOMPARE(moveEndedSpy.count(), 1);
+    QCOMPARE(draggingSpy.count(), 2);
+    QCOMPARE(dragStartedSpy.count(), 1);
+    QCOMPARE(dragEndedSpy.count(), 1);
+    QCOMPARE(flickStartedSpy.count(), 1);
+    QCOMPARE(flickEndedSpy.count(), 1);
+
 }
 
 QTEST_MAIN(tst_QQuickPathView)

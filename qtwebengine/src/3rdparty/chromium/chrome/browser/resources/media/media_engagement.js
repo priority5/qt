@@ -2,16 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+import {assertNotReached} from 'chrome://resources/js/assert.m.js';
+import {PromiseResolver} from 'chrome://resources/js/promise_resolver.m.js';
+import {$} from 'chrome://resources/js/util.m.js';
+import {Origin} from 'chrome://resources/mojo/url/mojom/origin.mojom-webui.js';
+
+import {MediaEngagementConfig, MediaEngagementScoreDetails, MediaEngagementScoreDetailsProvider} from './media_engagement_score_details.mojom-webui.js';
 
 // Allow a function to be provided by tests, which will be called when
 // the page has been populated with media engagement details.
 const pageIsPopulatedResolver = new PromiseResolver();
-function whenPageIsPopulatedForTest() {
+window.whenPageIsPopulatedForTest = function() {
   return pageIsPopulatedResolver.promise;
-}
-
-(function() {
+};
 
 let detailsProvider = null;
 let info = null;
@@ -23,7 +26,8 @@ let showNoPlaybacks = false;
 
 /**
  * Creates a single row in the engagement table.
- * @param {!MediaEngagementScoreDetails} rowInfo The info to create the row.
+ * @param {!MediaEngagementScoreDetails} rowInfo The info to create
+ *     the row.
  * @return {!HTMLElement}
  */
 function createRow(rowInfo) {
@@ -31,9 +35,9 @@ function createRow(rowInfo) {
   const td = template.content.querySelectorAll('td');
 
   td[0].textContent = rowInfo.origin.scheme + '://' + rowInfo.origin.host;
-  if (rowInfo.origin.scheme == 'http' && rowInfo.origin.port != '80') {
+  if (rowInfo.origin.scheme === 'http' && rowInfo.origin.port !== 80) {
     td[0].textContent += ':' + rowInfo.origin.port;
-  } else if (rowInfo.origin.scheme == 'https' && rowInfo.origin.port != '443') {
+  } else if (rowInfo.origin.scheme === 'https' && rowInfo.origin.port !== 443) {
     td[0].textContent += ':' + rowInfo.origin.port;
   }
 
@@ -46,7 +50,8 @@ function createRow(rowInfo) {
   td[5].textContent = rowInfo.totalScore ? rowInfo.totalScore.toFixed(2) : '0';
   td[6].getElementsByClassName('engagement-bar')[0].style.width =
       (rowInfo.totalScore * 50) + 'px';
-  return document.importNode(template.content, true);
+  return /** @type {!HTMLElement} */ (
+      document.importNode(template.content, true));
 }
 
 /**
@@ -68,8 +73,8 @@ function sortInfo() {
 /**
  * Compares two MediaEngagementScoreDetails objects based on |sortKey|.
  * @param {string} sortKey The name of the property to sort by.
- * @param {number|url.mojom.Origin} The first object to compare.
- * @param {number|url.mojom.Origin} The second object to compare.
+ * @param {Object|Origin} a The first object to compare.
+ * @param {Object|Origin} b The second object to compare.
  * @return {number} A negative number if |a| should be ordered before
  *     |b|, a positive number otherwise.
  */
@@ -78,15 +83,15 @@ function compareTableItem(sortKey, a, b) {
   const val2 = b[sortKey];
 
   // Compare the hosts of the origin ignoring schemes.
-  if (sortKey == 'origin') {
+  if (sortKey === 'origin') {
     return val1.host > val2.host ? 1 : -1;
   }
 
-  if (sortKey == 'visits' || sortKey == 'mediaPlaybacks' ||
-      sortKey == 'lastMediaPlaybackTime' || sortKey == 'totalScore' ||
-      sortKey == 'audiblePlaybacks' || sortKey == 'significantPlaybacks' ||
-      sortKey == 'highScoreChanges' || sortKey == 'mediaElementPlaybacks' ||
-      sortKey == 'audioContextPlaybacks' || sortKey == 'isHigh') {
+  if (sortKey === 'visits' || sortKey === 'mediaPlaybacks' ||
+      sortKey === 'lastMediaPlaybackTime' || sortKey === 'totalScore' ||
+      sortKey === 'audiblePlaybacks' || sortKey === 'significantPlaybacks' ||
+      sortKey === 'highScoreChanges' || sortKey === 'mediaElementPlaybacks' ||
+      sortKey === 'audioContextPlaybacks' || sortKey === 'isHigh') {
     return val1 - val2;
   }
 
@@ -97,7 +102,7 @@ function compareTableItem(sortKey, a, b) {
 /**
  * Creates a single row in the config table.
  * @param {string} name The name of the config setting.
- * @param {string} value The value of the config setting.
+ * @param {number|string} value The value of the config setting.
  * @return {!HTMLElement}
  */
 function createConfigRow(name, value) {
@@ -105,12 +110,14 @@ function createConfigRow(name, value) {
   const td = template.content.querySelectorAll('td');
   td[0].textContent = name;
   td[1].textContent = value;
-  return document.importNode(template.content, true);
+  return /** @type {!HTMLElement} */ (
+      document.importNode(template.content, true));
 }
 
 /**
  * Regenerates the config table.
- * @param {!MediaEngagementConfig} config The config of the MEI service.
+ * @param {!MediaEngagementConfig} config The config of the MEI
+ *     service.
  */
 
 function renderConfigTable(config) {
@@ -136,9 +143,6 @@ function renderConfigTable(config) {
       'Autoplay disable settings',
       formatFeatureFlag(config.featureAutoplayDisableSettings)));
   configTableBody.appendChild(createConfigRow(
-      'Autoplay whitelist settings',
-      formatFeatureFlag(config.featureAutoplayWhitelistSettings)));
-  configTableBody.appendChild(createConfigRow(
       'Unified autoplay (preference)',
       formatFeatureFlag(config.prefDisableUnifiedAutoplay)));
   configTableBody.appendChild(createConfigRow(
@@ -153,7 +157,7 @@ function renderConfigTable(config) {
 
 /**
  * Converts a boolean into a string value.
- * @param {bool} value The value of the config setting.
+ * @param {boolean} value The value of the config setting.
  * @return {string}
  */
 function formatFeatureFlag(value) {
@@ -188,7 +192,7 @@ function updateEngagementTable() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  detailsProvider = media.mojom.MediaEngagementScoreDetailsProvider.getRemote();
+  detailsProvider = MediaEngagementScoreDetailsProvider.getRemote();
   updateEngagementTable();
 
   engagementTableBody = $('engagement-table-body');
@@ -200,7 +204,7 @@ document.addEventListener('DOMContentLoaded', function() {
   for (let i = 0; i < headers.length; i++) {
     headers[i].addEventListener('click', (e) => {
       const newSortKey = e.target.getAttribute('sort-key');
-      if (sortKey == newSortKey) {
+      if (sortKey === newSortKey) {
         sortReverse = !sortReverse;
       } else {
         sortKey = newSortKey;
@@ -238,4 +242,3 @@ document.addEventListener('DOMContentLoaded', function() {
     renderTable();
   });
 });
-})();

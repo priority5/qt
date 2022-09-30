@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Charts module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QtCharts/QBoxPlotSeries>
 #include <private/qboxplotseries_p.h>
@@ -41,7 +15,7 @@
 #include <QtCharts/QBoxSet>
 #include <private/qboxset_p.h>
 
-QT_CHARTS_BEGIN_NAMESPACE
+QT_BEGIN_NAMESPACE
 
 /*!
     \class QBoxPlotSeries
@@ -62,12 +36,12 @@ QT_CHARTS_BEGIN_NAMESPACE
     \sa QBoxSet, QBarCategoryAxis
 */
 /*!
-    \fn QBoxPlotSeries::boxsetsAdded(QList<QBoxSet *> sets)
+    \fn QBoxPlotSeries::boxsetsAdded(const QList<QBoxSet *> &sets)
     This signal is emitted when the list of box-and-whiskers items specified by \a sets
     is added to the series.
 */
 /*!
-    \fn QBoxPlotSeries::boxsetsRemoved(QList<QBoxSet *> sets)
+    \fn QBoxPlotSeries::boxsetsRemoved(const QList<QBoxSet *> &sets)
     This signal is emitted when the list of box-and-whiskers items specified by \a sets
     is removed from the series.
 */
@@ -236,7 +210,7 @@ bool QBoxPlotSeries::take(QBoxSet *set)
     them. If the list is null or the items already belong to the series, it will not be appended.
     Returns \c true if appending succeeded.
 */
-bool QBoxPlotSeries::append(QList<QBoxSet *> sets)
+bool QBoxPlotSeries::append(const QList<QBoxSet *> &sets)
 {
     Q_D(QBoxPlotSeries);
     bool success = d->append(sets);
@@ -465,8 +439,8 @@ void QBoxPlotSeriesPrivate::initializeGraphics(QGraphicsItem *parent)
     QAbstractSeriesPrivate::initializeGraphics(parent);
 
     if (m_chart) {
-        connect(m_chart->d_ptr->m_dataset, SIGNAL(seriesAdded(QAbstractSeries*)), this, SLOT(handleSeriesChange(QAbstractSeries*)) );
-        connect(m_chart->d_ptr->m_dataset, SIGNAL(seriesRemoved(QAbstractSeries*)), this, SLOT(handleSeriesRemove(QAbstractSeries*)) );
+        connect(m_chart->d_ptr->m_dataset, SIGNAL(seriesAdded(QAbstractSeries*)), this, SLOT(handleSeriesChange(QAbstractSeries*)));
+        connect(m_chart->d_ptr->m_dataset, SIGNAL(seriesRemoved(QAbstractSeries*)), this, SLOT(handleSeriesRemove(QAbstractSeries*)));
 
         QList<QAbstractSeries *> serieses = m_chart->series();
 
@@ -509,7 +483,7 @@ void QBoxPlotSeriesPrivate::initializeTheme(int index, ChartTheme* theme, bool f
 void QBoxPlotSeriesPrivate::initializeAnimations(QChart::AnimationOptions options, int duration,
                                                  QEasingCurve &curve)
 {
-    BoxPlotChartItem *item = static_cast<BoxPlotChartItem *>(m_item.data());
+    BoxPlotChartItem *item = static_cast<BoxPlotChartItem *>(m_item.get());
     Q_ASSERT(item);
     if (item->animation())
         item->animation()->stopAndDestroyLater();
@@ -547,7 +521,7 @@ void QBoxPlotSeriesPrivate::handleSeriesRemove(QAbstractSeries *series)
 
     // Test if series removed is me, then don't do anything
     if (q != removedSeries) {
-        BoxPlotChartItem *item = static_cast<BoxPlotChartItem *>(m_item.data());
+        BoxPlotChartItem *item = static_cast<BoxPlotChartItem *>(m_item.get());
         if (item) {
             item->m_seriesCount = item->m_seriesCount - 1;
             if (removedSeries->d_func()->m_index < m_index) {
@@ -566,7 +540,7 @@ void QBoxPlotSeriesPrivate::handleSeriesChange(QAbstractSeries *series)
 
     Q_Q(QBoxPlotSeries);
 
-    BoxPlotChartItem *boxPlot = static_cast<BoxPlotChartItem *>(m_item.data());
+    BoxPlotChartItem *boxPlot = static_cast<BoxPlotChartItem *>(m_item.get());
 
     if (m_chart) {
         QList<QAbstractSeries *> serieses = m_chart->series();
@@ -618,16 +592,16 @@ bool QBoxPlotSeriesPrivate::remove(QBoxSet *set)
     return true;
 }
 
-bool QBoxPlotSeriesPrivate::append(QList<QBoxSet *> sets)
+bool QBoxPlotSeriesPrivate::append(const QList<QBoxSet *> &sets)
 {
-    foreach (QBoxSet *set, sets) {
+    for (auto *set : sets) {
         if ((set == 0) || m_boxSets.contains(set) || set->d_ptr->m_series)
             return false; // Fail if any of the sets is null or is already appended.
         if (sets.count(set) != 1)
             return false; // Also fail if same set is more than once in given list.
     }
 
-    foreach (QBoxSet *set, sets) {
+    for (auto *set : sets) {
         m_boxSets.append(set);
         QObject::connect(set->d_ptr.data(), SIGNAL(updatedLayout()), this, SIGNAL(updatedLayout()));
         QObject::connect(set->d_ptr.data(), SIGNAL(updatedBox()), this, SIGNAL(updatedBoxes()));
@@ -639,19 +613,19 @@ bool QBoxPlotSeriesPrivate::append(QList<QBoxSet *> sets)
     return true;
 }
 
-bool QBoxPlotSeriesPrivate::remove(QList<QBoxSet *> sets)
+bool QBoxPlotSeriesPrivate::remove(const QList<QBoxSet *> &sets)
 {
     if (sets.count() == 0)
         return false;
 
-    foreach (QBoxSet *set, sets) {
+    for (auto *set : sets) {
         if ((set == 0) || (!m_boxSets.contains(set)))
             return false; // Fail if any of the sets is null or is not in series
         if (sets.count(set) != 1)
             return false; // Also fail if same set is more than once in given list.
     }
 
-    foreach (QBoxSet *set, sets) {
+    for (auto *set : sets) {
         set->d_ptr->m_series = 0;
         m_boxSets.removeOne(set);
         QObject::disconnect(set->d_ptr.data(), SIGNAL(updatedLayout()), this, SIGNAL(updatedLayout()));
@@ -718,7 +692,7 @@ qreal QBoxPlotSeriesPrivate::max()
     return max;
 }
 
-QT_CHARTS_END_NAMESPACE
+QT_END_NAMESPACE
 
 #include "moc_qboxplotseries.cpp"
 #include "moc_qboxplotseries_p.cpp"

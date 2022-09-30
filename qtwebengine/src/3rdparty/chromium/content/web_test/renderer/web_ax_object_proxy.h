@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
 #include "third_party/blink/public/web/web_ax_object.h"
@@ -35,6 +34,10 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   static gin::WrapperInfo kWrapperInfo;
 
   WebAXObjectProxy(const blink::WebAXObject& object, Factory* factory);
+
+  WebAXObjectProxy(const WebAXObjectProxy&) = delete;
+  WebAXObjectProxy& operator=(const WebAXObjectProxy&) = delete;
+
   ~WebAXObjectProxy() override;
 
   // gin::Wrappable:
@@ -57,6 +60,8 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   }
 
   Factory* factory() const { return factory_; }
+
+  bool IsDetached() const { return !factory_; }
 
  private:
   friend class WebAXObjectProxyBindings;
@@ -229,14 +234,14 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   int DescriptionElementCount();
   v8::Local<v8::Object> DescriptionElementAtIndex(unsigned index);
 
+  std::vector<std::string> GetMisspellings() const;
+
   std::string Placeholder();
 
   blink::WebAXObject accessibility_object_;
   Factory* factory_;
 
   v8::Persistent<v8::Function> notification_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebAXObjectProxy);
 };
 
 class RootWebAXObjectProxy : public WebAXObjectProxy {

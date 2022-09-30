@@ -63,7 +63,7 @@
 #include "third_party/blink/renderer/core/svg/svg_script_element.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 
@@ -279,6 +279,11 @@ void HTMLConstructionSite::FlushPendingText(FlushMode mode) {
     unsigned break_index =
         FindBreakIndexBetween(string, current_position, proposed_break_index);
     DCHECK_LE(break_index, string.length());
+    if (!break_index) {
+      // FindBreakIndexBetween returns 0 if it cannot find a breakpoint. In this
+      // case, just keep the entire string.
+      break_index = string.length();
+    }
     String substring =
         string.Substring(current_position, break_index - current_position);
     substring = AtomizeIfAllWhitespace(substring, pending_text.whitespace_mode);
@@ -396,6 +401,7 @@ HTMLConstructionSite::~HTMLConstructionSite() {
 }
 
 void HTMLConstructionSite::Trace(Visitor* visitor) const {
+  visitor->Trace(reentry_permit_);
   visitor->Trace(document_);
   visitor->Trace(attachment_root_);
   visitor->Trace(head_);
@@ -803,8 +809,6 @@ void HTMLConstructionSite::InsertTextNode(const StringView& string,
   if (ShouldFosterParent())
     FindFosterSite(dummy_task);
 
-  // TODO(crbug.com/1070669): This can likely be removed, because it is already
-  // handled in Insert().
   if (auto* template_element =
           DynamicTo<HTMLTemplateElement>(*dummy_task.parent)) {
     // If the Document was detached in the middle of parsing, the template

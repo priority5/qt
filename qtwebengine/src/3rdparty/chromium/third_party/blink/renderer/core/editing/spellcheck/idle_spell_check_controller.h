@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_SPELLCHECK_IDLE_SPELL_CHECK_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_SPELLCHECK_IDLE_SPELL_CHECK_CONTROLLER_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/scripted_idle_task_controller.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
@@ -30,11 +31,11 @@ class SpellCheckRequester;
 class CORE_EXPORT IdleSpellCheckController final
     : public GarbageCollected<IdleSpellCheckController>,
       public ExecutionContextLifecycleObserver {
-  DISALLOW_COPY_AND_ASSIGN(IdleSpellCheckController);
-
  public:
   explicit IdleSpellCheckController(LocalDOMWindow&, SpellCheckRequester&);
-  ~IdleSpellCheckController();
+  IdleSpellCheckController(const IdleSpellCheckController&) = delete;
+  IdleSpellCheckController& operator=(const IdleSpellCheckController&) = delete;
+  ~IdleSpellCheckController() override;
 
   enum class State {
 #define V(state) k##state,

@@ -1,52 +1,16 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 Intel Corporation.
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2013 Samuel Gaist <samuel.gaist@edeltech.ch>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 Intel Corporation.
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2013 Samuel Gaist <samuel.gaist@edeltech.ch>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qplatformdefs.h"
 #include "qfilesystemengine_p.h"
 #include "qfile.h"
 #include "qstorageinfo.h"
-#include "qtextstream.h"
 
 #include <QtCore/qoperatingsystemversion.h>
 #include <QtCore/private/qcore_unix_p.h>
+#include <QtCore/private/qfiledevice_p.h>
 #include <QtCore/qvarlengtharray.h>
 #ifndef QT_BOOTSTRAPPED
 # include <QtCore/qstandardpaths.h>
@@ -54,11 +18,11 @@
 
 #include <pwd.h>
 #include <stdlib.h> // for realpath()
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
+
+#include <memory> // for std::unique_ptr
 
 #if __has_include(<paths.h>)
 # include <paths.h>
@@ -112,6 +76,8 @@ struct statx { mode_t stx_mode; };      // dummy
 #endif
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 enum {
 #ifdef Q_OS_ANDROID
@@ -180,7 +146,7 @@ static bool isPackage(const QFileSystemMetaData &data, const QFileSystemEntry &e
             QCFType<CFBundleRef> bundle = CFBundleCreate(kCFAllocatorDefault, application);
             CFStringRef identifier = CFBundleGetIdentifier(bundle);
             QString applicationId = QString::fromCFString(identifier);
-            if (applicationId != QLatin1String("com.apple.finder"))
+            if (applicationId != "com.apple.finder"_L1)
                 return true;
         }
 #endif
@@ -195,7 +161,7 @@ namespace {
 namespace GetFileTimes {
 #if !QT_CONFIG(futimens) && (QT_CONFIG(futimes))
 template <typename T>
-static inline typename QtPrivate::QEnableIf<(&T::st_atim, &T::st_mtim, true)>::Type get(const T *p, struct timeval *access, struct timeval *modification)
+static inline typename std::enable_if_t<(&T::st_atim, &T::st_mtim, true)> get(const T *p, struct timeval *access, struct timeval *modification)
 {
     access->tv_sec = p->st_atim.tv_sec;
     access->tv_usec = p->st_atim.tv_nsec / 1000;
@@ -205,7 +171,7 @@ static inline typename QtPrivate::QEnableIf<(&T::st_atim, &T::st_mtim, true)>::T
 }
 
 template <typename T>
-static inline typename QtPrivate::QEnableIf<(&T::st_atimespec, &T::st_mtimespec, true)>::Type get(const T *p, struct timeval *access, struct timeval *modification)
+static inline typename std::enable_if_t<(&T::st_atimespec, &T::st_mtimespec, true)> get(const T *p, struct timeval *access, struct timeval *modification)
 {
     access->tv_sec = p->st_atimespec.tv_sec;
     access->tv_usec = p->st_atimespec.tv_nsec / 1000;
@@ -217,7 +183,7 @@ static inline typename QtPrivate::QEnableIf<(&T::st_atimespec, &T::st_mtimespec,
 #  ifndef st_atimensec
 // if "st_atimensec" is defined, this would expand to invalid C++
 template <typename T>
-static inline typename QtPrivate::QEnableIf<(&T::st_atimensec, &T::st_mtimensec, true)>::Type get(const T *p, struct timeval *access, struct timeval *modification)
+static inline typename std::enable_if_t<(&T::st_atimensec, &T::st_mtimensec, true)> get(const T *p, struct timeval *access, struct timeval *modification)
 {
     access->tv_sec = p->st_atime;
     access->tv_usec = p->st_atimensec / 1000;
@@ -234,51 +200,51 @@ qint64 timespecToMSecs(const timespec &spec)
 }
 
 // fallback set
-Q_DECL_UNUSED qint64 atime(const QT_STATBUF &statBuffer, ulong) { return qint64(statBuffer.st_atime) * 1000; }
-Q_DECL_UNUSED qint64 birthtime(const QT_STATBUF &, ulong)       { return Q_INT64_C(0); }
-Q_DECL_UNUSED qint64 ctime(const QT_STATBUF &statBuffer, ulong) { return qint64(statBuffer.st_ctime) * 1000; }
-Q_DECL_UNUSED qint64 mtime(const QT_STATBUF &statBuffer, ulong) { return qint64(statBuffer.st_mtime) * 1000; }
+[[maybe_unused]] qint64 atime(const QT_STATBUF &statBuffer, ulong) { return qint64(statBuffer.st_atime) * 1000; }
+[[maybe_unused]] qint64 birthtime(const QT_STATBUF &, ulong)       { return Q_INT64_C(0); }
+[[maybe_unused]] qint64 ctime(const QT_STATBUF &statBuffer, ulong) { return qint64(statBuffer.st_ctime) * 1000; }
+[[maybe_unused]] qint64 mtime(const QT_STATBUF &statBuffer, ulong) { return qint64(statBuffer.st_mtime) * 1000; }
 
 // Xtim, POSIX.1-2008
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_atim, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_atim, true), qint64>::type
 atime(const T &statBuffer, int)
 { return timespecToMSecs(statBuffer.st_atim); }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_birthtim, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_birthtim, true), qint64>::type
 birthtime(const T &statBuffer, int)
 { return timespecToMSecs(statBuffer.st_birthtim); }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_ctim, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_ctim, true), qint64>::type
 ctime(const T &statBuffer, int)
 { return timespecToMSecs(statBuffer.st_ctim); }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_mtim, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_mtim, true), qint64>::type
 mtime(const T &statBuffer, int)
 { return timespecToMSecs(statBuffer.st_mtim); }
 
 #ifndef st_mtimespec
 // Xtimespec
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_atimespec, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_atimespec, true), qint64>::type
 atime(const T &statBuffer, int)
 { return timespecToMSecs(statBuffer.st_atimespec); }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_birthtimespec, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_birthtimespec, true), qint64>::type
 birthtime(const T &statBuffer, int)
 { return timespecToMSecs(statBuffer.st_birthtimespec); }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_ctimespec, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_ctimespec, true), qint64>::type
 ctime(const T &statBuffer, int)
 { return timespecToMSecs(statBuffer.st_ctimespec); }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_mtimespec, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_mtimespec, true), qint64>::type
 mtime(const T &statBuffer, int)
 { return timespecToMSecs(statBuffer.st_mtimespec); }
 #endif
@@ -286,22 +252,22 @@ mtime(const T &statBuffer, int)
 #if !defined(st_mtimensec) && !defined(__alpha__)
 // Xtimensec
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_atimensec, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_atimensec, true), qint64>::type
 atime(const T &statBuffer, int)
 { return statBuffer.st_atime * Q_INT64_C(1000) + statBuffer.st_atimensec / 1000000; }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_birthtimensec, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_birthtimensec, true), qint64>::type
 birthtime(const T &statBuffer, int)
 { return statBuffer.st_birthtime * Q_INT64_C(1000) + statBuffer.st_birthtimensec / 1000000; }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_ctimensec, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_ctimensec, true), qint64>::type
 ctime(const T &statBuffer, int)
 { return statBuffer.st_ctime * Q_INT64_C(1000) + statBuffer.st_ctimensec / 1000000; }
 
 template <typename T>
-Q_DECL_UNUSED static typename std::enable_if<(&T::st_mtimensec, true), qint64>::type
+[[maybe_unused]] static typename std::enable_if<(&T::st_mtimensec, true), qint64>::type
 mtime(const T &statBuffer, int)
 { return statBuffer.st_mtime * Q_INT64_C(1000) + statBuffer.st_mtimensec / 1000000; }
 #endif
@@ -407,10 +373,7 @@ bool QFileSystemEngine::fillMetaData(int fd, QFileSystemMetaData &data)
     data.entryFlags &= ~QFileSystemMetaData::PosixStatFlags;
     data.knownFlagsMask |= QFileSystemMetaData::PosixStatFlags;
 
-    union {
-        struct statx statxBuffer;
-        QT_STATBUF statBuffer;
-    };
+    struct statx statxBuffer;
 
     int ret = qt_fstatx(fd, &statxBuffer);
     if (ret != -ENOSYS) {
@@ -420,6 +383,8 @@ bool QFileSystemEngine::fillMetaData(int fd, QFileSystemMetaData &data)
         }
         return false;
     }
+
+    QT_STATBUF statBuffer;
 
     if (QT_FSTAT(fd, &statBuffer) == 0) {
         data.fillFromStatBuf(statBuffer);
@@ -616,7 +581,7 @@ void QFileSystemMetaData::fillFromDirEnt(const QT_DIRENT &entry)
         clear();
     }
 #else
-    Q_UNUSED(entry)
+    Q_UNUSED(entry);
 #endif
 }
 
@@ -634,15 +599,15 @@ QFileSystemEntry QFileSystemEngine::getLinkTarget(const QFileSystemEntry &link, 
             QDir parent(link.filePath());
             parent.cdUp();
             ret = parent.path();
-            if (!ret.isEmpty() && !ret.endsWith(QLatin1Char('/')))
-                ret += QLatin1Char('/');
+            if (!ret.isEmpty() && !ret.endsWith(u'/'))
+                ret += u'/';
         }
         ret += QFile::decodeName(s);
 
-        if (!ret.startsWith(QLatin1Char('/')))
-            ret.prepend(absoluteName(link).path() + QLatin1Char('/'));
+        if (!ret.startsWith(u'/'))
+            ret.prepend(absoluteName(link).path() + u'/');
         ret = QDir::cleanPath(ret);
-        if (ret.size() > 1 && ret.endsWith(QLatin1Char('/')))
+        if (ret.size() > 1 && ret.endsWith(u'/'))
             ret.chop(1);
         return QFileSystemEntry(ret);
     }
@@ -689,36 +654,41 @@ QFileSystemEntry QFileSystemEngine::canonicalName(const QFileSystemEntry &entry,
     Q_UNUSED(data);
     return QFileSystemEntry(slowCanonicalized(absoluteName(entry).filePath()));
 #else
-    char stack_result[PATH_MAX+1];
-    char *resolved_name = nullptr;
+# if defined(Q_OS_DARWIN) || defined(Q_OS_ANDROID) || _POSIX_VERSION < 200801L
+    // used to store the result of realpath in case where realpath cannot allocate itself
+    char stack_result[PATH_MAX + 1];
+#else
+    // enables unconditionally passing stack_result below
+    std::nullptr_t stack_result = nullptr;
+# endif
+    auto resolved_path_deleter = [&](char *ptr) {
+        // frees resolved_name if it was allocated by realpath
+# if defined(Q_OS_DARWIN) || defined(Q_OS_ANDROID) || _POSIX_VERSION < 200801L
+        // ptr is either null, or points to stack_result
+        Q_ASSERT(!ptr || ptr == stack_result);
+        return;
+#else
+        free(ptr);
+# endif
+    };
+    std::unique_ptr<char, decltype (resolved_path_deleter)> resolved_name {nullptr, resolved_path_deleter};
 # if defined(Q_OS_DARWIN) || defined(Q_OS_ANDROID)
     // On some Android and macOS versions, realpath() will return a path even if
     // it does not exist. To work around this, we check existence in advance.
     if (!data.hasFlags(QFileSystemMetaData::ExistsAttribute))
         fillMetaData(entry, data, QFileSystemMetaData::ExistsAttribute);
 
-    if (!data.exists()) {
+    if (!data.exists())
         errno = ENOENT;
-    } else {
-        resolved_name = stack_result;
-    }
-    if (resolved_name && realpath(entry.nativeFilePath().constData(), resolved_name) == nullptr)
-        resolved_name = nullptr;
+    else
+        resolved_name.reset(realpath(entry.nativeFilePath().constData(), stack_result));
 # else
-#  if _POSIX_VERSION >= 200801L // ask realpath to allocate memory
-    resolved_name = realpath(entry.nativeFilePath().constData(), nullptr);
-#  else
-    resolved_name = stack_result;
-    if (realpath(entry.nativeFilePath().constData(), resolved_name) == nullptr)
-        resolved_name = nullptr;
-#  endif
+    resolved_name.reset(realpath(entry.nativeFilePath().constData(), stack_result));
 # endif
     if (resolved_name) {
         data.knownFlagsMask |= QFileSystemMetaData::ExistsAttribute;
         data.entryFlags |= QFileSystemMetaData::ExistsAttribute;
-        QString canonicalPath = QDir::cleanPath(QFile::decodeName(resolved_name));
-        if (resolved_name != stack_result)
-            free(resolved_name);
+        QString canonicalPath = QDir::cleanPath(QFile::decodeName(resolved_name.get()));
         return QFileSystemEntry(canonicalPath);
     } else if (errno == ENOENT || errno == ENOTDIR) { // file doesn't exist
         data.knownFlagsMask |= QFileSystemMetaData::ExistsAttribute;
@@ -760,7 +730,7 @@ QFileSystemEntry QFileSystemEngine::absoluteName(const QFileSystemEntry &entry)
     QFileSystemEntry resultingEntry(result, QFileSystemEntry::FromNativePath());
     QString stringVersion = QDir::cleanPath(resultingEntry.filePath());
     if (isDir)
-        stringVersion.append(QLatin1Char('/'));
+        stringVersion.append(u'/');
     return QFileSystemEntry(stringVersion);
 }
 
@@ -887,6 +857,8 @@ bool QFileSystemEngine::fillMetaData(const QFileSystemEntry &entry, QFileSystemM
         if (!data.hasFlags(QFileSystemMetaData::DirectoryType))
             what |= QFileSystemMetaData::DirectoryType;
     }
+    if (what & QFileSystemMetaData::AliasType)
+        what |= QFileSystemMetaData::LinkType;
 #endif
 #ifdef UF_HIDDEN
     if (what & QFileSystemMetaData::HiddenAttribute) {
@@ -1022,8 +994,11 @@ bool QFileSystemEngine::fillMetaData(const QFileSystemEntry &entry, QFileSystemM
 
 #if defined(Q_OS_DARWIN)
     if (what & QFileSystemMetaData::AliasType) {
-        if (entryErrno == 0 && hasResourcePropertyFlag(data, entry, kCFURLIsAliasFileKey))
-            data.entryFlags |= QFileSystemMetaData::AliasType;
+        if (entryErrno == 0 && hasResourcePropertyFlag(data, entry, kCFURLIsAliasFileKey)) {
+            // kCFURLIsAliasFileKey includes symbolic links, so filter those out
+            if (!(data.entryFlags & QFileSystemMetaData::LinkType))
+                data.entryFlags |= QFileSystemMetaData::AliasType;
+        }
         data.knownFlagsMask |= QFileSystemMetaData::AliasType;
     }
 
@@ -1038,7 +1013,7 @@ bool QFileSystemEngine::fillMetaData(const QFileSystemEntry &entry, QFileSystemM
     if (what & QFileSystemMetaData::HiddenAttribute
             && !data.isHidden()) {
         QString fileName = entry.fileName();
-        if ((fileName.size() > 0 && fileName.at(0) == QLatin1Char('.'))
+        if (fileName.startsWith(u'.')
 #if defined(Q_OS_DARWIN)
                 || (entryErrno == 0 && hasResourcePropertyFlag(data, entry, kCFURLIsHiddenKey))
 #endif
@@ -1113,7 +1088,8 @@ bool QFileSystemEngine::cloneFile(int srcfd, int dstfd, const QFileSystemMetaDat
 
 // Note: if \a shouldMkdirFirst is false, we assume the caller did try to mkdir
 // before calling this function.
-static bool createDirectoryWithParents(const QByteArray &nativeName, bool shouldMkdirFirst = true)
+static bool createDirectoryWithParents(const QByteArray &nativeName, mode_t mode,
+                                       bool shouldMkdirFirst = true)
 {
     // helper function to check if a given path is a directory, since mkdir can
     // fail if the dir already exists (it may have been created by another
@@ -1123,7 +1099,9 @@ static bool createDirectoryWithParents(const QByteArray &nativeName, bool should
         return QT_STAT(nativeName.constData(), &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR;
     };
 
-    if (shouldMkdirFirst && QT_MKDIR(nativeName, 0777) == 0)
+    if (shouldMkdirFirst && QT_MKDIR(nativeName, mode) == 0)
+        return true;
+    if (errno == EISDIR)
         return true;
     if (errno == EEXIST)
         return isDir(nativeName);
@@ -1136,33 +1114,35 @@ static bool createDirectoryWithParents(const QByteArray &nativeName, bool should
         return false;
 
     QByteArray parentNativeName = nativeName.left(slash);
-    if (!createDirectoryWithParents(parentNativeName))
+    if (!createDirectoryWithParents(parentNativeName, mode))
         return false;
 
     // try again
-    if (QT_MKDIR(nativeName, 0777) == 0)
+    if (QT_MKDIR(nativeName, mode) == 0)
         return true;
     return errno == EEXIST && isDir(nativeName);
 }
 
 //static
-bool QFileSystemEngine::createDirectory(const QFileSystemEntry &entry, bool createParents)
+bool QFileSystemEngine::createDirectory(const QFileSystemEntry &entry, bool createParents,
+                                        std::optional<QFile::Permissions> permissions)
 {
     QString dirName = entry.filePath();
     Q_CHECK_FILE_NAME(dirName, false);
 
     // Darwin doesn't support trailing /'s, so remove for everyone
-    while (dirName.size() > 1 && dirName.endsWith(QLatin1Char('/')))
+    while (dirName.size() > 1 && dirName.endsWith(u'/'))
         dirName.chop(1);
 
     // try to mkdir this directory
     QByteArray nativeName = QFile::encodeName(dirName);
-    if (QT_MKDIR(nativeName, 0777) == 0)
+    mode_t mode = permissions ? QtPrivate::toMode_t(*permissions) : 0777;
+    if (QT_MKDIR(nativeName, mode) == 0)
         return true;
     if (!createParents)
         return false;
 
-    return createDirectoryWithParents(nativeName, false);
+    return createDirectoryWithParents(nativeName, mode, false);
 }
 
 //static
@@ -1236,7 +1216,7 @@ static QString freeDesktopTrashLocation(const QString &sourcePath)
     const QStorageInfo homeStorage(QDir::home());
     // We support trashing of files outside the users home partition
     if (sourceStorage != homeStorage) {
-        const QLatin1String dotTrash(".Trash");
+        const auto dotTrash = ".Trash"_L1;
         QDir topDir(sourceStorage.rootPath());
         /*
             Method 1:
@@ -1284,7 +1264,7 @@ static QString freeDesktopTrashLocation(const QString &sourcePath)
         */
         if (trash.isEmpty()) {
             topDir = QDir(sourceStorage.rootPath());
-            const QString userTrashDir = dotTrash + QLatin1Char('-') + userID;
+            const QString userTrashDir = dotTrash + u'-' + userID;
             trash = makeTrashDir(topDir, userTrashDir);
         }
     }
@@ -1300,7 +1280,7 @@ static QString freeDesktopTrashLocation(const QString &sourcePath)
     */
     if (trash.isEmpty()) {
         QDir topDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-        trash = makeTrashDir(topDir, QLatin1String("Trash"));
+        trash = makeTrashDir(topDir, "Trash"_L1);
         if (!QFileInfo(trash).isDir()) {
             qWarning("Unable to establish trash directory in %s",
                      topDir.path().toLocal8Bit().constData());
@@ -1334,8 +1314,8 @@ bool QFileSystemEngine::moveFileToTrash(const QFileSystemEntry &source,
     /*
         "A trash directory contains two subdirectories, named info and files."
     */
-    const QLatin1String filesDir("files");
-    const QLatin1String infoDir("info");
+    const auto filesDir = "files"_L1;
+    const auto infoDir = "info"_L1;
     trashDir.mkdir(filesDir);
     int savedErrno = errno;
     trashDir.mkdir(infoDir);
@@ -1355,15 +1335,12 @@ bool QFileSystemEngine::moveFileToTrash(const QFileSystemEntry &source,
     const QString trashedName = sourceInfo.isDir()
                               ? QDir(sourcePath).dirName()
                               : sourceInfo.fileName();
-    QString uniqueTrashedName = QLatin1Char('/') + trashedName;
+    QString uniqueTrashedName = u'/' + trashedName;
     QString infoFileName;
     int counter = 0;
     QFile infoFile;
     auto makeUniqueTrashedName = [trashedName, &counter]() -> QString {
-        ++counter;
-        return QString(QLatin1String("/%1-%2"))
-                                        .arg(trashedName)
-                                        .arg(counter, 4, 10, QLatin1Char('0'));
+        return QString::asprintf("/%ls-%04d", qUtf16Printable(trashedName), ++counter);
     };
     do {
         while (QFile::exists(trashDir.filePath(filesDir) + uniqueTrashedName))
@@ -1381,7 +1358,7 @@ bool QFileSystemEngine::moveFileToTrash(const QFileSystemEntry &source,
              (at least on the same machine), if it fails you need to pick another filename."
         */
         infoFileName = trashDir.filePath(infoDir)
-                     + uniqueTrashedName + QLatin1String(".trashinfo");
+                     + uniqueTrashedName + ".trashinfo"_L1;
         infoFile.setFileName(infoFileName);
         if (!infoFile.open(QIODevice::NewOnly | QIODevice::WriteOnly | QIODevice::Text))
             uniqueTrashedName = makeUniqueTrashedName();
@@ -1401,14 +1378,12 @@ bool QFileSystemEngine::moveFileToTrash(const QFileSystemEntry &source,
         return false;
     }
 
-    QTextStream out(&infoFile);
-#if QT_CONFIG(textcodec)
-    out.setCodec("UTF-8");
-#endif
-    out << "[Trash Info]" << Qt::endl;
-    out << "Path=" << sourcePath << Qt::endl;
-    out << "DeletionDate="
-        << QDateTime::currentDateTime().toString(QLatin1String("yyyy-MM-ddThh:mm:ss")) << Qt::endl;
+    QByteArray info =
+            "[Trash Info]\n"
+            "Path=" + sourcePath.toUtf8() + "\n"
+            "DeletionDate=" + QDateTime::currentDateTime().toString("yyyy-MM-ddThh:mm:ss"_L1).toUtf8()
+            + "\n";
+    infoFile.write(info);
     infoFile.close();
 
     newLocation = QFileSystemEntry(targetPath);
@@ -1529,40 +1504,16 @@ bool QFileSystemEngine::removeFile(const QFileSystemEntry &entry, QSystemError &
 
 }
 
-static mode_t toMode_t(QFile::Permissions permissions)
-{
-    mode_t mode = 0;
-    if (permissions & (QFile::ReadOwner | QFile::ReadUser))
-        mode |= S_IRUSR;
-    if (permissions & (QFile::WriteOwner | QFile::WriteUser))
-        mode |= S_IWUSR;
-    if (permissions & (QFile::ExeOwner | QFile::ExeUser))
-        mode |= S_IXUSR;
-    if (permissions & QFile::ReadGroup)
-        mode |= S_IRGRP;
-    if (permissions & QFile::WriteGroup)
-        mode |= S_IWGRP;
-    if (permissions & QFile::ExeGroup)
-        mode |= S_IXGRP;
-    if (permissions & QFile::ReadOther)
-        mode |= S_IROTH;
-    if (permissions & QFile::WriteOther)
-        mode |= S_IWOTH;
-    if (permissions & QFile::ExeOther)
-        mode |= S_IXOTH;
-    return mode;
-}
-
 //static
 bool QFileSystemEngine::setPermissions(const QFileSystemEntry &entry, QFile::Permissions permissions, QSystemError &error, QFileSystemMetaData *data)
 {
     Q_CHECK_FILE_NAME(entry, false);
 
-    mode_t mode = toMode_t(permissions);
+    mode_t mode = QtPrivate::toMode_t(permissions);
     bool success = ::chmod(entry.nativeFilePath().constData(), mode) == 0;
     if (success && data) {
         data->entryFlags &= ~QFileSystemMetaData::Permissions;
-        data->entryFlags |= QFileSystemMetaData::MetaDataFlag(uint(permissions));
+        data->entryFlags |= QFileSystemMetaData::MetaDataFlag(uint(permissions.toInt()));
         data->knownFlagsMask |= QFileSystemMetaData::Permissions;
     }
     if (!success)
@@ -1573,12 +1524,12 @@ bool QFileSystemEngine::setPermissions(const QFileSystemEntry &entry, QFile::Per
 //static
 bool QFileSystemEngine::setPermissions(int fd, QFile::Permissions permissions, QSystemError &error, QFileSystemMetaData *data)
 {
-    mode_t mode = toMode_t(permissions);
+    mode_t mode = QtPrivate::toMode_t(permissions);
 
     bool success = ::fchmod(fd, mode) == 0;
     if (success && data) {
         data->entryFlags &= ~QFileSystemMetaData::Permissions;
-        data->entryFlags |= QFileSystemMetaData::MetaDataFlag(uint(permissions));
+        data->entryFlags |= QFileSystemMetaData::MetaDataFlag(uint(permissions.toInt()));
         data->knownFlagsMask |= QFileSystemMetaData::Permissions;
     }
     if (!success)
@@ -1661,13 +1612,13 @@ QString QFileSystemEngine::homePath()
 
 QString QFileSystemEngine::rootPath()
 {
-    return QLatin1String("/");
+    return u"/"_s;
 }
 
 QString QFileSystemEngine::tempPath()
 {
 #ifdef QT_UNIX_TEMP_PATH_OVERRIDE
-    return QLatin1String(QT_UNIX_TEMP_PATH_OVERRIDE);
+    return QT_UNIX_TEMP_PATH_OVERRIDE ""_L1;
 #else
     QString temp = QFile::decodeName(qgetenv("TMPDIR"));
     if (temp.isEmpty()) {
@@ -1677,7 +1628,7 @@ QString QFileSystemEngine::tempPath()
             temp = QString::fromCFString((CFStringRef)nsPath);
 #endif
         } else {
-            temp = QLatin1String(_PATH_TMP);
+            temp = _PATH_TMP ""_L1;
         }
     }
     return QDir(QDir::cleanPath(temp)).canonicalPath();

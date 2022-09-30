@@ -13,7 +13,7 @@
 // __STDC_FORMAT_MACROS is defined in order for //base/format_macros.h to
 // function correctly. See comment and #error message in //base/format_macros.h
 // for details.
-#if defined(OS_POSIX) && !defined(__STDC_FORMAT_MACROS)
+#if BUILDFLAG(IS_POSIX) && !defined(__STDC_FORMAT_MACROS)
 #define __STDC_FORMAT_MACROS
 #endif
 
@@ -32,12 +32,19 @@
 #include "ui/gl/gl_export.h"
 
 // The standard OpenGL native extension headers are also included.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <GL/wglext.h>
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 #include <OpenGL/OpenGL.h>
 #elif defined(USE_GLX)
+using Display = struct _XDisplay;
+using Bool = int;
+using Status = int;
 using XID = unsigned long;
+using Colormap = XID;
+using Font = XID;
+using Pixmap = XID;
+using Window = XID;
 using GLXPixmap = XID;
 using GLXWindow = XID;
 using GLXDrawable = XID;
@@ -47,7 +54,6 @@ using GLXContext = struct __GLXcontextRec*;
 using GLXFBConfig = struct __GLXFBConfigRec*;
 struct XVisualInfo;
 
-#include "ui/gfx/x/x11.h"
 
 #include <GL/glxext.h>
 #include <GL/glxtokens.h>
@@ -127,6 +133,7 @@ struct XVisualInfo;
 
 // GL_ANGLE_robust_resource_initialization
 #define GL_ROBUST_RESOURCE_INITIALIZATION_ANGLE 0x93AB
+#define GL_RESOURCE_INITIALIZED_ANGLE 0x969F
 
 // GL_ANGLE_request_extension
 #define GL_REQUESTABLE_EXTENSIONS_ANGLE 0x93A8
@@ -134,6 +141,9 @@ struct XVisualInfo;
 
 // GL_ANGLE_memory_size
 #define GL_MEMORY_SIZE_ANGLE 0x93AD
+
+// GL_ANGLE_rgbx_internal_format
+#define GL_RGBX8_ANGLE 0x96BA
 
 // GL_EXT_occlusion_query_boolean
 #define GL_ANY_SAMPLES_PASSED_EXT                        0x8C2F
@@ -214,6 +224,9 @@ struct XVisualInfo;
 
 // GL_OES_compressed_ETC1_RGB8_texture
 #define GL_ETC1_RGB8_OES                                 0x8D64
+
+// GL_OES_compressed_ETC2_RGB8_texture
+#define GL_COMPRESSED_RGB8_ETC2 0x9274
 
 // GL_AMD_compressed_ATC_texture
 #define GL_ATC_RGB_AMD                                   0x8C92
@@ -473,7 +486,7 @@ struct XVisualInfo;
 
 #define GL_GLEXT_PROTOTYPES 1
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define GL_BINDING_CALL WINAPI
 #else
 #define GL_BINDING_CALL
@@ -497,27 +510,6 @@ struct XVisualInfo;
 
 // Forward declare EGL types.
 typedef uint64_t EGLuint64CHROMIUM;
-#ifndef EGL_VERSION_1_5
-typedef intptr_t EGLAttrib;
-#endif
-#ifndef EGL_KHR_stream
-typedef void *EGLStreamKHR;
-typedef uint64_t EGLuint64KHR;
-#endif
-#ifndef EGL_ANDROID_presentation_time
-typedef khronos_stime_nanoseconds_t EGLnsecsANDROID;
-#endif
-#ifndef EGL_KHR_debug
-typedef void* EGLObjectKHR;
-typedef void* EGLLabelKHR;
-typedef void (APIENTRY *EGLDEBUGPROCKHR)(
-             EGLenum error,
-             const char *command,
-             EGLint messageType,
-             EGLLabelKHR threadLabel,
-             EGLLabelKHR objectLabel,
-             const char* message);
-#endif
 
 #include "gl_bindings_autogen_gl.h"
 

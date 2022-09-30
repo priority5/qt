@@ -7,7 +7,6 @@
 
 #include <vector>
 
-#include "base/macros.h"
 #include "base/observer_list.h"
 #include "components/password_manager/core/browser/form_fetcher.h"
 #include "components/password_manager/core/browser/password_form.h"
@@ -22,6 +21,9 @@ struct InteractionsStats;
 class FakeFormFetcher : public FormFetcher {
  public:
   FakeFormFetcher();
+
+  FakeFormFetcher(const FakeFormFetcher&) = delete;
+  FakeFormFetcher& operator=(const FakeFormFetcher&) = delete;
 
   ~FakeFormFetcher() override;
 
@@ -40,13 +42,13 @@ class FakeFormFetcher : public FormFetcher {
   State GetState() const override;
 
   const std::vector<InteractionsStats>& GetInteractionsStats() const override;
-  base::span<const CompromisedCredentials> GetCompromisedCredentials()
+  const std::vector<const PasswordForm*>& GetInsecureCredentials()
       const override;
   std::vector<const PasswordForm*> GetNonFederatedMatches() const override;
   std::vector<const PasswordForm*> GetFederatedMatches() const override;
-  bool IsBlacklisted() const override;
+  bool IsBlocklisted() const override;
   bool IsMovingBlocked(const autofill::GaiaIdHash& destination,
-                       const base::string16& username) const override;
+                       const std::u16string& username) const override;
   const std::vector<const PasswordForm*>& GetAllRelevantMatches()
       const override;
   const std::vector<const PasswordForm*>& GetBestMatches() const override;
@@ -66,13 +68,14 @@ class FakeFormFetcher : public FormFetcher {
     federated_ = federated;
   }
 
-  void set_compromised(const std::vector<CompromisedCredentials>& compromised) {
-    compromised_ = compromised;
+  void set_insecure_credentials(
+      const std::vector<const PasswordForm*>& credentials) {
+    insecure_credentials_ = credentials;
   }
 
   void SetNonFederated(const std::vector<const PasswordForm*>& non_federated);
 
-  void SetBlacklisted(bool is_blacklisted);
+  void SetBlocklisted(bool is_blocklisted);
 
   void NotifyFetchCompleted();
 
@@ -85,11 +88,9 @@ class FakeFormFetcher : public FormFetcher {
   std::vector<const PasswordForm*> federated_;
   std::vector<const PasswordForm*> non_federated_same_scheme_;
   std::vector<const PasswordForm*> best_matches_;
-  std::vector<CompromisedCredentials> compromised_;
+  std::vector<const PasswordForm*> insecure_credentials_;
   const PasswordForm* preferred_match_ = nullptr;
-  bool is_blacklisted_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeFormFetcher);
+  bool is_blocklisted_ = false;
 };
 
 }  // namespace password_manager

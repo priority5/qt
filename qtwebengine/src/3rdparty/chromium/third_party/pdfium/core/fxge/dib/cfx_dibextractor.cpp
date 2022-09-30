@@ -11,7 +11,7 @@
 
 CFX_DIBExtractor::CFX_DIBExtractor(const RetainPtr<CFX_DIBBase>& pSrc) {
   if (!pSrc->GetBuffer()) {
-    m_pBitmap = pSrc->Clone(nullptr);
+    m_pBitmap = pSrc->Realize();
     return;
   }
   RetainPtr<CFX_DIBBase> pOldSrc(pSrc);
@@ -21,8 +21,8 @@ CFX_DIBExtractor::CFX_DIBExtractor(const RetainPtr<CFX_DIBBase>& pSrc) {
     m_pBitmap.Reset();
     return;
   }
-  m_pBitmap->SetPalette(pOldSrc->GetPalette());
-  m_pBitmap->SetAlphaMask(pOldSrc->m_pAlphaMask, nullptr);
+  m_pBitmap->SetPalette(pOldSrc->GetPaletteSpan());
+  m_pBitmap->SetAlphaMask(pOldSrc->GetAlphaMask(), nullptr);
 }
 
 CFX_DIBExtractor::~CFX_DIBExtractor() = default;

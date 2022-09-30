@@ -30,6 +30,7 @@ function isTrustedOrigin(origin: string): boolean {
     'https://chrometto.googleplex.com',
     'https://uma.googleplex.com',
   ];
+  if (origin === window.origin) return true;
   if (TRUSTED_ORIGINS.includes(origin)) return true;
   if (new URL(origin).hostname.endsWith('corp.google.com')) return true;
   return false;
@@ -43,17 +44,19 @@ function isTrustedOrigin(origin: string): boolean {
 // ready, so the message handler always replies to a 'PING' message with 'PONG',
 // which indicates it is ready to receive a trace.
 export function postMessageHandler(messageEvent: MessageEvent) {
+  if (messageEvent.origin === 'https://tagassistant.google.com') {
+    // The GA debugger, does a window.open() and sends messages to the GA
+    // script. Ignore them.
+    return;
+  }
+
   if (document.readyState !== 'complete') {
     console.error('Ignoring message - document not ready yet.');
     return;
   }
 
-  if (messageEvent.source === null) {
-    throw new Error('Incoming message has no source');
-  }
-
-  // This can happen if an extension tries to postMessage.
-  if (messageEvent.source !== window.opener) {
+  if (messageEvent.source === null || messageEvent.source !== window.opener) {
+    // This can happen if an extension tries to postMessage.
     return;
   }
 
@@ -77,17 +80,30 @@ export function postMessageHandler(messageEvent: MessageEvent) {
   } else if (messageEvent.data instanceof ArrayBuffer) {
     postedTrace = {title: 'External trace', buffer: messageEvent.data};
   } else {
-    throw new Error('Incoming message data is not in a usable format');
+    console.warn(
+        'Unknown postMessage() event received. If you are trying to open a ' +
+        'trace via postMessage(), this is a bug in your code. If not, this ' +
+        'could be due to some Chrome extension.');
+    console.log('origin:', messageEvent.origin, 'data:', messageEvent.data);
+    return;
   }
 
   if (postedTrace.buffer.byteLength === 0) {
     throw new Error('Incoming message trace buffer is empty');
   }
 
+  /* Removing this event listener to avoid callers posting the trace multiple
+   * times. If the callers add an event listener which upon receiving 'PONG'
+   * posts the trace to ui.perfetto.dev, the callers can receive multiple 'PONG'
+   * messages and accidentally post the trace multiple times. This was part of
+   * the cause of b/182502595.
+   */
+  window.removeEventListener('message', postMessageHandler);
+
   const openTrace = () => {
     // For external traces, we need to disable other features such as
     // downloading and sharing a trace.
-    globals.frontendLocalState.localOnlyMode = true;
+    postedTrace.localOnly = true;
     globals.dispatch(Actions.openTraceFromBuffer(postedTrace));
   };
 
@@ -123,7 +139,7 @@ function sanitizePostedTrace(postedTrace: PostedTrace): PostedTrace {
 }
 
 function sanitizeString(str: string): string {
-  return str.replace(/[^A-Za-z0-9.\-_#:/?=&; ]/g, ' ');
+  return str.replace(/[^A-Za-z0-9.\-_#:/?=&;%+ ]/g, ' ');
 }
 
 // tslint:disable:no-any

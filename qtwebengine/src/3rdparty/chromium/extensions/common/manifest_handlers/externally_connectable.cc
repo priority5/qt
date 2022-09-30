@@ -10,7 +10,7 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/crx_file/id_util.h"
 #include "extensions/common/api/extensions_manifest_types.h"
@@ -62,12 +62,12 @@ ExternallyConnectableHandler::~ExternallyConnectableHandler() {
 }
 
 bool ExternallyConnectableHandler::Parse(Extension* extension,
-                                         base::string16* error) {
-  const base::Value* externally_connectable = NULL;
-  CHECK(extension->manifest()->Get(keys::kExternallyConnectable,
-                                   &externally_connectable));
+                                         std::u16string* error) {
+  const base::Value* externally_connectable =
+      extension->manifest()->FindPath(keys::kExternallyConnectable);
+  CHECK(externally_connectable != nullptr);
   bool allow_all_urls = PermissionsParser::HasAPIPermission(
-      extension, APIPermission::kExternallyConnectableAllUrls);
+      extension, mojom::APIPermissionID::kExternallyConnectableAllUrls);
 
   std::vector<InstallWarning> install_warnings;
   std::unique_ptr<ExternallyConnectableInfo> info =
@@ -83,11 +83,7 @@ bool ExternallyConnectableHandler::Parse(Extension* extension,
 
 base::span<const char* const> ExternallyConnectableHandler::Keys() const {
   static constexpr const char* kKeys[] = {keys::kExternallyConnectable};
-#if !defined(__GNUC__) || __GNUC__ > 5
   return kKeys;
-#else
-  return base::make_span(kKeys, 1);
-#endif
 }
 
 // static
@@ -102,11 +98,11 @@ std::unique_ptr<ExternallyConnectableInfo> ExternallyConnectableInfo::FromValue(
     const base::Value& value,
     bool allow_all_urls,
     std::vector<InstallWarning>* install_warnings,
-    base::string16* error) {
+    std::u16string* error) {
   std::unique_ptr<ExternallyConnectable> externally_connectable =
       ExternallyConnectable::FromValue(value, error);
   if (!externally_connectable)
-    return std::unique_ptr<ExternallyConnectableInfo>();
+    return nullptr;
 
   URLPatternSet matches;
 
@@ -119,7 +115,7 @@ std::unique_ptr<ExternallyConnectableInfo> ExternallyConnectableInfo::FromValue(
       if (pattern.Parse(*it) != URLPattern::ParseResult::kSuccess) {
         *error = ErrorUtils::FormatErrorMessageUTF16(
             externally_connectable_errors::kErrorInvalidMatchPattern, *it);
-        return std::unique_ptr<ExternallyConnectableInfo>();
+        return nullptr;
       }
 
       bool matches_all_hosts =
@@ -173,7 +169,7 @@ std::unique_ptr<ExternallyConnectableInfo> ExternallyConnectableInfo::FromValue(
       } else {
         *error = ErrorUtils::FormatErrorMessageUTF16(
             externally_connectable_errors::kErrorInvalidId, *it);
-        return std::unique_ptr<ExternallyConnectableInfo>();
+        return nullptr;
       }
     }
   }
@@ -208,7 +204,7 @@ ExternallyConnectableInfo::ExternallyConnectableInfo(
 bool ExternallyConnectableInfo::IdCanConnect(const std::string& id) {
   if (all_ids)
     return true;
-  DCHECK(base::STLIsSorted(ids));
+  DCHECK(base::ranges::is_sorted(ids));
   return std::binary_search(ids.begin(), ids.end(), id);
 }
 

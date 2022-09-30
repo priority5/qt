@@ -1,38 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 Klaralvdalens Datakonsult AB (KDAB).
-** Contact: http://www.qt-project.org/legal
-**
-** This file is part of the Qt3D module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL3$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPLv3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or later as published by the Free
-** Software Foundation and appearing in the file LICENSE.GPL included in
-** the packaging of this file. Please review the following information to
-** ensure the GNU General Public License version 2.0 requirements will be
-** met: http://www.gnu.org/licenses/gpl-2.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 Klaralvdalens Datakonsult AB (KDAB).
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QT3DANIMATION_ANIMATION_ANIMATIONUTILS_P_H
 #define QT3DANIMATION_ANIMATION_ANIMATIONUTILS_P_H
@@ -52,11 +19,11 @@
 #include <Qt3DAnimation/private/clock_p.h>
 #include <Qt3DAnimation/qanimationcallback.h>
 #include <Qt3DCore/qnodeid.h>
-#include <Qt3DCore/qscenechange.h>
 #include <Qt3DCore/private/sqt_p.h>
 
 #include <QtCore/qbitarray.h>
 #include <QtCore/qdebug.h>
+#include <QtCore/QVariant>
 #include <qmath.h>
 
 QT_BEGIN_NAMESPACE
@@ -72,7 +39,7 @@ class AnimationClip;
 class ChannelMapper;
 class ChannelMapping;
 
-typedef QVector<int> ComponentIndices;
+using ComponentIndices = QVector<int>;
 
 enum JointTransformComponent {
     NoTransformComponent = 0,
@@ -125,7 +92,7 @@ struct ClipEvaluationData
     bool isFinalFrame;
 };
 
-typedef QVector<float> ClipResults;
+using ClipResults = QVector<float>;
 
 struct ChannelNameAndType
 {
@@ -278,8 +245,8 @@ struct AnimationRecord {
     };
 
     Qt3DCore::QNodeId animatorId;
-    QVector<TargetChange> targetChanges;
-    QVector<QPair<Qt3DCore::QNodeId, QVector<Qt3DCore::Sqt>>> skeletonChanges;
+    QList<TargetChange> targetChanges;
+    QList<QPair<Qt3DCore::QNodeId, QVector<Qt3DCore::Sqt>>> skeletonChanges;
     float normalizedTime = -1.f;
     bool finalFrame = false;
 };
@@ -348,7 +315,7 @@ Q_AUTOTEST_EXPORT
 ComponentIndices channelComponentsToIndicesHelper(const Channel &channelGroup,
                                                   int expectedComponentCount,
                                                   int offset,
-                                                  const QVector<char> &suffixes);
+                                                  const QList<char> &suffixes);
 
 Q_AUTOTEST_EXPORT
 ClipResults evaluateClipAtLocalTime(AnimationClip *clip,

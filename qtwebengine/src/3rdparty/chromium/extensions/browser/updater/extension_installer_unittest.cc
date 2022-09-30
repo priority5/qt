@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -35,6 +35,10 @@ class ExtensionInstallerTest : public ExtensionsTest {
   using InstallError = update_client::InstallError;
 
   ExtensionInstallerTest();
+
+  ExtensionInstallerTest(const ExtensionInstallerTest&) = delete;
+  ExtensionInstallerTest& operator=(const ExtensionInstallerTest&) = delete;
+
   ~ExtensionInstallerTest() override;
 
   void InstallCompleteCallback(const Result& result);
@@ -53,8 +57,6 @@ class ExtensionInstallerTest : public ExtensionsTest {
   base::RunLoop run_loop_;
   Result result_;
   bool executed_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionInstallerTest);
 };
 
 ExtensionInstallerTest::ExtensionInstallerTest()

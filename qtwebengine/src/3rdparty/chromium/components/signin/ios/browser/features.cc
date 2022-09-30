@@ -4,19 +4,24 @@
 
 #include "components/signin/ios/browser/features.h"
 
+#include "components/signin/public/base/signin_switches.h"
+
 namespace signin {
 
-const base::Feature kForceStartupSigninPromo{"ForceStartupSigninPromo",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
-
 bool ForceStartupSigninPromo() {
-  return base::FeatureList::IsEnabled(kForceStartupSigninPromo);
+  return base::FeatureList::IsEnabled(switches::kForceStartupSigninPromo);
 }
-
-const base::Feature kRestoreGaiaCookiesIfDeleted{
-    "RestoreGAIACookiesIfDeleted", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const char kDelayThresholdMinutesToUpdateGaiaCookie[] =
     "minutes-delay-to-restore-gaia-cookies-if-deleted";
+
+const char kWaitThresholdMillisecondsForCapabilitiesApi[] =
+    "wait-threshold-milliseconds-for-capabilities-api";
+
+const base::Feature kNewMobileIdentityConsistencyFRE{
+    "NewMobileIdentityConsistencyFRE", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kEnableUnicornAccountSupport{
+    "EnableUnicornAccountSupport", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace signin

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtGui module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qaccessible.h"
 
@@ -54,10 +18,13 @@
 #include <QtCore/qdebug.h>
 #include <QtCore/qloggingcategory.h>
 #include <QtCore/qmetaobject.h>
+#include <QtCore/private/qmetaobject_p.h>
 #include <QtCore/qhash.h>
 #include <private/qfactoryloader_p.h>
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 Q_LOGGING_CATEGORY(lcAccessibilityCore, "qt.accessibility.core");
 
@@ -162,7 +129,6 @@ Q_LOGGING_CATEGORY(lcAccessibilityCore, "qt.accessibility.core");
     \value hasPopup                The object opens a popup.
     \value hotTracked              The object's appearance is sensitive to the mouse cursor position.
     \value invalid                 The object is no longer valid (because it has been deleted).
-    \value invalidEntry            Input validation current input invalid.
     \value invisible               The object is not visible to the user.
     \value linked                  The object is linked to another object, e.g. a hyperlink.
     \value marqueed                The object displays scrolling contents, e.g. a log view.
@@ -309,7 +275,7 @@ Q_LOGGING_CATEGORY(lcAccessibilityCore, "qt.accessibility.core");
     \value AlertMessage     An object that is used to alert the user.
     \value Animation        An object that displays an animation.
     \value Application      The application's main window.
-    \value Assistant        An object that provids interactive help.
+    \value Assistant        An object that provides interactive help.
     \value Border           An object that represents a border.
     \value ButtonDropDown   A button that drops down a list of items.
     \value ButtonDropGrid   A button that drops down a grid.
@@ -448,11 +414,12 @@ Q_LOGGING_CATEGORY(lcAccessibilityCore, "qt.accessibility.core");
     \omitvalue ImageInterface       \omit For objects that represent an image. This interface is generally less important. \endomit
     \value TableInterface           For lists, tables and trees.
     \value TableCellInterface       For cells in a TableInterface object.
+    \value HyperlinkInterface       For hyperlink nodes (usually embedded as children of text nodes)
 
     \sa QAccessibleInterface::interface_cast(), QAccessibleTextInterface, QAccessibleValueInterface, QAccessibleActionInterface, QAccessibleTableInterface, QAccessibleTableCellInterface
 */
 
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
 
 /*!
     Destroys the QAccessibleInterface.
@@ -470,7 +437,7 @@ QAccessibleInterface::~QAccessibleInterface()
 
 /* accessible widgets plugin discovery stuff */
 Q_GLOBAL_STATIC_WITH_ARGS(QFactoryLoader, loader,
-    (QAccessibleFactoryInterface_iid, QLatin1String("/accessible")))
+    (QAccessibleFactoryInterface_iid, "/accessible"_L1))
 typedef QHash<QString, QAccessiblePlugin*> QAccessiblePluginsHash;
 Q_GLOBAL_STATIC(QAccessiblePluginsHash, qAccessiblePlugins)
 
@@ -619,7 +586,6 @@ QAccessible::RootObjectHandler QAccessible::installRootObjectHandler(RootObjectH
 
 QAccessible::ActivationObserver::~ActivationObserver()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -675,41 +641,61 @@ QAccessibleInterface *QAccessible::queryAccessibleInterface(QObject *object)
     if (!object)
         return nullptr;
 
-    if (Id id = QAccessibleCache::instance()->objectToId.value(object))
+    if (Id id = QAccessibleCache::instance()->idForObject(object))
         return QAccessibleCache::instance()->interfaceForId(id);
 
     // Create a QAccessibleInterface for the object class. Start by the most
     // derived class and walk up the class hierarchy.
     const QMetaObject *mo = object->metaObject();
+    const auto *objectPriv = QObjectPrivate::get(object);
+    /*
+     We do not want to cache each and every QML metaobject (Button_QMLTYPE_124,
+     Button_QMLTYPE_125, etc.). Those dynamic metaobjects shouldn't have an
+     accessible interface in any case. Instead, we start the whole checking
+     with the first non-dynamic meta-object. To avoid potential regressions
+     in other areas of Qt that also use dynamic metaobjects, we only do this
+     for objects that are QML-related (approximated by checking whether they
+     have ddata set).
+    */
+    const bool qmlRelated = !objectPriv->isDeletingChildren &&
+                            objectPriv->declarativeData;
+    while (qmlRelated && mo) {
+        auto mop = QMetaObjectPrivate::get(mo);
+        if (!mop || !(mop->flags & DynamicMetaObject))
+            break;
+
+        mo = mo->superClass();
+    };
     while (mo) {
-        const QString cn = QLatin1String(mo->className());
+        const QString cn = QLatin1StringView(mo->className());
 
         // Check if the class has a InterfaceFactory installed.
         for (int i = qAccessibleFactories()->count(); i > 0; --i) {
             InterfaceFactory factory = qAccessibleFactories()->at(i - 1);
             if (QAccessibleInterface *iface = factory(cn, object)) {
                 QAccessibleCache::instance()->insert(object, iface);
-                Q_ASSERT(QAccessibleCache::instance()->objectToId.contains(object));
+                Q_ASSERT(QAccessibleCache::instance()->containsObject(object));
                 return iface;
             }
         }
         // Find a QAccessiblePlugin (factory) for the class name. If there's
         // no entry in the cache try to create it using the plugin loader.
         if (!qAccessiblePlugins()->contains(cn)) {
+            QAccessiblePlugin *factory = nullptr; // 0 means "no plugin found". This is cached as well.
             const int index = loader()->indexOf(cn);
-            if (index != -1) {
-                QAccessiblePlugin *factory = qobject_cast<QAccessiblePlugin *>(loader()->instance(index));
-                qAccessiblePlugins()->insert(cn, factory);
-            }
+            if (index != -1)
+                factory = qobject_cast<QAccessiblePlugin *>(loader()->instance(index));
+            qAccessiblePlugins()->insert(cn, factory);
         }
 
         // At this point the cache should contain a valid factory pointer or 0:
+        Q_ASSERT(qAccessiblePlugins()->contains(cn));
         QAccessiblePlugin *factory = qAccessiblePlugins()->value(cn);
         if (factory) {
             QAccessibleInterface *result = factory->create(cn, object);
-            if (result) {   // Need this condition because of QDesktopScreenWidget
+            if (result) {
                 QAccessibleCache::instance()->insert(object, result);
-                Q_ASSERT(QAccessibleCache::instance()->objectToId.contains(object));
+                Q_ASSERT(QAccessibleCache::instance()->containsObject(object));
             }
             return result;
         }
@@ -719,7 +705,7 @@ QAccessibleInterface *QAccessible::queryAccessibleInterface(QObject *object)
     if (object == qApp) {
         QAccessibleInterface *appInterface = new QAccessibleApplication;
         QAccessibleCache::instance()->insert(object, appInterface);
-        Q_ASSERT(QAccessibleCache::instance()->objectToId.contains(qApp));
+        Q_ASSERT(QAccessibleCache::instance()->containsObject(qApp));
         return appInterface;
     }
 
@@ -874,15 +860,6 @@ void QAccessible::updateAccessibility(QAccessibleEvent *event)
     if (QPlatformAccessibility *pfAccessibility = platformAccessibility())
         pfAccessibility->notifyAccessibilityUpdate(event);
 }
-
-#if QT_DEPRECATED_SINCE(5, 0)
-/*!
-    \obsolete
-    \fn void QAccessible::updateAccessibility(QObject *object, int child, Event reason);
-
-    \brief Use QAccessible::updateAccessibility(QAccessibleEvent*) instead.
-*/
-#endif
 
 /*!
     \internal
@@ -1094,15 +1071,16 @@ QPair< int, int > QAccessible::qAccessibleTextBoundaryHelper(const QTextCursor &
     relations, unless they are handled in a specific way such as in tree views.
     It will typically return the labelled-by and label relations.
 
-    It is possible to filter the relations by using \a match.
+    It is possible to filter the relations by using the optional parameter \a match.
     It should never return itself.
 
     \sa parent(), child()
 */
-QVector<QPair<QAccessibleInterface*, QAccessible::Relation> >
-QAccessibleInterface::relations(QAccessible::Relation /*match = QAccessible::AllRelations*/) const
+QList<QPair<QAccessibleInterface*, QAccessible::Relation>>
+QAccessibleInterface::relations(QAccessible::Relation match) const
 {
-    return QVector<QPair<QAccessibleInterface*, QAccessible::Relation> >();
+    Q_UNUSED(match);
+    return { };
 }
 
 /*!
@@ -1122,7 +1100,7 @@ QAccessibleInterface *QAccessibleInterface::focusChild() const
     If there are no children at this position this function returns \nullptr.
     The returned accessible must be a child, but not necessarily a direct child.
 
-    This function is only relyable for visible objects (invisible
+    This function is only reliable for visible objects (invisible
     object might not be laid out correctly).
 
     All visual objects provide this information.
@@ -1333,7 +1311,6 @@ QColor QAccessibleInterface::backgroundColor() const
 */
 QAccessibleEvent::~QAccessibleEvent()
 {
-    // must be empty until ### Qt 6
 }
 
 /*! \fn QAccessible::Event QAccessibleEvent::type() const
@@ -1413,7 +1390,6 @@ QAccessible::Id QAccessibleEvent::uniqueId() const
 */
 QAccessibleValueChangeEvent::~QAccessibleValueChangeEvent()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -1457,7 +1433,6 @@ QAccessibleValueChangeEvent::~QAccessibleValueChangeEvent()
 */
 QAccessibleStateChangeEvent::~QAccessibleStateChangeEvent()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -1537,7 +1512,6 @@ QAccessibleStateChangeEvent::~QAccessibleStateChangeEvent()
 */
 QAccessibleTableModelChangeEvent::~QAccessibleTableModelChangeEvent()
 {
-    // must be empty until ### Qt 6
 }
 /*!
     \class QAccessibleTextCursorEvent
@@ -1566,7 +1540,6 @@ QAccessibleTableModelChangeEvent::~QAccessibleTableModelChangeEvent()
 */
 QAccessibleTextCursorEvent::~QAccessibleTextCursorEvent()
 {
-    // must be empty until ### Qt 6
 }
 
 
@@ -1607,7 +1580,6 @@ QAccessibleTextCursorEvent::~QAccessibleTextCursorEvent()
 */
 QAccessibleTextInsertEvent::~QAccessibleTextInsertEvent()
 {
-    // must be empty until ### Qt 6
 }
 
 
@@ -1650,7 +1622,6 @@ QAccessibleTextInsertEvent::~QAccessibleTextInsertEvent()
 */
 QAccessibleTextRemoveEvent::~QAccessibleTextRemoveEvent()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -1712,7 +1683,6 @@ QAccessibleTextRemoveEvent::~QAccessibleTextRemoveEvent()
 */
 QAccessibleTextUpdateEvent::~QAccessibleTextUpdateEvent()
 {
-    // must be empty until ### Qt 6
 }
 
 
@@ -1747,7 +1717,6 @@ QAccessibleTextUpdateEvent::~QAccessibleTextUpdateEvent()
 */
 QAccessibleTextSelectionEvent::~QAccessibleTextSelectionEvent()
 {
-    // must be empty until ### Qt 6
 }
 
 
@@ -1837,12 +1806,6 @@ const char *qAccessibleEventString(QAccessible::Event event)
     return QAccessible::staticMetaObject.enumerator(eventEnum).valueToKey(event);
 }
 
-/*! \internal */
-bool operator==(const QAccessible::State &first, const QAccessible::State &second)
-{
-    return memcmp(&first, &second, sizeof(QAccessible::State)) == 0;
-}
-
 #ifndef QT_NO_DEBUG_STREAM
 /*! \internal */
 Q_GUI_EXPORT QDebug operator<<(QDebug d, const QAccessibleInterface *iface)
@@ -1865,16 +1828,16 @@ Q_GUI_EXPORT QDebug operator<<(QDebug d, const QAccessibleInterface *iface)
         QStringList stateStrings;
         QAccessible::State st = iface->state();
         if (st.focusable)
-            stateStrings << QLatin1String("focusable");
+            stateStrings << "focusable"_L1;
         if (st.focused)
-            stateStrings << QLatin1String("focused");
+            stateStrings << "focused"_L1;
         if (st.selected)
-            stateStrings << QLatin1String("selected");
+            stateStrings << "selected"_L1;
         if (st.invisible)
-            stateStrings << QLatin1String("invisible");
+            stateStrings << "invisible"_L1;
 
         if (!stateStrings.isEmpty())
-            d << stateStrings.join(QLatin1Char('|'));
+            d << stateStrings.join(u'|');
 
         if (!st.invisible)
             d << "rect=" << iface->rect();
@@ -1972,7 +1935,6 @@ QDebug operator<<(QDebug d, const QAccessibleEvent &ev)
 */
 QAccessibleTextInterface::~QAccessibleTextInterface()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -2361,7 +2323,6 @@ QString QAccessibleTextInterface::textAtOffset(int offset, QAccessible::TextBoun
 */
 QAccessibleEditableTextInterface::~QAccessibleEditableTextInterface()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -2406,7 +2367,6 @@ QAccessibleEditableTextInterface::~QAccessibleEditableTextInterface()
 */
 QAccessibleValueInterface::~QAccessibleValueInterface()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -2443,8 +2403,8 @@ QAccessibleValueInterface::~QAccessibleValueInterface()
     \fn QVariant QAccessibleValueInterface::minimumStepSize() const
 
     Returns the minimum step size for the accessible.
-    This is the smalles increment that makes sense when changing the value.
-    When programatically changing the value it should always be a multiple
+    This is the smallest increment that makes sense when changing the value.
+    When programmatically changing the value it should always be a multiple
     of the minimum step size.
 
     Some tools use this value even when the setCurrentValue does not
@@ -2470,7 +2430,6 @@ QAccessibleValueInterface::~QAccessibleValueInterface()
 */
 QAccessibleImageInterface::~QAccessibleImageInterface()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -2490,7 +2449,6 @@ QAccessibleImageInterface::~QAccessibleImageInterface()
 */
 QAccessibleTableCellInterface::~QAccessibleTableCellInterface()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -2544,6 +2502,7 @@ QAccessibleTableCellInterface::~QAccessibleTableCellInterface()
 
 /*!
     \class QAccessibleTableInterface
+    \inmodule QtGui
     \ingroup accessibility
 
     \brief The QAccessibleTableInterface class implements support for
@@ -2558,7 +2517,6 @@ QAccessibleTableCellInterface::~QAccessibleTableCellInterface()
 */
 QAccessibleTableInterface::~QAccessibleTableInterface()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -2691,6 +2649,7 @@ QAccessibleTableInterface::~QAccessibleTableInterface()
 
 /*!
     \class QAccessibleActionInterface
+    \inmodule QtGui
     \ingroup accessibility
 
     \brief The QAccessibleActionInterface class implements support for
@@ -2715,7 +2674,7 @@ QAccessibleTableInterface::~QAccessibleTableInterface()
     \row    \li \l toggleAction()   \li toggles the item (checkbox, radio button, switch, ...)
     \row    \li \l decreaseAction() \li decrease the value of the accessible (e.g. spinbox)
     \row    \li \l increaseAction() \li increase the value of the accessible (e.g. spinbox)
-    \row    \li \l pressAction()    \li press or click or activate the accessible (should correspont to clicking the object with the mouse)
+    \row    \li \l pressAction()    \li press or click or activate the accessible (should correspond to clicking the object with the mouse)
     \row    \li \l setFocusAction() \li set the focus to this accessible
     \row    \li \l showMenuAction() \li show a context menu, corresponds to right-clicks
     \endtable
@@ -2734,7 +2693,6 @@ QAccessibleTableInterface::~QAccessibleTableInterface()
 */
 QAccessibleActionInterface::~QAccessibleActionInterface()
 {
-    // must be empty until ### Qt 6
 }
 
 /*!
@@ -2989,7 +2947,46 @@ QString qAccessibleLocalizedActionDescription(const QString &actionName)
     return accessibleActionStrings()->localizedDescription(actionName);
 }
 
-#endif // QT_NO_ACCESSIBILITY
+/*!
+    \internal
+    \fn QString QAccessibleHyperlinkInterface::anchor() const
+
+    The logical/human readable name of the hyperlink
+*/
+
+/*!
+    \internal
+    \fn QString QAccessibleHyperlinkInterface::anchorTarget() const
+
+    The target url of the hyperlink
+*/
+
+/*!
+    \internal
+    \fn int QAccessibleHyperlinkInterface::startIndex() const
+
+    Returns the start index that will refer to the first character in the text where the hyperlink
+    begins. The index corresponds to the index that the QAccessibleTextInterface needs in order
+    to find the start of the hyperlink.
+
+*/
+
+/*!
+    \internal
+    \fn int QAccessibleHyperlinkInterface::endIndex() const
+
+    Returns the end index that will refer to the first character in the text where the hyperlink
+    begins. The index corresponds to the index that the QAccessibleTextInterface needs in order
+    to find the end of the hyperlink.
+*/
+
+QAccessibleHyperlinkInterface::~QAccessibleHyperlinkInterface()
+{
+
+}
+
+#endif // QT_CONFIG(accessibility)
 
 QT_END_NAMESPACE
 
+#include "moc_qaccessible_base.cpp"

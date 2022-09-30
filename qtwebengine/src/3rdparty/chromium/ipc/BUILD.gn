@@ -10,12 +10,6 @@ import("//testing/test.gni")
 import("//third_party/protobuf/proto_library.gni")
 import("//tools/ipc_fuzzer/ipc_fuzzer.gni")
 
-# Reset sources_assignment_filter for the BUILD.gn file to prevent
-# regression during the migration of Chromium away from the feature.
-# See docs/no_sources_assignment_filter.md for more information.
-# TODO(crbug.com/1018739): remove this when migration is done.
-set_sources_assignment_filter([])
-
 buildflag_header("ipc_buildflags") {
   header = "ipc_buildflags.h"
 
@@ -52,12 +46,14 @@ component("ipc") {
       "ipc_channel_proxy.h",
       "ipc_channel_reader.cc",
       "ipc_channel_reader.h",
+      "ipc_listener.cc",
       "ipc_listener.h",
       "ipc_logging.cc",
       "ipc_logging.h",
       "ipc_message_macros.h",
       "ipc_message_pipe_reader.cc",
       "ipc_message_pipe_reader.h",
+      "ipc_message_protobuf_utils.h",
       "ipc_message_start.h",
       "ipc_message_templates.h",
       "ipc_message_templates_impl.h",
@@ -74,10 +70,12 @@ component("ipc") {
       "message_filter_router.h",
       "message_router.cc",
       "message_router.h",
+      "trace_ipc_message.cc",
+      "trace_ipc_message.h",
     ]
   }
 
-  if (is_nacl && !is_nacl_nonsfi) {
+  if (is_nacl) {
     sources += [
       "ipc_channel_nacl.cc",
       "ipc_channel_nacl.h",
@@ -94,30 +92,18 @@ component("ipc") {
     ":mojom",
     ":native_handle_type_converters",
     ":param_traits",
-    "//base/util/type_safety",
+    "//base",
     "//mojo/public/cpp/base",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",
+    "//services/tracing/public/cpp",
+    "//third_party/protobuf:protobuf_lite",
   ]
-
-  if (!is_nacl_nonsfi) {
-    sources += [ "ipc_message_protobuf_utils.h" ]
-
-    public_deps += [ "//third_party/protobuf:protobuf_lite" ]
-  }
 
   deps = [ "//base" ]
 
   if (enable_ipc_fuzzer) {
     public_configs = [ "//tools/ipc_fuzzer:ipc_fuzzer_config" ]
-  }
-
-  if (!is_nacl && !is_ios) {
-    sources += [
-      "trace_ipc_message.cc",
-      "trace_ipc_message.h",
-    ]
-    public_deps += [ "//services/tracing/public/cpp" ]
   }
 }
 
@@ -203,7 +189,10 @@ mojom_component("mojom") {
   output_prefix = "ipc_mojom"
   macro_prefix = "IPC_MOJOM"
   sources = [ "ipc.mojom" ]
-  public_deps = [ "//mojo/public/interfaces/bindings" ]
+  public_deps = [
+    "//mojo/public/interfaces/bindings",
+    "//mojo/public/mojom/base",
+  ]
 
   cpp_typemaps = [
     {
@@ -269,6 +258,7 @@ if (!is_ios) {
       "ipc_channel_proxy_unittest.cc",
       "ipc_channel_reader_unittest.cc",
       "ipc_fuzzing_tests.cc",
+      "ipc_message_protobuf_utils_unittest.cc",
       "ipc_message_unittest.cc",
       "ipc_message_utils_unittest.cc",
       "ipc_mojo_bootstrap_unittest.cc",
@@ -280,10 +270,9 @@ if (!is_ios) {
 
     if (is_posix || is_fuchsia) {
       sources += [ "ipc_message_attachment_set_posix_unittest.cc" ]
-    }
-
-    if (!is_ios) {
-      sources += [ "ipc_send_fds_test.cc" ]
+      if (!is_ios) {
+        sources += [ "ipc_send_fds_test.cc" ]
+      }
     }
 
     deps = [
@@ -298,21 +287,11 @@ if (!is_ios) {
       "//crypto",
       "//mojo/core/test:test_support",
       "//testing/gtest",
+      "//third_party/ipcz/src:ipcz_tests_sources_chromium",
     ]
 
     if (is_mac) {
       deps += [ "//sandbox/mac:seatbelt" ]
-    }
-
-    if (is_fuchsia) {
-      sources -= [
-        # No AF_UNIX domain sockets on Fuchsia.
-        "sync_socket_unittest.cc",
-      ]
-    }
-
-    if (!is_nacl_nonsfi) {
-      sources += [ "ipc_message_protobuf_utils_unittest.cc" ]
     }
   }
 

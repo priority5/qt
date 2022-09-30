@@ -9,25 +9,25 @@
 #include "base/check.h"
 #include "net/base/http_user_agent_settings.h"
 #include "net/base/network_delegate.h"
+#include "net/base/port_util.h"
 #include "net/base/proxy_delegate.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
-#include "net/cert/ct_verifier.h"
 #include "net/cert/sct_auditing_delegate.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_server_properties.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/http/transport_security_state.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/quic/quic_context.h"
+#include "net/socket/client_socket_factory.h"
+#include "net/ssl/ssl_config_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory.h"
 #include "net/url_request/url_request_throttler_manager.h"
-
-#if !BUILDFLAG(DISABLE_FTP_SUPPORT)
-#include "net/ftp/ftp_auth_cache.h"
-#endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
 
 #if BUILDFLAG(ENABLE_REPORTING)
 #include "net/network_error_logging/network_error_logging_service.h"
@@ -104,12 +104,6 @@ void URLRequestContextStorage::set_transport_security_state(
   transport_security_state_ = std::move(transport_security_state);
 }
 
-void URLRequestContextStorage::set_cert_transparency_verifier(
-    std::unique_ptr<CTVerifier> cert_transparency_verifier) {
-  context_->set_cert_transparency_verifier(cert_transparency_verifier.get());
-  cert_transparency_verifier_ = std::move(cert_transparency_verifier);
-}
-
 void URLRequestContextStorage::set_ct_policy_enforcer(
     std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer) {
   context_->set_ct_policy_enforcer(ct_policy_enforcer.get());
@@ -157,14 +151,6 @@ void URLRequestContextStorage::set_http_user_agent_settings(
   http_user_agent_settings_ = std::move(http_user_agent_settings);
 }
 
-#if !BUILDFLAG(DISABLE_FTP_SUPPORT)
-void URLRequestContextStorage::set_ftp_auth_cache(
-    std::unique_ptr<FtpAuthCache> ftp_auth_cache) {
-  context_->set_ftp_auth_cache(ftp_auth_cache.get());
-  ftp_auth_cache_ = std::move(ftp_auth_cache);
-}
-#endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
-
 #if BUILDFLAG(ENABLE_REPORTING)
 void URLRequestContextStorage::set_persistent_reporting_and_nel_store(
     std::unique_ptr<PersistentReportingAndNelStore>
@@ -186,5 +172,10 @@ void URLRequestContextStorage::set_network_error_logging_service(
   network_error_logging_service_ = std::move(network_error_logging_service);
 }
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+
+void URLRequestContextStorage::set_client_socket_factory(
+    std::unique_ptr<ClientSocketFactory> client_socket_factory) {
+  client_socket_factory_ = std::move(client_socket_factory);
+}
 
 }  // namespace net

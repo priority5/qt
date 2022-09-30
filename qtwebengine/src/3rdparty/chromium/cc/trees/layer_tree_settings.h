@@ -7,8 +7,6 @@
 
 #include <stddef.h>
 
-#include <vector>
-
 #include "base/time/time.h"
 #include "cc/cc_export.h"
 #include "cc/debug/layer_tree_debug_state.h"
@@ -40,8 +38,6 @@ class CC_EXPORT LayerTreeSettings {
   // When |enable_early_damage_check| is true, the early damage check is
   // performed if one of the last |damaged_frame_limit| frames had no damage.
   int damaged_frame_limit = 3;
-  bool enable_impl_latency_recovery = false;
-  bool enable_main_latency_recovery = false;
   bool can_use_lcd_text = true;
   bool gpu_rasterization_disabled = false;
   int gpu_rasterization_msaa_sample_count = -1;
@@ -59,12 +55,10 @@ class CC_EXPORT LayerTreeSettings {
   base::TimeDelta scrollbar_fade_duration;
   base::TimeDelta scrollbar_thinning_duration;
   bool scrollbar_flash_after_any_scroll_update = false;
-  bool scrollbar_flash_when_mouse_enter = false;
   SkColor solid_color_scrollbar_color = SK_ColorWHITE;
   base::TimeDelta scroll_animation_duration_for_testing;
   bool timeout_and_draw_when_animation_checkerboards = true;
   bool layers_always_allowed_lcd_text = false;
-  float minimum_contents_scale = 0.0625f;
   float low_res_contents_scale_factor = 0.25f;
   float top_controls_show_threshold = 0.5f;
   float top_controls_hide_threshold = 0.5f;
@@ -133,9 +127,6 @@ class CC_EXPORT LayerTreeSettings {
   // deadlines.
   bool wait_for_all_pipeline_stages_before_draw = false;
 
-  // Determines whether the zoom needs to be applied to the device scale factor.
-  bool use_zoom_for_dsf = false;
-
   // Determines whether mouse interactions on composited scrollbars are handled
   // on the compositor thread.
   bool compositor_threaded_scrollbar_scrolling = true;
@@ -197,12 +188,22 @@ class CC_EXPORT LayerTreeSettings {
 
   // When enabled, enforces new interoperable semantics for 3D transforms.
   // See crbug.com/1008483.
-  bool enable_transform_interop = false;
+  bool enable_backface_visibility_interop = false;
 
-  // When enabled, the compositor specifies a frame rate preference that would
-  // allow the display to run at a low refresh rate matching the playback rate
-  // for videos updating onscreen.
-  bool force_preferred_interval_for_video = false;
+  // Enables ThrottleDecider which produces a list of FrameSinkIds that are
+  // candidates for throttling.
+  // LayerTreeHostSingleThreadClient::FrameSinksToThrottleUpdated() will be
+  // called with candidates.
+  bool enable_compositing_based_throttling = false;
+
+  // Whether it is a LayerTree for ui.
+  bool is_layer_tree_for_ui = false;
+
+  // Whether tile resources are dropped for hidden layers. In terms of code,
+  // this uses PictureLayerImpl::HasValidTilePriorities(), which may return true
+  // even if the layer is not drawn. For example, if the layer is occluded it is
+  // still considered drawn and will not be impacted by this feature.
+  bool release_tile_resources_for_hidden_layers = false;
 };
 
 class CC_EXPORT LayerListSettings : public LayerTreeSettings {

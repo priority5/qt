@@ -14,12 +14,13 @@ package org.chromium.weblayer;
  * Because of WebLayer's multi-process architecture, this function can not be used to reliably
  * synchronize the painting of other Views with WebLayer's Views. It's entirely possible one will
  * render before or after the other.
- *
- * @since 87
  */
 public abstract class ScrollOffsetCallback {
     /**
-     * Called when the scroll offset of the content of a Tab changes.
+     * Called when the vertical scroll location of the content of a Tab changes.
+     *
+     * @param scrollLocation The new vertical location. More specifically, the 'scrollTop' html
+     * property.
      */
-    public abstract void onVerticalScrollOffsetChanged(int scrollOffset);
+    public abstract void onVerticalScrollOffsetChanged(int scrollLocation);
 }

@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "media/base/cdm_context.h"
 #include "media/base/media_resource.h"
 #include "media/base/pipeline_status.h"
@@ -86,8 +86,8 @@ void MojoRenderer::InitializeRendererFromStreams(
     // Using base::Unretained(this) is safe because |this| owns |mojo_stream|,
     // and the error handler can't be invoked once |mojo_stream| is destroyed.
     mojo_stream->set_disconnect_handler(
-        base::Bind(&MojoRenderer::OnDemuxerStreamConnectionError,
-                   base::Unretained(this), mojo_stream.get()));
+        base::BindOnce(&MojoRenderer::OnDemuxerStreamConnectionError,
+                       base::Unretained(this), mojo_stream.get()));
 
     streams_.push_back(std::move(mojo_stream));
     stream_proxies.push_back(std::move(stream_proxy));
@@ -120,7 +120,7 @@ void MojoRenderer::InitializeRendererFromUrl(media::RendererClient* client) {
       url_params.top_frame_origin, url_params.allow_credentials,
       url_params.is_hls);
   remote_renderer_->Initialize(client_receiver_.BindNewEndpointAndPassRemote(),
-                               base::nullopt, std::move(media_url_params),
+                               absl::nullopt, std::move(media_url_params),
                                base::BindOnce(&MojoRenderer::OnInitialized,
                                               base::Unretained(this), client));
 }
@@ -139,7 +139,7 @@ void MojoRenderer::SetCdm(CdmContext* cdm_context,
     return;
   }
 
-  base::Optional<base::UnguessableToken> cdm_id = cdm_context->GetCdmId();
+  absl::optional<base::UnguessableToken> cdm_id = cdm_context->GetCdmId();
   if (!cdm_id) {
     DVLOG(2) << "MojoRenderer only works with remote CDMs but the CDM ID "
                 "is invalid.";
@@ -156,7 +156,7 @@ void MojoRenderer::SetCdm(CdmContext* cdm_context,
 }
 
 void MojoRenderer::SetLatencyHint(
-    base::Optional<base::TimeDelta> latency_hint) {
+    absl::optional<base::TimeDelta> latency_hint) {
   // TODO(chcunningham): Proxy to remote renderer if needed.
 }
 
@@ -248,16 +248,13 @@ void MojoRenderer::OnEnded() {
   client_->OnEnded();
 }
 
-void MojoRenderer::OnError() {
+void MojoRenderer::OnError(const PipelineStatus& status) {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!init_cb_);
 
   encountered_error_ = true;
-
-  // TODO(tim): Should we plumb error code from remote renderer?
-  // http://crbug.com/410451.
-  client_->OnError(PIPELINE_ERROR_DECODE);
+  client_->OnError(status);
 }
 
 void MojoRenderer::OnVideoNaturalSizeChange(const gfx::Size& size) {
@@ -313,7 +310,7 @@ void MojoRenderer::OnConnectionError() {
   CancelPendingCallbacks();
 
   if (client_)
-    client_->OnError(PIPELINE_ERROR_DECODE);
+    client_->OnError(PIPELINE_ERROR_DISCONNECTED);
 }
 
 void MojoRenderer::OnDemuxerStreamConnectionError(

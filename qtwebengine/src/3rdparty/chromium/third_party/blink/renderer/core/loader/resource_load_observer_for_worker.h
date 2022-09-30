@@ -29,11 +29,11 @@ class ResourceLoadObserverForWorker final : public ResourceLoadObserver {
 
   // ResourceLoadObserver implementation.
   void DidStartRequest(const FetchParameters&, ResourceType) override;
-  void WillSendRequest(uint64_t identifier,
-                       const ResourceRequest&,
+  void WillSendRequest(const ResourceRequest&,
                        const ResourceResponse& redirect_response,
                        ResourceType,
-                       const FetchInitiatorInfo&) override;
+                       const ResourceLoaderOptions&,
+                       RenderBlockingBehavior) override;
   void DidChangePriority(uint64_t identifier,
                          ResourceLoadPriority,
                          int intra_priority_value) override;
@@ -57,6 +57,9 @@ class ResourceLoadObserverForWorker final : public ResourceLoadObserver {
                       const ResourceError&,
                       int64_t encoded_data_length,
                       IsInternalRequest) override;
+  void DidChangeRenderBlockingBehavior(Resource* resource,
+                                       const FetchParameters& params) override {
+  }
   void Trace(Visitor*) const override;
 
  private:

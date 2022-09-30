@@ -1,43 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*!
-    \namespace QtDataVisualization
-    \inmodule QtDataVisualization
-    \brief Contains the classes and enumerations in the Qt Data Visualization
-    module.
-
-    \generatelist{classesbymodule QtDataVisualization}
-*/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \module QtDataVisualization
     \title Qt Data Visualization C++ Classes
     \ingroup modules
+    \qtcmakepackage DataVisualization
+    \qtvariable datavisualization
 
     \brief C++ classes for the Qt Data Visualization API.
 
@@ -150,7 +119,7 @@
 
     When you have a data set that updates rapidly, it is important to handle data properly to
     ensure good performance. Since memory allocation is a costly operation, always use
-    QList::reserve() and QVector::resize() where possible to avoid unnecessary reallocations when
+    QList::reserve() and QList::resize() where possible to avoid unnecessary reallocations when
     constructing the array to give to the proxy. If you need to change the entire data set
     for each frame, it is in most cases best to reuse the existing array - especially if the
     array dimensions do not change. If you need to add, insert, remove, or change several
@@ -225,6 +194,11 @@
     \title Qt Data Visualization Known Issues
 
     \list
+        \li As OpenGL is not necessarily the default rendering backend anymore in Qt 6.x (it is
+            Metal on macOS and Direct3D on Windows, for example), it is necessary to define
+            the rendering backend explicitly either on your environment variables, or in your
+            application main. It can be defined by adding \c {qputenv("QSG_RHI_BACKEND", "opengl");}
+            in the beginning of your main function.
         \li Some platforms like Android and WinRT cannot handle multiple native windows properly,
             so only the Qt Quick 2 graphs are available in practice for those platforms.
         \li Surfaces with non-straight rows and columns do not always render properly.
@@ -240,7 +214,7 @@
 */
 
 /*!
- * \fn QSurfaceFormat QtDataVisualization::qDefaultSurfaceFormat(bool antialias)
+ * \fn QSurfaceFormat qDefaultSurfaceFormat(bool antialias)
  * \relates QAbstract3DGraph
  *
  * This convenience function can be used to create a custom surface format suitable for use by
@@ -258,7 +232,7 @@
  *
  * // ...
  *
- * Q3DBars *graph = new Q3DBars(QtDataVisualization::qDefaultSurfaceFormat(false));
+ * Q3DBars *graph = new Q3DBars(qDefaultSurfaceFormat(false));
  * \endcode
  *
  * For example, enable antialiasing for direct rendering modes on QML application:
@@ -269,7 +243,7 @@
  * // ...
  *
  * QQuickView viewer;
- * viewer.setFormat(QtDataVisualization::qDefaultSurfaceFormat());
+ * viewer.setFormat(qDefaultSurfaceFormat(true));
  * \endcode
  *
  * \note Antialiasing is not supported in OpenGL ES2 environments.

@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "media/audio/audio_manager_base.h"
 
@@ -22,6 +21,10 @@ class MEDIA_EXPORT AudioManagerCrasBase : public AudioManagerBase {
  public:
   AudioManagerCrasBase(std::unique_ptr<AudioThread> audio_thread,
                    AudioLogFactory* audio_log_factory);
+
+  AudioManagerCrasBase(const AudioManagerCrasBase&) = delete;
+  AudioManagerCrasBase& operator=(const AudioManagerCrasBase&) = delete;
+
   ~AudioManagerCrasBase() override;
 
   // AudioManager implementation.
@@ -48,6 +51,9 @@ class MEDIA_EXPORT AudioManagerCrasBase : public AudioManagerBase {
   // Set |is_input| to true for capture devices, false for output.
   virtual bool IsDefault(const std::string& device_id, bool is_input) = 0;
 
+  // Returns CRAS client type.
+  virtual enum CRAS_CLIENT_TYPE GetClientType() = 0;
+
  protected:
   // Called by MakeLinearOutputStream and MakeLowLatencyOutputStream.
   AudioOutputStream* MakeOutputStream(const AudioParameters& params,
@@ -56,9 +62,6 @@ class MEDIA_EXPORT AudioManagerCrasBase : public AudioManagerBase {
   // Called by MakeLinearInputStream and MakeLowLatencyInputStream.
   AudioInputStream* MakeInputStream(const AudioParameters& params,
                                     const std::string& device_id);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioManagerCrasBase);
 };
 
 }  // namespace media

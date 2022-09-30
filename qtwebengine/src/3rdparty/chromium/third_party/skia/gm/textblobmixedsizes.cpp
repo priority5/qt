@@ -110,8 +110,11 @@ protected:
             sk_sp<SkColorSpace> colorSpace = inputCanvas->imageInfo().refColorSpace();
             SkImageInfo info = SkImageInfo::MakeN32(size.width(), size.height(),
                                                     kPremul_SkAlphaType, colorSpace);
-            SkSurfaceProps props(SkSurfaceProps::kUseDeviceIndependentFonts_Flag,
-                                 SkSurfaceProps::kLegacyFontHost_InitType);
+            SkSurfaceProps inputProps;
+            inputCanvas->getProps(&inputProps);
+            SkSurfaceProps props(
+                    SkSurfaceProps::kUseDeviceIndependentFonts_Flag | inputProps.flags(),
+                    inputProps.pixelGeometry());
             surface = SkSurface::MakeRenderTarget(ctx, SkBudgeted::kNo, info, 0, &props);
             canvas = surface ? surface->getCanvas() : inputCanvas;
             // init our new canvas with the old canvas's matrix
@@ -173,7 +176,7 @@ protected:
             SkAutoCanvasRestore acr(inputCanvas, true);
             // since we prepended this matrix already, we blit using identity
             inputCanvas->resetMatrix();
-            inputCanvas->drawImage(surface->makeImageSnapshot().get(), 0, 0, nullptr);
+            inputCanvas->drawImage(surface->makeImageSnapshot().get(), 0, 0);
         }
     }
 

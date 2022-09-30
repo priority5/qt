@@ -22,6 +22,7 @@
 
 #include "perfetto/base/export.h"
 #include "perfetto/tracing/core/forward_decls.h"
+#include "perfetto/tracing/interceptor.h"
 #include "perfetto/tracing/internal/basic_types.h"
 #include "perfetto/tracing/internal/tracing_tls.h"
 #include "perfetto/tracing/platform.h"
@@ -63,17 +64,29 @@ class PERFETTO_EXPORT TracingMuxer {
                                   DataSourceFactory,
                                   DataSourceStaticState*) = 0;
 
+  // Updates the DataSourceDescriptor for the DataSource.
+  virtual void UpdateDataSourceDescriptor(const DataSourceDescriptor&,
+                                          const DataSourceStaticState*) = 0;
+
   // It identifies the right backend and forwards the call to it.
   // The returned TraceWriter must be used within the same sequence (for most
   // projects this means "same thread"). Alternatively the client needs to take
   // care of using synchronization primitives to prevent concurrent accesses.
   virtual std::unique_ptr<TraceWriterBase> CreateTraceWriter(
+      DataSourceStaticState*,
+      uint32_t data_source_instance_index,
       DataSourceState*,
       BufferExhaustedPolicy buffer_exhausted_policy) = 0;
 
   virtual void DestroyStoppedTraceWritersForCurrentThread() = 0;
 
   uint32_t generation(std::memory_order ord) { return generation_.load(ord); }
+
+  using InterceptorFactory = std::function<std::unique_ptr<InterceptorBase>()>;
+  virtual void RegisterInterceptor(const InterceptorDescriptor&,
+                                   InterceptorFactory,
+                                   InterceptorBase::TLSFactory,
+                                   InterceptorBase::TracePacketCallback) = 0;
 
  protected:
   explicit TracingMuxer(Platform* platform) : platform_(platform) {}

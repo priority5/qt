@@ -5,12 +5,20 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PARSING_FIELD_CANDIDATES_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_FORM_PARSING_FIELD_CANDIDATES_H_
 
-#include <unordered_map>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/common/unique_ids.h"
 
 namespace autofill {
+
+enum class PredictionSource {
+  kDefaultHeuristics,
+  kExperimentalHeuristics,
+  kNextGenHeuristics,
+  kMaxValue = kNextGenHeuristics
+};
 
 // Represents a possible type for a given field.
 struct FieldCandidate {
@@ -44,13 +52,20 @@ class FieldCandidates {
   // Determines the best type based on the current possible types.
   ServerFieldType BestHeuristicType() const;
 
+  absl::optional<ServerFieldType> GetHypotheticalType(
+      PredictionSource prediction_source) const {
+    DCHECK_NE(prediction_source, PredictionSource::kDefaultHeuristics);
+    // TODO(crbug.com/1310255): Implement experimental types.
+    return absl::nullopt;
+  }
+
  private:
   // Internal storage for all the possible types for a given field.
   std::vector<FieldCandidate> field_candidates_;
 };
 
-// A map from the field's unique name to its possible candidates.
-using FieldCandidatesMap = std::unordered_map<base::string16, FieldCandidates>;
+// A map from the field's global ID to its possible candidates.
+using FieldCandidatesMap = base::flat_map<FieldGlobalId, FieldCandidates>;
 
 }  // namespace autofill
 

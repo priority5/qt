@@ -9,15 +9,15 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/gpu_stream_constants.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
-#include "content/renderer/pepper/plugin_instance_throttler_impl.h"
 #include "content/renderer/pepper/plugin_module.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
@@ -181,7 +181,7 @@ int32_t PPB_Graphics3D_Impl::DoSwapBuffers(const gpu::SyncToken& sync_token,
     bool is_overlay_candidate = use_image_chromium_;
     // TODO(reveman): Get texture target from browser process.
     uint32_t target = GL_TEXTURE_2D;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     if (use_image_chromium_)
       target = GL_TEXTURE_RECTANGLE_ARB;
 #endif
@@ -224,11 +224,6 @@ bool PPB_Graphics3D_Impl::InitRaw(
   if (!prefs.pepper_3d_enabled)
     return false;
 
-  // Force SW rendering for keyframe extraction to avoid pixel reads from VRAM.
-  PluginInstanceThrottlerImpl* throttler = plugin_instance->throttler();
-  if (throttler && throttler->needs_representative_keyframe())
-    return false;
-
   RenderThreadImpl* render_thread = RenderThreadImpl::current();
   if (!render_thread)
     return false;
@@ -253,8 +248,7 @@ bool PPB_Graphics3D_Impl::InitRaw(
   attrib_helper.context_type = gpu::CONTEXT_TYPE_OPENGLES2;
 
   gpu::CommandBufferProxyImpl* share_buffer = nullptr;
-  if (!plugin_instance->is_flash_plugin())
-    UMA_HISTOGRAM_BOOLEAN("Pepper.Graphics3DHasShareGroup", !!share_context);
+  UMA_HISTOGRAM_BOOLEAN("Pepper.Graphics3DHasShareGroup", !!share_context);
   if (share_context) {
     PPB_Graphics3D_Impl* share_graphics =
         static_cast<PPB_Graphics3D_Impl*>(share_context);
@@ -324,7 +318,8 @@ void PPB_Graphics3D_Impl::OnGpuControlLostContextMaybeReentrant() {
 }
 
 void PPB_Graphics3D_Impl::OnGpuControlSwapBuffersCompleted(
-    const gpu::SwapBuffersCompleteParams& params) {}
+    const gpu::SwapBuffersCompleteParams& params,
+    gfx::GpuFenceHandle release_fence) {}
 
 void PPB_Graphics3D_Impl::OnGpuControlReturnData(
     base::span<const uint8_t> data) {

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickitemview_p_p.h"
 #include "qquickitemviewfxitem_p_p.h"
@@ -57,8 +21,6 @@ FxViewItem::FxViewItem(QQuickItem *i, QQuickItemView *v, bool own, QQuickItemVie
     , view(v)
     , attached(attached)
 {
-    if (attached) // can be null for default components (see createComponentItem)
-        attached->setView(view);
 }
 
 QQuickItemViewChangeSet::QQuickItemViewChangeSet()
@@ -290,8 +252,6 @@ void QQuickItemView::setDelegate(QQmlComponent *delegate)
     if (QQmlDelegateModel *dataModel = qobject_cast<QQmlDelegateModel*>(d->model)) {
         int oldCount = dataModel->count();
         dataModel->setDelegate(delegate);
-        if (isComponentComplete())
-            d->applyDelegateChange();
         if (oldCount != dataModel->count())
             emit countChanged();
     }
@@ -1366,13 +1326,13 @@ void QQuickItemView::trackedPositionChanged()
     }
 }
 
-void QQuickItemView::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
+void QQuickItemView::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     Q_D(QQuickItemView);
     d->markExtentsDirty();
     if (isComponentComplete() && (d->isValid() || !d->visibleItems.isEmpty()))
         d->forceLayoutPolish();
-    QQuickFlickable::geometryChanged(newGeometry, oldGeometry);
+    QQuickFlickable::geometryChange(newGeometry, oldGeometry);
 }
 
 qreal QQuickItemView::minYExtent() const
@@ -1785,7 +1745,7 @@ void QQuickItemViewPrivate::refill(qreal from, qreal to)
 
     do {
         bufferPause.stop();
-        if (currentChanges.hasPendingChanges() || bufferedChanges.hasPendingChanges()) {
+        if (currentChanges.hasPendingChanges() || bufferedChanges.hasPendingChanges() || currentChanges.active) {
             currentChanges.reset();
             bufferedChanges.reset();
             releaseVisibleItems(reusableFlag);
@@ -1989,7 +1949,7 @@ bool QQuickItemViewPrivate::applyModelChanges(ChangeResult *totalInsertionResult
 
     updateUnrequestedIndexes();
 
-    FxViewItem *prevVisibleItemsFirst = visibleItems.count() ? *visibleItems.constBegin() : 0;
+    FxViewItem *prevVisibleItemsFirst = visibleItems.count() ? *visibleItems.constBegin() : nullptr;
     int prevItemCount = itemCount;
     int prevVisibleItemsCount = visibleItems.count();
     bool visibleAffected = false;
@@ -2504,10 +2464,27 @@ QQuickItem *QQuickItemViewPrivate::createComponentItem(QQmlComponent *component,
             item->setZ(zValue);
         QQml_setParent_noEvent(item, q->contentItem());
         item->setParentItem(q->contentItem());
+
+        initializeComponentItem(item);
     }
     if (component)
         component->completeCreate();
     return item;
+}
+
+/*!
+    \internal
+
+    Allows derived classes to do any initialization required for \a item
+    before completeCreate() is called on it. For example, any attached
+    properties required by the item can be set.
+
+    This is similar to initItem(), but as that has logic specific to
+    delegate items, we use a separate function for non-delegates.
+*/
+void QQuickItemViewPrivate::initializeComponentItem(QQuickItem *item) const
+{
+    Q_UNUSED(item);
 }
 
 void QQuickItemViewPrivate::updateTrackedItem()
@@ -2515,7 +2492,7 @@ void QQuickItemViewPrivate::updateTrackedItem()
     Q_Q(QQuickItemView);
     FxViewItem *item = currentItem;
     if (highlight)
-        item = highlight;
+        item = highlight.get();
     trackedItem = item;
 
     if (trackedItem)

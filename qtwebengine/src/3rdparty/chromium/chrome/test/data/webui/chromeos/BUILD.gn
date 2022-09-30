@@ -2,21 +2,41 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//third_party/closure_compiler/compile_js.gni")
-import("//ui/webui/resources/tools/js_modulizer.gni")
 
-# This file depends on the legacy global sources assignment filter. It should
-# be converted to check target platform before assigning source files to the
-# sources variable. Remove this import and set_sources_assignment_filter call
-# when the file has been converted. See https://crbug.com/1018739 for details.
-import("//build/config/deprecated_default_sources_assignment_filter.gni")
-set_sources_assignment_filter(deprecated_default_sources_assignment_filter)
+assert(is_chromeos_ash)
 
-js_modulizer("modulize") {
-  input_files = [ "fake_network_config_mojom.js" ]
+js_type_check("closure_compile_local") {
+  is_polymer3 = true
+  closure_flags = default_closure_args + [
+                    "js_module_root=../../chrome/test/data/webui/",
+                    "js_module_root=./gen/chrome/test/data/webui/",
+                  ]
+  deps = [ ":fake_network_config_mojom" ]
 }
 
-js_library("fake_network_config_mojom.m") {
-  sources = [ "$root_gen_dir/chrome/test/data/webui/chromeos/fake_network_config_mojom.m.js" ]
-  extra_deps = [ ":modulize" ]
+js_library("fake_network_config_mojom") {
+  deps = [
+    "//ui/webui/resources/cr_components/chromeos/network:onc_mojo.m",
+    "//ui/webui/resources/js:assert.m",
+    "//ui/webui/resources/js:promise_resolver.m",
+  ]
+}
+
+group("closure_compile") {
+  public_deps = [
+    ":closure_compile_local",
+    "account_manager:closure_compile",
+    "arc_account_picker:closure_compile",
+    "ash_common:closure_compile",
+    "diagnostics:closure_compile",
+    "emoji_picker:closure_compile",
+    "firmware_update:closure_compile",
+    "gaia_action_buttons:closure_compile",
+    "os_feedback_ui:closure_compile",
+    "scanning:closure_compile",
+    "shimless_rma:closure_compile",
+    "shortcut_customization:closure_compile",
+  ]
 }

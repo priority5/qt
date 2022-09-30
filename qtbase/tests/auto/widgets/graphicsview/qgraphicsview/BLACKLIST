@@ -1,7 +1,3 @@
-[task255529_transformationAnchorMouseAndViewportMargins]
-opensuse-leap
-[cursor]
-opensuse-leap
 [cursor2]
 ubuntu-16.04
 [sendEvent]
@@ -18,3 +14,36 @@ opensuse-42.3
 ubuntu-16.04
 [fitInView]
 osx
+# QTBUG-87397
+[itemsAtPoint]
+android
+[itemsInRect_cosmeticAdjust]
+android
+[itemAt]
+android
+[mapToScenePath]
+android
+[mapFromScenePoly]
+android
+[mapFromScenePath]
+android
+[viewportUpdateMode]
+android
+[scrollBarRanges]
+android
+[moveItemWhileScrolling]
+android
+[exposeRegion]
+android
+[update2]
+android
+[update_ancestorClipsChildrenToShape]
+android
+[update_ancestorClipsChildrenToShape2]
+android
+[QTBUG_70255_scrollTo]
+android # QTBUG-87397
+[embeddedViewsWithFocus]
+android # QTBUG-87397
+[viewportUpdateMode2]
+android # QTBUG-87397

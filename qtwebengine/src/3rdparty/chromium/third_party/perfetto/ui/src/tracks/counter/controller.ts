@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {iter, NUM, slowlyCountRows} from '../../common/query_iterator';
+import {NUM, NUM_NULL} from '../../common/query_result';
 import {fromNs, toNs} from '../../common/time';
 import {
   TrackController,
@@ -30,6 +30,8 @@ class CounterTrackController extends TrackController<Config, Data> {
   private setup = false;
   private maximumValueSeen = 0;
   private minimumValueSeen = 0;
+  private maximumDeltaSeen = 0;
+  private minimumDeltaSeen = 0;
   private maxDurNs = 0;
 
   async onBoundsChange(start: number, end: number, resolution: number):
@@ -51,7 +53,8 @@ class CounterTrackController extends TrackController<Config, Data> {
             id,
             ts,
             dur,
-            value
+            value,
+            delta
           from experimental_counter_dur
           where track_id = ${this.config.trackId};
         `);
@@ -62,6 +65,7 @@ class CounterTrackController extends TrackController<Config, Data> {
             id,
             ts,
             lead(ts, 1, ts) over (order by ts) - ts as dur,
+            lead(value, 1, value) over (order by ts) - value as delta,
             value
           from ${this.namespaceTable('counter')}
           where track_id = ${this.config.trackId};
@@ -72,27 +76,34 @@ class CounterTrackController extends TrackController<Config, Data> {
           select
             max(
               iif(dur != -1, dur, (select end_ts from trace_bounds) - ts)
-            )
+            ) as maxDur
           from ${this.tableName('counter_view')}
       `);
-      if (maxDurResult.numRecords === 1) {
-        this.maxDurNs = maxDurResult.columns[0].longValues![0];
-      }
+      this.maxDurNs = maxDurResult.firstRow({maxDur: NUM_NULL}).maxDur || 0;
 
-      const result = await this.query(`
-        select max(value), min(value)
+      const queryRes = await this.query(`
+        select
+          ifnull(max(value), 0) as maxValue,
+          ifnull(min(value), 0) as minValue,
+          ifnull(max(delta), 0) as maxDelta,
+          ifnull(min(delta), 0) as minDelta
         from ${this.tableName('counter_view')}`);
-      this.maximumValueSeen = +result.columns[0].doubleValues![0];
-      this.minimumValueSeen = +result.columns[1].doubleValues![0];
+      const row = queryRes.firstRow(
+          {maxValue: NUM, minValue: NUM, maxDelta: NUM, minDelta: NUM});
+      this.maximumValueSeen = row.maxValue;
+      this.minimumValueSeen = row.minValue;
+      this.maximumDeltaSeen = row.maxDelta;
+      this.minimumDeltaSeen = row.minDelta;
 
       this.setup = true;
     }
 
-    const rawResult = await this.query(`
+    const queryRes = await this.query(`
       select
         (ts + ${bucketNs / 2}) / ${bucketNs} * ${bucketNs} as tsq,
         min(value) as minValue,
         max(value) as maxValue,
+        sum(delta) as totalDelta,
         value_at_max_ts(ts, id) as lastId,
         value_at_max_ts(ts, value) as lastValue
       from ${this.tableName('counter_view')}
@@ -101,7 +112,7 @@ class CounterTrackController extends TrackController<Config, Data> {
       order by tsq
     `);
 
-    const numRows = slowlyCountRows(rawResult);
+    const numRows = queryRes.numRows();
 
     const data: Data = {
       start,
@@ -109,31 +120,33 @@ class CounterTrackController extends TrackController<Config, Data> {
       length: numRows,
       maximumValue: this.maximumValue(),
       minimumValue: this.minimumValue(),
+      maximumDelta: this.maximumDeltaSeen,
+      minimumDelta: this.minimumDeltaSeen,
       resolution,
       timestamps: new Float64Array(numRows),
       lastIds: new Float64Array(numRows),
       minValues: new Float64Array(numRows),
       maxValues: new Float64Array(numRows),
       lastValues: new Float64Array(numRows),
+      totalDeltas: new Float64Array(numRows),
     };
 
-    const it = iter(
-        {
-          'tsq': NUM,
-          'lastId': NUM,
-          'minValue': NUM,
-          'maxValue': NUM,
-          'lastValue': NUM
-        },
-        rawResult);
-    for (let i = 0; it.valid(); ++i, it.next()) {
-      data.timestamps[i] = fromNs(it.row.tsq);
-      data.lastIds[i] = it.row.lastId;
-      data.minValues[i] = it.row.minValue;
-      data.maxValues[i] = it.row.maxValue;
-      data.lastValues[i] = it.row.lastValue;
+    const it = queryRes.iter({
+      'tsq': NUM,
+      'lastId': NUM,
+      'minValue': NUM,
+      'maxValue': NUM,
+      'lastValue': NUM,
+      'totalDelta': NUM,
+    });
+    for (let row = 0; it.valid(); it.next(), row++) {
+      data.timestamps[row] = fromNs(it.tsq);
+      data.lastIds[row] = it.lastId;
+      data.minValues[row] = it.minValue;
+      data.maxValues[row] = it.maxValue;
+      data.lastValues[row] = it.lastValue;
+      data.totalDeltas[row] = it.totalDelta;
     }
-
     return data;
   }
 

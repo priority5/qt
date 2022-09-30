@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "extensions/shell/browser/root_window_controller.h"
+#include "base/memory/raw_ptr.h"
 
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/native_app_window.h"
@@ -25,6 +26,10 @@ namespace {
 class FillLayout : public aura::LayoutManager {
  public:
   FillLayout(aura::Window* owner) : owner_(owner) { DCHECK(owner_); }
+
+  FillLayout(const FillLayout&) = delete;
+  FillLayout& operator=(const FillLayout&) = delete;
+
   ~FillLayout() override = default;
 
  private:
@@ -58,9 +63,7 @@ class FillLayout : public aura::LayoutManager {
     SetChildBoundsDirect(child, requested_bounds);
   }
 
-  aura::Window* owner_;  // Not owned.
-
-  DISALLOW_COPY_AND_ASSIGN(FillLayout);
+  raw_ptr<aura::Window> owner_;  // Not owned.
 };
 
 // A simple screen positioning client that translates bounds to screen
@@ -68,6 +71,10 @@ class FillLayout : public aura::LayoutManager {
 class ScreenPositionClient : public wm::DefaultScreenPositionClient {
  public:
   using DefaultScreenPositionClient::DefaultScreenPositionClient;
+
+  ScreenPositionClient(const ScreenPositionClient&) = delete;
+  ScreenPositionClient& operator=(const ScreenPositionClient&) = delete;
+
   ~ScreenPositionClient() override = default;
 
   // wm::DefaultScreenPositionClient:
@@ -82,13 +89,10 @@ class ScreenPositionClient : public wm::DefaultScreenPositionClient {
     aura::Window::ConvertPointToTarget(window->parent(), root_window, &origin);
 
     // Translate the origin by the root window's offset in screen coordinates.
-    gfx::Point host_origin = GetOriginInScreen(root_window);
+    gfx::Point host_origin = GetRootWindowOriginInScreen(root_window);
     origin.Offset(-host_origin.x(), -host_origin.y());
     window->SetBounds(gfx::Rect(origin, bounds.size()));
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScreenPositionClient);
 };
 
 }  // namespace

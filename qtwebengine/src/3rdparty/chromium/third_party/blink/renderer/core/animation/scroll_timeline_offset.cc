@@ -4,16 +4,16 @@
 
 #include "third_party/blink/renderer/core/animation/scroll_timeline_offset.h"
 
-#include "base/optional.h"
-#include "third_party/blink/renderer/bindings/core/v8/css_numeric_value_or_string_or_css_keyword_value_or_scroll_timeline_element_based_offset.h"
+#include "base/memory/values_equivalent.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_scroll_timeline_element_based_offset.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_csskeywordvalue_cssnumericvalue_scrolltimelineelementbasedoffset_string.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/cssom/css_keyword_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_numeric_value.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
-#include "third_party/blink/renderer/core/style/data_equivalency.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/geometry/length_functions.h"
 
@@ -21,7 +21,8 @@ namespace blink {
 
 namespace {
 
-bool ValidateElementBasedOffset(ScrollTimelineElementBasedOffset* offset) {
+bool ValidateElementBasedOffset(
+    const ScrollTimelineElementBasedOffset* offset) {
   if (!offset->hasTarget())
     return false;
 
@@ -58,53 +59,56 @@ bool ElementBasedOffsetsEqual(ScrollTimelineElementBasedOffset* o1,
     return true;
   if (!o1 || !o2)
     return false;
-  return (o1->edge() == o2->edge()) && (o1->target() == o2->target()) &&
-         (o1->threshold() == o2->threshold());
-}
-
-CSSKeywordValue* GetCSSKeywordValue(const ScrollTimelineOffsetValue& offset) {
-  if (offset.IsCSSKeywordValue())
-    return offset.GetAsCSSKeywordValue();
-  // CSSKeywordish:
-  if (offset.IsString() && !offset.GetAsString().IsEmpty())
-    return CSSKeywordValue::Create(offset.GetAsString());
-  return nullptr;
+  // TODO(crbug.com/1070871): Use targetOr(nullptr) after migration is done.
+  Element* target_or_null1 = o1->hasTarget() ? o1->target() : nullptr;
+  Element* target_or_null2 = o2->hasTarget() ? o2->target() : nullptr;
+  return target_or_null1 == target_or_null2 && o1->edge() == o2->edge() &&
+         o1->threshold() == o2->threshold();
 }
 
 }  // namespace
 
 // static
 ScrollTimelineOffset* ScrollTimelineOffset::Create(
-    const ScrollTimelineOffsetValue& input_offset) {
-  if (input_offset.IsCSSNumericValue()) {
-    auto* numeric = input_offset.GetAsCSSNumericValue();
-    const auto& offset = To<CSSPrimitiveValue>(*numeric->ToCSSValue());
-    bool matches_length_percentage = offset.IsLength() ||
-                                     offset.IsPercentage() ||
-                                     offset.IsCalculatedPercentageWithLength();
-    if (!matches_length_percentage)
-      return nullptr;
-    return MakeGarbageCollected<ScrollTimelineOffset>(&offset);
+    const V8ScrollTimelineOffset* offset) {
+  switch (offset->GetContentType()) {
+    case V8ScrollTimelineOffset::ContentType::kCSSKeywordValue: {
+      const auto* keyword = offset->GetAsCSSKeywordValue();
+      if (keyword->KeywordValueID() != CSSValueID::kAuto)
+        return nullptr;
+      return MakeGarbageCollected<ScrollTimelineOffset>();
+    }
+    case V8ScrollTimelineOffset::ContentType::kCSSNumericValue: {
+      const auto* value =
+          To<CSSPrimitiveValue>(offset->GetAsCSSNumericValue()->ToCSSValue());
+      bool matches_length_percentage =
+          !value || value->IsLength() || value->IsPercentage() ||
+          value->IsCalculatedPercentageWithLength();
+      if (!matches_length_percentage)
+        return nullptr;
+      return MakeGarbageCollected<ScrollTimelineOffset>(value);
+    }
+    case V8ScrollTimelineOffset::ContentType::
+        kScrollTimelineElementBasedOffset: {
+      auto* value = offset->GetAsScrollTimelineElementBasedOffset();
+      if (!ValidateElementBasedOffset(value))
+        return nullptr;
+      return MakeGarbageCollected<ScrollTimelineOffset>(value);
+    }
+    case V8ScrollTimelineOffset::ContentType::kString: {
+      if (offset->GetAsString().IsEmpty())
+        return nullptr;
+      const auto* keyword = CSSKeywordValue::Create(offset->GetAsString());
+      if (keyword->KeywordValueID() != CSSValueID::kAuto)
+        return nullptr;
+      return MakeGarbageCollected<ScrollTimelineOffset>();
+    }
   }
-
-  if (input_offset.IsScrollTimelineElementBasedOffset()) {
-    auto* offset = input_offset.GetAsScrollTimelineElementBasedOffset();
-    if (!ValidateElementBasedOffset(offset))
-      return nullptr;
-
-    return MakeGarbageCollected<ScrollTimelineOffset>(offset);
-  }
-
-  if (auto* keyword = GetCSSKeywordValue(input_offset)) {
-    if (keyword->KeywordValueID() != CSSValueID::kAuto)
-      return nullptr;
-    return MakeGarbageCollected<ScrollTimelineOffset>();
-  }
-
+  NOTREACHED();
   return nullptr;
 }
 
-base::Optional<double> ScrollTimelineOffset::ResolveOffset(
+absl::optional<double> ScrollTimelineOffset::ResolveOffset(
     Node* scroll_source,
     ScrollOrientation orientation,
     double max_offset,
@@ -121,23 +125,17 @@ base::Optional<double> ScrollTimelineOffset::ResolveOffset(
             ? document.documentElement()->GetComputedStyle()
             : document.GetComputedStyle();
 
+    // TOOD(crbug.com/1223030): Handle container relative units.
     CSSToLengthConversionData conversion_data = CSSToLengthConversionData(
         &computed_style, root_style, document.GetLayoutView(),
-        computed_style.EffectiveZoom());
+        /* nearest_container */ nullptr, computed_style.EffectiveZoom());
     double resolved = FloatValueForLength(
         length_based_offset_->ConvertToLength(conversion_data), max_offset);
 
     return resolved;
   } else if (element_based_offset_) {
-    // We assume that the root is the target's ancestor in layout tree. Under
-    // this assumption |target.LocalToAncestorRect()| returns the targets's
-    // position relative to the root's border box, while ignoring scroll offset.
-    //
-    // TODO(majidvp): We need to validate this assumption and deal with cases
-    // where it is not true. See the spec discussion here:
-    // https://github.com/w3c/csswg-drafts/issues/4337#issuecomment-610989843
-
-    DCHECK(element_based_offset_->hasTarget());
+    if (!element_based_offset_->hasTarget())
+      return absl::nullopt;
     Element* target = element_based_offset_->target();
     const LayoutBox* target_box = target->GetLayoutBox();
 
@@ -147,10 +145,10 @@ base::Optional<double> ScrollTimelineOffset::ResolveOffset(
     // See the spec discussion here:
     // https://github.com/w3c/csswg-drafts/issues/4337#issuecomment-610997231
     if (!target_box)
-      return base::nullopt;
+      return absl::nullopt;
 
     if (!IsContainingBlockChainDescendant(target_box, root_box))
-      return base::nullopt;
+      return absl::nullopt;
 
     PhysicalRect target_rect = target_box->PhysicalBorderBoxRect();
     target_rect = target_box->LocalToAncestorRect(
@@ -213,24 +211,20 @@ base::Optional<double> ScrollTimelineOffset::ResolveOffset(
   }
 }
 
-ScrollTimelineOffsetValue ScrollTimelineOffset::ToScrollTimelineOffsetValue()
-    const {
-  ScrollTimelineOffsetValue result;
+V8ScrollTimelineOffset* ScrollTimelineOffset::ToV8ScrollTimelineOffset() const {
   if (length_based_offset_) {
-    result.SetCSSNumericValue(
+    return MakeGarbageCollected<V8ScrollTimelineOffset>(
         CSSNumericValue::FromCSSValue(*length_based_offset_.Get()));
   } else if (element_based_offset_) {
-    result.SetScrollTimelineElementBasedOffset(element_based_offset_);
-  } else {
-    // This is the default value (i.e., 'auto' value)
-    result.SetCSSKeywordValue(CSSKeywordValue::Create("auto"));
+    return MakeGarbageCollected<V8ScrollTimelineOffset>(element_based_offset_);
   }
-
-  return result;
+  // This is the default value (i.e., 'auto' value)
+  return MakeGarbageCollected<V8ScrollTimelineOffset>(
+      CSSKeywordValue::Create("auto"));
 }
 
 bool ScrollTimelineOffset::operator==(const ScrollTimelineOffset& o) const {
-  return DataEquivalent(length_based_offset_, o.length_based_offset_) &&
+  return base::ValuesEquivalent(length_based_offset_, o.length_based_offset_) &&
          ElementBasedOffsetsEqual(element_based_offset_,
                                   o.element_based_offset_);
 }

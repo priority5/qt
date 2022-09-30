@@ -115,7 +115,7 @@ findLikelySubtags(const char* localeID,
  * @param tag The tag to add.
  * @param tagLength The length of the tag.
  * @param buffer The output buffer.
- * @param bufferLength The length of the output buffer.  This is an input/ouput parameter.
+ * @param bufferLength The length of the output buffer.  This is an input/output parameter.
  **/
 static void U_CALLCONV
 appendTag(
@@ -464,8 +464,7 @@ parseTagString(
         goto error;
     }
 
-    subtagLength = ulocimp_getLanguage(position, lang, *langLength, &position);
-    u_terminateChars(lang, *langLength, subtagLength, err);
+    subtagLength = ulocimp_getLanguage(position, &position, *err).extract(lang, *langLength, *err);
 
     /*
      * Note that we explicit consider U_STRING_NOT_TERMINATED_WARNING
@@ -486,8 +485,7 @@ parseTagString(
         ++position;
     }
 
-    subtagLength = ulocimp_getScript(position, script, *scriptLength, &position);
-    u_terminateChars(script, *scriptLength, subtagLength, err);
+    subtagLength = ulocimp_getScript(position, &position, *err).extract(script, *scriptLength, *err);
 
     if(U_FAILURE(*err)) {
         goto error;
@@ -511,8 +509,7 @@ parseTagString(
         }    
     }
 
-    subtagLength = ulocimp_getCountry(position, region, *regionLength, &position);
-    u_terminateChars(region, *regionLength, subtagLength, err);
+    subtagLength = ulocimp_getCountry(position, &position, *err).extract(region, *regionLength, *err);
 
     if(U_FAILURE(*err)) {
         goto error;
@@ -1184,13 +1181,13 @@ error:
     }
 }
 
-static UBool
+static int32_t
 do_canonicalize(const char*    localeID,
          char* buffer,
          int32_t bufferCapacity,
          UErrorCode* err)
 {
-    uloc_canonicalize(
+    int32_t canonicalizedSize = uloc_canonicalize(
         localeID,
         buffer,
         bufferCapacity,
@@ -1198,16 +1195,14 @@ do_canonicalize(const char*    localeID,
 
     if (*err == U_STRING_NOT_TERMINATED_WARNING ||
         *err == U_BUFFER_OVERFLOW_ERROR) {
-        *err = U_ILLEGAL_ARGUMENT_ERROR;
-
-        return FALSE;
+        return canonicalizedSize;
     }
     else if (U_FAILURE(*err)) {
 
-        return FALSE;
+        return -1;
     }
     else {
-        return TRUE;
+        return canonicalizedSize;
     }
 }
 
@@ -1244,12 +1239,17 @@ static UBool
 _ulocimp_addLikelySubtags(const char* localeID,
                           icu::ByteSink& sink,
                           UErrorCode* status) {
-    char localeBuffer[ULOC_FULLNAME_CAPACITY];
-
-    if (do_canonicalize(localeID, localeBuffer, sizeof localeBuffer, status)) {
-        return _uloc_addLikelySubtags(localeBuffer, sink, status);
+    PreflightingLocaleIDBuffer localeBuffer;
+    do {
+        localeBuffer.requestedCapacity = do_canonicalize(localeID, localeBuffer.getBuffer(),
+            localeBuffer.getCapacity(), status);
+    } while (localeBuffer.needToTryAgain(status));
+    
+    if (U_SUCCESS(*status)) {
+        return _uloc_addLikelySubtags(localeBuffer.getBuffer(), sink, status);
+    } else {
+        return FALSE;
     }
-    return FALSE;
 }
 
 U_CAPI void U_EXPORT2
@@ -1292,11 +1292,13 @@ U_CAPI void U_EXPORT2
 ulocimp_minimizeSubtags(const char* localeID,
                         icu::ByteSink& sink,
                         UErrorCode* status) {
-    char localeBuffer[ULOC_FULLNAME_CAPACITY];
-
-    if (do_canonicalize(localeID, localeBuffer, sizeof localeBuffer, status)) {
-        _uloc_minimizeSubtags(localeBuffer, sink, status);
-    }
+    PreflightingLocaleIDBuffer localeBuffer;
+    do {
+        localeBuffer.requestedCapacity = do_canonicalize(localeID, localeBuffer.getBuffer(),
+            localeBuffer.getCapacity(), status);
+    } while (localeBuffer.needToTryAgain(status));
+    
+    _uloc_minimizeSubtags(localeBuffer.getBuffer(), sink, status);
 }
 
 // Pairs of (language subtag, + or -) for finding out fast if common languages

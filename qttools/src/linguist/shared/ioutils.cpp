@@ -1,36 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Linguist of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "ioutils.h"
 
 #include <qdir.h>
 #include <qfile.h>
-#include <qregexp.h>
+#include <qregularexpression.h>
 
 #ifdef Q_OS_WIN
 #  include <windows.h>
@@ -86,14 +61,14 @@ bool IoUtils::isRelativePath(const QString &path)
     return true;
 }
 
-QStringRef IoUtils::pathName(const QString &fileName)
+QStringView IoUtils::pathName(QStringView fileName)
 {
-    return fileName.leftRef(fileName.lastIndexOf(QLatin1Char('/')) + 1);
+    return fileName.left(fileName.lastIndexOf(QLatin1Char('/')) + 1);
 }
 
-QStringRef IoUtils::fileName(const QString &fileName)
+QStringView IoUtils::fileName(QStringView fileName)
 {
-    return fileName.midRef(fileName.lastIndexOf(QLatin1Char('/')) + 1);
+    return fileName.mid(fileName.lastIndexOf(QLatin1Char('/')) + 1);
 }
 
 QString IoUtils::resolvePath(const QString &baseDir, const QString &fileName)
@@ -173,9 +148,9 @@ QString IoUtils::shellQuoteWin(const QString &arg)
         // The process-level standard quoting allows escaping quotes with backslashes (note
         // that backslashes don't escape themselves, unless they are followed by a quote).
         // Consequently, quotes are escaped and their preceding backslashes are doubled.
-        ret.replace(QRegExp(QLatin1String("(\\\\*)\"")), QLatin1String("\\1\\1\\\""));
+        ret.replace(QRegularExpression(QLatin1String("(\\\\*)\"")), QLatin1String("\\1\\1\\\""));
         // Trailing backslashes must be doubled as well, as they are followed by a quote.
-        ret.replace(QRegExp(QLatin1String("(\\\\+)$")), QLatin1String("\\1\\1"));
+        ret.replace(QRegularExpression(QLatin1String("(\\\\+)$")), QLatin1String("\\1\\1"));
         // However, the shell also interprets the command, and no backslash-escaping exists
         // there - a quote always toggles the quoting state, but is nonetheless passed down
         // to the called process verbatim. In the unquoted state, the circumflex escapes

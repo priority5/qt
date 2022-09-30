@@ -5,8 +5,9 @@
 #include "content/common/cursors/webcursor.h"
 
 #include "base/check_op.h"
+#include "ui/aura/cursor/cursor_util.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/cursor/cursor_util.h"
+#include "ui/base/cursor/cursor_factory.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 
 namespace content {
@@ -21,8 +22,10 @@ gfx::NativeCursor WebCursor::GetNativeCursor() {
       CreateScaledBitmapAndHotspotFromCustomData(&bitmap, &hotspot, &scale);
       custom_cursor_->set_custom_bitmap(bitmap);
       custom_cursor_->set_custom_hotspot(hotspot);
-      custom_cursor_->set_image_scale_factor(scale);
-      custom_cursor_->SetPlatformCursor(GetPlatformCursor(*custom_cursor_));
+      custom_cursor_->set_image_scale_factor(device_scale_factor_);
+      custom_cursor_->SetPlatformCursor(
+          ui::CursorFactory::GetInstance()->CreateImageCursor(
+              ui::mojom::CursorType::kCustom, bitmap, hotspot));
     }
     return *custom_cursor_;
   }
@@ -36,7 +39,8 @@ void WebCursor::CreateScaledBitmapAndHotspotFromCustomData(SkBitmap* bitmap,
   *bitmap = cursor_.custom_bitmap();
   *hotspot = cursor_.custom_hotspot();
   *scale = GetCursorScaleFactor(bitmap);
-  ui::ScaleAndRotateCursorBitmapAndHotpoint(*scale, rotation_, bitmap, hotspot);
+  aura::ScaleAndRotateCursorBitmapAndHotpoint(*scale, rotation_, bitmap,
+                                              hotspot);
 }
 
 #if !defined(USE_OZONE)
@@ -56,5 +60,9 @@ float WebCursor::GetCursorScaleFactor(SkBitmap* bitmap) {
   return device_scale_factor_ / cursor_.image_scale_factor();
 }
 #endif
+
+void WebCursor::CleanupPlatformData() {
+  custom_cursor_.reset();
+}
 
 }  // namespace content

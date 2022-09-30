@@ -9,8 +9,8 @@
 #include "base/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/base/x/x11_display_util.h"
+#include "ui/gfx/x/future.h"
 #include "ui/gfx/x/randr.h"
-#include "ui/gfx/x/x11.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/xproto.h"
 
@@ -34,8 +34,6 @@ XDisplayManager::~XDisplayManager() = default;
 void XDisplayManager::Init() {
   if (IsXrandrAvailable()) {
     auto& randr = connection_->randr();
-    xrandr_event_base_ = randr.first_event();
-
     randr.SelectInput(
         {x_root_window_, x11::RandR::NotifyMask::ScreenChange |
                              x11::RandR::NotifyMask::OutputChange |
@@ -62,15 +60,12 @@ void XDisplayManager::RemoveObserver(display::DisplayObserver* observer) {
   change_notifier_.RemoveObserver(observer);
 }
 
-bool XDisplayManager::ProcessEvent(x11::Event* xev) {
-  DCHECK(xev);
-  auto* prop = xev->As<x11::PropertyNotifyEvent>();
-  if (xev->As<x11::RandR::NotifyEvent>() ||
-      (prop && prop->atom == gfx::GetAtom("_NET_WORKAREA"))) {
+void XDisplayManager::OnEvent(const x11::Event& xev) {
+  auto* prop = xev.As<x11::PropertyNotifyEvent>();
+  if (xev.As<x11::RandR::NotifyEvent>() ||
+      (prop && prop->atom == x11::GetAtom("_NET_WORKAREA"))) {
     DispatchDelayedDisplayListUpdate();
-    return true;
   }
-  return false;
 }
 
 void XDisplayManager::SetDisplayList(std::vector<display::Display> displays) {

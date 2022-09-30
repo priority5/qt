@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquicktextinput_p.h"
 #include "qquicktextinput_p_p.h"
@@ -67,6 +31,7 @@
 QT_BEGIN_NAMESPACE
 
 DEFINE_BOOL_CONFIG_OPTION(qmlDisableDistanceField, QML_DISABLE_DISTANCEFIELD)
+Q_LOGGING_CATEGORY(lcQuickTextInput, "qt.quick.textInput")
 
 /*!
     \qmltype TextInput
@@ -134,6 +99,13 @@ QString QQuickTextInput::text() const
     QString content = d->m_text;
     QString res = d->m_maskData ? d->stripString(content) : content;
     return (res.isNull() ? QString::fromLatin1("") : res);
+}
+
+void QQuickTextInput::invalidate()
+{
+    Q_D(QQuickTextInput);
+    d->updateLayout();
+    invalidateFontCaches();
 }
 
 void QQuickTextInput::setText(const QString &s)
@@ -255,11 +227,10 @@ QString QQuickTextInputPrivate::realText() const
 */
 
 /*!
-    \qmlproperty enumeration QtQuick::TextInput::font.weight
+    \qmlproperty int QtQuick::TextInput::font.weight
 
-    Sets the font's weight.
-
-    The weight can be one of:
+    The requested weight of the font. The weight requested must be an integer
+    between 1 and 1000, or one of the predefined values:
     \list
     \li Font.Thin
     \li Font.Light
@@ -518,8 +489,16 @@ void QQuickTextInput::setSelectedTextColor(const QColor &color)
 }
 
 /*!
-    \qmlproperty enumeration QtQuick::TextInput::horizontalAlignment
     \qmlproperty enumeration QtQuick::TextInput::effectiveHorizontalAlignment
+    \readonly
+
+    When using the attached property LayoutMirroring::enabled to mirror application
+    layouts, the horizontal alignment of text will also be mirrored. However, the property
+    \l horizontalAlignment will remain unchanged. To query the effective horizontal alignment
+    of TextInput, use the read-only property \c effectiveHorizontalAlignment.
+*/
+/*!
+    \qmlproperty enumeration QtQuick::TextInput::horizontalAlignment
     \qmlproperty enumeration QtQuick::TextInput::verticalAlignment
 
     Sets the horizontal alignment of the text within the TextInput item's
@@ -542,7 +521,7 @@ void QQuickTextInput::setSelectedTextColor(const QColor &color)
     When using the attached property LayoutMirroring::enabled to mirror application
     layouts, the horizontal alignment of text will also be mirrored. However, the property
     \c horizontalAlignment will remain unchanged. To query the effective horizontal alignment
-    of TextInput, use the read-only property \c effectiveHorizontalAlignment.
+    of TextInput, use the read-only property \l effectiveHorizontalAlignment.
 */
 QQuickTextInput::HAlignment QQuickTextInput::hAlign() const
 {
@@ -831,7 +810,19 @@ void QQuickTextInput::setCursorVisible(bool on)
 
 /*!
     \qmlproperty int QtQuick::TextInput::cursorPosition
-    The position of the cursor in the TextInput.
+    The position of the cursor in the TextInput. The cursor is positioned between
+    characters.
+
+    \note The \e characters in this case refer to the string of \l QChar objects,
+    therefore 16-bit Unicode characters, and the position is considered an index
+    into this string. This does not necessarily correspond to individual graphemes
+    in the writing system, as a single grapheme may be represented by multiple
+    Unicode characters, such as in the case of surrogate pairs, linguistic
+    ligatures or diacritics.
+
+    \l displayText is different if echoMode is set to \c {TextInput.Password}:
+    then each passwordCharacter is a "narrow" character (the cursorPosition always
+    moves by 1), even if the text in the TextInput is not.
 */
 int QQuickTextInput::cursorPosition() const
 {
@@ -849,6 +840,7 @@ void QQuickTextInput::setCursorPosition(int cp)
 
 /*!
     \qmlproperty rectangle QtQuick::TextInput::cursorRectangle
+    \readonly
 
     The rectangle where the standard text cursor is rendered within the text input.  Read only.
 
@@ -890,6 +882,7 @@ QRectF QQuickTextInput::cursorRectangle() const
     This property is read-only. To change the selection, use select(start,end),
     selectAll(), or selectWord().
 
+    \readonly
     \sa selectionEnd, cursorPosition, selectedText
 */
 int QQuickTextInput::selectionStart() const
@@ -905,6 +898,7 @@ int QQuickTextInput::selectionStart() const
     This property is read-only. To change the selection, use select(start,end),
     selectAll(), or selectWord().
 
+    \readonly
     \sa selectionStart, cursorPosition, selectedText
 */
 int QQuickTextInput::selectionEnd() const
@@ -935,6 +929,7 @@ void QQuickTextInput::select(int start, int end)
 
 /*!
     \qmlproperty string QtQuick::TextInput::selectedText
+    \readonly
 
     This read-only property provides the text currently selected in the
     text input.
@@ -1009,10 +1004,10 @@ void QQuickTextInput::setAutoScroll(bool b)
     an acceptable or intermediate state. The accepted signal will only be sent
     if the text is in an acceptable state when enter is pressed.
 
-    Currently supported validators are IntValidator, DoubleValidator,
-    RegExpValidator and RegularExpressionValidator. An example of using
-    validators is shown below, which allows input of integers between 11 and 31
-    into the text input:
+    Currently supported validators are IntValidator, DoubleValidator
+    and RegularExpressionValidator. An example of using validators is shown
+    below, which allows input of integers between 11 and 31 into the
+    text input:
 
     \code
     import QtQuick 2.0
@@ -1028,7 +1023,7 @@ void QQuickTextInput::setAutoScroll(bool b)
 QValidator* QQuickTextInput::validator() const
 {
 #if !QT_CONFIG(validator)
-    return 0;
+    return nullptr;
 #else
     Q_D(const QQuickTextInput);
     return d->m_validator;
@@ -1152,6 +1147,7 @@ void QQuickTextInput::setInputMask(const QString &im)
 
 /*!
     \qmlproperty bool QtQuick::TextInput::acceptableInput
+    \readonly
 
     This property is always true unless a validator or input mask has been set.
     If a validator or input mask has been set, this property will only be true
@@ -1524,11 +1520,7 @@ void QQuickTextInput::inputMethodEvent(QInputMethodEvent *ev)
 {
     Q_D(QQuickTextInput);
     const bool wasComposing = d->hasImState;
-    if (d->m_readOnly) {
-        ev->ignore();
-    } else {
-        d->processInputMethodEvent(ev);
-    }
+    d->processInputMethodEvent(ev);
     if (!ev->isAccepted())
         QQuickImplicitSizeItem::inputMethodEvent(ev);
 
@@ -1541,15 +1533,16 @@ void QQuickTextInput::mouseDoubleClickEvent(QMouseEvent *event)
 {
     Q_D(QQuickTextInput);
 
-    if (d->selectByMouse && event->button() == Qt::LeftButton) {
+    if (d->selectByMouse && event->button() == Qt::LeftButton &&
+            QQuickDeliveryAgentPrivate::isEventFromMouseOrTouchpad(event)) {
 #if QT_CONFIG(im)
         d->commitPreedit();
 #endif
-        int cursor = d->positionAt(event->localPos());
+        int cursor = d->positionAt(event->position());
         d->selectWordAtPos(cursor);
         event->setAccepted(true);
         if (!d->hasPendingTripleClick()) {
-            d->tripleClickStartPoint = event->localPos();
+            d->tripleClickStartPoint = event->position();
             d->tripleClickTimer.start();
         }
     } else {
@@ -1563,26 +1556,34 @@ void QQuickTextInput::mousePressEvent(QMouseEvent *event)
 {
     Q_D(QQuickTextInput);
 
-    d->pressPos = event->localPos();
+    d->pressPos = event->position();
 
     if (d->sendMouseEventToInputContext(event))
         return;
 
-    if (d->selectByMouse) {
+    const bool isMouse = QQuickDeliveryAgentPrivate::isEventFromMouseOrTouchpad(event);
+    if (d->selectByMouse &&
+            (isMouse
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+             || d->selectByTouchDrag
+#endif
+             )) {
         setKeepMouseGrab(false);
         d->selectPressed = true;
         QPointF distanceVector = d->pressPos - d->tripleClickStartPoint;
         if (d->hasPendingTripleClick()
-            && distanceVector.manhattanLength() < QGuiApplication::styleHints()->startDragDistance()) {
+                && distanceVector.manhattanLength() < QGuiApplication::styleHints()->startDragDistance()) {
             event->setAccepted(true);
             selectAll();
             return;
         }
     }
 
-    bool mark = (event->modifiers() & Qt::ShiftModifier) && d->selectByMouse;
-    int cursor = d->positionAt(event->localPos());
-    d->moveCursor(cursor, mark);
+    if (isMouse) {
+        bool mark = (event->modifiers() & Qt::ShiftModifier) && d->selectByMouse;
+        int cursor = d->positionAt(event->position());
+        d->moveCursor(cursor, mark);
+    }
 
     if (d->focusOnPress && !qGuiApp->styleHints()->setFocusOnTouchRelease())
         ensureActiveFocus(Qt::MouseFocusReason);
@@ -1593,22 +1594,28 @@ void QQuickTextInput::mousePressEvent(QMouseEvent *event)
 void QQuickTextInput::mouseMoveEvent(QMouseEvent *event)
 {
     Q_D(QQuickTextInput);
+    if (!QQuickDeliveryAgentPrivate::isEventFromMouseOrTouchpad(event)
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+            && ! d->selectByTouchDrag
+#endif
+            )
+        return;
 
     if (d->selectPressed) {
-        if (qAbs(int(event->localPos().x() - d->pressPos.x())) > QGuiApplication::styleHints()->startDragDistance())
+        if (qAbs(int(event->position().x() - d->pressPos.x())) > QGuiApplication::styleHints()->startDragDistance())
             setKeepMouseGrab(true);
 
 #if QT_CONFIG(im)
         if (d->composeMode()) {
             // start selection
             int startPos = d->positionAt(d->pressPos);
-            int currentPos = d->positionAt(event->localPos());
+            int currentPos = d->positionAt(event->position());
             if (startPos != currentPos)
                 d->setSelection(startPos, currentPos - startPos);
         } else
 #endif
         {
-            moveCursorSelection(d->positionAt(event->localPos()), d->mouseSelectionMode);
+            moveCursorSelection(d->positionAt(event->position()), d->mouseSelectionMode);
         }
         event->setAccepted(true);
     } else {
@@ -1625,8 +1632,14 @@ void QQuickTextInput::mouseReleaseEvent(QMouseEvent *event)
         d->selectPressed = false;
         setKeepMouseGrab(false);
     }
+    const bool isMouse = QQuickDeliveryAgentPrivate::isEventFromMouseOrTouchpad(event)
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+        || d->selectByTouchDrag
+#endif
+    ;
+
 #if QT_CONFIG(clipboard)
-    if (QGuiApplication::clipboard()->supportsSelection()) {
+    if (isMouse && QGuiApplication::clipboard()->supportsSelection()) {
         if (event->button() == Qt::LeftButton) {
             d->copy(QClipboard::Selection);
         } else if (!d->m_readOnly && event->button() == Qt::MiddleButton) {
@@ -1635,6 +1648,10 @@ void QQuickTextInput::mouseReleaseEvent(QMouseEvent *event)
         }
     }
 #endif
+    // On a touchscreen or with a stylus, set cursor position and focus on release, not on press;
+    // if Flickable steals the grab in the meantime, the cursor won't move.
+    if (!isMouse)
+        d->moveCursor(d->positionAt(event->position()), false);
 
     if (d->focusOnPress && qGuiApp->styleHints()->setFocusOnTouchRelease())
         ensureActiveFocus(Qt::MouseFocusReason);
@@ -1647,7 +1664,7 @@ bool QQuickTextInputPrivate::sendMouseEventToInputContext(QMouseEvent *event)
 {
 #if QT_CONFIG(im)
     if (composeMode()) {
-        int tmp_cursor = positionAt(event->localPos());
+        int tmp_cursor = positionAt(event->position());
         int mousePos = tmp_cursor - m_cursor;
         if (mousePos >= 0 && mousePos <= m_textLayout.preeditAreaText().length()) {
             if (event->type() == QEvent::MouseButtonRelease) {
@@ -1725,8 +1742,8 @@ bool QQuickTextInput::event(QEvent* ev)
     return QQuickImplicitSizeItem::event(ev);
 }
 
-void QQuickTextInput::geometryChanged(const QRectF &newGeometry,
-                                  const QRectF &oldGeometry)
+void QQuickTextInput::geometryChange(const QRectF &newGeometry,
+                                     const QRectF &oldGeometry)
 {
     Q_D(QQuickTextInput);
     if (!d->inLayout) {
@@ -1736,7 +1753,7 @@ void QQuickTextInput::geometryChanged(const QRectF &newGeometry,
             d->updateBaselineOffset();
         updateCursorRectangle();
     }
-    QQuickImplicitSizeItem::geometryChanged(newGeometry, oldGeometry);
+    QQuickImplicitSizeItem::geometryChange(newGeometry, oldGeometry);
 }
 
 void QQuickTextInputPrivate::ensureVisible(int position, int preeditCursor, int preeditLength)
@@ -2000,8 +2017,10 @@ QVariant QQuickTextInput::inputMethodQuery(Qt::InputMethodQuery property, const 
         return QVariant(d->m_text.mid(d->m_cursor));
     case Qt::ImTextBeforeCursor:
         if (argument.isValid())
-            return QVariant(d->m_text.leftRef(d->m_cursor).right(argument.toInt()).toString());
+            return QVariant(QStringView{d->m_text}.left(d->m_cursor).right(argument.toInt()).toString());
         return QVariant(d->m_text.left(d->m_cursor));
+    case Qt::ImReadOnly:
+        return QVariant(d->m_readOnly);
     default:
         return QQuickItem::inputMethodQuery(property);
     }
@@ -2042,7 +2061,7 @@ bool QQuickTextInput::isRightToLeft(int start, int end)
         qmlWarning(this) << "isRightToLeft(start, end) called with the end property being smaller than the start.";
         return false;
     } else {
-        return text().midRef(start, end - start).isRightToLeft();
+        return QStringView{text()}.mid(start, end - start).isRightToLeft();
     }
 }
 
@@ -2105,7 +2124,7 @@ void QQuickTextInput::undo()
 {
     Q_D(QQuickTextInput);
     if (!d->m_readOnly) {
-        d->resetInputMethod();
+        d->cancelInput();
         d->internalUndo();
         d->finishChange(-1, true);
     }
@@ -2121,7 +2140,7 @@ void QQuickTextInput::redo()
 {
     Q_D(QQuickTextInput);
     if (!d->m_readOnly) {
-        d->resetInputMethod();
+        d->cancelInput();
         d->internalRedo();
         d->finishChange();
     }
@@ -2149,7 +2168,7 @@ void QQuickTextInput::insert(int position, const QString &text)
 
     if (d->hasSelectedText()) {
         d->addCommand(QQuickTextInputPrivate::Command(
-                QQuickTextInputPrivate::SetSelection, d->m_cursor, 0, d->m_selstart, d->m_selend));
+                QQuickTextInputPrivate::SetSelection, d->m_cursor, u'\0', d->m_selstart, d->m_selend));
     }
     if (d->m_maskData) {
         insertText = d->maskString(position, insertText);
@@ -2185,7 +2204,7 @@ void QQuickTextInput::insert(int position, const QString &text)
     }
 
     d->addCommand(QQuickTextInputPrivate::Command(
-            QQuickTextInputPrivate::SetSelection, d->m_cursor, 0, d->m_selstart, d->m_selend));
+            QQuickTextInputPrivate::SetSelection, d->m_cursor, u'\0', d->m_selstart, d->m_selend));
     d->finishChange(priorState);
 
     if (d->lastSelectionStart != d->lastSelectionEnd) {
@@ -2224,7 +2243,7 @@ void QQuickTextInput::remove(int start, int end)
     const int priorState = d->m_undoState;
 
     d->addCommand(QQuickTextInputPrivate::Command(
-            QQuickTextInputPrivate::SetSelection, d->m_cursor, 0, d->m_selstart, d->m_selend));
+            QQuickTextInputPrivate::SetSelection, d->m_cursor, u'\0', d->m_selstart, d->m_selend));
 
     if (start <= d->m_cursor && d->m_cursor < end) {
         // cursor is within the selection. Split up the commands
@@ -2260,7 +2279,7 @@ void QQuickTextInput::remove(int start, int end)
             d->m_selend -= end - start;
     }
     d->addCommand(QQuickTextInputPrivate::Command(
-            QQuickTextInputPrivate::SetSelection, d->m_cursor, 0, d->m_selstart, d->m_selend));
+            QQuickTextInputPrivate::SetSelection, d->m_cursor, u'\0', d->m_selstart, d->m_selend));
 
     d->m_textDirty = true;
     d->finishChange(priorState);
@@ -2385,12 +2404,20 @@ QString QQuickTextInput::preeditText() const
 /*!
     \qmlproperty bool QtQuick::TextInput::selectByMouse
 
-    Defaults to false.
+    Defaults to \c true.
 
-    If true, the user can use the mouse to select text in some
-    platform-specific way. Note that for some platforms this may
-    not be an appropriate interaction (it may conflict with how
-    the text needs to behave inside a \l Flickable, for example).
+    If true, the user can use the mouse to select text in the usual way.
+
+    \note In versions prior to 6.4, the default was \c false; but if you
+    enabled this property, you could also select text on a touchscreen by
+    dragging your finger across it. This interfered with flicking when
+    TextInput was used inside a Flickable. For consistency with TextField,
+    selectByMouse now really means what it says: if \c true, you can select
+    text by dragging \e only with a mouse. If this change does not suit your
+    application, you can set \c selectByMouse to \c false, or import an older
+    API version (for example \c {import QtQuick 6.3}) to revert to the previous
+    behavior. The option to revert behavior by changing the import version will
+    be removed in a later version of Qt.
 */
 bool QQuickTextInput::selectByMouse() const
 {
@@ -2459,6 +2486,7 @@ void QQuickTextInput::setPersistentSelection(bool on)
 
 /*!
     \qmlproperty bool QtQuick::TextInput::canPaste
+    \readonly
 
     Returns true if the TextInput is writable and the content of the clipboard is
     suitable for pasting into the TextInput.
@@ -2480,6 +2508,7 @@ bool QQuickTextInput::canPaste() const
 
 /*!
     \qmlproperty bool QtQuick::TextInput::canUndo
+    \readonly
 
     Returns true if the TextInput is writable and there are previous operations
     that can be undone.
@@ -2493,6 +2522,7 @@ bool QQuickTextInput::canUndo() const
 
 /*!
     \qmlproperty bool QtQuick::TextInput::canRedo
+    \readonly
 
     Returns true if the TextInput is writable and there are \l {undo}{undone}
     operations that can be redone.
@@ -2506,6 +2536,7 @@ bool QQuickTextInput::canRedo() const
 
 /*!
     \qmlproperty real QtQuick::TextInput::contentWidth
+    \readonly
 
     Returns the width of the text, including the width past the width
     which is covered due to insufficient wrapping if \l wrapMode is set.
@@ -2519,6 +2550,7 @@ qreal QQuickTextInput::contentWidth() const
 
 /*!
     \qmlproperty real QtQuick::TextInput::contentHeight
+    \readonly
 
     Returns the height of the text, including the height past the height
     that is covered if the text does not fit within the set height.
@@ -2579,7 +2611,7 @@ void QQuickTextInput::moveCursorSelection(int pos, SelectionMode mode)
 
     if (mode == SelectCharacters) {
         d->moveCursor(pos, true);
-    } else if (pos != d->m_cursor){
+    } else if (pos != d->m_cursor) {
         const int cursor = d->m_cursor;
         int anchor;
         if (!d->hasSelectedText())
@@ -2682,7 +2714,7 @@ void QQuickTextInput::focusOutEvent(QFocusEvent *event)
 
 /*!
     \qmlproperty bool QtQuick::TextInput::inputMethodComposing
-
+    \readonly
 
     This property holds whether the TextInput has partial text input from an
     input method.
@@ -2748,11 +2780,13 @@ void QQuickTextInputPrivate::init()
     m_inputControl = new QInputControl(QInputControl::LineEdit, q);
 }
 
-void QQuickTextInputPrivate::resetInputMethod()
+void QQuickTextInputPrivate::cancelInput()
 {
+#if QT_CONFIG(im)
     Q_Q(QQuickTextInput);
     if (!m_readOnly && q->hasActiveFocus() && qGuiApp)
-        QGuiApplication::inputMethod()->reset();
+        cancelPreedit();
+#endif // im
 }
 
 void QQuickTextInput::updateCursorRectangle(bool scroll)
@@ -2908,6 +2942,31 @@ void QQuickTextInputPrivate::updateDisplayText(bool forceUpdate)
     }
 }
 
+qreal QQuickTextInputPrivate::calculateImplicitWidthForText(const QString &text) const
+{
+    Q_Q(const QQuickTextInput);
+    QTextLayout layout(text);
+
+    QTextOption option = m_textLayout.textOption();
+    option.setTextDirection(m_layoutDirection);
+    option.setFlags(QTextOption::IncludeTrailingSpaces);
+    option.setWrapMode(QTextOption::WrapMode(wrapMode));
+    option.setAlignment(Qt::Alignment(q->effectiveHAlign()));
+    layout.setTextOption(option);
+    layout.setFont(font);
+#if QT_CONFIG(im)
+    layout.setPreeditArea(m_textLayout.preeditAreaPosition(), m_textLayout.preeditAreaText());
+#endif
+    layout.beginLayout();
+
+    QTextLine line = layout.createLine();
+    line.setLineWidth(INT_MAX);
+    const qreal theImplicitWidth = qCeil(line.naturalTextWidth()) + q->leftPadding() + q->rightPadding();
+
+    layout.endLayout();
+    return theImplicitWidth;
+}
+
 qreal QQuickTextInputPrivate::getImplicitWidth() const
 {
     Q_Q(const QQuickTextInput);
@@ -2915,29 +2974,8 @@ qreal QQuickTextInputPrivate::getImplicitWidth() const
         QQuickTextInputPrivate *d = const_cast<QQuickTextInputPrivate *>(this);
         d->requireImplicitWidth = true;
 
-        if (q->isComponentComplete()) {
-            // One time cost, only incurred if implicitWidth is first requested after
-            // componentComplete.
-            QTextLayout layout(m_text);
-
-            QTextOption option = m_textLayout.textOption();
-            option.setTextDirection(m_layoutDirection);
-            option.setFlags(QTextOption::IncludeTrailingSpaces);
-            option.setWrapMode(QTextOption::WrapMode(wrapMode));
-            option.setAlignment(Qt::Alignment(q->effectiveHAlign()));
-            layout.setTextOption(option);
-            layout.setFont(font);
-#if QT_CONFIG(im)
-            layout.setPreeditArea(m_textLayout.preeditAreaPosition(), m_textLayout.preeditAreaText());
-#endif
-            layout.beginLayout();
-
-            QTextLine line = layout.createLine();
-            line.setLineWidth(INT_MAX);
-            d->implicitWidth = qCeil(line.naturalTextWidth()) + q->leftPadding() + q->rightPadding();
-
-            layout.endLayout();
-        }
+        if (q->isComponentComplete())
+            d->implicitWidth = calculateImplicitWidthForText(m_text);
     }
     return implicitWidth;
 }
@@ -3294,7 +3332,7 @@ void QQuickTextInputPrivate::setSelection(int start, int length)
         m_selstart = start;
         m_selend = qMin(start + length, m_text.length());
         m_cursor = m_selend;
-    } else if (length < 0){
+    } else if (length < 0) {
         if (start == m_selend && start + length == m_selstart && m_cursor == m_selstart)
             return;
         m_selstart = qMax(start + length, 0);
@@ -3456,7 +3494,12 @@ void QQuickTextInputPrivate::processInputMethodEvent(QInputMethodEvent *event)
     for (int i = 0; i < event->attributes().size(); ++i) {
         const QInputMethodEvent::Attribute &a = event->attributes().at(i);
         if (a.type == QInputMethodEvent::Selection) {
-            m_cursor = qBound(0, a.start + a.length, m_text.length());
+            // If we already called internalInsert(), the cursor position will
+            // already be adjusted correctly. The attribute.start does
+            // not seem to take the mask into account, so it will reset cursor
+            // to an invalid position in such case.
+            if (!cursorPositionChanged)
+                m_cursor = qBound(0, a.start + a.length, m_text.length());
             if (a.length) {
                 m_selstart = qMax(0, qMin(a.start, m_text.length()));
                 m_selend = m_cursor;
@@ -3564,7 +3607,7 @@ bool QQuickTextInputPrivate::finishChange(int validateFromState, bool update, bo
 {
     Q_Q(QQuickTextInput);
 
-    Q_UNUSED(update)
+    Q_UNUSED(update);
 #if QT_CONFIG(im)
     bool inputMethodAttributesChanged = m_textDirty || m_selDirty;
 #endif
@@ -3686,7 +3729,7 @@ void QQuickTextInputPrivate::internalSetText(const QString &txt, int pos, bool e
 
     bool changed = finishChange(-1, true, edited);
 #if !QT_CONFIG(accessibility)
-    Q_UNUSED(changed)
+    Q_UNUSED(changed);
 #else
     Q_Q(QQuickTextInput);
     if (changed && QAccessible::isActive()) {
@@ -3709,7 +3752,7 @@ void QQuickTextInputPrivate::addCommand(const Command &cmd)
 {
     if (m_separator && m_undoState && m_history[m_undoState - 1].type != Separator) {
         m_history.resize(m_undoState + 2);
-        m_history[m_undoState++] = Command(Separator, m_cursor, 0, m_selstart, m_selend);
+        m_history[m_undoState++] = Command(Separator, m_cursor, u'\0', m_selstart, m_selend);
     } else {
         m_history.resize(m_undoState + 1);
     }
@@ -3748,7 +3791,7 @@ void QQuickTextInputPrivate::internalInsert(const QString &s)
     } else {
         int remaining = m_maxLength - m_text.length();
         if (remaining != 0) {
-            const QStringRef remainingStr = s.leftRef(remaining);
+            const QStringView remainingStr = QStringView{s}.left(remaining);
             m_text.insert(m_cursor, remainingStr);
             for (auto e : remainingStr)
                addCommand(Command(Insert, m_cursor++, e, -1, -1));
@@ -3836,7 +3879,7 @@ bool QQuickTextInputPrivate::separateSelection()
 {
     if (hasSelectedText()) {
         separate();
-        addCommand(Command(SetSelection, m_cursor, 0, m_selstart, m_selend));
+        addCommand(Command(SetSelection, m_cursor, u'\0', m_selstart, m_selend));
         return true;
     } else {
         return false;
@@ -3871,7 +3914,7 @@ void QQuickTextInputPrivate::parseInputMask(const QString &maskFields)
 
     // calculate m_maxLength / m_maskData length
     m_maxLength = 0;
-    QChar c = 0;
+    QChar c = u'\0';
     for (int i=0; i<m_inputMask.length(); i++) {
         c = m_inputMask.at(i);
         if (i > 0 && m_inputMask.at(i-1) == QLatin1Char('\\')) {
@@ -3888,7 +3931,7 @@ void QQuickTextInputPrivate::parseInputMask(const QString &maskFields)
     m_maskData.reset(new MaskInputData[m_maxLength]);
 
     MaskInputData::Casemode m = MaskInputData::NoCaseMode;
-    c = 0;
+    c = u'\0';
     bool s;
     bool escape = false;
     int index = 0;
@@ -4102,14 +4145,14 @@ QString QQuickTextInputPrivate::maskString(uint pos, const QString &str, bool cl
                     int n = findInMask(i, true, true, str[strIndex]);
                     if (n != -1) {
                         if (str.length() != 1 || i == 0 || (i > 0 && (!m_maskData[i-1].separator || m_maskData[i-1].maskChar != str[strIndex]))) {
-                            s += fill.midRef(i, n-i+1);
+                            s += QStringView{fill}.mid(i, n-i+1);
                             i = n + 1; // update i to find + 1
                         }
                     } else {
                         // search for valid m_blank if not
                         n = findInMask(i, true, false, str[strIndex]);
                         if (n != -1) {
-                            s += fill.midRef(i, n-i);
+                            s += QStringView{fill}.mid(i, n-i);
                             switch (m_maskData[n].caseMode) {
                             case MaskInputData::Upper:
                                 s += str[strIndex].toUpper();
@@ -4414,8 +4457,6 @@ void QQuickTextInputPrivate::processKeyEvent(QKeyEvent* event)
 
             QInputMethod *inputMethod = QGuiApplication::inputMethod();
             inputMethod->commit();
-            if (!(q->inputMethodHints() & Qt::ImhMultiLine))
-                inputMethod->hide();
 
             if (activeFocus) {
                 // If we lost focus after hiding the virtual keyboard, we've already emitted
@@ -4621,7 +4662,7 @@ void QQuickTextInputPrivate::processKeyEvent(QKeyEvent* event)
 void QQuickTextInputPrivate::deleteStartOfWord()
 {
     int priorState = m_undoState;
-    Command cmd(SetSelection, m_cursor, 0, m_selstart, m_selend);
+    Command cmd(SetSelection, m_cursor, u'\0', m_selstart, m_selend);
     separate();
     cursorWordBackward(true);
     addCommand(cmd);
@@ -4638,7 +4679,7 @@ void QQuickTextInputPrivate::deleteStartOfWord()
 void QQuickTextInputPrivate::deleteEndOfWord()
 {
     int priorState = m_undoState;
-    Command cmd(SetSelection, m_cursor, 0, m_selstart, m_selend);
+    Command cmd(SetSelection, m_cursor, u'\0', m_selstart, m_selend);
     separate();
     cursorWordForward(true);
     // moveCursor (sometimes) calls separate() so we need to add the command after that so the
@@ -4657,7 +4698,7 @@ void QQuickTextInputPrivate::deleteEndOfWord()
 void QQuickTextInputPrivate::deleteEndOfLine()
 {
     int priorState = m_undoState;
-    Command cmd(SetSelection, m_cursor, 0, m_selstart, m_selend);
+    Command cmd(SetSelection, m_cursor, u'\0', m_selstart, m_selend);
     separate();
     setSelection(m_cursor, end());
     addCommand(cmd);
@@ -4695,7 +4736,7 @@ void QQuickTextInput::ensureVisible(int position)
 void QQuickTextInput::clear()
 {
     Q_D(QQuickTextInput);
-    d->resetInputMethod();
+    d->cancelInput();
     d->clear();
 }
 
@@ -4832,6 +4873,23 @@ void QQuickTextInput::resetBottomPadding()
     Q_D(QQuickTextInput);
     d->setBottomPadding(0, true);
 }
+
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
+void QQuickTextInput::setOldSelectionDefault()
+{
+    Q_D(QQuickTextInput);
+    d->selectByMouse = false;
+    d->selectByTouchDrag = true;
+    qCDebug(lcQuickTextInput, "pre-6.4 behavior chosen: selectByMouse defaults false; if enabled, touchscreen acts like a mouse");
+}
+
+// TODO in 6.7.0: remove the note about versions prior to 6.4 in selectByMouse() documentation
+QQuickPre64TextInput::QQuickPre64TextInput(QQuickItem *parent)
+    : QQuickTextInput(parent)
+{
+    setOldSelectionDefault();
+}
+#endif
 
 QT_END_NAMESPACE
 

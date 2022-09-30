@@ -4,13 +4,14 @@
 
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
 #include "ui/events/blink/blink_event_util.h"
 
@@ -25,11 +26,10 @@ LocalFrame* SingleChildLocalFrameClient::CreateFrame(
       MakeGarbageCollected<LocalFrameClientWithParent>(parent_frame);
   LocalFrame* child = MakeGarbageCollected<LocalFrame>(
       child_client, *parent_frame->GetPage(), owner_element, parent_frame,
-      nullptr, FrameInsertType::kInsertInConstructor,
-      base::UnguessableToken::Create(), &parent_frame->window_agent_factory(),
-      nullptr);
-  child->CreateView(IntSize(500, 500), Color::kTransparent);
-  child->Init(nullptr);
+      nullptr, FrameInsertType::kInsertInConstructor, LocalFrameToken(),
+      &parent_frame->window_agent_factory(), nullptr);
+  child->CreateView(gfx::Size(500, 500), Color::kTransparent);
+  child->Init(/*opener=*/nullptr, /*policy_container=*/nullptr);
 
   return child;
 }
@@ -42,7 +42,7 @@ void RenderingTestChromeClient::InjectGestureScrollEvent(
     LocalFrame& local_frame,
     WebGestureDevice device,
     const gfx::Vector2dF& delta,
-    ScrollGranularity granularity,
+    ui::ScrollGranularity granularity,
     CompositorElementId scrollable_area_element_id,
     WebInputEvent::Type injected_type) {
   // Directly handle injected gesture scroll events. In a real browser, these
@@ -91,11 +91,9 @@ HitTestResult::NodeSet RenderingTest::RectBasedHitTest(
 }
 
 void RenderingTest::SetUp() {
-  Page::PageClients page_clients;
-  FillWithEmptyClients(page_clients);
   GetChromeClient().SetUp();
-  page_clients.chrome_client = &GetChromeClient();
-  SetupPageWithClients(&page_clients, local_frame_client_, SettingOverrider());
+  SetupPageWithClients(&GetChromeClient(), local_frame_client_,
+                       SettingOverrider());
   EXPECT_TRUE(
       GetDocument().GetPage()->GetScrollbarTheme().UsesOverlayScrollbars());
 

@@ -70,7 +70,7 @@ base::Optional<MappingId> SequenceStackProfileTracker::AddMapping(
   NullTermStringView raw_build_id_str =
       context_->storage->GetString(raw_build_id);
   StringId build_id = GetEmptyStringId();
-  if (raw_build_id_str.size() > 0) {
+  if (!raw_build_id_str.empty()) {
     // If the build_id is 33 characters long, we assume it's a Breakpad debug
     // identifier which is already in Hex and doesn't need conversion.
     // TODO(b/148109467): Remove workaround once all active Chrome versions
@@ -185,7 +185,7 @@ base::Optional<FrameId> SequenceStackProfileTracker::AddFrame(
       cur_id = frames->Insert(row).id;
       context_->global_stack_profile_tracker->InsertFrameRow(
           mapping_id, static_cast<uint64_t>(row.rel_pc), *cur_id);
-      if (name.find('.') != std::string::npos) {
+      if (base::Contains(name, '.')) {
         // Java frames always contain a '.'
         base::Optional<std::string> package =
             PackageFromLocation(context_->storage.get(), mapping_name);

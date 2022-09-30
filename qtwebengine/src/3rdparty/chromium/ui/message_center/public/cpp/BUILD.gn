@@ -24,7 +24,9 @@ jumbo_component("cpp") {
 
   deps = [
     "//base",
+    "//build:chromeos_buildflags",
     "//skia",
+    "//ui/base",
     "//ui/gfx",
     "//ui/strings",
     "//url",

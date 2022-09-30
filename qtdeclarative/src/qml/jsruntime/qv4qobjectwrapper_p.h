@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QV4QOBJECTWRAPPER_P_H
 #define QV4QOBJECTWRAPPER_P_H
@@ -92,34 +56,31 @@ struct Q_QML_EXPORT QObjectWrapper : Object {
     static void markObjects(Heap::Base *that, MarkStack *markStack);
 
 private:
-    QQmlQPointer<QObject> qObj;
+    QV4QPointer<QObject> qObj;
 };
 
 #define QObjectMethodMembers(class, Member) \
     Member(class, Pointer, QQmlValueTypeWrapper *, valueTypeWrapper) \
-    Member(class, NoMark, QQmlQPointer<QObject>, qObj) \
-    Member(class, NoMark, QQmlPropertyCache *, _propertyCache) \
+    Member(class, NoMark, QV4QPointer<QObject>, qObj) \
     Member(class, NoMark, int, index)
 
 DECLARE_HEAP_OBJECT(QObjectMethod, FunctionObject) {
     DECLARE_MARKOBJECTS(QObjectMethod);
 
+    QQmlPropertyData *methods;
+    int methodCount;
+    alignas(alignof(QQmlPropertyData)) std::byte _singleMethod[sizeof(QQmlPropertyData)];
+
     void init(QV4::ExecutionContext *scope);
     void destroy()
     {
-        setPropertyCache(nullptr);
+        if (methods != reinterpret_cast<const QQmlPropertyData *>(&_singleMethod))
+            delete[] methods;
         qObj.destroy();
         FunctionObject::destroy();
     }
 
-    QQmlPropertyCache *propertyCache() const { return _propertyCache; }
-    void setPropertyCache(QQmlPropertyCache *c) {
-        if (c)
-            c->addref();
-        if (_propertyCache)
-            _propertyCache->release();
-        _propertyCache = c;
-    }
+    void ensureMethodsCache();
 
     const QMetaObject *metaObject();
     QObject *object() const { return qObj.data(); }
@@ -149,7 +110,7 @@ struct QmlSignalHandler : Object {
     void setObject(QObject *o) { qObj = o; }
 
 private:
-    QQmlQPointer<QObject> qObj;
+    QV4QPointer<QObject> qObj;
 };
 
 }
@@ -165,10 +126,18 @@ struct Q_QML_EXPORT QObjectWrapper : public Object
 
     QObject *object() const { return d()->object(); }
 
-    ReturnedValue getQmlProperty(QQmlContextData *qmlContext, String *name, RevisionMode revisionMode, bool *hasProperty = nullptr, bool includeImports = false) const;
-    static ReturnedValue getQmlProperty(ExecutionEngine *engine, QQmlContextData *qmlContext, QObject *object, String *name, RevisionMode revisionMode, bool *hasProperty = nullptr, QQmlPropertyData **property = nullptr);
+    ReturnedValue getQmlProperty(
+            const QQmlRefPointer<QQmlContextData> &qmlContext, String *name,
+            RevisionMode revisionMode, bool *hasProperty = nullptr,
+            bool includeImports = false) const;
+    \
+    static ReturnedValue getQmlProperty(ExecutionEngine *engine, const QQmlRefPointer<QQmlContextData> &qmlContext,
+            QObject *object, String *name, RevisionMode revisionMode, bool *hasProperty = nullptr,
+            const QQmlPropertyData **property = nullptr);
 
-    static bool setQmlProperty(ExecutionEngine *engine, QQmlContextData *qmlContext, QObject *object, String *name, RevisionMode revisionMode, const Value &value);
+    static bool setQmlProperty(
+            ExecutionEngine *engine, const QQmlRefPointer<QQmlContextData> &qmlContext,
+            QObject *object, String *name, RevisionMode revisionMode, const Value &value);
 
     static ReturnedValue wrap(ExecutionEngine *engine, QObject *object);
     static void markWrapper(QObject *object, MarkStack *markStack);
@@ -177,24 +146,30 @@ struct Q_QML_EXPORT QObjectWrapper : public Object
 
     static void setProperty(ExecutionEngine *engine, QObject *object, int propertyIndex, const Value &value);
     void setProperty(ExecutionEngine *engine, int propertyIndex, const Value &value);
+    static void setProperty(
+            ExecutionEngine *engine, QObject *object,
+            const QQmlPropertyData *property, const Value &value);
 
     void destroyObject(bool lastCall);
 
-    static ReturnedValue getProperty(ExecutionEngine *engine, QObject *object, QQmlPropertyData *property);
+    static ReturnedValue getProperty(
+            ExecutionEngine *engine, QObject *object, const QQmlPropertyData *property);
 
     static ReturnedValue virtualResolveLookupGetter(const Object *object, ExecutionEngine *engine, Lookup *lookup);
-    static ReturnedValue lookupGetter(Lookup *l, ExecutionEngine *engine, const Value &object);
+    static ReturnedValue lookupAttached(Lookup *l, ExecutionEngine *engine, const Value &object);
+
     template <typename ReversalFunctor> static ReturnedValue lookupGetterImpl(Lookup *l, ExecutionEngine *engine, const Value &object, bool useOriginalProperty, ReversalFunctor revert);
     static bool virtualResolveLookupSetter(Object *object, ExecutionEngine *engine, Lookup *lookup, const Value &value);
 
 protected:
-    static void setProperty(ExecutionEngine *engine, QObject *object, QQmlPropertyData *property, const Value &value);
-
     static bool virtualIsEqualTo(Managed *that, Managed *o);
     static ReturnedValue create(ExecutionEngine *engine, QObject *object);
 
-    static QQmlPropertyData *findProperty(ExecutionEngine *engine, QObject *o, QQmlContextData *qmlContext, String *name, RevisionMode revisionMode, QQmlPropertyData *local);
-    QQmlPropertyData *findProperty(ExecutionEngine *engine, QQmlContextData *qmlContext, String *name, RevisionMode revisionMode, QQmlPropertyData *local) const;
+    static const QQmlPropertyData *findProperty(QObject *o, const QQmlRefPointer<QQmlContextData> &qmlContext,
+            String *name, RevisionMode revisionMode, QQmlPropertyData *local);
+
+    const QQmlPropertyData *findProperty(const QQmlRefPointer<QQmlContextData> &qmlContext,
+            String *name, RevisionMode revisionMode, QQmlPropertyData *local) const;
 
     static ReturnedValue virtualGet(const Managed *m, PropertyKey id, const Value *receiver, bool *hasProperty);
     static bool virtualPut(Managed *m, PropertyKey id, const Value &value, Value *receiver);
@@ -240,20 +215,20 @@ inline ReturnedValue QObjectWrapper::lookupGetterImpl(Lookup *lookup, ExecutionE
     if (!ddata)
         return revertLookup();
 
-    QQmlPropertyData *property = lookup->qobjectLookup.propertyData;
-    if (ddata->propertyCache != lookup->qobjectLookup.propertyCache) {
+    const QQmlPropertyData *property = lookup->qobjectLookup.propertyData;
+    if (ddata->propertyCache.data() != lookup->qobjectLookup.propertyCache) {
         if (property->isOverridden() && (!useOriginalProperty || property->isFunction() || property->isSignalHandler()))
             return revertLookup();
 
-        QQmlPropertyCache *fromMo = ddata->propertyCache;
-        QQmlPropertyCache *toMo = lookup->qobjectLookup.propertyCache;
+        const QQmlPropertyCache *fromMo = ddata->propertyCache.data();
+        const QQmlPropertyCache *toMo = lookup->qobjectLookup.propertyCache;
         bool canConvert = false;
         while (fromMo) {
             if (fromMo == toMo) {
                 canConvert = true;
                 break;
             }
-            fromMo = fromMo->parent();
+            fromMo = fromMo->parent().data();
         }
         if (!canConvert)
             return revertLookup();
@@ -303,9 +278,6 @@ protected:
 private:
     void init(ExecutionEngine *engine);
     ReturnedValue constructInternal(const Value *argv, int argc) const;
-    ReturnedValue callConstructor(const QQmlPropertyData &data, QV4::ExecutionEngine *engine, QV4::CallData *callArgs) const;
-    ReturnedValue callOverloadedConstructor(QV4::ExecutionEngine *engine, QV4::CallData *callArgs) const;
-
 };
 
 struct Q_QML_EXPORT QmlSignalHandler : public QV4::Object
@@ -327,6 +299,8 @@ class MultiplyWrappedQObjectMap : public QObject,
 public:
     typedef QHash<QObject*, QV4::WeakValue>::ConstIterator ConstIterator;
     typedef QHash<QObject*, QV4::WeakValue>::Iterator Iterator;
+
+    using value_type = QHash<QObject*, QV4::WeakValue>::value_type;
 
     ConstIterator begin() const { return QHash<QObject*, QV4::WeakValue>::constBegin(); }
     Iterator begin() { return QHash<QObject*, QV4::WeakValue>::begin(); }

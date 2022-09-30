@@ -16,16 +16,18 @@
 
 #include "tools/trace_to_text/utils.h"
 
-#include <inttypes.h>
 #include <stdio.h>
 
+#include <cinttypes>
 #include <memory>
 #include <ostream>
 #include <set>
 #include <utility>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/optional.h"
+#include "perfetto/ext/base/scoped_file.h"
 #include "perfetto/ext/base/string_splitter.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/trace_processor/trace_processor.h"
@@ -40,91 +42,11 @@ namespace perfetto {
 namespace trace_to_text {
 namespace {
 
-using trace_processor::Iterator;
-
 #if PERFETTO_BUILDFLAG(PERFETTO_ZLIB)
 constexpr size_t kCompressionBufferSize = 500 * 1024;
 #endif
 
-using ::protozero::proto_utils::MakeTagLengthDelimited;
-using ::protozero::proto_utils::WriteVarInt;
-
 }  // namespace
-
-void WriteTracePacket(const std::string& str, std::ostream* output) {
-  constexpr char kPreamble =
-      MakeTagLengthDelimited(protos::pbzero::Trace::kPacketFieldNumber);
-  uint8_t length_field[10];
-  uint8_t* end = WriteVarInt(str.size(), length_field);
-  *output << kPreamble;
-  *output << std::string(length_field, end);
-  *output << str;
-}
-
-void ForEachPacketBlobInTrace(
-    std::istream* input,
-    const std::function<void(std::unique_ptr<char[]>, size_t)>& f) {
-  size_t bytes_processed = 0;
-  // The trace stream can be very large. We cannot just pass it in one go to
-  // libprotobuf as that will refuse to parse messages > 64MB. However we know
-  // that a trace is merely a sequence of TracePackets. Here we just manually
-  // tokenize the repeated TracePacket messages and parse them individually
-  // using libprotobuf.
-  for (uint32_t i = 0;; i++) {
-    if ((i & 0x3f) == 0) {
-      fprintf(stderr, "Processing trace: %8zu KB%c", bytes_processed / 1024,
-              kProgressChar);
-      fflush(stderr);
-    }
-    // A TracePacket consists in one byte stating its field id and type ...
-    char preamble;
-    input->get(preamble);
-    if (!input->good())
-      break;
-    bytes_processed++;
-    PERFETTO_DCHECK(preamble == 0x0a);  // Field ID:1, type:length delimited.
-
-    // ... a varint stating its size ...
-    uint32_t field_size = 0;
-    uint32_t shift = 0;
-    for (;;) {
-      char c = 0;
-      input->get(c);
-      field_size |= static_cast<uint32_t>(c & 0x7f) << shift;
-      shift += 7;
-      bytes_processed++;
-      if (!(c & 0x80))
-        break;
-    }
-
-    // ... and the actual TracePacket itself.
-    std::unique_ptr<char[]> buf(new char[field_size]);
-    input->read(buf.get(), static_cast<std::streamsize>(field_size));
-    bytes_processed += field_size;
-
-    f(std::move(buf), field_size);
-  }
-}
-
-base::Optional<std::vector<ProguardMap>> GetPerfettoProguardMapPath() {
-  const char* env = getenv("PERFETTO_PROGUARD_MAP");
-  if (env == nullptr)
-    return base::nullopt;
-  std::vector<ProguardMap> res;
-  for (base::StringSplitter sp(std::string(env), ':'); sp.Next();) {
-    std::string token(sp.cur_token(), sp.cur_token_size());
-    size_t eq = token.find('=');
-    if (eq == std::string::npos) {
-      PERFETTO_ELOG(
-          "Invalid PERFETTO_PROGUARD_MAP. "
-          "Expected format packagename=filename[:packagename=filename...], "
-          "e.g. com.example.package1=foo.txt:com.example.package2=bar.txt.");
-      return base::nullopt;
-    }
-    res.emplace_back(ProguardMap{token.substr(0, eq), token.substr(eq + 1)});
-  }
-  return std::move(res);  // for Wreturn-std-move-in-c++11.
-}
 
 bool ReadTrace(trace_processor::TraceProcessor* tp, std::istream* input) {
   // 1MB chunk size seems the best tradeoff on a MacBook Pro 2013 - i7 2.8 GHz.
@@ -165,38 +87,14 @@ bool ReadTrace(trace_processor::TraceProcessor* tp, std::istream* input) {
   return true;
 }
 
-void MakeDeobfuscationPackets(
-    const std::string& package_name,
-    const std::map<std::string, profiling::ObfuscatedClass>& mapping,
-    std::function<void(const std::string&)> callback) {
-  protozero::HeapBuffered<perfetto::protos::pbzero::TracePacket> packet;
-  // TODO(fmayer): Add handling for package name and version code here so we
-  // can support multiple dumps in the same trace.
-  auto* proto_mapping = packet->set_deobfuscation_mapping();
-  proto_mapping->set_package_name(package_name);
-  for (const auto& p : mapping) {
-    const std::string& obfuscated_class_name = p.first;
-    const profiling::ObfuscatedClass& cls = p.second;
-
-    auto* proto_class = proto_mapping->add_obfuscated_classes();
-    proto_class->set_obfuscated_name(obfuscated_class_name);
-    proto_class->set_deobfuscated_name(cls.deobfuscated_name);
-    for (const auto& field_p : cls.deobfuscated_fields) {
-      const std::string& obfuscated_field_name = field_p.first;
-      const std::string& deobfuscated_field_name = field_p.second;
-      auto* proto_member = proto_class->add_obfuscated_members();
-      proto_member->set_obfuscated_name(obfuscated_field_name);
-      proto_member->set_deobfuscated_name(deobfuscated_field_name);
-    }
-    for (const auto& field_p : cls.deobfuscated_methods) {
-      const std::string& obfuscated_method_name = field_p.first;
-      const std::string& deobfuscated_method_name = field_p.second;
-      auto* proto_member = proto_class->add_obfuscated_methods();
-      proto_member->set_obfuscated_name(obfuscated_method_name);
-      proto_member->set_deobfuscated_name(deobfuscated_method_name);
-    }
+void IngestTraceOrDie(trace_processor::TraceProcessor* tp,
+                      const std::string& trace_proto) {
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[trace_proto.size()]);
+  memcpy(buf.get(), trace_proto.data(), trace_proto.size());
+  auto status = tp->Parse(std::move(buf), trace_proto.size());
+  if (!status.ok()) {
+    PERFETTO_DFATAL_OR_ELOG("Failed to parse: %s", status.message().c_str());
   }
-  callback(packet.SerializeAsString());
 }
 
 TraceWriter::TraceWriter(std::ostream* output) : output_(output) {}

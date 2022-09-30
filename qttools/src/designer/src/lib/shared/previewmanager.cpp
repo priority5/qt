@@ -1,65 +1,39 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
+#include "formwindowbase_p.h"
 #include "previewmanager_p.h"
 #include "qdesigner_formbuilder_p.h"
 #include "shared_settings_p.h"
-#include "shared_settings_p.h"
-#include "zoomwidget_p.h"
-#include "formwindowbase_p.h"
 #include "widgetfactory_p.h"
+#include "zoomwidget_p.h"
 
 #include <deviceskin.h>
 
-#include <QtDesigner/abstractformwindow.h>
 #include <QtDesigner/abstractformeditor.h>
+#include <QtDesigner/abstractformwindow.h>
 #include <QtDesigner/abstractformwindowmanager.h>
 #include <QtDesigner/abstractsettings.h>
 
-#include <QtWidgets/qwidget.h>
-#include <QtGui/qevent.h>
-#include <QtWidgets/qdesktopwidget.h>
-#include <QtWidgets/qmainwindow.h>
-#include <QtWidgets/qdockwidget.h>
 #include <QtWidgets/qapplication.h>
-#include <QtGui/qpixmap.h>
 #include <QtWidgets/qboxlayout.h>
 #include <QtWidgets/qdialog.h>
+#include <QtWidgets/qdockwidget.h>
+#include <QtWidgets/qmainwindow.h>
 #include <QtWidgets/qmenu.h>
-#include <QtWidgets/qaction.h>
-#include <QtWidgets/qactiongroup.h>
+
+#include <QtGui/qaction.h>
+#include <QtGui/qactiongroup.h>
 #include <QtGui/qcursor.h>
+#include <QtGui/qevent.h>
+#include <QtGui/qpixmap.h>
+#include <QtGui/qscreen.h>
 #include <QtGui/qtransform.h>
 
-#include <QtCore/qmap.h>
 #include <QtCore/qdebug.h>
+#include <QtCore/qlist.h>
+#include <QtCore/qmap.h>
 #include <QtCore/qshareddata.h>
-#include <QtCore/qvector.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -556,7 +530,7 @@ public:
 
     QPointer<QWidget> m_activePreview;
 
-    using PreviewDataList = QVector<PreviewData>;
+    using PreviewDataList = QList<PreviewData>;
 
     PreviewDataList m_previews;
 
@@ -778,9 +752,8 @@ QWidget *PreviewManager::showPreview(const QDesignerFormWindowInterface *fw,
         widget->move(fw->mapToGlobal(QPoint(Spacing, Spacing)));
     } else {
         if (QWidget *lastPreview = d->m_previews.constLast().m_widget) {
-            QDesktopWidget *desktop = qApp->desktop();
             const QRect lastPreviewGeometry = lastPreview->frameGeometry();
-            const QRect availGeometry = desktop->availableGeometry(lastPreview);
+            const QRect availGeometry = lastPreview->screen()->availableGeometry();
             const QPoint newPos = lastPreviewGeometry.topRight() + QPoint(Spacing, 0);
             if (newPos.x() +  size.width() < availGeometry.right())
                 widget->move(newPos);

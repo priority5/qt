@@ -5,15 +5,12 @@
 #ifndef CONTENT_BROWSER_MEDIA_CAPTURE_DESKTOP_CAPTURER_LACROS_H_
 #define CONTENT_BROWSER_MEDIA_CAPTURE_DESKTOP_CAPTURER_LACROS_H_
 
+#include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "chromeos/crosapi/mojom/screen_manager.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capturer.h"
-
-namespace crosapi {
-struct Bitmap;
-}  // namespace crosapi
 
 namespace content {
 
@@ -46,13 +43,9 @@ class DesktopCapturerLacros : public webrtc::DesktopCapturer {
   void SetExcludedWindow(webrtc::WindowId window) override;
 
  private:
-  // This method is used to lazily initialize screen_manager_ on the same
-  // affine sequence on which |Start| is called.
-  void EnsureScreenManager();
-
   // Callback for when ash-chrome returns a snapshot of the screen or window as
   // a bitmap.
-  void DidTakeSnapshot(bool success, const crosapi::Bitmap& snapshot);
+  void DidTakeSnapshot(bool success, const SkBitmap& snapshot);
 
   SEQUENCE_CHECKER(sequence_checker_);
 
@@ -77,6 +70,16 @@ class DesktopCapturerLacros : public webrtc::DesktopCapturer {
 
   // The remote connection to the screen manager.
   mojo::Remote<crosapi::mojom::ScreenManager> screen_manager_;
+
+  // A remote for an ash interface that is responsible for either capturing
+  // screen snapshots or window snapshots.
+  mojo::Remote<crosapi::mojom::SnapshotCapturer> snapshot_capturer_;
+
+#if DCHECK_IS_ON()
+  bool capturing_frame_ = false;
+#endif
+
+  base::WeakPtrFactory<DesktopCapturerLacros> weak_factory_{this};
 };
 
 }  // namespace content

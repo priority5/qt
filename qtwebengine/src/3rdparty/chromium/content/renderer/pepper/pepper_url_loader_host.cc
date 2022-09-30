@@ -300,7 +300,7 @@ int32_t PepperURLLoaderHost::InternalOnHostMsgOpen(
     }
   }
 
-  loader_.reset(frame->CreateAssociatedURLLoader(options));
+  loader_ = frame->CreateAssociatedURLLoader(options);
   if (!loader_.get())
     return PP_ERROR_FAILED;
 
@@ -329,8 +329,7 @@ int32_t PepperURLLoaderHost::OnHostMsgClose(
 int32_t PepperURLLoaderHost::OnHostMsgGrantUniversalAccess(
     ppapi::host::HostMessageContext* context) {
   // Only plugins with permission can bypass same origin.
-  if (host()->permissions().HasPermission(ppapi::PERMISSION_PDF) ||
-      host()->permissions().HasPermission(ppapi::PERMISSION_FLASH)) {
+  if (host()->permissions().HasPermission(ppapi::PERMISSION_PDF)) {
     has_universal_access_ = true;
     return PP_OK;
   }

@@ -22,28 +22,4 @@ bool StructTraits<blink::mojom::FetchAPIRequestBodyDataView,
   return true;
 }
 
-bool StructTraits<
-    blink::mojom::FetchAPIDataElementDataView,
-    network::DataElement>::Read(blink::mojom::FetchAPIDataElementDataView data,
-                                network::DataElement* out) {
-  base::Optional<std::string> blob_uuid;
-  if (!data.ReadPath(&out->path_) || !data.ReadBlobUuid(&blob_uuid) ||
-      !data.ReadExpectedModificationTime(&out->expected_modification_time_)) {
-    return false;
-  }
-  out->blob_uuid_ = std::move(blob_uuid).value_or(std::string());
-  if (data.type() == network::mojom::DataElementType::kBytes) {
-    if (!data.ReadBuf(&out->buf_))
-      return false;
-  }
-  out->type_ = data.type();
-  out->data_pipe_getter_ = data.TakeDataPipeGetter<
-      mojo::PendingRemote<network::mojom::DataPipeGetter>>();
-  out->chunked_data_pipe_getter_ = data.TakeChunkedDataPipeGetter<
-      mojo::PendingRemote<network::mojom::ChunkedDataPipeGetter>>();
-  out->offset_ = data.offset();
-  out->length_ = data.length();
-  return true;
-}
-
 }  // namespace mojo

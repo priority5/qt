@@ -25,11 +25,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_H_
 
+#include "base/time/time.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_result.h"
-#include "third_party/blink/renderer/core/probe/async_task_id.h"
+#include "third_party/blink/renderer/core/probe/async_task_context.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -39,6 +41,7 @@ class EventDispatcher;
 class EventInit;
 class EventPath;
 class EventTarget;
+class Node;
 class ScriptState;
 class ScriptValue;
 
@@ -180,7 +183,6 @@ class CORE_EXPORT Event : public ScriptWrappable {
   bool bubbles() const { return bubbles_; }
   bool cancelable() const { return cancelable_; }
   bool composed() const { return composed_; }
-  bool IsScopedInV0() const;
 
   // Event creation timestamp in milliseconds. It returns a DOMHighResTimeStamp
   // using the platform timestamp (see |platform_time_stamp_|).
@@ -306,7 +308,7 @@ class CORE_EXPORT Event : public ScriptWrappable {
 
   virtual DispatchEventResult DispatchEvent(EventDispatcher&);
 
-  probe::AsyncTaskId* async_task_id() { return &async_task_id_; }
+  probe::AsyncTaskContext* async_task_context() { return &async_task_context_; }
 
   void Trace(Visitor*) const override;
 
@@ -327,7 +329,6 @@ class CORE_EXPORT Event : public ScriptWrappable {
   unsigned bubbles_ : 1;
   unsigned cancelable_ : 1;
   unsigned composed_ : 1;
-  unsigned is_event_type_scoped_in_v0_ : 1;
 
   unsigned propagation_stopped_ : 1;
   unsigned immediate_propagation_stopped_ : 1;
@@ -352,7 +353,7 @@ class CORE_EXPORT Event : public ScriptWrappable {
 
   PassiveMode handling_passive_;
   uint8_t event_phase_;
-  probe::AsyncTaskId async_task_id_;
+  probe::AsyncTaskContext async_task_context_;
 
   Member<EventTarget> current_target_;
   Member<EventTarget> target_;

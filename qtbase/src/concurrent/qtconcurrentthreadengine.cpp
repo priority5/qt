@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtConcurrent module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qtconcurrentthreadengine.h"
 
@@ -160,8 +124,8 @@ bool ThreadEngineBarrier::releaseUnlessLast()
     }
 }
 
-ThreadEngineBase::ThreadEngineBase()
-:futureInterface(0), threadPool(QThreadPool::globalInstance())
+ThreadEngineBase::ThreadEngineBase(QThreadPool *pool)
+    : futureInterface(nullptr), threadPool(pool)
 {
     setAutoDelete(false);
 }
@@ -186,6 +150,12 @@ void ThreadEngineBase::acquireBarrierSemaphore()
     barrier.acquire();
 }
 
+void ThreadEngineBase::reportIfSuspensionDone() const
+{
+    if (futureInterface && futureInterface->isSuspending())
+        futureInterface->reportSuspended();
+}
+
 bool ThreadEngineBase::isCanceled()
 {
     if (futureInterface)
@@ -203,7 +173,7 @@ void ThreadEngineBase::waitForResume()
 bool ThreadEngineBase::isProgressReportingEnabled()
 {
     // If we don't have a QFuture, there is no-one to report the progress to.
-    return (futureInterface != 0);
+    return (futureInterface != nullptr);
 }
 
 void ThreadEngineBase::setProgressValue(int progress)
@@ -239,7 +209,7 @@ void ThreadEngineBase::startThreads()
 
 void ThreadEngineBase::threadExit()
 {
-    const bool asynchronous = futureInterface != 0;
+    const bool asynchronous = (futureInterface != nullptr);
     const int lastThread = (barrier.release() == 0);
 
     if (lastThread && asynchronous)
@@ -271,15 +241,22 @@ void ThreadEngineBase::run() // implements QRunnable.
             // struct wants to be throttled by making a worker thread exit.
             // Respect that request unless this is the only worker thread left
             // running, in which case it has to keep going.
-            if (threadThrottleExit())
+            if (threadThrottleExit()) {
                 return;
+            } else {
+                // If the last worker thread is throttled and the state is "suspending",
+                // it means that suspension has been requested, and it is already
+                // in effect (because all previous threads have already exited).
+                // Report the "Suspended" state.
+                reportIfSuspensionDone();
+            }
         }
 
 #ifndef QT_NO_EXCEPTIONS
     } catch (QException &e) {
         handleException(e);
     } catch (...) {
-        handleException(QUnhandledException());
+        handleException(QUnhandledException(std::current_exception()));
     }
 #endif
     threadExit();
@@ -289,15 +266,18 @@ void ThreadEngineBase::run() // implements QRunnable.
 
 void ThreadEngineBase::handleException(const QException &exception)
 {
-    if (futureInterface)
+    if (futureInterface) {
         futureInterface->reportException(exception);
-    else
-        exceptionStore.setException(exception);
+    } else {
+        QMutexLocker lock(&mutex);
+        if (!exceptionStore.hasException())
+            exceptionStore.setException(exception);
+    }
 }
 #endif
 
 
-} // namepsace QtConcurrent
+} // namespace QtConcurrent
 
 QT_END_NAMESPACE
 

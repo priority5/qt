@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
-#include "chromeos/dbus/cec_service_client.h"
+#include "chromeos/dbus/cec_service/cec_service_client.h"
+#include "chromeos/dbus/cec_service/fake_cec_service_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/fake_cec_service_client.h"
 #include "extensions/common/features/feature_session_type.h"
+#include "extensions/common/mojom/feature_session_type.mojom.h"
 #include "extensions/common/switches.h"
 #include "extensions/shell/test/shell_apitest.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -21,8 +21,12 @@ constexpr char kTestAppId[] = "jabiebdnficieldhmegebckfhpfidfla";
 class CecPrivateKioskApiTest : public ShellApiTest {
  public:
   CecPrivateKioskApiTest()
-      : session_type_(
-            ScopedCurrentFeatureSessionType(FeatureSessionType::KIOSK)) {}
+      : session_type_(ScopedCurrentFeatureSessionType(
+            mojom::FeatureSessionType::kKiosk)) {}
+
+  CecPrivateKioskApiTest(const CecPrivateKioskApiTest&) = delete;
+  CecPrivateKioskApiTest& operator=(const CecPrivateKioskApiTest&) = delete;
+
   ~CecPrivateKioskApiTest() override = default;
 
   void SetUpOnMainThread() override {
@@ -40,8 +44,7 @@ class CecPrivateKioskApiTest : public ShellApiTest {
   chromeos::FakeCecServiceClient* cec_ = nullptr;
 
  private:
-  std::unique_ptr<base::AutoReset<FeatureSessionType>> session_type_;
-  DISALLOW_COPY_AND_ASSIGN(CecPrivateKioskApiTest);
+  std::unique_ptr<base::AutoReset<mojom::FeatureSessionType>> session_type_;
 };
 
 using CecPrivateNonKioskApiTest = ShellApiTest;

@@ -5,11 +5,7 @@
 #ifndef UI_NATIVE_THEME_NATIVE_THEME_BASE_H_
 #define UI_NATIVE_THEME_NATIVE_THEME_BASE_H_
 
-#include <memory>
-
-#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "cc/paint/paint_flags.h"
 #include "ui/native_theme/native_theme.h"
 
@@ -23,20 +19,24 @@ namespace ui {
 // Theme support for non-Windows toolkits.
 class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
  public:
+  NativeThemeBase(const NativeThemeBase&) = delete;
+  NativeThemeBase& operator=(const NativeThemeBase&) = delete;
+
   // NativeTheme implementation:
   gfx::Size GetPartSize(Part part,
                         State state,
                         const ExtraParams& extra) const override;
   float GetBorderRadiusForPart(Part part,
                                float width,
-                               float height,
-                               float zoom) const override;
+                               float height) const override;
   void Paint(cc::PaintCanvas* canvas,
+             const ui::ColorProvider* color_provider,
              Part part,
              State state,
              const gfx::Rect& rect,
              const ExtraParams& extra,
-             ColorScheme color_scheme) const override;
+             ColorScheme color_scheme,
+             const absl::optional<SkColor>& accent_color) const override;
 
   bool SupportsNinePatch(Part part) const override;
   gfx::Size GetNinePatchCanvasSize(Part part) const override;
@@ -76,12 +76,21 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
     kScrollbarThumb,
     kScrollbarThumbHovered,
     kScrollbarThumbPressed,
-    kScrollbarThumbInactive
+    kScrollbarThumbInactive,
+    kButtonBorder,
+    kButtonDisabledBorder,
+    kButtonHoveredBorder,
+    kButtonPressedBorder,
+    kButtonFill,
+    kButtonDisabledFill,
+    kButtonHoveredFill,
+    kButtonPressedFill
   };
 
   using NativeTheme::NativeTheme;
   NativeThemeBase();
-  explicit NativeThemeBase(bool should_only_use_dark_colors);
+  explicit NativeThemeBase(bool should_only_use_dark_colors,
+                           bool is_custom_system_theme = false);
   ~NativeThemeBase() override;
 
   // Draw the arrow. Used by scrollbar and inner spin button.
@@ -103,6 +112,7 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
   // Draw the scrollbar thumb over the track.
   virtual void PaintScrollbarThumb(
       cc::PaintCanvas* canvas,
+      const ColorProvider* color_provider,
       Part part,
       State state,
       const gfx::Rect& rect,
@@ -118,13 +128,15 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
                      State state,
                      const gfx::Rect& rect,
                      const ButtonExtraParams& button,
-                     ColorScheme color_scheme) const;
+                     ColorScheme color_scheme,
+                     const absl::optional<SkColor>& accent_color) const;
 
   void PaintRadio(cc::PaintCanvas* canvas,
                   State state,
                   const gfx::Rect& rect,
                   const ButtonExtraParams& button,
-                  ColorScheme color_scheme) const;
+                  ColorScheme color_scheme,
+                  const absl::optional<SkColor>& accent_color) const;
 
   void PaintButton(cc::PaintCanvas* canvas,
                    State state,
@@ -146,11 +158,13 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
 
   virtual void PaintMenuPopupBackground(
       cc::PaintCanvas* canvas,
+      const ColorProvider* color_provider,
       const gfx::Size& size,
       const MenuBackgroundExtraParams& menu_background,
       ColorScheme color_scheme) const;
 
   virtual void PaintMenuItemBackground(cc::PaintCanvas* canvas,
+                                       const ColorProvider* color_provider,
                                        State state,
                                        const gfx::Rect& rect,
                                        const MenuItemExtraParams& menu_item,
@@ -158,22 +172,24 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
 
   virtual void PaintMenuSeparator(
       cc::PaintCanvas* canvas,
+      const ColorProvider* color_provider,
       State state,
       const gfx::Rect& rect,
-      const MenuSeparatorExtraParams& menu_separator,
-      ColorScheme color_scheme) const;
+      const MenuSeparatorExtraParams& menu_separator) const;
 
   void PaintSliderTrack(cc::PaintCanvas* canvas,
                         State state,
                         const gfx::Rect& rect,
                         const SliderExtraParams& slider,
-                        ColorScheme color_scheme) const;
+                        ColorScheme color_scheme,
+                        const absl::optional<SkColor>& accent_color) const;
 
   void PaintSliderThumb(cc::PaintCanvas* canvas,
                         State state,
                         const gfx::Rect& rect,
                         const SliderExtraParams& slider,
-                        ColorScheme color_scheme) const;
+                        ColorScheme color_scheme,
+                        const absl::optional<SkColor>& accent_color) const;
 
   virtual void PaintInnerSpinButton(
       cc::PaintCanvas* canvas,
@@ -186,7 +202,8 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
                         State state,
                         const gfx::Rect& rect,
                         const ProgressBarExtraParams& progress_bar,
-                        ColorScheme color_scheme) const;
+                        ColorScheme color_scheme,
+                        const absl::optional<SkColor>& accent_color) const;
 
   virtual void PaintFrameTopArea(cc::PaintCanvas* canvas,
                                  State state,
@@ -226,6 +243,18 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
   SkColor GetArrowColor(State state, ColorScheme color_scheme) const;
   SkColor GetControlColor(ControlColorId color_id,
                           ColorScheme color_scheme) const;
+  virtual SkColor ControlsAccentColorForState(State state,
+                                              ColorScheme color_scheme) const;
+  virtual SkColor ControlsSliderColorForState(State state,
+                                              ColorScheme color_scheme) const;
+  virtual SkColor ButtonBorderColorForState(State state,
+                                            ColorScheme color_scheme) const;
+  virtual SkColor ButtonFillColorForState(State state,
+                                          ColorScheme color_scheme) const;
+  virtual SkColor ControlsBorderColorForState(State state,
+                                              ColorScheme color_scheme) const;
+  virtual SkColor ControlsFillColorForState(State state,
+                                            ColorScheme color_scheme) const;
 
   int scrollbar_width_ = 15;
 
@@ -252,24 +281,18 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
 
   // Paint the common parts of the checkboxes and radio buttons.
   // border_radius specifies how rounded the corners should be.
-  SkRect PaintCheckboxRadioCommon(cc::PaintCanvas* canvas,
-                                  State state,
-                                  const gfx::Rect& rect,
-                                  const ButtonExtraParams& button,
-                                  bool is_checkbox,
-                                  const SkScalar border_radius,
-                                  ColorScheme color_scheme) const;
+  SkRect PaintCheckboxRadioCommon(
+      cc::PaintCanvas* canvas,
+      State state,
+      const gfx::Rect& rect,
+      const ButtonExtraParams& button,
+      bool is_checkbox,
+      const SkScalar border_radius,
+      ColorScheme color_scheme,
+      const absl::optional<SkColor>& accent_color) const;
 
-  SkColor ControlsAccentColorForState(State state,
-                                      ColorScheme color_scheme) const;
-  SkColor ControlsBorderColorForState(State state,
-                                      ColorScheme color_scheme) const;
-  SkColor ControlsFillColorForState(State state,
-                                    ColorScheme color_scheme) const;
   SkColor ControlsBackgroundColorForState(State state,
                                           ColorScheme color_scheme) const;
-  SkColor ControlsSliderColorForState(State state,
-                                      ColorScheme color_scheme) const;
   SkColor GetHighContrastControlColor(ControlColorId color_id,
                                       ColorScheme color_scheme) const;
   SkColor GetDarkModeControlColor(ControlColorId color_id) const;
@@ -281,8 +304,6 @@ class NATIVE_THEME_EXPORT NativeThemeBase : public NativeTheme {
 
   // The length of the arrow buttons, 0 means no buttons are drawn.
   int scrollbar_button_length_ = 14;
-
-  DISALLOW_COPY_AND_ASSIGN(NativeThemeBase);
 };
 
 }  // namespace ui

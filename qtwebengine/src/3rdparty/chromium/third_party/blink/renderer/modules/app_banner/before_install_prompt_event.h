@@ -22,7 +22,6 @@ namespace blink {
 class BeforeInstallPromptEvent;
 class BeforeInstallPromptEventInit;
 class ExceptionState;
-class LocalFrame;
 
 using UserChoiceProperty = ScriptPromiseProperty<Member<AppBannerPromptResult>,
                                                  ToV8UndefinedGenerator>;
@@ -36,7 +35,7 @@ class BeforeInstallPromptEvent final
 
  public:
   BeforeInstallPromptEvent(const AtomicString& name,
-                           LocalFrame&,
+                           ExecutionContext&,
                            mojo::PendingRemote<mojom::blink::AppBannerService>,
                            mojo::PendingReceiver<mojom::blink::AppBannerEvent>,
                            const Vector<String>& platforms);
@@ -47,7 +46,7 @@ class BeforeInstallPromptEvent final
 
   static BeforeInstallPromptEvent* Create(
       const AtomicString& name,
-      LocalFrame& frame,
+      ExecutionContext& frame,
       mojo::PendingRemote<mojom::blink::AppBannerService> service_remote,
       mojo::PendingReceiver<mojom::blink::AppBannerEvent> event_receiver,
       const Vector<String>& platforms) {
@@ -81,12 +80,8 @@ class BeforeInstallPromptEvent final
   void BannerAccepted(const String& platform) override;
   void BannerDismissed() override;
 
-  HeapMojoRemote<mojom::blink::AppBannerService,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      banner_service_remote_;
-  HeapMojoReceiver<mojom::blink::AppBannerEvent,
-                   BeforeInstallPromptEvent,
-                   HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoRemote<mojom::blink::AppBannerService> banner_service_remote_;
+  HeapMojoReceiver<mojom::blink::AppBannerEvent, BeforeInstallPromptEvent>
       receiver_;
   Vector<String> platforms_;
   Member<UserChoiceProperty> user_choice_;

@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
 #include "base/metrics/histogram_macros.h"
+#include "cc/metrics/event_metrics.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_input_event_attribution.h"
@@ -18,8 +19,7 @@ namespace blink {
 
 namespace {
 
-constexpr base::TimeDelta kMaxRafDelay =
-    base::TimeDelta::FromMilliseconds(5 * 1000);
+constexpr base::TimeDelta kMaxRafDelay = base::Milliseconds(5 * 1000);
 
 class QueuedClosure : public MainThreadEventQueueTask {
  public:
@@ -42,8 +42,7 @@ class QueuedClosure : public MainThreadEventQueueTask {
 
 // Time interval at which touchmove events during scroll will be skipped
 // during rAF signal.
-constexpr base::TimeDelta kAsyncTouchMoveInterval =
-    base::TimeDelta::FromMilliseconds(200);
+constexpr base::TimeDelta kAsyncTouchMoveInterval = base::Milliseconds(200);
 
 }  // namespace
 
@@ -53,19 +52,38 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
                       bool originally_cancelable,
                       HandledEventCallback callback,
                       bool known_by_scheduler,
-                      const WebInputEventAttribution& attribution)
+                      const WebInputEventAttribution& attribution,
+                      std::unique_ptr<cc::EventMetrics> metrics)
       : event_(std::move(event)),
         originally_cancelable_(originally_cancelable),
         callback_(std::move(callback)),
         known_by_scheduler_count_(known_by_scheduler ? 1 : 0),
-        attribution_(attribution) {}
+        attribution_(attribution),
+        metrics_(std::move(metrics)) {}
 
   ~QueuedWebInputEvent() override {}
 
-  bool AreCoalescablePointerRawUpdateEvents(QueuedWebInputEvent* other_event) {
+  static std::unique_ptr<QueuedWebInputEvent> CreateForRawEvent(
+      std::unique_ptr<WebCoalescedInputEvent> raw_event,
+      const WebInputEventAttribution& attribution,
+      const cc::EventMetrics* original_metrics) {
+    DCHECK_EQ(raw_event->Event().GetType(),
+              WebInputEvent::Type::kPointerRawUpdate);
+    std::unique_ptr<cc::EventMetrics> metrics =
+        cc::EventMetrics::CreateFromExisting(
+            raw_event->Event().GetTypeAsUiEventType(),
+            cc::EventMetrics::DispatchStage::kRendererCompositorFinished,
+            original_metrics);
+    return std::make_unique<QueuedWebInputEvent>(
+        std::move(raw_event), false, HandledEventCallback(), false, attribution,
+        std::move(metrics));
+  }
+
+  bool AreCoalescablePointerRawUpdateEvents(
+      const QueuedWebInputEvent& other_event) {
     // There is no pointermove at this point in the queue.
     DCHECK(event_->Event().GetType() != WebInputEvent::Type::kPointerMove &&
-           other_event->event_->Event().GetType() !=
+           other_event.event_->Event().GetType() !=
                WebInputEvent::Type::kPointerMove);
     // Events with modifiers differing by kRelativeMotionEvent should not be
     // coalesced. In case of a pointer lock, kRelativeMotionEvent is sent
@@ -74,11 +92,11 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
     // coalesced.
     return event_->Event().GetType() ==
                WebInputEvent::Type::kPointerRawUpdate &&
-           other_event->event_->Event().GetType() ==
+           other_event.event_->Event().GetType() ==
                WebInputEvent::Type::kPointerRawUpdate &&
            ((event_->Event().GetModifiers() &
              blink::WebInputEvent::Modifiers::kRelativeMotionEvent) ==
-            (other_event->event_->Event().GetModifiers() &
+            (other_event.event_->Event().GetModifiers() &
              blink::WebInputEvent::Modifiers::kRelativeMotionEvent));
   }
 
@@ -100,7 +118,7 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
       // Two pointerevents may not be able to coalesce but we should continue
       // looking further down the queue if both of them were rawupdate or move
       // events and only their pointer_type, id, or event_type was different.
-      if (AreCoalescablePointerRawUpdateEvents(other_event))
+      if (AreCoalescablePointerRawUpdateEvents(*other_event))
         return FilterResult::KeepIterating;
       return FilterResult::StopIterating;
     }
@@ -109,13 +127,19 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
     // also save the trace_id to ensure the flow events correct show the
     // critical path.
     if (other_event->callback_) {
-      blocking_coalesced_callbacks_.push_back(
-          std::make_pair(std::move(other_event->callback_),
-                         other_event->event_->latency_info().trace_id()));
+      blocking_coalesced_callbacks_.emplace_back(
+          std::move(other_event->callback_),
+          other_event->event_->latency_info().trace_id());
     }
 
     known_by_scheduler_count_ += other_event->known_by_scheduler_count_;
     event_->CoalesceWith(*other_event->event_);
+    auto* metrics = metrics_ ? metrics_->AsScrollUpdate() : nullptr;
+    auto* other_metrics = other_event->metrics_
+                              ? other_event->metrics_->AsScrollUpdate()
+                              : nullptr;
+    if (metrics && other_metrics)
+      metrics->CoalesceWith(*other_metrics);
 
     // The newest event (|other_item|) always wins when updating fields.
     originally_cancelable_ = other_event->originally_cancelable_;
@@ -129,12 +153,12 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
     HandledEventCallback callback =
         base::BindOnce(&QueuedWebInputEvent::HandledEvent,
                        base::Unretained(this), base::RetainedRef(queue));
-    if (!queue->HandleEventOnMainThread(*event_, attribution(),
-                                        std::move(callback))) {
+    if (!queue->HandleEventOnMainThread(
+            *event_, attribution(), std::move(metrics_), std::move(callback))) {
       // The |callback| won't be run, so our stored |callback_| should run
       // indicating error.
       HandledEvent(queue, mojom::blink::InputEventResultState::kNotConsumed,
-                   event_->latency_info(), nullptr, base::nullopt);
+                   event_->latency_info(), nullptr, absl::nullopt);
     }
   }
 
@@ -142,7 +166,7 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
                     mojom::blink::InputEventResultState ack_result,
                     const ui::LatencyInfo& latency_info,
                     mojom::blink::DidOverscrollParamsPtr overscroll,
-                    base::Optional<cc::TouchAction> touch_action) {
+                    absl::optional<cc::TouchAction> touch_action) {
     if (callback_) {
       std::move(callback_).Run(ack_result, latency_info, std::move(overscroll),
                                touch_action);
@@ -156,7 +180,7 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
       for (auto&& callback : blocking_coalesced_callbacks_) {
         coalesced_latency_info.set_trace_id(callback.second);
         std::move(callback.first)
-            .Run(ack_result, coalesced_latency_info, nullptr, base::nullopt);
+            .Run(ack_result, coalesced_latency_info, nullptr, absl::nullopt);
       }
     }
 
@@ -173,9 +197,9 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
     }
   }
 
-  bool originallyCancelable() const { return originally_cancelable_; }
+  bool originally_cancelable() const { return originally_cancelable_; }
 
-  WebInputEventAttribution attribution() const { return attribution_; }
+  const WebInputEventAttribution& attribution() const { return attribution_; }
 
   const WebInputEvent& Event() const { return event_->Event(); }
 
@@ -223,6 +247,8 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
   size_t known_by_scheduler_count_;
 
   const WebInputEventAttribution attribution_;
+
+  std::unique_ptr<cc::EventMetrics> metrics_;
 };
 
 MainThreadEventQueue::SharedState::SharedState()
@@ -256,6 +282,7 @@ void MainThreadEventQueue::HandleEvent(
     DispatchType original_dispatch_type,
     mojom::blink::InputEventResultState ack_result,
     const WebInputEventAttribution& attribution,
+    std::unique_ptr<cc::EventMetrics> metrics,
     HandledEventCallback callback) {
   TRACE_EVENT2("input", "MainThreadEventQueue::HandleEvent", "dispatch_type",
                original_dispatch_type, "event_type", event->Event().GetType());
@@ -330,34 +357,26 @@ void MainThreadEventQueue::HandleEvent(
 
   if (has_pointerrawupdate_handlers_) {
     if (event->Event().GetType() == WebInputEvent::Type::kMouseMove) {
-      std::unique_ptr<WebCoalescedInputEvent> raw_event =
-          std::make_unique<WebCoalescedInputEvent>(
-              std::make_unique<WebPointerEvent>(
-                  WebInputEvent::Type::kPointerRawUpdate,
-                  *(static_cast<WebMouseEvent*>(event->EventPointer()))),
-              event->latency_info());
-      std::unique_ptr<QueuedWebInputEvent> raw_queued_event(
-          new QueuedWebInputEvent(std::move(raw_event), false,
-                                  HandledEventCallback(), false, attribution));
-
-      QueueEvent(std::move(raw_queued_event));
+      auto raw_event = std::make_unique<WebCoalescedInputEvent>(
+          std::make_unique<WebPointerEvent>(
+              WebInputEvent::Type::kPointerRawUpdate,
+              static_cast<const WebMouseEvent&>(event->Event())),
+          event->latency_info());
+      QueueEvent(QueuedWebInputEvent::CreateForRawEvent(
+          std::move(raw_event), attribution, metrics.get()));
     } else if (event->Event().GetType() == WebInputEvent::Type::kTouchMove) {
       const WebTouchEvent& touch_event =
-          *static_cast<const WebTouchEvent*>(event->EventPointer());
+          static_cast<const WebTouchEvent&>(event->Event());
       for (unsigned i = 0; i < touch_event.touches_length; ++i) {
         const WebTouchPoint& touch_point = touch_event.touches[i];
         if (touch_point.state == WebTouchPoint::State::kStateMoved) {
-          std::unique_ptr<WebCoalescedInputEvent> raw_event =
-              std::make_unique<WebCoalescedInputEvent>(
-                  std::make_unique<WebPointerEvent>(touch_event, touch_point),
-                  event->latency_info());
+          auto raw_event = std::make_unique<WebCoalescedInputEvent>(
+              std::make_unique<WebPointerEvent>(touch_event, touch_point),
+              event->latency_info());
           raw_event->EventPointer()->SetType(
               WebInputEvent::Type::kPointerRawUpdate);
-          std::unique_ptr<QueuedWebInputEvent> raw_queued_event(
-              new QueuedWebInputEvent(std::move(raw_event), false,
-                                      HandledEventCallback(), false,
-                                      attribution));
-          QueueEvent(std::move(raw_queued_event));
+          QueueEvent(QueuedWebInputEvent::CreateForRawEvent(
+              std::move(raw_event), attribution, metrics.get()));
         }
       }
     }
@@ -369,15 +388,16 @@ void MainThreadEventQueue::HandleEvent(
   if (callback)
     cloned_latency_info = event->latency_info();
 
-  std::unique_ptr<QueuedWebInputEvent> queued_event(new QueuedWebInputEvent(
+  auto queued_event = std::make_unique<QueuedWebInputEvent>(
       std::move(event), originally_cancelable, std::move(event_callback),
-      IsForwardedAndSchedulerKnown(ack_result), attribution));
+      IsForwardedAndSchedulerKnown(ack_result), attribution,
+      std::move(metrics));
 
   QueueEvent(std::move(queued_event));
 
   if (callback) {
     std::move(callback).Run(ack_result, cloned_latency_info, nullptr,
-                            base::nullopt);
+                            absl::nullopt);
   }
 }
 
@@ -481,6 +501,9 @@ void MainThreadEventQueue::DispatchEvents() {
   }
 
   PossiblyScheduleMainFrame();
+
+  if (client_)
+    client_->InputEventsDispatched(/*raf_aligned=*/false);
 }
 
 static bool IsAsyncTouchMove(
@@ -493,7 +516,8 @@ static bool IsAsyncTouchMove(
     return false;
   const WebTouchEvent& touch_event =
       static_cast<const WebTouchEvent&>(event->Event());
-  return touch_event.moved_beyond_slop_region && !event->originallyCancelable();
+  return touch_event.moved_beyond_slop_region &&
+         !event->originally_cancelable();
 }
 
 void MainThreadEventQueue::RafFallbackTimerFired() {
@@ -547,6 +571,9 @@ void MainThreadEventQueue::DispatchRafAlignedInput(base::TimeTicks frame_time) {
   }
 
   PossiblyScheduleMainFrame();
+
+  if (client_)
+    client_->InputEventsDispatched(/*raf_aligned=*/true);
 }
 
 void MainThreadEventQueue::PostTaskToMainThread() {
@@ -645,16 +672,18 @@ void MainThreadEventQueue::HandleEventResampling(
 bool MainThreadEventQueue::HandleEventOnMainThread(
     const WebCoalescedInputEvent& event,
     const WebInputEventAttribution& attribution,
+    std::unique_ptr<cc::EventMetrics> metrics,
     HandledEventCallback handled_callback) {
   // Notify the scheduler that the main thread is about to execute handlers.
-  if (auto* scheduler = main_thread_scheduler_) {
-    scheduler->WillHandleInputEventOnMainThread(event.Event().GetType(),
-                                                attribution);
+  if (main_thread_scheduler_) {
+    main_thread_scheduler_->WillHandleInputEventOnMainThread(
+        event.Event().GetType(), attribution);
   }
 
   bool handled = false;
   if (client_) {
-    handled = client_->HandleInputEvent(event, std::move(handled_callback));
+    handled = client_->HandleInputEvent(event, std::move(metrics),
+                                        std::move(handled_callback));
   }
 
   if (needs_low_latency_until_pointer_up_) {

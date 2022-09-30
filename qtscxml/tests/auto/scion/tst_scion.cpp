@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtScxml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QtTest/QtTest>
 #include <QCoreApplication>
@@ -109,7 +84,7 @@ QByteArray DynamicLoader::load(const QString &name,
     QUrl url(name);
     if (!url.isLocalFile() && !url.isRelative())
         errs << QStringLiteral("src attribute is not a local file (%1)").arg(name);
-    QFileInfo fInfo = url.isLocalFile() ? url.toLocalFile() : name;
+    QFileInfo fInfo(url.isLocalFile() ? url.toLocalFile() : name);
     if (fInfo.isRelative())
         fInfo = QFileInfo(QDir(baseDir).filePath(fInfo.filePath()));
     fInfo = QFileInfo(QLatin1String(":/") + fInfo.filePath()); // take it from resources
@@ -383,6 +358,11 @@ QDebug operator<<(QDebug debug, const QScxmlEvent &event)
     obj.insert(QLatin1String("originType"), event.originType());
     obj.insert(QLatin1String("invokeid"), event.invokeId());
     return debug << obj;
+}
+
+QDebug operator<<(QDebug debug, const QList<QScxmlEvent> &events)
+{
+    return QtPrivate::printSequentialContainer(debug, "QList", events);
 }
 QT_END_NAMESPACE
 

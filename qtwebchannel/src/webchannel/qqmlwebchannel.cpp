@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com, author Milian Wolff <milian.wolff@kdab.com>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebChannel module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com, author Milian Wolff <milian.wolff@kdab.com>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qqmlwebchannel.h"
 
@@ -93,7 +57,7 @@ class QQmlWebChannelPrivate : public QWebChannelPrivate
 {
     Q_DECLARE_PUBLIC(QQmlWebChannel)
 public:
-    QVector<QObject*> registeredObjects;
+    QList<QObject *> registeredObjects;
 
     void _q_objectIdChanged(const QString &newId);
 };
@@ -204,10 +168,8 @@ void QQmlWebChannel::disconnectFrom(QObject *transport)
 
 QQmlListProperty<QObject> QQmlWebChannel::registeredObjects()
 {
-    return QQmlListProperty<QObject>(this, 0,
-                                     registeredObjects_append,
-                                     registeredObjects_count,
-                                     registeredObjects_at,
+    return QQmlListProperty<QObject>(this, nullptr, registeredObjects_append,
+                                     registeredObjects_count, registeredObjects_at,
                                      registeredObjects_clear);
 }
 
@@ -229,12 +191,12 @@ void QQmlWebChannel::registeredObjects_append(QQmlListProperty<QObject> *prop, Q
     connect(attached, SIGNAL(idChanged(QString)), channel, SLOT(_q_objectIdChanged(QString)));
 }
 
-int QQmlWebChannel::registeredObjects_count(QQmlListProperty<QObject> *prop)
+qsizetype QQmlWebChannel::registeredObjects_count(QQmlListProperty<QObject> *prop)
 {
     return static_cast<QQmlWebChannel*>(prop->object)->d_func()->registeredObjects.size();
 }
 
-QObject *QQmlWebChannel::registeredObjects_at(QQmlListProperty<QObject> *prop, int index)
+QObject *QQmlWebChannel::registeredObjects_at(QQmlListProperty<QObject> *prop, qsizetype index)
 {
     return static_cast<QQmlWebChannel*>(prop->object)->d_func()->registeredObjects.at(index);
 }
@@ -250,11 +212,8 @@ void QQmlWebChannel::registeredObjects_clear(QQmlListProperty<QObject> *prop)
 
 QQmlListProperty<QObject> QQmlWebChannel::transports()
 {
-    return QQmlListProperty<QObject>(this, 0,
-                                                           transports_append,
-                                                           transports_count,
-                                                           transports_at,
-                                                           transports_clear);
+    return QQmlListProperty<QObject>(this, nullptr, transports_append, transports_count,
+                                     transports_at, transports_clear);
 }
 
 void QQmlWebChannel::transports_append(QQmlListProperty<QObject> *prop, QObject *transport)
@@ -263,12 +222,12 @@ void QQmlWebChannel::transports_append(QQmlListProperty<QObject> *prop, QObject 
     channel->connectTo(transport);
 }
 
-int QQmlWebChannel::transports_count(QQmlListProperty<QObject> *prop)
+qsizetype QQmlWebChannel::transports_count(QQmlListProperty<QObject> *prop)
 {
     return static_cast<QQmlWebChannel*>(prop->object)->d_func()->transports.size();
 }
 
-QObject *QQmlWebChannel::transports_at(QQmlListProperty<QObject> *prop, int index)
+QObject *QQmlWebChannel::transports_at(QQmlListProperty<QObject> *prop, qsizetype index)
 {
     QQmlWebChannel *channel = static_cast<QQmlWebChannel*>(prop->object);
     return channel->d_func()->transports.at(index);

@@ -7,23 +7,21 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "content/browser/renderer_host/navigation_controller_impl.h"
 #include "content/common/content_export.h"
 #include "content/common/navigation_client.mojom.h"
-#include "content/common/navigation_params.h"
-#include "content/common/navigation_params.mojom.h"
 #include "content/public/browser/navigation_controller.h"
-#include "content/public/common/impression.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
-#include "third_party/blink/public/common/loader/previews_state.h"
-#include "third_party/blink/public/common/navigation/triggering_event_info.h"
-#include "third_party/blink/public/mojom/frame/navigation_initiator.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/navigation/impression.h"
+#include "third_party/blink/public/mojom/frame/triggering_event_info.mojom-shared.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom-forward.h"
 #include "ui/base/window_open_disposition.h"
 
 class GURL;
-struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 
 namespace base {
 class TimeTicks;
@@ -35,12 +33,14 @@ class ResourceRequestBody;
 
 namespace content {
 
+class BrowserContext;
 class FrameNavigationEntry;
+class FrameTree;
 class FrameTreeNode;
-class NavigationControllerImpl;
-class NavigatorDelegate;
+class NavigationControllerDelegate;
 class NavigationEntryImpl;
 class NavigationRequest;
+class NavigatorDelegate;
 class PrefetchedSignedExchangeCache;
 class RenderFrameHostImpl;
 class WebBundleHandleTracker;
@@ -51,8 +51,14 @@ struct UrlInfo;
 // FrameTree. Its lifetime is bound to the FrameTree.
 class CONTENT_EXPORT Navigator {
  public:
-  Navigator(NavigationControllerImpl* navigation_controller,
-            NavigatorDelegate* delegate);
+  Navigator(BrowserContext* browser_context,
+            FrameTree& frame_tree,
+            NavigatorDelegate* delegate,
+            NavigationControllerDelegate* navigation_controller_delegate);
+
+  Navigator(const Navigator&) = delete;
+  Navigator& operator=(const Navigator&) = delete;
+
   ~Navigator();
 
   // This method verifies that a navigation to |url| doesn't commit into a WebUI
@@ -65,7 +71,7 @@ class CONTENT_EXPORT Navigator {
   //   then the renderer process is misbehaving and must be terminated.
   // TODO(nasko): Remove the is_renderer_initiated_check parameter when callers
   // of this method are migrated to use CHECK instead of DumpWithoutCrashing.
-  static WARN_UNUSED_RESULT bool CheckWebUIRendererDoesNotDisplayNormalURL(
+  [[nodiscard]] static bool CheckWebUIRendererDoesNotDisplayNormalURL(
       RenderFrameHostImpl* render_frame_host,
       const UrlInfo& url_info,
       bool is_renderer_initiated_check);
@@ -76,9 +82,6 @@ class CONTENT_EXPORT Navigator {
 
   // Returns the delegate of this Navigator.
   NavigatorDelegate* GetDelegate();
-
-  // Returns the NavigationController associated with this Navigator.
-  NavigationController* GetController();
 
   // Notifications coming from the RenderFrameHosts ----------------------------
 
@@ -96,7 +99,7 @@ class CONTENT_EXPORT Navigator {
   // Navigator should use the NavigationRequest provided by this method and not
   // attempt to access the RenderFrameHost's NavigationsRequests.
   void DidNavigate(RenderFrameHostImpl* render_frame_host,
-                   const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
+                   const mojom::DidCommitProvisionalLoadParams& params,
                    std::unique_ptr<NavigationRequest> navigation_request,
                    bool was_within_same_document);
 
@@ -116,26 +119,28 @@ class CONTENT_EXPORT Navigator {
   // RendererDidNavigate on success or DiscardPendingEntry on failure. The
   // callbacks should be called in a future iteration of the message loop.
   void Navigate(std::unique_ptr<NavigationRequest> request,
-                ReloadType reload_type,
-                RestoreType restore_type);
+                ReloadType reload_type);
 
   // The RenderFrameHostImpl has received a request to open a URL with the
   // specified |disposition|.
   void RequestOpenURL(
       RenderFrameHostImpl* render_frame_host,
       const GURL& url,
-      const GlobalFrameRoutingId& initiator_routing_id,
-      const base::Optional<url::Origin>& initiator_origin,
+      const blink::LocalFrameToken* initiator_frame_token,
+      int initiator_process_id,
+      const absl::optional<url::Origin>& initiator_origin,
       const scoped_refptr<network::ResourceRequestBody>& post_body,
       const std::string& extra_headers,
       const Referrer& referrer,
       WindowOpenDisposition disposition,
       bool should_replace_current_entry,
       bool user_gesture,
-      blink::TriggeringEventInfo triggering_event_info,
+      // TODO(crbug.com/1315802): Refactor _unfencedTop handling.
+      bool is_unfenced_top_navigation,
+      blink::mojom::TriggeringEventInfo triggering_event_info,
       const std::string& href_translate,
       scoped_refptr<network::SharedURLLoaderFactory> blob_url_loader_factory,
-      const base::Optional<Impression>& impression);
+      const absl::optional<blink::Impression>& impression);
 
   // Called when a document requests a navigation in another document through a
   // RenderFrameProxy. If |method| is "POST", then |post_body| needs to specify
@@ -143,19 +148,23 @@ class CONTENT_EXPORT Navigator {
   void NavigateFromFrameProxy(
       RenderFrameHostImpl* render_frame_host,
       const GURL& url,
-      const GlobalFrameRoutingId& initiator_routing_id,
+      const blink::LocalFrameToken* initiator_frame_token,
+      int initiator_process_id,
       const url::Origin& initiator_origin,
       SiteInstance* source_site_instance,
       const Referrer& referrer,
       ui::PageTransition page_transition,
       bool should_replace_current_entry,
-      NavigationDownloadPolicy download_policy,
+      blink::NavigationDownloadPolicy download_policy,
       const std::string& method,
       scoped_refptr<network::ResourceRequestBody> post_body,
       const std::string& extra_headers,
       scoped_refptr<network::SharedURLLoaderFactory> blob_url_loader_factory,
+      network::mojom::SourceLocationPtr source_location,
       bool has_user_gesture,
-      const base::Optional<Impression>& impression);
+      const absl::optional<blink::Impression>& impression,
+      base::TimeTicks navigation_start_time,
+      absl::optional<bool> is_fenced_frame_opaque_url = absl::nullopt);
 
   // Called after BeforeUnloadCompleted callback is invoked from the renderer.
   // If |frame_tree_node| has a NavigationRequest waiting for the renderer
@@ -169,12 +178,10 @@ class CONTENT_EXPORT Navigator {
   // BeginNavigation IPC from the renderer.
   void OnBeginNavigation(
       FrameTreeNode* frame_tree_node,
-      mojom::CommonNavigationParamsPtr common_params,
-      mojom::BeginNavigationParamsPtr begin_params,
+      blink::mojom::CommonNavigationParamsPtr common_params,
+      blink::mojom::BeginNavigationParamsPtr begin_params,
       scoped_refptr<network::SharedURLLoaderFactory> blob_url_loader_factory,
       mojo::PendingAssociatedRemote<mojom::NavigationClient> navigation_client,
-      mojo::PendingRemote<blink::mojom::NavigationInitiator>
-          navigation_initiator,
       scoped_refptr<PrefetchedSignedExchangeCache>
           prefetched_signed_exchange_cache,
       std::unique_ptr<WebBundleHandleTracker> web_bundle_handle_tracker);
@@ -187,20 +194,20 @@ class CONTENT_EXPORT Navigator {
   // Cancel a NavigationRequest for |frame_tree_node|.
   void CancelNavigation(FrameTreeNode* frame_tree_node);
 
-  // Called when the network stack started handling the navigation request
-  // so that the |timestamp| when it happened can be recorded into an histogram.
-  // The |url| is used to verify we're tracking the correct navigation.
-  // TODO(carlosk): Remove the URL parameter and rename this method to better
-  // suit naming conventions.
-  void LogResourceRequestTime(base::TimeTicks timestamp, const GURL& url);
-
   // Called to record the time it took to execute the beforeunload hook for the
-  // current navigation.
+  // current navigation. See RenderFrameHostImpl::SendBeforeUnload() for details
+  // on `for_legacy`.
   void LogBeforeUnloadTime(base::TimeTicks renderer_before_unload_start_time,
                            base::TimeTicks renderer_before_unload_end_time,
-                           base::TimeTicks before_unload_sent_time);
+                           base::TimeTicks before_unload_sent_time,
+                           bool for_legacy);
 
-  NavigationControllerImpl* controller() { return controller_; }
+  // Called to record the time that the RenderFrameHost told the renderer to
+  // commit the current navigation.
+  void LogCommitNavigationSent();
+
+  // Returns the NavigationController associated with this Navigator.
+  NavigationControllerImpl& controller() { return controller_; }
 
  private:
   friend class NavigatorTestWithBrowserSideNavigation;
@@ -210,14 +217,15 @@ class CONTENT_EXPORT Navigator {
 
   void RecordNavigationMetrics(
       const LoadCommittedDetails& details,
-      const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
-      SiteInstance* site_instance);
+      const mojom::DidCommitProvisionalLoadParams& params,
+      SiteInstance* site_instance,
+      const GURL& original_request_url);
 
   // Called when a renderer initiated navigation has started. Returns the
   // pending NavigationEntry to be used. Either null or a new one owned
   // NavigationController.
   NavigationEntryImpl* GetNavigationEntryForRendererInitiatedNavigation(
-      const mojom::CommonNavigationParams& common_params,
+      const blink::mojom::CommonNavigationParams& common_params,
       FrameTreeNode* frame_tree_node);
 
   // Called to record the time it took to execute beforeunload handlers for
@@ -230,17 +238,13 @@ class CONTENT_EXPORT Navigator {
 
   // The NavigationController that will keep track of session history for all
   // RenderFrameHost objects using this Navigator.
-  // TODO(nasko): Move ownership of the NavigationController from
-  // WebContentsImpl to this class.
-  NavigationControllerImpl* controller_;
+  NavigationControllerImpl controller_;
 
   // Used to notify the object embedding this Navigator about navigation
   // events. Can be nullptr in tests.
-  NavigatorDelegate* delegate_;
+  raw_ptr<NavigatorDelegate> delegate_;
 
   std::unique_ptr<Navigator::NavigationMetricsData> navigation_data_;
-
-  DISALLOW_COPY_AND_ASSIGN(Navigator);
 };
 
 }  // namespace content

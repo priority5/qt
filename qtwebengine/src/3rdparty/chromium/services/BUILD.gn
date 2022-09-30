@@ -25,12 +25,13 @@ test("services_unittests") {
   deps = [
     "//services/cert_verifier:tests",
     "//services/cert_verifier/cert_net_url_loader:tests",
-    "//services/content:tests",
     "//services/metrics/public/cpp:tests",
     "//services/network:tests",
     "//services/network/public/cpp:tests",
     "//services/test:run_all_unittests",
   ]
+
+  data_deps = [ "//testing/buildbot/filters:services_unittests_filters" ]
 
   if (!is_ios) {
     deps += [
@@ -50,6 +51,10 @@ test("services_unittests") {
       "//services/viz/public/cpp/gpu:tests",
       "//services/viz/public/cpp/hit_test:tests",
     ]
+  }
+
+  if (is_win) {
+    deps += [ "//services/proxy_resolver_win:tests" ]
   }
 
   if (is_android) {
@@ -82,6 +87,13 @@ test("services_unittests") {
   if (is_fuchsia) {
     # Enable the test HTTP server for use by NetworkServiceTestWithService.*
     use_test_server = true
+    use_cfv2 = false
+    additional_manifest_fragments = [
+      # TODO(crbug.com/1185811): Figure out why jit_capabilities is needed.
+      "//build/config/fuchsia/test/jit_capabilities.test-cmx",
+
+      "//build/config/fuchsia/test/network_capabilities.test-cmx",
+    ]
   }
 }
 
@@ -125,7 +137,7 @@ if (is_android) {
       "//services/device/public/mojom:mojom_java",
       "//services/shape_detection:shape_detection_java",
       "//skia/public/mojom:mojom_java",
-      "//third_party/android_deps:androidx_annotation_annotation_java",
+      "//third_party/androidx:androidx_annotation_annotation_java",
     ]
   }
 
@@ -150,9 +162,10 @@ if (is_android) {
       "//services/shape_detection:shape_detection_java",
       "//services/shape_detection/public/mojom:mojom_java",
       "//skia/public/mojom:mojom_java",
-      "//third_party/android_deps:androidx_test_monitor_java",
-      "//third_party/android_deps:androidx_test_runner_java",
+      "//third_party/android_deps:chromium_play_services_availability_java",
       "//third_party/android_support_test_runner:runner_java",
+      "//third_party/androidx:androidx_test_monitor_java",
+      "//third_party/androidx:androidx_test_runner_java",
       "//third_party/junit",
       "//ui/gfx/geometry/mojom:mojom_java",
     ]

@@ -13,15 +13,17 @@ component("shared") {
 
   sources = [
     "constants.h",
-    "utils.cc",
     "utils.h",
   ]
 
-  if (enable_cros_libassistant) {
+  if (is_chromeos && is_chrome_branded) {
     sources += [ "//chromeos/assistant/internal/constants.cc" ]
   } else {
     sources += [ "constants.cc" ]
   }
 
-  deps = [ "//base:base" ]
+  deps = [
+    "//base:base",
+    "//chromeos/services/libassistant/public/cpp:structs",
+  ]
 }

@@ -30,9 +30,11 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
 
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
@@ -104,11 +106,13 @@ class MemoryCacheTest : public testing::Test {
     global_memory_cache_ = ReplaceMemoryCacheForTesting(
         MakeGarbageCollected<MemoryCache>(platform_->test_task_runner()));
     auto* properties = MakeGarbageCollected<TestResourceFetcherProperties>();
+    lifecycle_notifier_ = MakeGarbageCollected<MockContextLifecycleNotifier>();
     fetcher_ = MakeGarbageCollected<ResourceFetcher>(ResourceFetcherInit(
         properties->MakeDetachable(), MakeGarbageCollected<MockFetchContext>(),
         base::MakeRefCounted<scheduler::FakeTaskRunner>(),
-        MakeGarbageCollected<TestLoaderFactory>(),
-        MakeGarbageCollected<MockContextLifecycleNotifier>()));
+        base::MakeRefCounted<scheduler::FakeTaskRunner>(),
+        MakeGarbageCollected<TestLoaderFactory>(), lifecycle_notifier_,
+        nullptr /* back_forward_cache_loader_helper */));
   }
 
   void TearDown() override {
@@ -117,8 +121,12 @@ class MemoryCacheTest : public testing::Test {
 
   Persistent<MemoryCache> global_memory_cache_;
   Persistent<ResourceFetcher> fetcher_;
+  Persistent<MockContextLifecycleNotifier> lifecycle_notifier_;
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
       platform_;
+
+ private:
+  base::test::TaskEnvironment task_environment_;
 };
 
 // Verifies that setters and getters for cache capacities work correcty.
@@ -228,7 +236,7 @@ static void TestResourcePruningLater(ResourceFetcher* fetcher,
   platform->RunUntilIdle();
 
   // Now, the resources was pruned.
-  unsigned size_without_decode =
+  size_t size_without_decode =
       resource1->EncodedSize() + resource1->OverheadSize() +
       resource2->EncodedSize() + resource2->OverheadSize();
   EXPECT_EQ(size_without_decode, GetMemoryCache()->size());
@@ -312,7 +320,7 @@ static void TestClientRemoval(ResourceFetcher* fetcher,
   WeakPersistent<Resource> resource2_weak = resource2;
 
   ThreadState::Current()->CollectAllGarbageForTesting(
-      BlinkGC::kNoHeapPointersOnStack);
+      ThreadState::StackState::kNoHeapPointers);
   // Resources are garbage-collected (WeakMemoryCache) and thus removed
   // from MemoryCache.
   EXPECT_FALSE(resource1_weak);

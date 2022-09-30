@@ -13,12 +13,12 @@
 namespace blink {
 
 IdentifiabilityMetricBuilder::IdentifiabilityMetricBuilder(
-    base::UkmSourceId source_id)
+    ukm::SourceIdObj source_id)
     : source_id_(source_id) {}
 
 IdentifiabilityMetricBuilder::~IdentifiabilityMetricBuilder() = default;
 
-IdentifiabilityMetricBuilder& IdentifiabilityMetricBuilder::Set(
+IdentifiabilityMetricBuilder& IdentifiabilityMetricBuilder::Add(
     IdentifiableSurface surface,
     IdentifiableToken value) {
   metrics_.emplace_back(surface, value);

@@ -122,8 +122,8 @@ class TextureState final : private angle::NonCopyable
 
     bool isCubeComplete() const;
 
-    ANGLE_INLINE bool compatibleWithSamplerFormat(SamplerFormat format,
-                                                  const SamplerState &samplerState) const
+    ANGLE_INLINE bool compatibleWithSamplerFormatForWebGL(SamplerFormat format,
+                                                          const SamplerState &samplerState) const
     {
         if (!mCachedSamplerFormatValid ||
             mCachedSamplerCompareMode != samplerState.getCompareMode())
@@ -143,15 +143,18 @@ class TextureState final : private angle::NonCopyable
     const SwizzleState &getSwizzleState() const { return mSwizzleState; }
     const SamplerState &getSamplerState() const { return mSamplerState; }
     GLenum getUsage() const { return mUsage; }
+    bool hasProtectedContent() const { return mHasProtectedContent; }
     GLenum getDepthStencilTextureMode() const { return mDepthStencilTextureMode; }
     bool isStencilMode() const { return mDepthStencilTextureMode == GL_STENCIL_INDEX; }
 
     bool hasBeenBoundAsImage() const { return mHasBeenBoundAsImage; }
+    bool hasBeenBoundAsAttachment() const { return mHasBeenBoundAsAttachment; }
 
     gl::SrgbOverride getSRGBOverride() const { return mSrgbOverride; }
 
     // Returns the desc of the base level. Only valid for cube-complete/mip-complete textures.
     const ImageDesc &getBaseLevelDesc() const;
+    const ImageDesc &getLevelZeroDesc() const;
 
     // GLES1 emulation: For GL_OES_draw_texture
     void setCrop(const Rectangle &rect);
@@ -171,14 +174,19 @@ class TextureState final : private angle::NonCopyable
 
     InitState getInitState() const { return mInitState; }
 
+    const OffsetBindingPointer<Buffer> &getBuffer() const { return mBuffer; }
+
+    const std::string &getLabel() const { return mLabel; }
+
   private:
     // Texture needs access to the ImageDesc functions.
     friend class Texture;
-    // TODO(jmadill): Remove TextureGL from friends.
-    friend class rx::TextureGL;
     friend bool operator==(const TextureState &a, const TextureState &b);
 
     bool computeSamplerCompleteness(const SamplerState &samplerState, const State &state) const;
+    bool computeSamplerCompletenessForCopyImage(const SamplerState &samplerState,
+                                                const State &state) const;
+
     bool computeMipmapCompleteness() const;
     bool computeLevelCompleteness(TextureTarget target, size_t level) const;
     SamplerFormat computeRequiredSamplerFormat(const SamplerState &samplerState) const;
@@ -214,12 +222,16 @@ class TextureState final : private angle::NonCopyable
     GLenum mDepthStencilTextureMode;
 
     bool mHasBeenBoundAsImage;
+    bool mHasBeenBoundAsAttachment;
 
     bool mImmutableFormat;
     GLuint mImmutableLevels;
 
     // From GL_ANGLE_texture_usage
     GLenum mUsage;
+
+    // GL_EXT_protected_textures
+    bool mHasProtectedContent;
 
     std::vector<ImageDesc> mImageDescs;
 
@@ -230,11 +242,15 @@ class TextureState final : private angle::NonCopyable
     // GLES1 emulation: Generate-mipmap hint per texture
     GLenum mGenerateMipmapHint;
 
+    // GL_OES_texture_buffer / GLES3.2
+    OffsetBindingPointer<Buffer> mBuffer;
+
     InitState mInitState;
 
     mutable SamplerFormat mCachedSamplerFormat;
     mutable GLenum mCachedSamplerCompareMode;
     mutable bool mCachedSamplerFormatValid;
+    std::string mLabel;
 };
 
 bool operator==(const TextureState &a, const TextureState &b);
@@ -321,10 +337,23 @@ class Texture final : public RefCountObject<TextureID>,
     void setUsage(const Context *context, GLenum usage);
     GLenum getUsage() const;
 
+    void setProtectedContent(Context *context, bool hasProtectedContent);
+    bool hasProtectedContent() const override;
+
     const TextureState &getState() const { return mState; }
 
     void setBorderColor(const Context *context, const ColorGeneric &color);
     const ColorGeneric &getBorderColor() const;
+
+    angle::Result setBuffer(const Context *context, gl::Buffer *buffer, GLenum internalFormat);
+    angle::Result setBufferRange(const Context *context,
+                                 gl::Buffer *buffer,
+                                 GLenum internalFormat,
+                                 GLintptr offset,
+                                 GLsizeiptr size);
+    const OffsetBindingPointer<Buffer> &getBuffer() const;
+
+    GLint getRequiredTextureImageUnits(const Context *context) const;
 
     const TextureState &getTextureState() const;
 
@@ -390,6 +419,34 @@ class Texture final : public RefCountObject<TextureID>,
                                const Rectangle &sourceArea,
                                Framebuffer *source);
 
+    angle::Result copyRenderbufferSubData(Context *context,
+                                          const gl::Renderbuffer *srcBuffer,
+                                          GLint srcLevel,
+                                          GLint srcX,
+                                          GLint srcY,
+                                          GLint srcZ,
+                                          GLint dstLevel,
+                                          GLint dstX,
+                                          GLint dstY,
+                                          GLint dstZ,
+                                          GLsizei srcWidth,
+                                          GLsizei srcHeight,
+                                          GLsizei srcDepth);
+
+    angle::Result copyTextureSubData(Context *context,
+                                     const gl::Texture *srcTexture,
+                                     GLint srcLevel,
+                                     GLint srcX,
+                                     GLint srcY,
+                                     GLint srcZ,
+                                     GLint dstLevel,
+                                     GLint dstX,
+                                     GLint dstY,
+                                     GLint dstZ,
+                                     GLsizei srcWidth,
+                                     GLsizei srcHeight,
+                                     GLsizei srcDepth);
+
     angle::Result copyTexture(Context *context,
                               TextureTarget target,
                               GLint level,
@@ -420,7 +477,7 @@ class Texture final : public RefCountObject<TextureID>,
 
     angle::Result setStorageMultisample(Context *context,
                                         TextureType type,
-                                        GLsizei samples,
+                                        GLsizei samplesIn,
                                         GLint internalformat,
                                         const Extents &size,
                                         bool fixedSampleLocations);
@@ -433,7 +490,8 @@ class Texture final : public RefCountObject<TextureID>,
                                            MemoryObject *memoryObject,
                                            GLuint64 offset,
                                            GLbitfield createFlags,
-                                           GLbitfield usageFlags);
+                                           GLbitfield usageFlags,
+                                           const void *imageCreateInfoPNext);
 
     angle::Result setImageExternal(Context *context,
                                    TextureTarget target,
@@ -444,6 +502,11 @@ class Texture final : public RefCountObject<TextureID>,
                                    GLenum type);
 
     angle::Result setEGLImageTarget(Context *context, TextureType type, egl::Image *imageTarget);
+
+    angle::Result setStorageEGLImageTarget(Context *context,
+                                           TextureType type,
+                                           egl::Image *image,
+                                           const GLint *attrib_list);
 
     angle::Result generateMipmap(Context *context);
 
@@ -458,6 +521,8 @@ class Texture final : public RefCountObject<TextureID>,
     void signalDirtyStorage(InitState initState);
 
     bool isSamplerComplete(const Context *context, const Sampler *optionalSampler);
+    bool isSamplerCompleteForCopyImage(const Context *context,
+                                       const Sampler *optionalSampler) const;
 
     GLenum getImplementationColorReadFormat(const Context *context) const;
     GLenum getImplementationColorReadType(const Context *context) const;
@@ -471,6 +536,13 @@ class Texture final : public RefCountObject<TextureID>,
                               GLenum format,
                               GLenum type,
                               void *pixels);
+
+    angle::Result getCompressedTexImage(const Context *context,
+                                        const PixelPackState &packState,
+                                        Buffer *packBuffer,
+                                        TextureTarget target,
+                                        GLint level,
+                                        void *pixels);
 
     rx::TextureImpl *getImplementation() const { return mTexture; }
 
@@ -503,6 +575,7 @@ class Texture final : public RefCountObject<TextureID>,
     InitState initState(const ImageIndex &imageIndex) const override;
     InitState initState() const { return mState.mInitState; }
     void setInitState(const ImageIndex &imageIndex, InitState initState) override;
+    void setInitState(InitState initState);
 
     bool isBoundToFramebuffer(rx::Serial framebufferSerial) const
     {
@@ -548,9 +621,9 @@ class Texture final : public RefCountObject<TextureID>,
 
         // Image state
         DIRTY_BIT_BOUND_AS_IMAGE,
+        DIRTY_BIT_BOUND_AS_ATTACHMENT,
 
         // Misc
-        DIRTY_BIT_LABEL,
         DIRTY_BIT_USAGE,
         DIRTY_BIT_IMPLEMENTATION,
 
@@ -560,6 +633,11 @@ class Texture final : public RefCountObject<TextureID>,
 
     angle::Result syncState(const Context *context, Command source);
     bool hasAnyDirtyBit() const { return mDirtyBits.any(); }
+    bool hasAnyDirtyBitExcludingBoundAsAttachmentBit() const
+    {
+        static constexpr DirtyBits kBoundAsAttachment = DirtyBits({DIRTY_BIT_BOUND_AS_ATTACHMENT});
+        return mDirtyBits.any() && mDirtyBits != kBoundAsAttachment;
+    }
 
     // ObserverInterface implementation.
     void onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMessage message) override;
@@ -592,14 +670,19 @@ class Texture final : public RefCountObject<TextureID>,
 
     angle::Result handleMipmapGenerationHint(Context *context, int level);
 
+    angle::Result setEGLImageTargetImpl(Context *context,
+                                        TextureType type,
+                                        GLuint levels,
+                                        egl::Image *imageTarget);
+
     void signalDirtyState(size_t dirtyBit);
 
     TextureState mState;
     DirtyBits mDirtyBits;
     rx::TextureImpl *mTexture;
     angle::ObserverBinding mImplObserver;
-
-    std::string mLabel;
+    // For EXT_texture_buffer, observes buffer changes.
+    angle::ObserverBinding mBufferObserver;
 
     egl::Surface *mBoundSurface;
     egl::Stream *mBoundStream;

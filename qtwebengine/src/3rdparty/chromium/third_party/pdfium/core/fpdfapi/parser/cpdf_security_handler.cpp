@@ -19,7 +19,10 @@
 #include "core/fpdfapi/parser/cpdf_object.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
 #include "core/fxcrt/fx_random.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/check.h"
+#include "third_party/base/check_op.h"
+#include "third_party/base/cxx17_backports.h"
+#include "third_party/base/notreached.h"
 
 namespace {
 
@@ -70,15 +73,16 @@ void CalcEncryptKey(const CPDF_Dictionary* pEncrypt,
   memcpy(key, digest, copy_len);
 }
 
-bool IsValidKeyLengthForCipher(int cipher, size_t keylen) {
+bool IsValidKeyLengthForCipher(CPDF_CryptoHandler::Cipher cipher,
+                               size_t keylen) {
   switch (cipher) {
-    case FXCIPHER_AES:
+    case CPDF_CryptoHandler::Cipher::kAES:
       return keylen == 16 || keylen == 24 || keylen == 32;
-    case FXCIPHER_AES2:
+    case CPDF_CryptoHandler::Cipher::kAES2:
       return keylen == 32;
-    case FXCIPHER_RC4:
+    case CPDF_CryptoHandler::Cipher::kRC4:
       return keylen >= 5 && keylen <= 16;
-    case FXCIPHER_NONE:
+    case CPDF_CryptoHandler::Cipher::kNone:
       return true;
     default:
       NOTREACHED();
@@ -145,7 +149,7 @@ void Revision6_Hash(const ByteString& password,
         content.insert(std::end(content), vector, vector + 48);
       }
     }
-    CRYPT_AESSetKey(&aes, key, 16, true);
+    CRYPT_AESSetKey(&aes, key, 16);
     CRYPT_AESSetIV(&aes, iv);
     CRYPT_AESEncrypt(&aes, E, content.data(), iBufLen);
     int iHash = 0;
@@ -196,7 +200,7 @@ bool CPDF_SecurityHandler::OnInit(const CPDF_Dictionary* pEncryptDict,
     m_FileId.clear();
   if (!LoadDict(pEncryptDict))
     return false;
-  if (m_Cipher == FXCIPHER_NONE)
+  if (m_Cipher == CPDF_CryptoHandler::Cipher::kNone)
     return true;
   if (!CheckSecurity(password))
     return false;
@@ -225,10 +229,10 @@ uint32_t CPDF_SecurityHandler::GetPermissions() const {
 
 static bool LoadCryptInfo(const CPDF_Dictionary* pEncryptDict,
                           const ByteString& name,
-                          int* cipher,
+                          CPDF_CryptoHandler::Cipher* cipher,
                           size_t* keylen_out) {
   int Version = pEncryptDict->GetIntegerFor("V");
-  *cipher = FXCIPHER_RC4;
+  *cipher = CPDF_CryptoHandler::Cipher::kRC4;
   *keylen_out = 0;
   int keylen = 0;
   if (Version >= 4) {
@@ -237,7 +241,7 @@ static bool LoadCryptInfo(const CPDF_Dictionary* pEncryptDict,
       return false;
 
     if (name == "Identity") {
-      *cipher = FXCIPHER_NONE;
+      *cipher = CPDF_CryptoHandler::Cipher::kNone;
     } else {
       const CPDF_Dictionary* pDefFilter = pCryptFilters->GetDictFor(name);
       if (!pDefFilter)
@@ -261,7 +265,7 @@ static bool LoadCryptInfo(const CPDF_Dictionary* pEncryptDict,
       keylen = nKeyBits / 8;
       ByteString cipher_name = pDefFilter->GetStringFor("CFM");
       if (cipher_name == "AESV2" || cipher_name == "AESV3")
-        *cipher = FXCIPHER_AES;
+        *cipher = CPDF_CryptoHandler::Cipher::kAES;
     }
   } else {
     keylen = Version > 1 ? pEncryptDict->GetIntegerFor("Length", 40) / 8 : 5;
@@ -293,7 +297,7 @@ bool CPDF_SecurityHandler::LoadDict(const CPDF_Dictionary* pEncryptDict) {
 }
 
 bool CPDF_SecurityHandler::LoadDict(const CPDF_Dictionary* pEncryptDict,
-                                    int* cipher,
+                                    CPDF_CryptoHandler::Cipher* cipher,
                                     size_t* key_len) {
   m_pEncryptDict.Reset(pEncryptDict);
   m_Version = pEncryptDict->GetIntegerFor("V");
@@ -318,8 +322,8 @@ bool CPDF_SecurityHandler::LoadDict(const CPDF_Dictionary* pEncryptDict,
 
 bool CPDF_SecurityHandler::AES256_CheckPassword(const ByteString& password,
                                                 bool bOwner) {
-  ASSERT(m_pEncryptDict);
-  ASSERT(m_Revision >= 5);
+  DCHECK(m_pEncryptDict);
+  DCHECK(m_Revision >= 5);
 
   ByteString okey = m_pEncryptDict->GetStringFor("O");
   if (okey.GetLength() < 48)
@@ -362,11 +366,11 @@ bool CPDF_SecurityHandler::AES256_CheckPassword(const ByteString& password,
     return false;
 
   CRYPT_aes_context aes = {};
-  CRYPT_AESSetKey(&aes, digest, sizeof(digest), false);
+  CRYPT_AESSetKey(&aes, digest, sizeof(digest));
   uint8_t iv[16] = {};
   CRYPT_AESSetIV(&aes, iv);
   CRYPT_AESDecrypt(&aes, m_EncryptKey, ekey.raw_str(), 32);
-  CRYPT_AESSetKey(&aes, m_EncryptKey, sizeof(m_EncryptKey), false);
+  CRYPT_AESSetKey(&aes, m_EncryptKey, sizeof(m_EncryptKey));
   CRYPT_AESSetIV(&aes, iv);
   ByteString perms = m_pEncryptDict->GetStringFor("Perms");
   if (perms.IsEmpty())
@@ -381,7 +385,7 @@ bool CPDF_SecurityHandler::AES256_CheckPassword(const ByteString& password,
   if (buf[9] != 'a' || buf[10] != 'd' || buf[11] != 'b')
     return false;
 
-  if (FXDWORD_GET_LSBFIRST(buf) != m_Permissions)
+  if (FXSYS_UINT32_GET_LSBFIRST(buf) != m_Permissions)
     return false;
 
   // Relax this check as there appear to be some non-conforming documents
@@ -539,9 +543,9 @@ void CPDF_SecurityHandler::OnCreateInternal(CPDF_Dictionary* pEncryptDict,
                                             const ByteString& user_password,
                                             const ByteString& owner_password,
                                             bool bDefault) {
-  ASSERT(pEncryptDict);
+  DCHECK(pEncryptDict);
 
-  int cipher = FXCIPHER_NONE;
+  CPDF_CryptoHandler::Cipher cipher = CPDF_CryptoHandler::Cipher::kNone;
   size_t key_len = 0;
   if (!LoadDict(pEncryptDict, &cipher, &key_len)) {
     return;
@@ -677,7 +681,7 @@ void CPDF_SecurityHandler::AES256_SetPassword(CPDF_Dictionary* pEncryptDict,
     CRYPT_SHA256Finish(&sha2, digest1);
   }
   CRYPT_aes_context aes = {};
-  CRYPT_AESSetKey(&aes, digest1, 32, true);
+  CRYPT_AESSetKey(&aes, digest1, 32);
   uint8_t iv[16] = {};
   CRYPT_AESSetIV(&aes, iv);
   CRYPT_AESEncrypt(&aes, digest1, m_EncryptKey, sizeof(m_EncryptKey));
@@ -706,7 +710,7 @@ void CPDF_SecurityHandler::AES256_SetPerms(CPDF_Dictionary* pEncryptDict) {
   FX_Random_GenerateMT(buf_random, 1);
 
   CRYPT_aes_context aes = {};
-  CRYPT_AESSetKey(&aes, m_EncryptKey, sizeof(m_EncryptKey), true);
+  CRYPT_AESSetKey(&aes, m_EncryptKey, sizeof(m_EncryptKey));
 
   uint8_t iv[16] = {};
   CRYPT_AESSetIV(&aes, iv);

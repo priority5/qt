@@ -1,33 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <QtGui/QPainterPath>
 #include <QtWidgets/qgraphicsscene.h>
 #include <private/qgraphicsscenebsptreeindex_p.h>
@@ -73,7 +48,7 @@ void tst_QGraphicsSceneIndex::common_data()
 
 QGraphicsSceneIndex *tst_QGraphicsSceneIndex::createIndex(const QString &indexMethod)
 {
-    QGraphicsSceneIndex *index = 0;
+    QGraphicsSceneIndex *index = nullptr;
     QGraphicsScene *scene = new QGraphicsScene();
     if (indexMethod == "bsp")
         index = new QGraphicsSceneBspTreeIndex(scene);
@@ -228,9 +203,9 @@ class CustomShapeItem : public QGraphicsItem
 public:
     CustomShapeItem(const QPainterPath &shape) : QGraphicsItem(0), mShape(shape) {}
 
-    QPainterPath shape() const { return mShape; }
-    QRectF boundingRect() const { return mShape.boundingRect(); }
-    void paint(QPainter*, const QStyleOptionGraphicsItem*, QWidget*) {}
+    QPainterPath shape() const override { return mShape; }
+    QRectF boundingRect() const override { return mShape.boundingRect(); }
+    void paint(QPainter*, const QStyleOptionGraphicsItem*, QWidget*) override {}
 private:
     QPainterPath mShape;
 };
@@ -277,11 +252,11 @@ class RectWidget : public QGraphicsWidget
 {
     Q_OBJECT
 public:
-    RectWidget(QGraphicsItem *parent = 0) : QGraphicsWidget(parent)
+    RectWidget(QGraphicsItem *parent = nullptr) : QGraphicsWidget(parent)
     {
     }
 
-    void paint(QPainter *painter, const QStyleOptionGraphicsItem * /* option */, QWidget * /* widget */)
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem * /* option */, QWidget * /* widget */) override
     {
         painter->setBrush(brush);
         painter->drawRect(boundingRect());
@@ -333,11 +308,11 @@ void tst_QGraphicsSceneIndex::clear()
     class MyItem : public QGraphicsItem
     {
     public:
-        MyItem(QGraphicsItem *parent = 0) : QGraphicsItem(parent), numPaints(0) {}
+        MyItem(QGraphicsItem *parent = nullptr) : QGraphicsItem(parent), numPaints(0) {}
         int numPaints;
     protected:
-        QRectF boundingRect() const { return QRectF(0, 0, 10, 10); }
-        void paint(QPainter * /* painter */, const QStyleOptionGraphicsItem *, QWidget *)
+        QRectF boundingRect() const override { return QRectF(0, 0, 10, 10); }
+        void paint(QPainter * /* painter */, const QStyleOptionGraphicsItem *, QWidget *) override
         { ++numPaints; }
     };
 
@@ -356,10 +331,7 @@ void tst_QGraphicsSceneIndex::clear()
     MyItem *item = new MyItem;
     scene.addItem(item);
     qApp->processEvents();
-#ifdef Q_OS_WINRT
-    QEXPECT_FAIL("", "There is one additional paint event on WinRT - QTBUG-68297", Abort);
-#endif
-    QTRY_COMPARE(item->numPaints, 1);
+    QTRY_VERIFY(item->numPaints > 0);
 }
 
 QTEST_MAIN(tst_QGraphicsSceneIndex)

@@ -4,19 +4,19 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/date_time_section.h"
 
+#include "ash/components/settings/cros_settings_names.h"
+#include "ash/components/settings/system_settings_provider.h"
+#include "ash/components/settings/timezone_settings.h"
 #include "base/no_destructor.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/ash/system/timezone_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/ui/webui/settings/chromeos/date_time_handler.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search/search_tag_registry.h"
 #include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/settings/cros_settings_names.h"
-#include "chromeos/settings/system_settings_provider.h"
-#include "chromeos/settings/timezone_settings.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -115,7 +115,7 @@ void DateTimeSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
       {"use24HourClock", IDS_SETTINGS_USE_24_HOUR_CLOCK},
       {"setDateTime", IDS_SETTINGS_SET_DATE_TIME},
   };
-  AddLocalizedStringsBulk(html_source, kLocalizedStrings);
+  html_source->AddLocalizedStrings(kLocalizedStrings);
 
   html_source->AddString(
       "timeZoneSettingsLearnMoreURL",

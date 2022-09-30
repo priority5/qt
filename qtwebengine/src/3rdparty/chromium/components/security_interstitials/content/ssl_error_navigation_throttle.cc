@@ -18,11 +18,17 @@ SSLErrorNavigationThrottle::SSLErrorNavigationThrottle(
     std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
     SSLErrorNavigationThrottle::HandleSSLErrorCallback
         handle_ssl_error_callback,
-    IsInHostedAppCallback is_in_hosted_app_callback)
+    IsInHostedAppCallback is_in_hosted_app_callback,
+    ShouldIgnoreInterstitialBecauseNavigationDefaultedToHttpsCallback
+        should_ignore_interstitial_because_navigation_defaulted_to_https_callback)
     : content::NavigationThrottle(navigation_handle),
       ssl_cert_reporter_(std::move(ssl_cert_reporter)),
       handle_ssl_error_callback_(std::move(handle_ssl_error_callback)),
-      is_in_hosted_app_callback_(std::move(is_in_hosted_app_callback)) {}
+      is_in_hosted_app_callback_(std::move(is_in_hosted_app_callback)),
+      should_ignore_interstitial_because_navigation_defaulted_to_https_callback_(
+          std::move(
+              should_ignore_interstitial_because_navigation_defaulted_to_https_callback)) {
+}
 
 SSLErrorNavigationThrottle::~SSLErrorNavigationThrottle() {}
 
@@ -39,9 +45,20 @@ SSLErrorNavigationThrottle::WillFailRequest() {
     return content::NavigationThrottle::PROCEED;
   }
 
-  // Do not set special error page HTML for subframes; those are handled as
-  // normal network errors.
-  if (!handle->IsInMainFrame() || handle->GetWebContents()->IsPortal()) {
+  // Do not set special error page HTML for non-primary pages (e.g. regular
+  // subframe, prerendering, fenced-frame, portal). Those are handled as normal
+  // network errors.
+  if (!handle->IsInPrimaryMainFrame() || handle->GetWebContents()->IsPortal()) {
+    return content::NavigationThrottle::PROCEED;
+  }
+
+  // If the scheme of this navigation was upgraded to HTTPS (because the user
+  // didn't type a scheme), don't show an error.
+  // TypedNavigationUpgradeThrottle or HttpsOnlyModeNavigationThrottle will
+  // handle the error and fall back to HTTP as needed.
+  if (std::move(
+          should_ignore_interstitial_because_navigation_defaulted_to_https_callback_)
+          .Run(handle)) {
     return content::NavigationThrottle::PROCEED;
   }
 
@@ -65,9 +82,10 @@ SSLErrorNavigationThrottle::WillProcessResponse() {
     return content::NavigationThrottle::PROCEED;
   }
 
-  // Do not set special error page HTML for subframes; those are handled as
-  // normal network errors.
-  if (!handle->IsInMainFrame() || handle->GetWebContents()->IsPortal()) {
+  // Do not set special error page HTML for non-primary pages (e.g. regular
+  // subframe, prerendering, fenced-frame, portal). Those are handled as normal
+  // network errors.
+  if (!handle->IsInPrimaryMainFrame() || handle->GetWebContents()->IsPortal()) {
     return content::NavigationThrottle::PROCEED;
   }
 
@@ -122,9 +140,15 @@ void SSLErrorNavigationThrottle::ShowInterstitial(
   std::string error_page_content = blocking_page->GetHTMLContents();
 
   content::NavigationHandle* handle = navigation_handle();
+
+  // Do not display insterstitials for SSL errors from non-primary pages (e.g.
+  // prerendering, fenced-frame, portal). For prerendering specifically, we
+  // should already have canceled the prerender from OnSSLCertificateError
+  // before the throttle runs.
+  DCHECK(handle->IsInPrimaryMainFrame());
+
   security_interstitials::SecurityInterstitialTabHelper::AssociateBlockingPage(
-      handle->GetWebContents(), handle->GetNavigationId(),
-      std::move(blocking_page));
+      handle, std::move(blocking_page));
 
   CancelDeferredNavigation(content::NavigationThrottle::ThrottleCheckResult(
       content::NavigationThrottle::CANCEL, static_cast<net::Error>(net_error),

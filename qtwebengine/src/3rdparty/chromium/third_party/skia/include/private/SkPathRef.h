@@ -9,9 +9,7 @@
 #define SkPathRef_DEFINED
 
 #include "include/core/SkMatrix.h"
-#include "include/core/SkPathTypes.h"
 #include "include/core/SkPoint.h"
-#include "include/core/SkRRect.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkRefCnt.h"
 #include "include/private/SkIDChangeListener.h"
@@ -24,9 +22,9 @@
 #include <limits>
 #include <tuple>
 
-struct SkPathView;
 class SkRBuffer;
 class SkWBuffer;
+class SkRRect;
 
 enum class SkPathConvexity {
     kConvex,
@@ -39,6 +37,15 @@ enum class SkPathFirstDirection {
     kCCW,        // == SkPathDirection::kCCW
     kUnknown,
 };
+
+// These are computed from a stream of verbs
+struct SkPathVerbAnalysis {
+    bool     valid;
+    int      points, weights;
+    unsigned segmentMask;
+};
+SkPathVerbAnalysis sk_path_analyze_verbs(const uint8_t verbs[], int count);
+
 
 /**
  * Holds the path verbs and points. It is versioned by a generation ID. None of its public methods
@@ -239,21 +246,7 @@ public:
         return SkToBool(fIsOval);
     }
 
-    bool isRRect(SkRRect* rrect, bool* isCCW, unsigned* start) const {
-        if (fIsRRect) {
-            if (rrect) {
-                *rrect = this->getRRect();
-            }
-            if (isCCW) {
-                *isCCW = SkToBool(fRRectOrOvalIsCCW);
-            }
-            if (start) {
-                *start = fRRectOrOvalStartIdx;
-            }
-        }
-        return SkToBool(fIsRRect);
-    }
-
+    bool isRRect(SkRRect* rrect, bool* isCCW, unsigned* start) const;
 
     bool hasComputedBounds() const {
         return !fBoundsIsDirty;
@@ -293,6 +286,8 @@ public:
     int countPoints() const { return fPoints.count(); }
     int countVerbs() const { return fVerbs.count(); }
     int countWeights() const { return fConicWeights.count(); }
+
+    size_t approximateBytesUsed() const;
 
     /**
      * Returns a pointer one beyond the first logical verb (last verb in memory order).
@@ -347,10 +342,9 @@ public:
     void addGenIDChangeListener(sk_sp<SkIDChangeListener>);   // Threadsafe.
     int genIDChangeListenerCount();                           // Threadsafe
 
+    bool dataMatchesVerbs() const;
     bool isValid() const;
     SkDEBUGCODE(void validate() const { SkASSERT(this->isValid()); } )
-
-    SkPathView view(SkPathFillType, SkPathConvexity) const;
 
 private:
     enum SerializationOffsets {
@@ -376,9 +370,6 @@ private:
     }
 
     void copy(const SkPathRef& ref, int additionalReserveVerbs, int additionalReservePoints);
-
-    // Doesn't read fSegmentMask, but (re)computes it from the verbs array
-    unsigned computeSegmentMask() const;
 
     // Return true if the computed bounds are finite.
     static bool ComputePtBounds(SkRect* bounds, const SkPathRef& ref) {

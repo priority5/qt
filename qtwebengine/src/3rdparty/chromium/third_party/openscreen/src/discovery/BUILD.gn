@@ -5,20 +5,32 @@
 import("//build_overrides/build.gni")
 import("../testing/libfuzzer/fuzzer_test.gni")
 
-source_set("common") {
+source_set("public") {
   sources = [
     "common/config.h",
     "common/reporting_client.h",
+    "dnssd/public/dns_sd_instance.cc",
+    "dnssd/public/dns_sd_instance.h",
+    "dnssd/public/dns_sd_instance_endpoint.cc",
+    "dnssd/public/dns_sd_instance_endpoint.h",
+    "dnssd/public/dns_sd_publisher.h",
+    "dnssd/public/dns_sd_querier.h",
+    "dnssd/public/dns_sd_service.h",
+    "dnssd/public/dns_sd_txt_record.cc",
+    "dnssd/public/dns_sd_txt_record.h",
+    "mdns/public/mdns_constants.h",
+    "mdns/public/mdns_service.cc",
+    "mdns/public/mdns_service.h",
+    "public/dns_sd_service_factory.h",
+    "public/dns_sd_service_publisher.h",
+    "public/dns_sd_service_watcher.h",
   ]
-
+  public_deps = [ "../platform" ]
   deps = [ "../util" ]
-
-  public_deps = [
-    "../platform",
-    "../third_party/abseil",
-  ]
 }
 
+# TODO(https://issuetracker.google.com/issues/194234872):
+# Move implementation files to impl/
 source_set("mdns") {
   sources = [
     "mdns/mdns_domain_confirmed_provider.h",
@@ -47,17 +59,13 @@ source_set("mdns") {
     "mdns/mdns_trackers.h",
     "mdns/mdns_writer.cc",
     "mdns/mdns_writer.h",
-    "mdns/public/mdns_constants.h",
-    "mdns/public/mdns_service.cc",
-    "mdns/public/mdns_service.h",
   ]
 
-  deps = [ "../util" ]
-
-  public_deps = [
-    ":common",
+  public_deps = [ "../third_party/abseil" ]
+  deps = [
+    ":public",
     "../platform",
-    "../third_party/abseil",
+    "../util",
   ]
 }
 
@@ -81,33 +89,13 @@ source_set("dnssd") {
     "dnssd/impl/service_instance.h",
     "dnssd/impl/service_key.cc",
     "dnssd/impl/service_key.h",
-    "dnssd/public/dns_sd_instance.cc",
-    "dnssd/public/dns_sd_instance.h",
-    "dnssd/public/dns_sd_instance_endpoint.cc",
-    "dnssd/public/dns_sd_instance_endpoint.h",
-    "dnssd/public/dns_sd_publisher.h",
-    "dnssd/public/dns_sd_querier.h",
-    "dnssd/public/dns_sd_service.h",
-    "dnssd/public/dns_sd_txt_record.cc",
-    "dnssd/public/dns_sd_txt_record.h",
   ]
 
-  public_deps = [
-    ":common",
+  deps = [
     ":mdns",
-  ]
-}
-
-source_set("public") {
-  sources = [
-    "public/dns_sd_service_factory.h",
-    "public/dns_sd_service_publisher.h",
-    "public/dns_sd_service_watcher.h",
-  ]
-
-  public_deps = [
-    ":common",
-    ":dnssd",
+    ":public",
+    "../third_party/abseil",
+    "../util",
   ]
 }
 
@@ -117,14 +105,25 @@ source_set("testing") {
   sources = [
     "common/testing/mock_reporting_client.h",
     "dnssd/testing/fake_dns_record_factory.cc",
+    "mdns/testing/hash_test_util.h",
     "mdns/testing/mdns_test_util.cc",
     "mdns/testing/mdns_test_util.h",
   ]
 
-  public_deps = [
+  defines = []
+  if (build_with_chromium) {
+    sources += [ "mdns/testing/hash_test_util_nop.h" ]
+  } else {
+    defines += [ "HASH_TEST_UTIL_USE_ABSL" ]
+    sources += [ "mdns/testing/hash_test_util_abseil.h" ]
+  }
+
+  deps = [
     ":mdns",
+    ":public",
     "../third_party/abseil",
     "../third_party/googletest:gmock",
+    "../third_party/googletest:gtest",
   ]
 }
 
@@ -159,7 +158,10 @@ source_set("unittests") {
   deps = [
     ":dnssd",
     ":mdns",
+    ":public",
     ":testing",
+    "../platform:test",
+    "../third_party/abseil",
     "../third_party/googletest:gmock",
     "../third_party/googletest:gtest",
     "../util",
@@ -169,7 +171,10 @@ source_set("unittests") {
 openscreen_fuzzer_test("mdns_fuzzer") {
   sources = [ "mdns/mdns_reader_fuzztest.cc" ]
 
-  deps = [ ":mdns" ]
+  deps = [
+    ":mdns",
+    ":public",
+  ]
 
   seed_corpus = "mdns/fuzzer_seeds"
 

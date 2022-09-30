@@ -11,14 +11,15 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
 #include "components/safe_browsing/android/jni_headers/SafeBrowsingApiBridge_jni.h"
 #include "components/safe_browsing/android/safe_browsing_api_handler_util.h"
-#include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
-#include "components/safe_browsing/core/features.h"
+#include "components/safe_browsing/core/browser/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -62,7 +63,7 @@ int SBThreatTypeToJavaThreatType(const SBThreatType& sb_threat_type) {
       return safe_browsing::JAVA_THREAT_TYPE_POTENTIALLY_HARMFUL_APPLICATION;
     case SB_THREAT_TYPE_URL_UNWANTED:
       return safe_browsing::JAVA_THREAT_TYPE_UNWANTED_SOFTWARE;
-    case SB_THREAT_TYPE_CSD_WHITELIST:
+    case SB_THREAT_TYPE_CSD_ALLOWLIST:
       return safe_browsing::JAVA_THREAT_TYPE_CSD_ALLOWLIST;
     case SB_THREAT_TYPE_HIGH_CONFIDENCE_ALLOWLIST:
       return safe_browsing::JAVA_THREAT_TYPE_HIGH_CONFIDENCE_ALLOWLIST;
@@ -255,7 +256,7 @@ void SafeBrowsingApiHandlerBridge::StartURLCheck(
 }
 
 bool SafeBrowsingApiHandlerBridge::StartCSDAllowlistCheck(const GURL& url) {
-  return StartAllowlistCheck(url, safe_browsing::SB_THREAT_TYPE_CSD_WHITELIST);
+  return StartAllowlistCheck(url, safe_browsing::SB_THREAT_TYPE_CSD_ALLOWLIST);
 }
 
 bool SafeBrowsingApiHandlerBridge::StartHighConfidenceAllowlistCheck(

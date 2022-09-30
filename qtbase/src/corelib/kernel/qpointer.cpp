@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 /*!
     \class QPointer
@@ -156,6 +120,13 @@
 */
 
 /*!
+    \fn template <class T> T* QPointer<T>::get() const
+    \since 6.0
+
+    Same as data(). This function is provided for STL compatibility.
+*/
+
+/*!
     \fn template <class T> bool QPointer<T>::isNull() const
 
     Returns \c true if the referenced object has been destroyed or if
@@ -194,8 +165,7 @@
 */
 
 /*!
-    \fn template <class T> bool operator==(const T *o, const QPointer<T> &p)
-    \relates QPointer
+    \fn template <typename T, typename X> bool QPointer<T>::operator==(X *o, const QPointer<T> &p)
 
     Equality operator. Returns \c true if \a o and the guarded
     pointer \a p are pointing to the same object, otherwise
@@ -203,8 +173,7 @@
 
 */
 /*!
-    \fn template <class T> bool operator==(const QPointer<T> &p, const T *o)
-    \relates QPointer
+    \fn template <typename T, typename X> bool QPointer<T>::operator==(const QPointer<T> &p, X *o)
 
     Equality operator. Returns \c true if \a o and the guarded
     pointer \a p are pointing to the same object, otherwise
@@ -212,74 +181,64 @@
 
 */
 /*!
-    \fn template <class T> bool operator==(T *o, const QPointer<T> &p)
-    \relates QPointer
-
-    Equality operator. Returns \c true if \a o and the guarded
-    pointer \a p are pointing to the same object, otherwise
-    returns \c false.
-
-*/
-/*!
-    \fn template <class T> bool operator==(const QPointer<T> &p, T *o)
-    \relates QPointer
-
-    Equality operator. Returns \c true if \a o and the guarded
-    pointer \a p are pointing to the same object, otherwise
-    returns \c false.
-
-*/
-/*!
-    \fn template <class T> bool operator==(const QPointer<T> &p1, const QPointer<T> &p2)
-    \relates QPointer
+    \fn template <typename T, typename X> bool QPointer<T>::operator==(const QPointer<T> &p1, const QPointer<X> &p2)
 
     Equality operator. Returns \c true if the guarded pointers \a p1 and \a p2
     are pointing to the same object, otherwise
     returns \c false.
 
 */
+/*!
+    \fn template <typename T> bool QPointer<T>::operator==(std::nullptr_t, const QPointer<T> &rhs)
 
+    Equality operator. Returns \c true if the pointer guarded by \a rhs
+    is \nullptr, otherwise
+    returns \c false.
+*/
+/*!
+    \fn template <typename T> bool QPointer<T>::operator==(const QPointer<T> &lhs, std::nullptr_t)
+
+    Equality operator. Returns \c true if the pointer guarded by \a lhs
+    is \nullptr, otherwise
+    returns \c false.
+*/
 
 /*!
-    \fn template <class T> bool operator!=(const T *o, const QPointer<T> &p)
-    \relates QPointer
+    \fn template <typename T, typename X> bool QPointer<T>::operator!=(const QPointer<T> &p, X *o)
 
     Inequality operator. Returns \c true if \a o and the guarded
     pointer \a p are not pointing to the same object, otherwise
     returns \c false.
 */
 /*!
-    \fn template <class T> bool operator!=(const QPointer<T> &p, const T *o)
-    \relates QPointer
+    \fn template <typename T, typename X> bool QPointer<T>::operator!=(X *o, const QPointer<T> &p)
 
     Inequality operator. Returns \c true if \a o and the guarded
     pointer \a p are not pointing to the same object, otherwise
     returns \c false.
 */
 /*!
-    \fn template <class T> bool operator!=(T *o, const QPointer<T> &p)
-    \relates QPointer
-
-    Inequality operator. Returns \c true if \a o and the guarded
-    pointer \a p are not pointing to the same object, otherwise
-    returns \c false.
-*/
-/*!
-    \fn template <class T> bool operator!=(const QPointer<T> &p, T *o)
-    \relates QPointer
-
-    Inequality operator. Returns \c true if \a o and the guarded
-    pointer \a p are not pointing to the same object, otherwise
-    returns \c false.
-*/
-/*!
-    \fn template <class T> bool operator!=(const QPointer<T> &p1, const QPointer<T> &p2)
-    \relates QPointer
+    \fn template <typename T, typename X> bool QPointer<T>::operator!=(const QPointer<T> &p1, const QPointer<X> &p2)
 
     Inequality operator. Returns \c true if  the guarded pointers \a p1 and
     \a p2 are not pointing to the same object, otherwise
     returns \c false.
 */
+/*!
+    \fn template <typename T> bool QPointer<T>::operator!=(std::nullptr_t, const QPointer<T> &rhs)
+
+    Inequality operator. Returns \c true if the pointer guarded by \a rhs is
+    a valid (ie not \nullptr) pointer, otherwise
+    returns \c false.
+*/
+/*!
+    \fn template <typename T> bool QPointer<T>::operator!=(const QPointer<T> &lhs, std::nullptr_t)
+
+    Inequality operator. Returns \c true if the pointer guarded by \a lhs is
+    a valid (ie not \nullptr) pointer, otherwise
+    returns \c false.
+*/
+
 /*!
     \fn template <typename T> QPointer<T> qPointerFromVariant(const QVariant &variant)
 

@@ -8,21 +8,30 @@
 
 #include "base/feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/accessibility/ax_base_export.h"
 
 namespace features {
 
-AX_BASE_EXPORT extern const base::Feature kEnableAccessibilityExposeDisplayNone;
+AX_BASE_EXPORT extern const base::Feature
+    kEnableAccessibilityAriaVirtualContent;
 
-// Returns true if "display: none" nodes should be exposed to the
-// browser process AXTree.
-AX_BASE_EXPORT bool IsAccessibilityExposeDisplayNoneEnabled();
+// Returns true if "aria-virtualcontent" should be recognized as a valid aria
+// property.
+AX_BASE_EXPORT bool IsAccessibilityAriaVirtualContentEnabled();
 
 AX_BASE_EXPORT extern const base::Feature kEnableAccessibilityExposeHTMLElement;
 
 // Returns true if the <html> element should be exposed to the
 // browser process AXTree (as an ignored node).
 AX_BASE_EXPORT bool IsAccessibilityExposeHTMLElementEnabled();
+
+AX_BASE_EXPORT extern const base::Feature
+    kEnableAccessibilityExposeIgnoredNodes;
+
+// Returns true if all ignored nodes are exposed by Blink in the
+// accessibility tree.
+AX_BASE_EXPORT bool IsAccessibilityExposeIgnoredNodesEnabled();
 
 AX_BASE_EXPORT extern const base::Feature kEnableAccessibilityLanguageDetection;
 
@@ -46,22 +55,98 @@ AX_BASE_EXPORT extern const base::Feature kAccessibilityFocusHighlight;
 // briefly whenever focus changes.
 AX_BASE_EXPORT bool IsAccessibilityFocusHighlightEnabled();
 
-#if defined(OS_WIN)
+AX_BASE_EXPORT extern const base::Feature kAutoDisableAccessibility;
+
+// Returns true if accessibility will be auto-disabled after a certain
+// number of user input events spanning a minimum amount of time with no
+// accessibility API usage in that time.
+AX_BASE_EXPORT bool IsAutoDisableAccessibilityEnabled();
+
+#if BUILDFLAG(IS_WIN)
 // Enables an experimental Chrome-specific accessibility COM API
 AX_BASE_EXPORT extern const base::Feature kIChromeAccessible;
 
 // Returns true if the IChromeAccessible COM API is enabled.
 AX_BASE_EXPORT bool IsIChromeAccessibleEnabled();
 
-#endif  // defined(OS_WIN)
+AX_BASE_EXPORT extern const base::Feature kSelectiveUIAEnablement;
 
-#if defined(OS_CHROMEOS)
-AX_BASE_EXPORT extern const base::Feature kAccessibilityCursorColor;
+// Returns true if accessibility will be selectively enabled depending on the
+// UIA APIs that are called, allowing non-screenreader usage to enable less of
+// the accessibility system.
+AX_BASE_EXPORT bool IsSelectiveUIAEnablementEnabled();
 
-// Returns true if the accessibility cursor color feature is enabled, letting
-// users pick a custom cursor color.
-AX_BASE_EXPORT bool IsAccessibilityCursorColorEnabled();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+// Enables ability to choose new continuous mouse following mode in Magnifier
+// settings.
+AX_BASE_EXPORT extern const base::Feature
+    kMagnifierContinuousMouseFollowingModeSetting;
+
+// Returns true if the feature to allow choosing the new continuous mouse
+// following mode in Magnifier settings is enabled.
+AX_BASE_EXPORT bool IsMagnifierContinuousMouseFollowingModeSettingEnabled();
+
+// Enables ability to resize Docked Magnifier.
+AX_BASE_EXPORT extern const base::Feature kDockedMagnifierResizing;
+
+// Returns true if the feature which adds ability for user to grab and resize
+// bottom of Docked Magnifier is enabled.
+AX_BASE_EXPORT bool IsDockedMagnifierResizingEnabled();
+
+AX_BASE_EXPORT bool IsDictationOfflineAvailable();
+
+// Enables text-editing commands in the dictation.
+AX_BASE_EXPORT extern const base::Feature
+    kExperimentalAccessibilityDictationCommands;
+
+// Returns true if the expeirmental accessibility feature to enable dictation
+// text editing commands is enabled.
+AX_BASE_EXPORT bool IsExperimentalAccessibilityDictationCommandsEnabled();
+
+// Enables the accessibility Dictation extension.
+AX_BASE_EXPORT extern const base::Feature
+    kExperimentalAccessibilityDictationExtension;
+
+// Returns true if experimental accessibility dictation extension is enabled.
+AX_BASE_EXPORT bool IsExperimentalAccessibilityDictationExtensionEnabled();
+
+// Enables accessibility Dictation UI hints.
+AX_BASE_EXPORT extern const base::Feature
+    kExperimentalAccessibilityDictationHints;
+
+// Returns true if experimental accessibility dictation hints is enabled.
+AX_BASE_EXPORT bool IsExperimentalAccessibilityDictationHintsEnabled();
+
+// Enables accessibility Dictation with the pumpkin semantic parser.
+AX_BASE_EXPORT extern const base::Feature
+    kExperimentalAccessibilityDictationWithPumpkin;
+
+// Returns true if dictation with pumpkin is enabled.
+AX_BASE_EXPORT bool IsExperimentalAccessibilityDictationWithPumpkinEnabled();
+
+// Enables downloading Google TTS voices using Language Packs.
+AX_BASE_EXPORT extern const base::Feature
+    kExperimentalAccessibilityGoogleTtsLanguagePacks;
+
+// Returns true if using Language Packs to download Google TTS voices is
+// enabled.
+AX_BASE_EXPORT bool IsExperimentalAccessibilityGoogleTtsLanguagePacksEnabled();
+
+// Enables high-quality, network-based voices in Select-to-speak.
+AX_BASE_EXPORT extern const base::Feature kEnhancedNetworkVoices;
+
+// Returns true if network-based voices are enabled in Select-to-speak.
+AX_BASE_EXPORT bool IsEnhancedNetworkVoicesEnabled();
+
+// Enables improved Accessibility OS Settings visibility.
+AX_BASE_EXPORT extern const base::Feature kAccessibilityOSSettingsVisibility;
+
+// Returns true if improved Accessibility OS Settings visibility is enabled.
+AX_BASE_EXPORT bool IsAccessibilityOSSettingsVisibilityEnabled();
+
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Enables Get Image Descriptions to augment existing images labels,
 // rather than only provide descriptions for completely unlabeled images.
@@ -81,6 +166,48 @@ AX_BASE_EXPORT extern const base::Feature kUseAXPositionForDocumentMarkers;
 // of the legacy code that collects document markers manually from static text
 // nodes and which is different for each platform.
 AX_BASE_EXPORT bool IsUseAXPositionForDocumentMarkersEnabled();
+
+// Enable support for ARIA element reflection, for example
+// element.ariaActiveDescendantElement = child;
+AX_BASE_EXPORT extern const base::Feature kEnableAriaElementReflection;
+
+// Returns true if ARIA element reflection is enabled.
+AX_BASE_EXPORT bool IsAriaElementReflectionEnabled();
+
+#if BUILDFLAG(IS_ANDROID)
+// Compute the AXMode based on AccessibilityServiceInfo. If disabled,
+// the AXMode is either entirely on or entirely off.
+AX_BASE_EXPORT extern const base::Feature kComputeAXMode;
+
+// Returns true if the IChromeAccessible COM API is enabled.
+AX_BASE_EXPORT bool IsComputeAXModeEnabled();
+#endif  // BUILDFLAG(IS_ANDROID)
+
+AX_BASE_EXPORT extern const base::Feature kReadAnything;
+
+// Returns true if read anything is enabled. This feature shows users websites,
+// such as articles, in a comfortable reading experience in a side panel.
+AX_BASE_EXPORT bool IsReadAnythingEnabled();
+
+#if !BUILDFLAG(IS_ANDROID)
+// Enables using Screen AI library to add metadata for accessibility tools.
+AX_BASE_EXPORT extern const base::Feature kScreenAI;
+
+// Returns true if Screen AI feature is enabled. This feature uses a local
+// machine intelligence library to process browser screenshots and add metadata
+// to the accessibility tree.
+AX_BASE_EXPORT bool IsScreenAIEnabled();
+
+// Enables a feature whereby inaccessible (i.e. untagged) PDFs are made
+// accessible using an optical character recognition service. Due to the size of
+// the OCR component, this feature targets desktop versions of Chrome for now.
+AX_BASE_EXPORT extern const base::Feature kPdfOcr;
+
+// Returns true if OCR will be performed on inaccessible (i.e. untagged) PDFs
+// and the resulting text, together with its layout information, will be added
+// to the accessibility tree.
+AX_BASE_EXPORT bool IsPdfOcrEnabled();
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace features
 

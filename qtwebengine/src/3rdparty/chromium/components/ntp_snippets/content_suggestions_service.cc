@@ -10,11 +10,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "base/values.h"
@@ -56,8 +56,6 @@ ContentSuggestionsService::ContentSuggestionsService(
     std::unique_ptr<UserClassifier> user_classifier,
     std::unique_ptr<RemoteSuggestionsScheduler> remote_suggestions_scheduler)
     : state_(state),
-      identity_manager_observer_(this),
-      history_service_observer_(this),
       remote_suggestions_provider_(nullptr),
       large_icon_service_(large_icon_service),
       pref_service_(pref_service),
@@ -66,11 +64,11 @@ ContentSuggestionsService::ContentSuggestionsService(
       category_ranker_(std::move(category_ranker)) {
   // Can be null in tests.
   if (identity_manager) {
-    identity_manager_observer_.Add(identity_manager);
+    identity_manager_observation_.Observe(identity_manager);
   }
 
   if (history_service) {
-    history_service_observer_.Add(history_service);
+    history_service_observation_.Observe(history_service);
   }
 
   RestoreDismissedCategoriesFromPrefs();
@@ -120,11 +118,11 @@ CategoryStatus ContentSuggestionsService::GetCategoryStatus(
   return iterator->second->GetCategoryStatus(category);
 }
 
-base::Optional<CategoryInfo> ContentSuggestionsService::GetCategoryInfo(
+absl::optional<CategoryInfo> ContentSuggestionsService::GetCategoryInfo(
     Category category) const {
   auto iterator = providers_by_category_.find(category);
   if (iterator == providers_by_category_.end()) {
-    return base::Optional<CategoryInfo>();
+    return absl::optional<CategoryInfo>();
   }
   return iterator->second->GetCategoryInfo(category);
 }
@@ -502,14 +500,18 @@ void ContentSuggestionsService::OnSuggestionInvalidated(
   }
 }
 // signin::IdentityManager::Observer implementation
-void ContentSuggestionsService::OnPrimaryAccountSet(
-    const CoreAccountInfo& account_info) {
-  OnSignInStateChanged(/*has_signed_in=*/true);
-}
-
-void ContentSuggestionsService::OnPrimaryAccountCleared(
-    const CoreAccountInfo& account_info) {
-  OnSignInStateChanged(/*has_signed_in=*/false);
+void ContentSuggestionsService::OnPrimaryAccountChanged(
+    const signin::PrimaryAccountChangeEvent& event_details) {
+  switch (event_details.GetEventTypeFor(signin::ConsentLevel::kSync)) {
+    case signin::PrimaryAccountChangeEvent::Type::kSet:
+      OnSignInStateChanged(/*has_signed_in=*/true);
+      break;
+    case signin::PrimaryAccountChangeEvent::Type::kCleared:
+      OnSignInStateChanged(/*has_signed_in=*/false);
+      break;
+    case signin::PrimaryAccountChangeEvent::Type::kNone:
+      break;
+  }
 }
 
 // history::HistoryServiceObserver implementation.
@@ -552,7 +554,8 @@ void ContentSuggestionsService::OnURLsDeleted(
 
 void ContentSuggestionsService::HistoryServiceBeingDeleted(
     history::HistoryService* history_service) {
-  history_service_observer_.RemoveAll();
+  DCHECK(history_service_observation_.IsObservingSource(history_service));
+  history_service_observation_.Reset();
 }
 
 bool ContentSuggestionsService::TryRegisterProviderForCategory(
@@ -670,24 +673,23 @@ void ContentSuggestionsService::RestoreDismissedCategoriesFromPrefs() {
   DCHECK(dismissed_providers_by_category_.empty());
   DCHECK(providers_by_category_.empty());
 
-  const base::ListValue* list =
-      pref_service_->GetList(prefs::kDismissedCategories);
-  for (const base::Value& entry : *list) {
-    int id = 0;
-    if (!entry.GetAsInteger(&id)) {
+  const base::Value* list = pref_service_->GetList(prefs::kDismissedCategories);
+  for (const base::Value& entry : list->GetListDeprecated()) {
+    if (!entry.is_int()) {
       DLOG(WARNING) << "Invalid category pref value: " << entry;
       continue;
     }
 
     // When the provider is registered, it will be stored in this map.
-    dismissed_providers_by_category_[Category::FromIDValue(id)] = nullptr;
+    dismissed_providers_by_category_[Category::FromIDValue(entry.GetInt())] =
+        nullptr;
   }
 }
 
 void ContentSuggestionsService::StoreDismissedCategoriesToPrefs() {
   base::ListValue list;
   for (const auto& category_provider_pair : dismissed_providers_by_category_) {
-    list.AppendInteger(category_provider_pair.first.id());
+    list.Append(category_provider_pair.first.id());
   }
 
   pref_service_->Set(prefs::kDismissedCategories, list);

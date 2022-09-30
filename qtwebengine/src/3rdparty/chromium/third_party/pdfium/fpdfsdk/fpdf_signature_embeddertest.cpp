@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <vector>
+
 #include "public/fpdf_signature.h"
 #include "testing/embedder_test.h"
 #include "testing/fx_string_testhelpers.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/cxx17_backports.h"
 
 class FPDFSignatureEmbedderTest : public EmbedderTest {};
 
@@ -186,4 +188,17 @@ TEST_F(FPDFSignatureEmbedderTest, GetTime) {
   ASSERT_EQ(sizeof(kExpectedTime), size);
   EXPECT_EQ('x', time_buffer[0]);
   EXPECT_EQ('\0', time_buffer[1]);
+}
+
+TEST_F(FPDFSignatureEmbedderTest, GetDocMDPPermission) {
+  ASSERT_TRUE(OpenDocument("docmdp.pdf"));
+  FPDF_SIGNATURE signature = FPDF_GetSignatureObject(document(), 0);
+  ASSERT_NE(nullptr, signature);
+
+  // FPDFSignatureObj_GetDocMDPPermission() positive testing.
+  unsigned int permission = FPDFSignatureObj_GetDocMDPPermission(signature);
+  EXPECT_EQ(1U, permission);
+
+  // FPDFSignatureObj_GetDocMDPPermission() negative testing.
+  EXPECT_EQ(0U, FPDFSignatureObj_GetDocMDPPermission(nullptr));
 }

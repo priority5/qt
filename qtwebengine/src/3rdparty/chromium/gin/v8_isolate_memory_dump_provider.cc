@@ -12,7 +12,9 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "gin/public/isolate_holder.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-locker.h"
+#include "v8/include/v8-statistics.h"
 
 namespace gin {
 
@@ -80,6 +82,9 @@ void DumpCodeStatistics(base::trace_event::MemoryAllocatorDump* dump,
   dump->AddScalar("external_script_source_size",
                   base::trace_event::MemoryAllocatorDump::kUnitsBytes,
                   code_statistics.external_script_source_size());
+  dump->AddScalar("cpu_profiler_metadata_size",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  code_statistics.cpu_profiler_metadata_size());
 }
 
 // Dump the number of native and detached contexts.
@@ -152,7 +157,7 @@ bool CanHaveMultipleIsolates(IsolateHolder::IsolateType isolate_type) {
   LOG(FATAL) << "Unreachable code";
 }
 
-}  // namespace anonymous
+}  // namespace
 
 void V8IsolateMemoryDumpProvider::DumpHeapStatistics(
     const base::trace_event::MemoryDumpArgs& args,
@@ -264,6 +269,14 @@ void V8IsolateMemoryDumpProvider::DumpHeapStatistics(
       base::trace_event::MemoryAllocatorDump::kNameSize,
       base::trace_event::MemoryAllocatorDump::kUnitsBytes,
       heap_statistics.total_global_handles_size());
+  global_handles_dump->AddScalar(
+      "allocated_objects_size",
+      base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+      heap_statistics.used_global_handles_size());
+  if (system_allocator_name) {
+    process_memory_dump->AddSuballocation(global_handles_dump->guid(),
+                                          system_allocator_name);
+  }
 
   // Dump object statistics only for detailed dumps.
   if (args.level_of_detail !=

@@ -30,7 +30,7 @@ _DASHBOARD_TESTS = [
             '--timeout-sec=120', '--timeout-retries=2'
         ],
         'outputs_presentation_json': True,
-        'disabled': ['android'],
+        'disabled': ['android', 'win', 'mac'],
     },
     {
         'name': 'Dashboard Dev Server Tests Canary',
@@ -40,13 +40,13 @@ _DASHBOARD_TESTS = [
             '--timeout-sec=120', '--timeout-retries=2'
         ],
         'outputs_presentation_json': True,
-        'disabled': ['android'],
+        'disabled': ['android', 'win', 'mac'],
     },
     {
         'name': 'Dashboard Python Tests',
         'path': 'dashboard/bin/run_py_tests',
         'additional_args': ['--no-install-hooks'],
-        'disabled': ['android'],
+        'disabled': ['android', 'win', 'mac'],
     },
 ]
 
@@ -73,11 +73,6 @@ _CATAPULT_TESTS = [
         'name': 'Devil Python Tests',
         'path': 'devil/bin/run_py_tests',
         'disabled': ['mac', 'win'],
-    },
-    {
-        'name': 'eslint Tests',
-        'path': 'common/eslint/bin/run_tests',
-        'disabled': ['android'],
     },
     {
         'name': 'Native Heap Symbolizer Tests',
@@ -208,6 +203,7 @@ def main(args=None):
       '--app-engine-sdk-pythonpath',
       help='PYTHONPATH to include app engine SDK path')
   parser.add_argument('--platform', help='Platform name (linux, mac, or win)')
+  parser.add_argument('--platform_arch', help='Platform arch (intel or arm)')
   parser.add_argument('--output-json', help='Output for buildbot status page')
   parser.add_argument(
       '--run_android_tests', default=True, help='Run Android tests')
@@ -215,6 +211,11 @@ def main(args=None):
       '--dashboard_only',
       default=False,
       help='Run only the Dashboard and Pinpoint tests',
+      action='store_true')
+  parser.add_argument(
+      '--use_python3',
+      default=False,
+      help='Run Catapult Tests using vpython3',
       action='store_true')
   args = parser.parse_args(args)
 
@@ -234,6 +235,14 @@ def main(args=None):
                                      'tracing', 'proto')
   tracing_proto_output_path = tracing_protos_path
   tracing_proto_files = [os.path.join(tracing_protos_path, 'histogram.proto')]
+
+  protoc_path = 'protoc'
+
+  # TODO(crbug.com/1271700): Remove this condition once protoc mac-arm build is
+  # released.
+  if args.platform == 'mac' and args.platform_arch == 'arm':
+    protoc_path = os.path.join(args.api_path_checkout, 'catapult_build', 'bin',
+                               'mac-arm64', 'protoc')
 
 
   steps = [
@@ -257,7 +266,7 @@ def main(args=None):
           'name':
               'Generate Sheriff Config protocol buffers',
           'cmd': [
-              'protoc',
+              protoc_path,
               '--proto_path',
               dashboard_protos_path,
               '--python_out',
@@ -268,7 +277,7 @@ def main(args=None):
           'name':
               'Generate Dashboard protocol buffers',
           'cmd': [
-              'protoc',
+              protoc_path,
               '--proto_path',
               dashboard_protos_path,
               '--python_out',
@@ -279,7 +288,7 @@ def main(args=None):
           'name':
               'Generate Tracing protocol buffers',
           'cmd': [
-              'protoc',
+              protoc_path,
               '--proto_path',
               tracing_protos_path,
               '--python_out',
@@ -325,7 +334,7 @@ def main(args=None):
   if args.dashboard_only:
     tests = _DASHBOARD_TESTS
   else:
-    tests = _DASHBOARD_TESTS + _CATAPULT_TESTS
+    tests = _CATAPULT_TESTS
   for test in tests:
     if args.platform == 'android' and not args.run_android_tests:
       # Remove all the steps for the Android configuration if we're asked to not
@@ -335,16 +344,33 @@ def main(args=None):
 
     if args.platform in test.get('disabled', []):
       continue
+
+    # The test "Devil Python Tests" has two executables, run_py_tests and
+    # run_py3_tests. Those scripts define the vpython interpreter on shebang,
+    # and will quit when running on unexpected version. This script assumes one
+    # path for each test and thus we will conditionally replace the script name
+    # until python 2 is fully dropped.
+    # here,
+    test_path = test['path']
+    if args.use_python3 and test['name'] == 'Devil Python Tests':
+      test_path = 'devil/bin/run_py3_tests'
+
     step = {'name': test['name'], 'env': {}}
 
-    executable = 'vpython.bat' if sys.platform == 'win32' else 'vpython'
+    if args.use_python3:
+      vpython_executable = "vpython3"
+    else:
+      vpython_executable = "vpython"
+
+    if sys.platform == 'win32':
+      vpython_executable += '.bat'
 
     # Always add the appengine SDK path.
     step['env']['PYTHONPATH'] = args.app_engine_sdk_pythonpath
 
     step['cmd'] = [
-        executable,
-        os.path.join(args.api_path_checkout, test['path'])
+        vpython_executable,
+        os.path.join(args.api_path_checkout, test_path)
     ]
     if step['name'] == 'Systrace Tests':
       step['cmd'] += ['--device=' + args.platform]
@@ -354,6 +380,13 @@ def main(args=None):
       step['env']['CHROME_DEVEL_SANDBOX'] = '/opt/chromium/chrome_sandbox'
     if test.get('outputs_presentation_json'):
       step['outputs_presentation_json'] = True
+    # TODO(crbug/1221663):
+    # Before python 3 conversion is finished, the try jobs with use_python3 are
+    # experimental. We want to see all possible failure and thus we don't want
+    # to try job to quit before all tests are finished.
+    # This condition will be removed when the python 3 conversion is done.
+    if args.use_python3:
+      step['always_run'] = True
     steps.append(step)
   with open(args.output_json, 'w') as outfile:
     json.dump(steps, outfile)

@@ -8,6 +8,7 @@
 #include "base/base_paths.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "net/cert/internal/cert_error_params.h"
@@ -34,7 +35,7 @@ bool GetValue(base::StringPiece prefix,
   }
 
   *has_value = true;
-  *value = line.substr(prefix.size()).as_string();
+  *value = std::string(line.substr(prefix.size()));
   return true;
 }
 
@@ -127,7 +128,7 @@ der::Input SequenceValueFromString(const std::string* s) {
 }
 
 VerifyCertChainTest::VerifyCertChainTest()
-    : user_initial_policy_set{AnyPolicy()} {}
+    : user_initial_policy_set{der::Input(kAnyPolicyOid)} {}
 VerifyCertChainTest::~VerifyCertChainTest() = default;
 
 bool VerifyCertChainTest::HasHighSeverityErrors() const {
@@ -224,7 +225,7 @@ bool ReadVerifyCertChainTestFromFile(const std::string& file_path_ascii,
       ReadCertChainFromFile(chain_path, &test->chain);
     } else if (GetValue("utc_time: ", line_piece, &value, &has_time)) {
       if (value == "DEFAULT") {
-        value = "201103120000Z";
+        value = "211005120000Z";
       }
       if (!der::ParseUTCTime(der::Input(&value), &test->time)) {
         ADD_FAILURE() << "Failed parsing UTC time";
@@ -245,6 +246,9 @@ bool ReadVerifyCertChainTestFromFile(const std::string& file_path_ascii,
     } else if (GetValue("last_cert_trust: ", line_piece, &value, &has_trust)) {
       if (value == "TRUSTED_ANCHOR") {
         test->last_cert_trust = CertificateTrust::ForTrustAnchor();
+      } else if (value == "TRUSTED_ANCHOR_WITH_EXPIRATION") {
+        test->last_cert_trust =
+            CertificateTrust::ForTrustAnchorEnforcingExpiration();
       } else if (value == "TRUSTED_ANCHOR_WITH_CONSTRAINTS") {
         test->last_cert_trust =
             CertificateTrust::ForTrustAnchorEnforcingConstraints();
@@ -264,7 +268,7 @@ bool ReadVerifyCertChainTestFromFile(const std::string& file_path_ascii,
       // The errors start on the next line, and extend until the end of the
       // file.
       std::string prefix =
-          std::string("\n") + kExpectedErrors.as_string() + std::string("\n");
+          std::string("\n") + std::string(kExpectedErrors) + std::string("\n");
       size_t errors_start = file_data.find(prefix);
       if (errors_start == std::string::npos) {
         ADD_FAILURE() << "expected_errors not found";

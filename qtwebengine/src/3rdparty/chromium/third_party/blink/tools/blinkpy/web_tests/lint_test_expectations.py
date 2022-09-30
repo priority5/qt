@@ -41,25 +41,34 @@ from blinkpy.web_tests.port.android import (
     PRODUCTS_TO_EXPECTATION_FILE_PATHS, ANDROID_DISABLED_TESTS,
     ANDROID_WEBLAYER)
 from blinkpy.web_tests.port.factory import platform_options
+from blinkpy.web_tests.port.linux import LinuxPort
+from blinkpy.web_tests.port.mac import MacPort
+from blinkpy.web_tests.port.win import WinPort
+
+from functools import reduce
 
 _log = logging.getLogger(__name__)
 
 
 def lint(host, options):
-    port = host.port_factory.get(options.platform)
-    wpt_tests = set(port.tests([host.filesystem.join('external', 'wpt')]))
+    # lint against three major ports. This is a tradeoff between presubmit
+    # check speed and the completeness of the check.
+    full_port_names_to_lint = ["%s-%s" % (cls.port_name, cls.SUPPORTED_VERSIONS[-1])
+                               for cls in [LinuxPort, MacPort, WinPort]]
+    ports_to_lint = [
+        host.port_factory.get(name) for name in full_port_names_to_lint
+    ]
 
     # Add all extra expectation files to be linted.
     options.additional_expectations.extend(
-        PRODUCTS_TO_EXPECTATION_FILE_PATHS.values() + [ANDROID_DISABLED_TESTS] + [
-        host.filesystem.join(port.web_tests_dir(), 'WPTOverrideExpectations'),
-        host.filesystem.join(port.web_tests_dir(), 'WebGPUExpectations'),
-    ])
+        list(PRODUCTS_TO_EXPECTATION_FILE_PATHS.values()) +
+        [ANDROID_DISABLED_TESTS] + [
+            host.filesystem.join(ports_to_lint[0].web_tests_dir(),
+                                 'WPTOverrideExpectations'),
+            host.filesystem.join(ports_to_lint[0].web_tests_dir(),
+                                 'WebGPUExpectations'),
+        ])
 
-    ports_to_lint = [
-        host.port_factory.get(name, options=options)
-        for name in host.port_factory.all_port_names(options.platform)
-    ]
 
     # In general, the set of TestExpectation files should be the same for
     # all ports. However, the method used to list expectations files is
@@ -69,97 +78,41 @@ def lint(host, options):
 
     failures = []
     warnings = []
-    expectations_dict = {}
     all_system_specifiers = set()
     all_build_specifiers = set(ports_to_lint[0].ALL_BUILD_TYPES)
 
-    # TODO(crbug.com/986447) Remove the checks below after migrating the expectations
-    # parsing to Typ. All the checks below can be handled by Typ.
-
     for port in ports_to_lint:
-        expectations_dict.update(port.all_expectations_dict())
-        config_macro_dict = port.configuration_specifier_macros()
-        if config_macro_dict:
-            all_system_specifiers.update(
-                {s.lower()
-                 for s in config_macro_dict.keys()})
-            all_system_specifiers.update({
-                s.lower()
-                for s in reduce(lambda x, y: x + y, config_macro_dict.values())
-            })
+        expectations_dict = port.all_expectations_dict()
         for path in port.extra_expectations_files():
             if host.filesystem.exists(path):
                 expectations_dict[path] = host.filesystem.read_text_file(path)
 
-    for path, content in expectations_dict.items():
-        # Check the expectations file content
-        failures.extend(_check_expectations_file_content(content))
+        for path, content in expectations_dict.items():
+            # Create a TestExpectations instance and see if an exception is raised
+            try:
+                test_expectations = TestExpectations(
+                    port, expectations_dict={path: content})
+                # Check each expectation for issues
+                f, w = _check_expectations(host, port, path,
+                                           test_expectations, options)
+                failures += f
+                warnings += w
+            except ParseError as error:
+                _log.error(str(error))
+                failures.append(str(error))
+                _log.error('')
 
-        # Create a TestExpectations instance and see if an exception is raised
-        try:
-            test_expectations = TestExpectations(
-                ports_to_lint[0], expectations_dict={path: content})
-            # Check each expectation for issues
-            f, w = _check_expectations(host, ports_to_lint[0], path,
-                                       test_expectations, options, wpt_tests)
-            failures += f
-            warnings += w
-        except ParseError as error:
-            _log.error(str(error))
-            failures.append(str(error))
-            _log.error('')
-
-    if any('Test does not exist' in w for w in warnings):
-        # TODO(rmhasan): Instead of hardcoding '--android-product=ANDROID_WEBLAYER'
-        # add a general --android command line argument which will be used to
-        # put wpt_update_expectations.py into Android mode.
-        _log.info('')
-        _log.info('If there are expectations for deleted tests in '
-                  'Android WPT override files then clean them by running '
-                  '\'//third_party/blink/tools/wpt_update_expectations.py '
-                  '--update-android-expectations-only '
-                  '--clean-up-test-expectations-only\'')
-        _log.info('')
     return failures, warnings
 
 
-def _check_expectations_file_content(content):
-    failures = []
-    for lineno, line in enumerate(content.splitlines(), 1):
-        if not line.strip() or line.strip().startswith('#'):
-            continue
-        # check for test expectations that start with leading spaces
-        if line.startswith(' '):
-            error = (('%s:%d Line %d has a test expectation'
-                      ' that has leading spaces.') %
-                     (host.filesystem.basename(path), lineno, lineno))
-            _log.error(error)
-            failures.append(error)
-            _log.error('')
-
-        # check for test expectations that have a Bug(...) as the reason
-        if line.startswith('Bug('):
-            error = (
-                ("%s:%d Expectation '%s' has the Bug(...) token, "
-                 "The token has been removed in the new expectations format") %
-                (host.filesystem.basename(path), lineno, line))
-            _log.error(error)
-            failures.append(error)
-            _log.error('')
-
-    return failures
-
-
-def _check_test_existence(host, port, path, expectations, wpt_tests):
+def _check_test_existence(host, port, path, expectations):
     failures = []
     warnings = []
-    is_android_path = path in PRODUCTS_TO_EXPECTATION_FILE_PATHS.values()
+    if path in PRODUCTS_TO_EXPECTATION_FILE_PATHS.values():
+        return [], []
+
     for exp in expectations:
         if not exp.test:
-            continue
-        # TODO(crbug.com/1102901): We currently can't clean up webgpu tests
-        # since they are not picked up by blinkpy
-        if exp.test.startswith('external/wpt/webgpu'):
             continue
         if exp.is_glob:
             test_name = exp.test[:-1]
@@ -167,14 +120,7 @@ def _check_test_existence(host, port, path, expectations, wpt_tests):
             test_name = exp.test
         possible_error = "{}:{} Test does not exist: {}".format(
             host.filesystem.basename(path), exp.lineno, exp.test)
-        if is_android_path and test_name not in wpt_tests:
-            # TODO(crbug.com/1110003): Change this lint back into a failure
-            # after figuring out how to clean up renamed or deleted generated
-            # tests from expectations files when wpt_update_expectations.py is
-            # run with the --clean-up-affected-tests-only command line argument.
-            warnings.append(possible_error)
-            _log.warning(possible_error)
-        elif not is_android_path and not port.test_exists(test_name):
+        if not port.test_exists(test_name):
             failures.append(possible_error)
             _log.error(possible_error)
     return failures, warnings
@@ -223,6 +169,10 @@ def _check_redundant_virtual_expectations(host, port, path, expectations):
     for exp in expectations:
         if not exp.test:
             continue
+        # TODO(crbug.com/1080691): For now, ignore redundant entries created by
+        # WPT import.
+        if port.is_wpt_test(exp.test):
+            continue
 
         base_test = port.lookup_virtual_test_base(exp.test)
         if base_test:
@@ -254,6 +204,27 @@ def _check_redundant_virtual_expectations(host, port, path, expectations):
 
     return failures
 
+def _check_not_slow_and_timeout(host, port, path, expectations):
+    # only do check for web tests, so that we don't impact test coverage
+    # for other test suites
+    if (not path.endswith('TestExpectations') and
+        not path.endswith('SlowTests')):
+        return []
+
+    rv = []
+    test_expectations = TestExpectations(host.port_factory.get())
+
+    for i in range(len(expectations)):
+        exp = expectations[i]
+        if (ResultType.Timeout in exp.results and
+                len(exp.results) == 1 and
+                (test_expectations.get_expectations(exp.test).is_slow_test or
+                    port.is_slow_wpt_test(exp.test))):
+            error = "{}:{} '{}' is a [ Slow ] and [ Timeout ] test: you must add [ Skip ] (see crrev.com/c/3381301).".format(
+                host.filesystem.basename(path), exp.lineno, exp.test)
+            _log.warning(error)
+            rv.append(error)
+    return rv
 
 def _check_never_fix_tests(host, port, path, expectations):
     if not path.endswith('NeverFixTests'):
@@ -300,23 +271,22 @@ def _check_never_fix_tests(host, port, path, expectations):
     return failures
 
 
-def _check_expectations(host, port, path, test_expectations, options, wpt_tests):
+def _check_expectations(host, port, path, test_expectations, options):
     # Check for original expectation lines (from get_updated_lines) instead of
     # expectations filtered for the current port (test_expectations).
     expectations = test_expectations.get_updated_lines(path)
     failures, warnings = _check_test_existence(
-        host, port, path, expectations, wpt_tests)
+        host, port, path, expectations)
     failures.extend(_check_directory_glob(host, port, path, expectations))
+    failures.extend(_check_not_slow_and_timeout(host, port, path, expectations))
     failures.extend(_check_never_fix_tests(host, port, path, expectations))
     if path in PRODUCTS_TO_EXPECTATION_FILE_PATHS.values():
         failures.extend(_check_non_wpt_in_android_override(
             host, port, path, expectations))
     # TODO(crbug.com/1080691): Change this to failures once
     # wpt_expectations_updater is fixed.
-    if not getattr(options, 'no_check_redundant_virtual_expectations', False):
-        warnings.extend(
-            _check_redundant_virtual_expectations(host, port, path,
-                                                  expectations))
+    warnings.extend(
+        _check_redundant_virtual_expectations(host, port, path, expectations))
     return failures, warnings
 
 
@@ -459,10 +429,6 @@ def main(argv, stderr, host=None):
         action='append',
         default=[],
         help='paths to additional expectation files to lint.')
-    parser.add_option('--no-check-redundant-virtual-expectations',
-                      action='store_true',
-                      default=False,
-                      help='skip checking redundant virtual expectations.')
 
     options, _ = parser.parse_args(argv)
 
@@ -490,7 +456,7 @@ def main(argv, stderr, host=None):
     except KeyboardInterrupt:
         exit_status = exit_codes.INTERRUPTED_EXIT_STATUS
     except Exception as error:  # pylint: disable=broad-except
-        print >> stderr, '\n%s raised: %s' % (error.__class__.__name__, error)
+        print('\n%s raised: %s' % (error.__class__.__name__, error), stderr)
         traceback.print_exc(file=stderr)
         exit_status = exit_codes.EXCEPTIONAL_EXIT_STATUS
 

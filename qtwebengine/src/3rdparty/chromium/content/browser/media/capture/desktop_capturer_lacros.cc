@@ -4,13 +4,36 @@
 
 #include "content/browser/media/capture/desktop_capturer_lacros.h"
 
-#include "base/task/task_traits.h"
-#include "base/task/thread_pool.h"
-
-#include "chromeos/crosapi/cpp/bitmap.h"
-#include "chromeos/lacros/lacros_chrome_service_impl.h"
+#include "chromeos/lacros/lacros_service.h"
+#include "mojo/public/cpp/bindings/sync_call_restrictions.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 
 namespace content {
+namespace {
+
+// An SkBitmap backed subclass of DesktopFrame. This enables the webrtc system
+// to retain the SkBitmap buffer without having to copy the pixels out until
+// they are needed (e.g., for encoding).
+class DesktopFrameSkia : public webrtc::DesktopFrame {
+ public:
+  explicit DesktopFrameSkia(const SkBitmap& bitmap)
+      : webrtc::DesktopFrame(
+            webrtc::DesktopSize(bitmap.width(), bitmap.height()),
+            bitmap.rowBytes(),
+            static_cast<uint8_t*>(bitmap.getPixels()),
+            nullptr),
+        bitmap_(bitmap) {}
+  ~DesktopFrameSkia() override = default;
+
+ private:
+  DesktopFrameSkia(const DesktopFrameSkia&) = delete;
+  DesktopFrameSkia& operator=(const DesktopFrameSkia&) = delete;
+
+  SkBitmap bitmap_;
+};
+
+}  // namespace
 
 DesktopCapturerLacros::DesktopCapturerLacros(
     CaptureType capture_type,
@@ -24,31 +47,21 @@ DesktopCapturerLacros::~DesktopCapturerLacros() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
-bool DesktopCapturerLacros::GetSourceList(SourceList* sources) {
+bool DesktopCapturerLacros::GetSourceList(SourceList* result) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (capture_type_ == kScreen) {
-    // TODO(https://crbug.com/1094460): Implement this source list
-    // appropriately.
-    Source w;
-    w.id = 1;
-    sources->push_back(w);
-    return true;
-  }
+  std::vector<crosapi::mojom::SnapshotSourcePtr> sources;
 
-  EnsureScreenManager();
-
-  std::vector<crosapi::mojom::WindowDetailsPtr> windows;
   {
     mojo::SyncCallRestrictions::ScopedAllowSyncCall allow_sync_call;
-    screen_manager_->ListWindows(&windows);
+    snapshot_capturer_->ListSources(&sources);
   }
 
-  for (auto& window : windows) {
-    Source w;
-    w.id = window->id;
-    w.title = window->title;
-    sources->push_back(w);
+  for (auto& source : sources) {
+    Source s;
+    s.id = source->id;
+    s.title = source->title;
+    result->push_back(s);
   }
   return true;
 }
@@ -70,32 +83,39 @@ bool DesktopCapturerLacros::FocusOnSelectedSource() {
 void DesktopCapturerLacros::Start(Callback* callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   callback_ = callback;
+
+  // The lacros service exists at all times except during early start-up and
+  // late shut-down. This class should never be used in those two times.
+  auto* lacros_service = chromeos::LacrosService::Get();
+  DCHECK(lacros_service);
+  lacros_service->BindScreenManagerReceiver(
+      screen_manager_.BindNewPipeAndPassReceiver());
+
+  // Lacros can assume that Ash is at least M88.
+  int version =
+      lacros_service->GetInterfaceVersion(crosapi::mojom::ScreenManager::Uuid_);
+  CHECK_GE(version, 1);
+
+  if (capture_type_ == kScreen) {
+    screen_manager_->GetScreenCapturer(
+        snapshot_capturer_.BindNewPipeAndPassReceiver());
+  } else {
+    screen_manager_->GetWindowCapturer(
+        snapshot_capturer_.BindNewPipeAndPassReceiver());
+  }
 }
 
 void DesktopCapturerLacros::CaptureFrame() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  EnsureScreenManager();
+#if DCHECK_IS_ON()
+  DCHECK(!capturing_frame_);
+  capturing_frame_ = true;
+#endif
 
-  if (capture_type_ == kScreen) {
-    crosapi::Bitmap snapshot;
-    {
-      // lacros-chrome is allowed to make sync calls to ash-chrome.
-      mojo::SyncCallRestrictions::ScopedAllowSyncCall allow_sync_call;
-      screen_manager_->TakeScreenSnapshot(&snapshot);
-    }
-    DidTakeSnapshot(/*success=*/true, snapshot);
-  } else {
-    bool success;
-    crosapi::Bitmap snapshot;
-    {
-      // lacros-chrome is allowed to make sync calls to ash-chrome.
-      mojo::SyncCallRestrictions::ScopedAllowSyncCall allow_sync_call;
-      screen_manager_->TakeWindowSnapshot(selected_source_, &success,
-                                          &snapshot);
-    }
-    DidTakeSnapshot(success, snapshot);
-  }
+  snapshot_capturer_->TakeSnapshot(
+      selected_source_, base::BindOnce(&DesktopCapturerLacros::DidTakeSnapshot,
+                                       weak_factory_.GetWeakPtr()));
 }
 
 bool DesktopCapturerLacros::IsOccluded(const webrtc::DesktopVector& pos) {
@@ -107,23 +127,13 @@ void DesktopCapturerLacros::SetSharedMemoryFactory(
 
 void DesktopCapturerLacros::SetExcludedWindow(webrtc::WindowId window) {}
 
-void DesktopCapturerLacros::EnsureScreenManager() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  if (screen_manager_)
-    return;
-
-  // The lacros chrome service exists at all times except during early start-up
-  // and late shut-down. This class should never be used in those two times.
-  auto* lacros_chrome_service = chromeos::LacrosChromeServiceImpl::Get();
-  DCHECK(lacros_chrome_service);
-  lacros_chrome_service->BindScreenManagerReceiver(
-      screen_manager_.BindNewPipeAndPassReceiver());
-}
-
 void DesktopCapturerLacros::DidTakeSnapshot(bool success,
-                                            const crosapi::Bitmap& snapshot) {
+                                            const SkBitmap& snapshot) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+#if DCHECK_IS_ON()
+  capturing_frame_ = false;
+#endif
 
   if (!success) {
     callback_->OnCaptureResult(Result::ERROR_PERMANENT,
@@ -131,17 +141,8 @@ void DesktopCapturerLacros::DidTakeSnapshot(bool success,
     return;
   }
 
-  std::unique_ptr<webrtc::DesktopFrame> frame =
-      std::make_unique<webrtc::BasicDesktopFrame>(
-          webrtc::DesktopSize(snapshot.width, snapshot.height));
-
-  // This code assumes that the stride is 4 * width. This relies on the
-  // assumption that there's no padding and each pixel is 4 bytes.
-  frame->CopyPixelsFrom(
-      snapshot.pixels.data(), 4 * snapshot.width,
-      webrtc::DesktopRect::MakeWH(snapshot.width, snapshot.height));
-
-  callback_->OnCaptureResult(Result::SUCCESS, std::move(frame));
+  callback_->OnCaptureResult(Result::SUCCESS,
+                             std::make_unique<DesktopFrameSkia>(snapshot));
 }
 
 }  // namespace content

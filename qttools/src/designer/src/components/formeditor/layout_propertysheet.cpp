@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "layout_propertysheet.h"
 
@@ -57,7 +32,6 @@ static const char *bottomMargin = "bottomMargin";
 static const char *horizontalSpacing = "horizontalSpacing";
 static const char *verticalSpacing = "verticalSpacing";
 static const char *spacing = "spacing";
-static const char *margin = "margin";
 static const char *sizeConstraint = "sizeConstraint";
 static const char *boxStretchPropertyC = "stretch";
 static const char *gridRowStretchPropertyC = "rowStretch";
@@ -68,7 +42,6 @@ static const char *gridColumnMinimumWidthPropertyC = "columnMinimumWidth";
 namespace {
     enum LayoutPropertyType {
         LayoutPropertyNone,
-        LayoutPropertyMargin, // Deprecated
         LayoutPropertyLeftMargin,
         LayoutPropertyTopMargin,
         LayoutPropertyRightMargin,
@@ -102,23 +75,21 @@ static bool isIntegerList(const QString &s)
 // Quick lookup by name
 static LayoutPropertyType  layoutPropertyType(const QString &name)
 {
-    static QHash<QString, LayoutPropertyType> namePropertyMap;
-    if (namePropertyMap.isEmpty()) {
-        namePropertyMap.insert(QLatin1String(leftMargin), LayoutPropertyLeftMargin);
-        namePropertyMap.insert(QLatin1String(topMargin), LayoutPropertyTopMargin);
-        namePropertyMap.insert(QLatin1String(rightMargin), LayoutPropertyRightMargin);
-        namePropertyMap.insert(QLatin1String(bottomMargin), LayoutPropertyBottomMargin);
-        namePropertyMap.insert(QLatin1String(horizontalSpacing), LayoutPropertyHorizontalSpacing);
-        namePropertyMap.insert(QLatin1String(verticalSpacing), LayoutPropertyVerticalSpacing);
-        namePropertyMap.insert(QLatin1String(spacing), LayoutPropertySpacing);
-        namePropertyMap.insert(QLatin1String(margin), LayoutPropertyMargin);
-        namePropertyMap.insert(QLatin1String(sizeConstraint), LayoutPropertySizeConstraint);
-        namePropertyMap.insert(QLatin1String(boxStretchPropertyC ), LayoutPropertyBoxStretch);
-        namePropertyMap.insert(QLatin1String(gridRowStretchPropertyC), LayoutPropertyGridRowStretch);
-        namePropertyMap.insert(QLatin1String(gridColumnStretchPropertyC), LayoutPropertyGridColumnStretch);
-        namePropertyMap.insert(QLatin1String(gridRowMinimumHeightPropertyC), LayoutPropertyGridRowMinimumHeight);
-        namePropertyMap.insert(QLatin1String(gridColumnMinimumWidthPropertyC), LayoutPropertyGridColumnMinimumWidth);
-    }
+    static const QHash<QString, LayoutPropertyType> namePropertyMap = {
+        {QLatin1String(leftMargin), LayoutPropertyLeftMargin},
+        {QLatin1String(topMargin), LayoutPropertyTopMargin},
+        {QLatin1String(rightMargin), LayoutPropertyRightMargin},
+        {QLatin1String(bottomMargin), LayoutPropertyBottomMargin},
+        {QLatin1String(horizontalSpacing), LayoutPropertyHorizontalSpacing},
+        {QLatin1String(verticalSpacing), LayoutPropertyVerticalSpacing},
+        {QLatin1String(spacing), LayoutPropertySpacing},
+        {QLatin1String(sizeConstraint), LayoutPropertySizeConstraint},
+        {QLatin1String(boxStretchPropertyC ), LayoutPropertyBoxStretch},
+        {QLatin1String(gridRowStretchPropertyC), LayoutPropertyGridRowStretch},
+        {QLatin1String(gridColumnStretchPropertyC), LayoutPropertyGridColumnStretch},
+        {QLatin1String(gridRowMinimumHeightPropertyC), LayoutPropertyGridRowMinimumHeight},
+        {QLatin1String(gridColumnMinimumWidthPropertyC), LayoutPropertyGridColumnMinimumWidth}
+    };
     return namePropertyMap.value(name, LayoutPropertyNone);
 }
 
@@ -203,7 +174,6 @@ LayoutPropertySheet::LayoutPropertySheet(QLayout *l, QObject *parent)
         setAttribute(indexOf(QLatin1String(spacing)), true);
     }
 
-    setAttribute(indexOf(QLatin1String(margin)), true);
     // Stretch
     if (visibleMask & LayoutProperties::BoxStretchProperty) {
         pindex = createFakeProperty(QLatin1String(boxStretchPropertyC), QByteArray());
@@ -255,14 +225,6 @@ void LayoutPropertySheet::setProperty(int index, const QVariant &value)
             return;
         case LayoutPropertyBottomMargin:
             lw->setLayoutBottomMargin(value.toInt());
-            return;
-        case LayoutPropertyMargin: {
-            const int v = value.toInt();
-            lw->setLayoutLeftMargin(v);
-            lw->setLayoutTopMargin(v);
-            lw->setLayoutRightMargin(v);
-            lw->setLayoutBottomMargin(v);
-        }
             return;
         default:
             break;
@@ -454,12 +416,6 @@ void LayoutPropertySheet::setChanged(int index, bool changed)
             setChanged(indexOf(QLatin1String(horizontalSpacing)), changed);
             setChanged(indexOf(QLatin1String(verticalSpacing)), changed);
         }
-        break;
-    case LayoutPropertyMargin:
-        setChanged(indexOf(QLatin1String(leftMargin)), changed);
-        setChanged(indexOf(QLatin1String(topMargin)), changed);
-        setChanged(indexOf(QLatin1String(rightMargin)), changed);
-        setChanged(indexOf(QLatin1String(bottomMargin)), changed);
         break;
     default:
         break;

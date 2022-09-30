@@ -19,7 +19,6 @@
 #include "helpers.h"
 #include "modules/audio_device/fine_audio_buffer.h"
 #include "rtc_base/atomic_ops.h"
-#include "rtc_base/bind.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/thread.h"
@@ -100,8 +99,9 @@ static void LogDeviceInfo() {
 }
 #endif  // !defined(NDEBUG)
 
-AudioDeviceIOS::AudioDeviceIOS()
-    : audio_device_buffer_(nullptr),
+AudioDeviceIOS::AudioDeviceIOS(bool bypass_voice_processing)
+    : bypass_voice_processing_(bypass_voice_processing),
+      audio_device_buffer_(nullptr),
       audio_unit_(nullptr),
       recording_(0),
       playing_(0),
@@ -113,7 +113,8 @@ AudioDeviceIOS::AudioDeviceIOS()
       last_playout_time_(0),
       num_playout_callbacks_(0),
       last_output_volume_change_time_(0) {
-  LOGI() << "ctor" << ios::GetCurrentThreadDescription();
+  LOGI() << "ctor" << ios::GetCurrentThreadDescription()
+         << ",bypass_voice_processing=" << bypass_voice_processing_;
   io_thread_checker_.Detach();
   thread_checker_.Detach();
   thread_ = rtc::Thread::Current();
@@ -234,8 +235,11 @@ int32_t AudioDeviceIOS::StartPlayout() {
     fine_audio_buffer_->ResetPlayout();
   }
   if (!recording_ && audio_unit_->GetState() == VoiceProcessingAudioUnit::kInitialized) {
-    if (!audio_unit_->Start()) {
-      RTCLogError(@"StartPlayout failed to start audio unit.");
+    OSStatus result = audio_unit_->Start();
+    if (result != noErr) {
+      RTC_OBJC_TYPE(RTCAudioSession)* session = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+      [session notifyAudioUnitStartFailedWithError:result];
+      RTCLogError(@"StartPlayout failed to start audio unit, reason %d", result);
       return -1;
     }
     RTC_LOG(LS_INFO) << "Voice-Processing I/O audio unit is now started";
@@ -287,8 +291,11 @@ int32_t AudioDeviceIOS::StartRecording() {
     fine_audio_buffer_->ResetRecord();
   }
   if (!playing_ && audio_unit_->GetState() == VoiceProcessingAudioUnit::kInitialized) {
-    if (!audio_unit_->Start()) {
-      RTCLogError(@"StartRecording failed to start audio unit.");
+    OSStatus result = audio_unit_->Start();
+    if (result != noErr) {
+      RTC_OBJC_TYPE(RTCAudioSession)* session = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+      [session notifyAudioUnitStartFailedWithError:result];
+      RTCLogError(@"StartRecording failed to start audio unit, reason %d", result);
       return -1;
     }
     RTC_LOG(LS_INFO) << "Voice-Processing I/O audio unit is now started";
@@ -385,7 +392,7 @@ OSStatus AudioDeviceIOS::OnDeliverRecordedData(AudioUnitRenderActionFlags* flags
   // Allocate AudioBuffers to be used as storage for the received audio.
   // The AudioBufferList structure works as a placeholder for the
   // AudioBuffer structure, which holds a pointer to the actual data buffer
-  // in |record_audio_buffer_|. Recorded audio will be rendered into this memory
+  // in `record_audio_buffer_`. Recorded audio will be rendered into this memory
   // at each input callback when calling AudioUnitRender().
   AudioBufferList audio_buffer_list;
   audio_buffer_list.mNumberBuffers = 1;
@@ -396,7 +403,7 @@ OSStatus AudioDeviceIOS::OnDeliverRecordedData(AudioUnitRenderActionFlags* flags
   audio_buffer->mData = reinterpret_cast<int8_t*>(record_audio_buffer_.data());
 
   // Obtain the recorded audio samples by initiating a rendering cycle.
-  // Since it happens on the input bus, the |io_data| parameter is a reference
+  // Since it happens on the input bus, the `io_data` parameter is a reference
   // to the preallocated audio buffer list that the audio unit renders into.
   // We can make the audio unit provide a buffer instead in io_data, but we
   // currently just use our own.
@@ -466,7 +473,7 @@ OSStatus AudioDeviceIOS::OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
 
   // Read decoded 16-bit PCM samples from WebRTC (using a size that matches
   // the native I/O audio unit) and copy the result to the audio buffer in the
-  // |io_data| destination.
+  // `io_data` destination.
   fine_audio_buffer_->GetPlayoutData(
       rtc::ArrayView<int16_t>(static_cast<int16_t*>(audio_buffer->mData), num_frames),
       kFixedPlayoutDelayEstimate);
@@ -506,9 +513,8 @@ void AudioDeviceIOS::HandleInterruptionBegin() {
     RTCLog(@"Stopping the audio unit due to interruption begin.");
     if (!audio_unit_->Stop()) {
       RTCLogError(@"Failed to stop the audio unit for interruption begin.");
-    } else {
-      PrepareForNewStart();
     }
+    PrepareForNewStart();
   }
   is_interrupted_ = true;
 }
@@ -620,9 +626,16 @@ void AudioDeviceIOS::HandleSampleRateChange(float sample_rate) {
   }
 
   // Restart the audio unit if it was already running.
-  if (restart_audio_unit && !audio_unit_->Start()) {
-    RTCLogError(@"Failed to start audio unit with sample rate: %f", session_sample_rate);
-    return;
+  if (restart_audio_unit) {
+    OSStatus result = audio_unit_->Start();
+    if (result != noErr) {
+      RTC_OBJC_TYPE(RTCAudioSession)* session = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+      [session notifyAudioUnitStartFailedWithError:result];
+      RTCLogError(@"Failed to start audio unit with sample rate: %f, reason %d",
+                  session_sample_rate,
+                  result);
+      return;
+    }
   }
   RTCLog(@"Successfully handled sample rate change.");
 }
@@ -731,7 +744,7 @@ void AudioDeviceIOS::SetupAudioBuffersForActiveAudioSession() {
 bool AudioDeviceIOS::CreateAudioUnit() {
   RTC_DCHECK(!audio_unit_);
 
-  audio_unit_.reset(new VoiceProcessingAudioUnit(this));
+  audio_unit_.reset(new VoiceProcessingAudioUnit(bypass_voice_processing_, this));
   if (!audio_unit_->Init()) {
     audio_unit_.reset();
     return false;
@@ -766,7 +779,7 @@ void AudioDeviceIOS::UpdateAudioUnit(bool can_play_or_record) {
   switch (audio_unit_->GetState()) {
     case VoiceProcessingAudioUnit::kInitRequired:
       RTCLog(@"VPAU state: InitRequired");
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       break;
     case VoiceProcessingAudioUnit::kUninitialized:
       RTCLog(@"VPAU state: Uninitialized");
@@ -801,8 +814,10 @@ void AudioDeviceIOS::UpdateAudioUnit(bool can_play_or_record) {
     // Log session settings before trying to start audio streaming.
     RTC_OBJC_TYPE(RTCAudioSession)* session = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
     RTCLog(@"%@", session);
-    if (!audio_unit_->Start()) {
-      RTCLogError(@"Failed to start audio unit.");
+    OSStatus result = audio_unit_->Start();
+    if (result != noErr) {
+      [session notifyAudioUnitStartFailedWithError:result];
+      RTCLogError(@"Failed to start audio unit, reason %d", result);
       return;
     }
   }
@@ -811,8 +826,10 @@ void AudioDeviceIOS::UpdateAudioUnit(bool can_play_or_record) {
     RTCLog(@"Stopping audio unit for UpdateAudioUnit");
     if (!audio_unit_->Stop()) {
       RTCLogError(@"Failed to stop audio unit.");
+      PrepareForNewStart();
       return;
     }
+    PrepareForNewStart();
   }
 
   if (should_uninitialize_audio_unit) {
@@ -833,6 +850,24 @@ bool AudioDeviceIOS::ConfigureAudioSession() {
   [session lockForConfiguration];
   bool success = [session configureWebRTCSession:nil];
   [session unlockForConfiguration];
+  if (success) {
+    has_configured_session_ = true;
+    RTCLog(@"Configured audio session.");
+  } else {
+    RTCLog(@"Failed to configure audio session.");
+  }
+  return success;
+}
+
+bool AudioDeviceIOS::ConfigureAudioSessionLocked() {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  RTCLog(@"Configuring audio session.");
+  if (has_configured_session_) {
+    RTCLogWarning(@"Audio session already configured.");
+    return false;
+  }
+  RTC_OBJC_TYPE(RTCAudioSession)* session = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+  bool success = [session configureWebRTCSession:nil];
   if (success) {
     has_configured_session_ = true;
     RTCLog(@"Configured audio session.");
@@ -885,7 +920,7 @@ bool AudioDeviceIOS::InitPlayOrRecord() {
   // If we are ready to play or record, and if the audio session can be
   // configured, then initialize the audio unit.
   if (session.canPlayOrRecord) {
-    if (!ConfigureAudioSession()) {
+    if (!ConfigureAudioSessionLocked()) {
       // One possible reason for failure is if an attempt was made to use the
       // audio session during or after a Media Services failure.
       // See AVAudioSessionErrorCodeMediaServicesFailed for details.
@@ -971,22 +1006,22 @@ int32_t AudioDeviceIOS::SpeakerVolumeIsAvailable(bool& available) {
 }
 
 int32_t AudioDeviceIOS::SetSpeakerVolume(uint32_t volume) {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::SpeakerVolume(uint32_t& volume) const {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::MaxSpeakerVolume(uint32_t& maxVolume) const {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::MinSpeakerVolume(uint32_t& minVolume) const {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
@@ -996,12 +1031,12 @@ int32_t AudioDeviceIOS::SpeakerMuteIsAvailable(bool& available) {
 }
 
 int32_t AudioDeviceIOS::SetSpeakerMute(bool enable) {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::SpeakerMute(bool& enabled) const {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
@@ -1011,7 +1046,7 @@ int32_t AudioDeviceIOS::SetPlayoutDevice(uint16_t index) {
 }
 
 int32_t AudioDeviceIOS::SetPlayoutDevice(AudioDeviceModule::WindowsDeviceType) {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
@@ -1029,12 +1064,12 @@ int32_t AudioDeviceIOS::MicrophoneMuteIsAvailable(bool& available) {
 }
 
 int32_t AudioDeviceIOS::SetMicrophoneMute(bool enable) {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::MicrophoneMute(bool& enabled) const {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
@@ -1074,36 +1109,36 @@ int32_t AudioDeviceIOS::MicrophoneVolumeIsAvailable(bool& available) {
 }
 
 int32_t AudioDeviceIOS::SetMicrophoneVolume(uint32_t volume) {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::MicrophoneVolume(uint32_t& volume) const {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::MaxMicrophoneVolume(uint32_t& maxVolume) const {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::MinMicrophoneVolume(uint32_t& minVolume) const {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::PlayoutDeviceName(uint16_t index,
                                           char name[kAdmMaxDeviceNameSize],
                                           char guid[kAdmMaxGuidSize]) {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
 int32_t AudioDeviceIOS::RecordingDeviceName(uint16_t index,
                                             char name[kAdmMaxDeviceNameSize],
                                             char guid[kAdmMaxGuidSize]) {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 
@@ -1113,7 +1148,7 @@ int32_t AudioDeviceIOS::SetRecordingDevice(uint16_t index) {
 }
 
 int32_t AudioDeviceIOS::SetRecordingDevice(AudioDeviceModule::WindowsDeviceType) {
-  RTC_NOTREACHED() << "Not implemented";
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
   return -1;
 }
 

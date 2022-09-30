@@ -5,14 +5,16 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_UI_BULK_LEAK_CHECK_SERVICE_ADAPTER_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_UI_BULK_LEAK_CHECK_SERVICE_ADAPTER_H_
 
+#include "base/memory/raw_ptr.h"
 #include "components/password_manager/core/browser/bulk_leak_check_service_interface.h"
 #include "components/password_manager/core/browser/leak_detection/bulk_leak_check.h"
-#include "components/password_manager/core/browser/password_form_forward.h"
 #include "components/password_manager/core/browser/ui/saved_passwords_presenter.h"
 
 class PrefService;
 
 namespace password_manager {
+
+struct PasswordForm;
 
 // This class serves as an apdater for the BulkLeakCheckService and exposes an
 // API that is intended to be consumed from the settings page.
@@ -47,10 +49,10 @@ class BulkLeakCheckServiceAdapter : public SavedPasswordsPresenter::Observer {
 
   // Weak handles to a presenter and service, respectively. These must be not
   // null and must outlive the adapter.
-  SavedPasswordsPresenter* presenter_ = nullptr;
-  BulkLeakCheckServiceInterface* service_ = nullptr;
+  raw_ptr<SavedPasswordsPresenter> presenter_ = nullptr;
+  raw_ptr<BulkLeakCheckServiceInterface> service_ = nullptr;
 
-  PrefService* prefs_ = nullptr;
+  raw_ptr<PrefService> prefs_ = nullptr;
 };
 
 }  // namespace password_manager

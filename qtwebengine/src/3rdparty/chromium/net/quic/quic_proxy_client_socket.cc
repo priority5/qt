@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/values.h"
 #include "net/base/proxy_delegate.h"
@@ -76,14 +75,6 @@ int QuicProxyClientSocket::RestartWithAuth(CompletionOnceCallback callback) {
   return ERR_UNABLE_TO_REUSE_CONNECTION_FOR_PROXY_AUTH;
 }
 
-bool QuicProxyClientSocket::IsUsingSpdy() const {
-  return false;
-}
-
-NextProto QuicProxyClientSocket::GetProxyNegotiatedProtocol() const {
-  return kProtoQUIC;
-}
-
 // Ignore priority changes, just use priority of initial request. Since multiple
 // requests are pooled on the QuicProxyClientSocket, reprioritization doesn't
 // really work.
@@ -141,15 +132,21 @@ bool QuicProxyClientSocket::WasEverUsed() const {
 }
 
 bool QuicProxyClientSocket::WasAlpnNegotiated() const {
+  // Do not delegate to `session_`. While `session_` negotiates ALPN with the
+  // proxy, this object represents the tunneled TCP connection to the origin.
   return false;
 }
 
 NextProto QuicProxyClientSocket::GetNegotiatedProtocol() const {
+  // Do not delegate to `session_`. While `session_` negotiates ALPN with the
+  // proxy, this object represents the tunneled TCP connection to the origin.
   return kProtoUnknown;
 }
 
 bool QuicProxyClientSocket::GetSSLInfo(SSLInfo* ssl_info) {
-  return session_->GetSSLInfo(ssl_info);
+  // Do not delegate to `session_`. While `session_` has a secure channel to the
+  // proxy, this object represents the tunneled TCP connection to the origin.
+  return false;
 }
 
 void QuicProxyClientSocket::GetConnectionAttempts(
@@ -368,7 +365,7 @@ int QuicProxyClientSocket::DoSendRequest() {
                        NetLogEventType::HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
                        request_line, &request_.extra_headers);
 
-  spdy::SpdyHeaderBlock headers;
+  spdy::Http2HeaderBlock headers;
   CreateSpdyHeadersFromHttpRequest(request_, request_.extra_headers, &headers);
 
   return stream_->WriteHeaders(std::move(headers), false, nullptr);
@@ -432,8 +429,7 @@ int QuicProxyClientSocket::DoReadReplyComplete(int result) {
 
     case 407:  // Proxy Authentication Required
       next_state_ = STATE_CONNECT_COMPLETE;
-      if (!SanitizeProxyAuth(&response_))
-        return ERR_TUNNEL_CONNECTION_FAILED;
+      SanitizeProxyAuth(response_);
       return HandleProxyAuthChallenge(auth_.get(), &response_, net_log_);
 
     default:
@@ -444,7 +440,7 @@ int QuicProxyClientSocket::DoReadReplyComplete(int result) {
 }
 
 void QuicProxyClientSocket::OnReadResponseHeadersComplete(int result) {
-  // Convert the now-populated spdy::SpdyHeaderBlock to HttpResponseInfo
+  // Convert the now-populated spdy::Http2HeaderBlock to HttpResponseInfo
   if (result > 0)
     result = ProcessResponseHeaders(response_header_block_);
 
@@ -453,8 +449,8 @@ void QuicProxyClientSocket::OnReadResponseHeadersComplete(int result) {
 }
 
 int QuicProxyClientSocket::ProcessResponseHeaders(
-    const spdy::SpdyHeaderBlock& headers) {
-  if (!SpdyHeadersToHttpResponse(headers, &response_)) {
+    const spdy::Http2HeaderBlock& headers) {
+  if (SpdyHeadersToHttpResponse(headers, &response_) != OK) {
     DLOG(WARNING) << "Invalid headers";
     return ERR_QUIC_PROTOCOL_ERROR;
   }

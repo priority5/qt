@@ -1,42 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2016 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtDBus module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2016 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qdbuspendingcall.h"
 #include "qdbuspendingcall_p.h"
@@ -52,6 +16,8 @@
 #ifndef QT_NO_DBUS
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 /*!
     \class QDBusPendingCall
@@ -185,10 +151,10 @@ bool QDBusPendingCallPrivate::setReplyCallback(QObject *target, const char *memb
     return true;
 }
 
-void QDBusPendingCallPrivate::setMetaTypes(int count, const int *types)
+void QDBusPendingCallPrivate::setMetaTypes(int count, const QMetaType *types)
 {
     if (count == 0) {
-        expectedReplySignature = QLatin1String(""); // not null
+        expectedReplySignature = ""_L1; // not null
         return;
     }
 
@@ -196,10 +162,8 @@ void QDBusPendingCallPrivate::setMetaTypes(int count, const int *types)
     sig.reserve(count + count / 2);
     for (int i = 0; i < count; ++i) {
         const char *typeSig = QDBusMetaType::typeToSignature(types[i]);
-        if (Q_UNLIKELY(!typeSig)) {
-            qFatal("QDBusPendingReply: type %s is not registered with QtDBus",
-                   QMetaType::typeName(types[i]));
-        }
+        if (Q_UNLIKELY(!typeSig))
+            qFatal("QDBusPendingReply: type %s is not registered with QtDBus", types[i].name());
         sig += typeSig;
     }
 
@@ -221,8 +185,7 @@ void QDBusPendingCallPrivate::checkReceivedSignature()
 
     // can't use startsWith here because a null string doesn't start or end with an empty string
     if (replyMessage.signature().indexOf(expectedReplySignature) != 0) {
-        const auto errorMsg = QLatin1String("Unexpected reply signature: got \"%1\", "
-                                            "expected \"%2\"");
+        const auto errorMsg = "Unexpected reply signature: got \"%1\", expected \"%2\""_L1;
         replyMessage = QDBusMessage::createError(
             QDBusError::InvalidSignature,
             errorMsg.arg(replyMessage.signature(), expectedReplySignature));
@@ -310,8 +273,9 @@ QDBusPendingCall &QDBusPendingCall::operator=(const QDBusPendingCall &other)
 
     \sa QDBusPendingReply::isFinished()
 */
+
 /*!
-    \fn template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8> bool QDBusPendingReply<T1, T2, T3, T4, T5, T6, T7, T8>::isFinished() const
+    \fn template <typename... Types> bool QDBusPendingReply<Types...>::isFinished() const
 
     Returns \c true if the pending call has finished processing and the
     reply has been received. If this function returns \c true, the
@@ -340,7 +304,7 @@ void QDBusPendingCall::waitForFinished()
 }
 
 /*!
-    \fn template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8> bool QDBusPendingReply<T1, T2, T3, T4, T5, T6, T7, T8>::isValid() const
+    \fn template <typename... Types> bool QDBusPendingReply<Types...>::isValid() const
 
     Returns \c true if the reply contains a normal reply message, false
     if it contains anything else.
@@ -357,7 +321,7 @@ bool QDBusPendingCall::isValid() const
 }
 
 /*!
-    \fn template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8> bool QDBusPendingReply<T1, T2, T3, T4, T5, T6, T7, T8>::isError() const
+    \fn template <typename... Types> bool QDBusPendingReply<Types...>::isError() const
 
     Returns \c true if the reply contains an error message, false if it
     contains a normal method reply.
@@ -374,7 +338,7 @@ bool QDBusPendingCall::isError() const
 }
 
 /*!
-    \fn template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8> QDBusError QDBusPendingReply<T1, T2, T3, T4, T5, T6, T7, T8>::error() const
+    \fn template <typename... Types> QDBusError QDBusPendingReply<Types...>::error() const
 
     Retrieves the error content of the reply message, if it has
     finished processing. If the reply message has not finished
@@ -395,7 +359,7 @@ QDBusError QDBusPendingCall::error() const
 }
 
 /*!
-    \fn template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8> QDBusMessage QDBusPendingReply<T1, T2, T3, T4, T5, T6, T7, T8>::reply() const
+    \fn template <typename... Types> QDBusMessage QDBusPendingReply<Types...>::reply() const
 
     Retrieves the reply message received for the asynchronous call
     that was sent, if it has finished processing. If the pending call
@@ -445,7 +409,7 @@ bool QDBusPendingCall::setReplyCallback(QObject *target, const char *member)
     \since 4.6
     Creates a QDBusPendingCall object based on the error condition
     \a error. The resulting pending call object will be in the
-    "finished" state and QDBusPendingReply<T1, T2, T3, T4, T5, T6, T7, T8>::isError() will return true.
+    "finished" state and QDBusPendingReply<Types...>::isError() will return true.
 
     \sa fromCompletedCall()
 */
@@ -545,6 +509,8 @@ void QDBusPendingCallWatcher::waitForFinished()
     }
 }
 QT_END_NAMESPACE
+
+#include "moc_qdbuspendingcall_p.cpp"
 
 #endif // QT_NO_DBUS
 

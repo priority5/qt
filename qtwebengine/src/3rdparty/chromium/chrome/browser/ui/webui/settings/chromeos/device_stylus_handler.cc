@@ -11,7 +11,9 @@
 
 #include "ash/public/cpp/stylus_utils.h"
 #include "base/bind.h"
-#include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/ash/arc/arc_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 
@@ -60,13 +62,13 @@ void StylusHandler::RegisterMessages() {
 }
 
 void StylusHandler::OnJavascriptAllowed() {
-  note_observer_.Add(NoteTakingHelper::Get());
-  input_observer_.Add(ui::DeviceDataManager::GetInstance());
+  note_observation_.Observe(NoteTakingHelper::Get());
+  input_observation_.Observe(ui::DeviceDataManager::GetInstance());
 }
 
 void StylusHandler::OnJavascriptDisallowed() {
-  note_observer_.RemoveAll();
-  input_observer_.RemoveAll();
+  note_observation_.Reset();
+  input_observation_.Reset();
 }
 
 void StylusHandler::OnAvailableNoteTakingAppsUpdated() {
@@ -97,11 +99,11 @@ void StylusHandler::UpdateNoteTakingApps() {
         helper->GetAvailableApps(Profile::FromWebUI(web_ui()));
     for (const NoteTakingAppInfo& info : available_apps) {
       auto dict = std::make_unique<base::DictionaryValue>();
-      dict->SetString(kAppNameKey, info.name);
-      dict->SetString(kAppIdKey, info.app_id);
-      dict->SetBoolean(kAppPreferredKey, info.preferred);
-      dict->SetInteger(kAppLockScreenSupportKey,
-                       static_cast<int>(info.lock_screen_support));
+      dict->SetStringKey(kAppNameKey, info.name);
+      dict->SetStringKey(kAppIdKey, info.app_id);
+      dict->SetBoolKey(kAppPreferredKey, info.preferred);
+      dict->SetIntKey(kAppLockScreenSupportKey,
+                      static_cast<int>(info.lock_screen_support));
       apps_list.Append(std::move(dict));
 
       note_taking_app_ids_.insert(info.app_id);
@@ -112,15 +114,14 @@ void StylusHandler::UpdateNoteTakingApps() {
                     base::Value(waiting_for_android));
 }
 
-void StylusHandler::HandleRequestApps(const base::ListValue* unused_args) {
+void StylusHandler::HandleRequestApps(const base::Value::List& unused_args) {
   AllowJavascript();
   UpdateNoteTakingApps();
 }
 
 void StylusHandler::HandleSetPreferredNoteTakingApp(
-    const base::ListValue* args) {
-  std::string app_id;
-  CHECK(args->GetString(0, &app_id));
+    const base::Value::List& args) {
+  const std::string& app_id = args[0].GetString();
 
   // Sanity check: make sure that the ID we got back from WebUI is in the
   // currently-available set.
@@ -134,15 +135,16 @@ void StylusHandler::HandleSetPreferredNoteTakingApp(
 }
 
 void StylusHandler::HandleSetPreferredNoteTakingAppEnabledOnLockScreen(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   bool enabled = false;
-  CHECK(args->GetBoolean(0, &enabled));
+  CHECK(args[0].is_bool());
+  enabled = args[0].GetBool();
 
   NoteTakingHelper::Get()->SetPreferredAppEnabledOnLockScreen(
       Profile::FromWebUI(web_ui()), enabled);
 }
 
-void StylusHandler::HandleInitialize(const base::ListValue* args) {
+void StylusHandler::HandleInitialize(const base::Value::List& args) {
   AllowJavascript();
   if (ui::DeviceDataManager::GetInstance()->AreDeviceListsComplete())
     SendHasStylus();
@@ -154,16 +156,19 @@ void StylusHandler::SendHasStylus() {
                     base::Value(ash::stylus_utils::HasStylusInput()));
 }
 
-void StylusHandler::HandleShowPlayStoreApps(const base::ListValue* args) {
-  std::string apps_url;
-  args->GetString(0, &apps_url);
+void StylusHandler::HandleShowPlayStoreApps(const base::Value::List& args) {
+  const std::string& apps_url = !args.empty() ? args[0].GetString() : "";
   Profile* profile = Profile::FromWebUI(web_ui());
   if (!arc::IsArcAllowedForProfile(profile)) {
     VLOG(1) << "ARC is not enabled for this profile";
     return;
   }
 
-  arc::LaunchPlayStoreWithUrl(apps_url);
+  DCHECK(
+      apps::AppServiceProxyFactory::IsAppServiceAvailableForProfile(profile));
+  apps::AppServiceProxyFactory::GetForProfile(profile)->LaunchAppWithUrl(
+      arc::kPlayStoreAppId, ui::EF_NONE, GURL(apps_url),
+      apps::mojom::LaunchSource::kFromChromeInternal);
 }
 
 }  // namespace settings

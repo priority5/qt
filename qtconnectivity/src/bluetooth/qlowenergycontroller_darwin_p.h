@@ -1,42 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2016 Javier S. Pedro <maemo@javispedro.com>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtBluetooth module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2016 Javier S. Pedro <maemo@javispedro.com>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 #ifndef QLOWENERGYCONTROLLER_DARWIN_P_H
 #define QLOWENERGYCONTROLLER_DARWIN_P_H
 
@@ -54,10 +18,10 @@
 #include "qlowenergyserviceprivate_p.h"
 #include "qlowenergycontrollerbase_p.h"
 #include "qlowenergycontroller.h"
-#include "osx/osxbtnotifier_p.h"
+#include "darwin/btnotifier_p.h"
 #include "qbluetoothaddress.h"
+#include "darwin/btraii_p.h"
 #include "qbluetoothuuid.h"
-#include "osx/btraii_p.h"
 
 #include <QtCore/qsharedpointer.h>
 #include <QtCore/qglobal.h>
@@ -82,7 +46,8 @@ public:
     void connectToDevice() override;
     void disconnectFromDevice() override;
     void discoverServices() override;
-    void discoverServiceDetails(const QBluetoothUuid &serviceUuid) override;
+    void discoverServiceDetails(const QBluetoothUuid &serviceUuid,
+                                QLowEnergyService::DiscoveryMode mode) override;
 
     void readCharacteristic(const QSharedPointer<QLowEnergyServicePrivate> service,
                             const QLowEnergyHandle charHandle) override;
@@ -103,17 +68,23 @@ public:
     void addToGenericAttributeList(const QLowEnergyServiceData &service,
                                    QLowEnergyHandle startHandle) override;
 
+    int mtu() const override;
+
     void startAdvertising(const QLowEnergyAdvertisingParameters &params,
                           const QLowEnergyAdvertisingData &advertisingData,
                           const QLowEnergyAdvertisingData &scanResponseData) override;
     void stopAdvertising()override;
     QLowEnergyService *addServiceHelper(const QLowEnergyServiceData &service) override;
-    bool isValid() const; // QT6 - delete this logic.
+
+    // Valid - a central or peripheral instance was allocated, and this may also
+    // mean a proper usage description was provided/found:
+    bool isValid() const;
 
 private Q_SLOTS:
     void _q_connected();
     void _q_disconnected();
 
+    void _q_mtuChanged(int newValue);
     void _q_serviceDiscoveryFinished();
     void _q_serviceDetailsDiscoveryFinished(QSharedPointer<QLowEnergyServicePrivate> service);
     void _q_servicesWereModified();
@@ -144,7 +115,7 @@ private:
                                     bool appendValue);
 
     void setErrorDescription(QLowEnergyController::Error errorCode);
-    bool connectSlots(OSXBluetooth::LECBManagerNotifier *notifier);
+    bool connectSlots(DarwinBluetooth::LECBManagerNotifier *notifier);
 
     DarwinBluetooth::ScopedPointer centralManager;
 

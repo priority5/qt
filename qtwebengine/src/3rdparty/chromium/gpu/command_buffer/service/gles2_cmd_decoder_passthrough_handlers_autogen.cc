@@ -4014,7 +4014,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleFramebufferParameteri(
 error::Error GLES2DecoderPassthroughImpl::HandleBindImageTexture(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2ComputeContext())
+  if (!feature_info_->IsES31ForTestingContext())
     return error::kUnknownCommand;
   const volatile gles2::cmds::BindImageTexture& c =
       *static_cast<const volatile gles2::cmds::BindImageTexture*>(cmd_data);
@@ -4036,7 +4036,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindImageTexture(
 error::Error GLES2DecoderPassthroughImpl::HandleDispatchCompute(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2ComputeContext())
+  if (!feature_info_->IsES31ForTestingContext())
     return error::kUnknownCommand;
   const volatile gles2::cmds::DispatchCompute& c =
       *static_cast<const volatile gles2::cmds::DispatchCompute*>(cmd_data);
@@ -4054,7 +4054,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleDispatchCompute(
 error::Error GLES2DecoderPassthroughImpl::HandleDispatchComputeIndirect(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2ComputeContext())
+  if (!feature_info_->IsES31ForTestingContext())
     return error::kUnknownCommand;
   const volatile gles2::cmds::DispatchComputeIndirect& c =
       *static_cast<const volatile gles2::cmds::DispatchComputeIndirect*>(
@@ -4070,7 +4070,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleDispatchComputeIndirect(
 error::Error GLES2DecoderPassthroughImpl::HandleGetProgramInterfaceiv(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2ComputeContext())
+  if (!feature_info_->IsES31ForTestingContext())
     return error::kUnknownCommand;
   const volatile gles2::cmds::GetProgramInterfaceiv& c =
       *static_cast<const volatile gles2::cmds::GetProgramInterfaceiv*>(
@@ -4104,7 +4104,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetProgramInterfaceiv(
 error::Error GLES2DecoderPassthroughImpl::HandleMemoryBarrierEXT(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2ComputeContext())
+  if (!feature_info_->IsES31ForTestingContext())
     return error::kUnknownCommand;
   const volatile gles2::cmds::MemoryBarrierEXT& c =
       *static_cast<const volatile gles2::cmds::MemoryBarrierEXT*>(cmd_data);
@@ -4119,7 +4119,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleMemoryBarrierEXT(
 error::Error GLES2DecoderPassthroughImpl::HandleMemoryBarrierByRegion(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2ComputeContext())
+  if (!feature_info_->IsES31ForTestingContext())
     return error::kUnknownCommand;
   const volatile gles2::cmds::MemoryBarrierByRegion& c =
       *static_cast<const volatile gles2::cmds::MemoryBarrierByRegion*>(
@@ -4401,32 +4401,6 @@ error::Error GLES2DecoderPassthroughImpl::HandleLoseContextCHROMIUM(
   GLenum current = static_cast<GLenum>(c.current);
   GLenum other = static_cast<GLenum>(c.other);
   error::Error error = DoLoseContextCHROMIUM(current, other);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
-error::Error
-GLES2DecoderPassthroughImpl::HandleUnpremultiplyAndDitherCopyCHROMIUM(
-    uint32_t immediate_data_size,
-    const volatile void* cmd_data) {
-  const volatile gles2::cmds::UnpremultiplyAndDitherCopyCHROMIUM& c =
-      *static_cast<
-          const volatile gles2::cmds::UnpremultiplyAndDitherCopyCHROMIUM*>(
-          cmd_data);
-  if (!features().unpremultiply_and_dither_copy) {
-    return error::kUnknownCommand;
-  }
-
-  GLuint source_id = static_cast<GLuint>(c.source_id);
-  GLuint dest_id = static_cast<GLuint>(c.dest_id);
-  GLint x = static_cast<GLint>(c.x);
-  GLint y = static_cast<GLint>(c.y);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  error::Error error = DoUnpremultiplyAndDitherCopyCHROMIUM(
-      source_id, dest_id, x, y, width, height);
   if (error != error::kNoError) {
     return error;
   }

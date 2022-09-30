@@ -24,8 +24,8 @@
 
 constexpr base::StringPiece StripLambda(base::StringPiece shader) {
   // Must contain at least "[]() {}".
-//  DCHECK_EQ(shader.substr(0, 6), "[]() {");
-//  DCHECK_EQ(shader.back(), '}');
+  DCHECK_EQ(shader.substr(0, 6), "[]() {");
+  DCHECK_EQ(shader.back(), '}');
   shader.remove_prefix(6);
   shader.remove_suffix(1);
   return shader;
@@ -335,7 +335,7 @@ std::string VertexShader::GetShaderString() const {
         break;
       case TEX_COORD_TRANSFORM_TRANSLATED_VEC4:
         SRC("texCoord = texCoord + vec2(0.5);");
-        FALLTHROUGH;
+        [[fallthrough]];
       case TEX_COORD_TRANSFORM_VEC4:
         if (use_uniform_arrays_) {
           HDR("uniform TexCoordPrecision vec4 vertexTexTransform[NUM_QUADS];");

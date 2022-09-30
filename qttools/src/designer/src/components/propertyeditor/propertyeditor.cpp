@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "propertyeditor.h"
 
@@ -53,7 +28,7 @@
 #include <iconloader_p.h>
 #include <widgetfactory_p.h>
 
-#include <QtWidgets/qaction.h>
+#include <QtWidgets/qlabel.h>
 #include <QtWidgets/qlineedit.h>
 #include <QtWidgets/qmenu.h>
 #include <QtWidgets/qapplication.h>
@@ -62,8 +37,9 @@
 #include <QtWidgets/qstackedwidget.h>
 #include <QtWidgets/qtoolbar.h>
 #include <QtWidgets/qtoolbutton.h>
-#include <QtWidgets/qactiongroup.h>
-#include <QtWidgets/qlabel.h>
+
+#include <QtGui/qaction.h>
+#include <QtGui/qactiongroup.h>
 #include <QtGui/qpainter.h>
 
 #include <QtCore/qdebug.h>
@@ -213,20 +189,12 @@ PropertyEditor::PropertyEditor(QDesignerFormEditorInterface *core, QWidget *pare
     m_buttonAction(new QAction(tr("Drop Down Button View"), this)),
     m_classLabel(new ElidingLabel)
 {
-    QVector<QColor> colors;
-    colors.reserve(6);
-    colors.push_back(QColor(255, 230, 191));
-    colors.push_back(QColor(255, 255, 191));
-    colors.push_back(QColor(191, 255, 191));
-    colors.push_back(QColor(199, 255, 255));
-    colors.push_back(QColor(234, 191, 255));
-    colors.push_back(QColor(255, 191, 239));
-    m_colors.reserve(colors.count());
+    const QColor colors[] = {{255, 230, 191}, {255, 255, 191}, {191, 255, 191},
+                             {199, 255, 255}, {234, 191, 255}, {255, 191, 239}};
     const int darknessFactor = 250;
-    for (int i = 0; i < colors.count(); i++) {
-        const QColor &c = colors.at(i);
+    m_colors.reserve(std::size(colors));
+    for (const QColor &c : colors)
         m_colors.push_back(qMakePair(c, c.darker(darknessFactor)));
-    }
     QColor dynamicColor(191, 207, 255);
     QColor layoutColor(255, 191, 191);
     m_dynamicColor = qMakePair(dynamicColor, dynamicColor.darker(darknessFactor));
@@ -255,14 +223,14 @@ PropertyEditor::PropertyEditor(QDesignerFormEditorInterface *core, QWidget *pare
     m_addDynamicAction->setMenu(addDynamicActionMenu);
     m_addDynamicAction->setEnabled(false);
     QAction *addDynamicAction = addDynamicActionGroup->addAction(tr("String..."));
-    addDynamicAction->setData(static_cast<int>(QVariant::String));
+    addDynamicAction->setData(static_cast<int>(QMetaType::QString));
     addDynamicActionMenu->addAction(addDynamicAction);
     addDynamicAction = addDynamicActionGroup->addAction(tr("Bool..."));
-    addDynamicAction->setData(static_cast<int>(QVariant::Bool));
+    addDynamicAction->setData(static_cast<int>(QMetaType::Bool));
     addDynamicActionMenu->addAction(addDynamicAction);
     addDynamicActionMenu->addSeparator();
     addDynamicAction = addDynamicActionGroup->addAction(tr("Other..."));
-    addDynamicAction->setData(static_cast<int>(QVariant::Invalid));
+    addDynamicAction->setData(static_cast<int>(QMetaType::UnknownType));
     addDynamicActionMenu->addAction(addDynamicAction);
     // remove
     m_removeDynamicAction->setEnabled(false);
@@ -373,6 +341,9 @@ PropertyEditor::PropertyEditor(QDesignerFormEditorInterface *core, QWidget *pare
 
 PropertyEditor::~PropertyEditor()
 {
+    // Prevent emission of QtTreePropertyBrowser::itemChanged() when deleting
+    // the current item, causing asserts.
+    m_treeBrowser->setCurrentItem(nullptr);
     storeExpansionState();
     saveSettings();
 }
@@ -694,9 +665,9 @@ void PropertyEditor::slotAddDynamicProperty(QAction *action)
     QString newName;
     QVariant newValue;
     { // Make sure the dialog is closed before the signal is emitted.
-        const QVariant::Type type = static_cast<QVariant::Type>(action->data().toInt());
+        const int  type = action->data().toInt();
         NewDynamicPropertyDialog dlg(core()->dialogGui(), m_currentBrowser);
-        if (type != QVariant::Invalid)
+        if (type != QMetaType::UnknownType)
             dlg.setPropertyType(type);
 
         QStringList reservedNames;
@@ -814,7 +785,7 @@ void PropertyEditor::updateBrowserValue(QtVariantProperty *property, const QVari
     }
 
     // Rich text string property with comment: Store/Update the font the rich text editor dialog starts out with
-    if (type == QVariant::String && !property->subProperties().isEmpty()) {
+    if (type == QMetaType::QString && !property->subProperties().isEmpty()) {
         const int fontIndex = m_propertySheet->indexOf(m_strings.m_fontProperty);
         if (fontIndex != -1)
             property->setAttribute(m_strings.m_fontAttribute, m_propertySheet->property(fontIndex));
@@ -865,9 +836,9 @@ QString PropertyEditor::realClassName(QObject *object) const
 static const char *typeName(int type)
 {
     if (type == qMetaTypeId<PropertySheetStringValue>())
-        type = QVariant::String;
-    if (type < int(QVariant::UserType))
-        return QVariant::typeToName(static_cast<QVariant::Type>(type));
+        type = QMetaType::QString;
+    if (type < int(QMetaType::User))
+        return QMetaType(type).name();
     if (type == qMetaTypeId<PropertySheetIconValue>())
         return "QIcon";
     if (type == qMetaTypeId<PropertySheetPixmapValue>())
@@ -878,9 +849,9 @@ static const char *typeName(int type)
         return "QFlags";
     if (type == qMetaTypeId<PropertySheetEnumValue>())
         return "enum";
-    if (type == QVariant::Invalid)
+    if (type == QMetaType::UnknownType)
         return "invalid";
-    if (type == QVariant::UserType)
+    if (type == QMetaType::User)
         return "user type";
     return nullptr;
 }
@@ -1040,16 +1011,16 @@ void PropertyEditor::setObject(QObject *object)
                 if (!descriptionToolTip.isEmpty())
                     property->setDescriptionToolTip(descriptionToolTip);
                 switch (type) {
-                case QVariant::Palette:
+                case QMetaType::QPalette:
                     setupPaletteProperty(property);
                     break;
-                case QVariant::KeySequence:
+                case QMetaType::QKeySequence:
                     //addCommentProperty(property, propertyName);
                     break;
                 default:
                     break;
                 }
-                if (type == QVariant::String || type == qMetaTypeId<PropertySheetStringValue>())
+                if (type == QMetaType::QString || type == qMetaTypeId<PropertySheetStringValue>())
                     setupStringProperty(property, isMainContainer);
                 property->setAttribute(m_strings.m_resettableAttribute, m_propertySheet->hasReset(i));
 
@@ -1107,7 +1078,7 @@ void PropertyEditor::setObject(QObject *object)
                 updateBrowserValue(property, value);
 
                 property->setModified(m_propertySheet->isChanged(i));
-                if (propertyName == QStringLiteral("geometry") && type == QVariant::Rect) {
+                if (propertyName == QStringLiteral("geometry") && type == QMetaType::QRect) {
                     const auto &subProperties = property->subProperties();
                     for (QtProperty *subProperty : subProperties) {
                         const QString subPropertyName = subProperty->propertyName();

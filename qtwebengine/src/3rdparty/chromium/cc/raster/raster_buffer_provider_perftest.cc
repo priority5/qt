@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/memory/raw_ptr.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "base/timer/lap_timer.h"
@@ -13,6 +14,7 @@
 #include "cc/raster/gpu_raster_buffer_provider.h"
 #include "cc/raster/one_copy_raster_buffer_provider.h"
 #include "cc/raster/raster_buffer_provider.h"
+#include "cc/raster/raster_query_queue.h"
 #include "cc/raster/synchronous_task_graph_runner.h"
 #include "cc/raster/zero_copy_raster_buffer_provider.h"
 #include "cc/resources/resource_pool.h"
@@ -238,7 +240,7 @@ class PerfRasterTaskImpl : public PerfTileTask {
   ~PerfRasterTaskImpl() override = default;
 
  private:
-  ResourcePool* const pool_;
+  const raw_ptr<ResourcePool> pool_;
   ResourcePool::InUsePoolResource resource_;
   std::unique_ptr<RasterBuffer> raster_buffer_;
 };
@@ -256,7 +258,7 @@ class RasterBufferProviderPerfTestBase {
         task_runner_(new base::TestSimpleTaskRunner),
         task_graph_runner_(new SynchronousTaskGraphRunner),
         timer_(kWarmupRuns,
-               base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+               base::Milliseconds(kTimeLimitMillis),
                kTimeCheckInterval) {}
 
   void CreateImageDecodeTasks(unsigned num_image_decode_tasks,
@@ -354,6 +356,9 @@ class RasterBufferProviderPerfTest
  public:
   // Overridden from testing::Test:
   void SetUp() override {
+    pending_raster_queries_ =
+        std::make_unique<RasterQueryQueue>(worker_context_provider_.get());
+
     switch (GetParam()) {
       case RASTER_BUFFER_PROVIDER_TYPE_ZERO_COPY:
         Create3dResourceProvider();
@@ -374,7 +379,8 @@ class RasterBufferProviderPerfTest
         Create3dResourceProvider();
         raster_buffer_provider_ = std::make_unique<GpuRasterBufferProvider>(
             compositor_context_provider_.get(), worker_context_provider_.get(),
-            false, viz::RGBA_8888, gfx::Size(), true, false);
+            false, viz::RGBA_8888, gfx::Size(), true,
+            pending_raster_queries_.get());
         break;
       case RASTER_BUFFER_PROVIDER_TYPE_BITMAP:
         CreateSoftwareResourceProvider();
@@ -553,6 +559,7 @@ class RasterBufferProviderPerfTest
   std::unique_ptr<TileTaskManager> tile_task_manager_;
   std::unique_ptr<RasterBufferProvider> raster_buffer_provider_;
   viz::TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
+  std::unique_ptr<RasterQueryQueue> pending_raster_queries_;
 };
 
 TEST_P(RasterBufferProviderPerfTest, ScheduleTasks) {

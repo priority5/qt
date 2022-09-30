@@ -18,35 +18,14 @@
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 
-#if BUILDFLAG(USE_TCMALLOC)
-#include "third_party/tcmalloc/chromium/src/config.h"
-#include "third_party/tcmalloc/chromium/src/gperftools/tcmalloc.h"
-#endif
-
 namespace base {
 
-size_t g_oom_size = 0U;
-
 namespace {
-
-void OnNoMemorySize(size_t size) {
-  g_oom_size = size;
-
-  if (size != 0)
-    LOG(FATAL) << "Out of memory, size = " << size;
-  LOG(FATAL) << "Out of memory.";
-}
-
-// NOINLINE as base::`anonymous namespace`::OnNoMemory() is recognized by the
-// crash server.
-NOINLINE void OnNoMemory() {
-  OnNoMemorySize(0);
-}
 
 void ReleaseReservationOrTerminate() {
   if (internal::ReleaseAddressSpaceReservation())
     return;
-  OnNoMemory();
+  TerminateBecauseOutOfMemory(0);
 }
 
 }  // namespace
@@ -63,9 +42,6 @@ void EnableTerminationOnOutOfMemory() {
 
 #if BUILDFLAG(USE_ALLOCATOR_SHIM)
   allocator::SetCallNewHandlerOnMallocFailure(true);
-#elif defined(USE_TCMALLOC)
-  // For tcmalloc, we need to tell it to behave like new.
-  tc_set_new_mode(1);
 #endif
 }
 
@@ -77,10 +53,11 @@ void EnableTerminationOnOutOfMemory() {
 // without the class.
 class AdjustOOMScoreHelper {
  public:
-  static bool AdjustOOMScore(ProcessId process, int score);
+  AdjustOOMScoreHelper() = delete;
+  AdjustOOMScoreHelper(const AdjustOOMScoreHelper&) = delete;
+  AdjustOOMScoreHelper& operator=(const AdjustOOMScoreHelper&) = delete;
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(AdjustOOMScoreHelper);
+  static bool AdjustOOMScore(ProcessId process, int score);
 };
 
 // static.
@@ -130,33 +107,24 @@ bool AdjustOOMScore(ProcessId process, int score) {
 
 bool UncheckedMalloc(size_t size, void** result) {
 #if BUILDFLAG(USE_ALLOCATOR_SHIM)
-  // TODO(tasak): Confirm whether |UncheckedAlloc| with PartitionAlloc works on
-  // Android or not. If it works, change the following condition to be
-  // !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && defined(OS_ANDROID).
-#if defined(OS_ANDROID)
-  // There is a reason for not calling |UncheckedAlloc()| with
-  // PartitionAlloc:
-  //
-  // TODO(crbug.com/1111332) On Android, not all callers of UncheckedMalloc()
-  //   have the proper wrapping of symbols. As a consequence, using
-  //   UncheckedAlloc() leads to allocating and freeing with different
-  //   allocators. Deferring to malloc() makes sure that the same allocator is
-  //   used.
-  *result = malloc(size);
-#else
   *result = allocator::UncheckedAlloc(size);
-#endif
-
 #elif defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || \
-    defined(TOOLKIT_QT) || \
-    (!defined(LIBC_GLIBC) && !BUILDFLAG(USE_TCMALLOC))
+    defined(TOOLKIT_QT) || !defined(LIBC_GLIBC)
   *result = malloc(size);
-#elif defined(LIBC_GLIBC) && !BUILDFLAG(USE_TCMALLOC)
+#elif defined(LIBC_GLIBC)
   *result = __libc_malloc(size);
-#elif BUILDFLAG(USE_TCMALLOC)
-  *result = tc_malloc_skip_new_handler(size);
 #endif
   return *result != nullptr;
+}
+
+void UncheckedFree(void* ptr) {
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
+  allocator::UncheckedFree(ptr);
+#elif defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || !defined(LIBC_GLIBC) || defined(TOOLKIT_QT)
+  free(ptr);
+#elif defined(LIBC_GLIBC)
+  __libc_free(ptr);
+#endif
 }
 
 }  // namespace base

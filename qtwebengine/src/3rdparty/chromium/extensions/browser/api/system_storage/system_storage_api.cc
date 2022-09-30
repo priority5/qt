@@ -5,9 +5,8 @@
 #include "extensions/browser/api/system_storage/system_storage_api.h"
 
 #include "base/bind.h"
-#include "base/task/post_task.h"
+#include "base/task/task_runner_util.h"
 #include "base/task/thread_pool.h"
-#include "base/task_runner_util.h"
 #include "content/public/browser/browser_thread.h"
 
 using storage_monitor::StorageMonitor;
@@ -25,7 +24,7 @@ SystemStorageGetInfoFunction::~SystemStorageGetInfoFunction() {
 }
 
 ExtensionFunction::ResponseAction SystemStorageGetInfoFunction::Run() {
-  StorageInfoProvider::Get()->StartQueryInfo(base::Bind(
+  StorageInfoProvider::Get()->StartQueryInfo(base::BindOnce(
       &SystemStorageGetInfoFunction::OnGetStorageInfoCompleted, this));
   return RespondLater();
 }
@@ -46,7 +45,7 @@ ExtensionFunction::ResponseAction SystemStorageEjectDeviceFunction::Run() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   std::unique_ptr<EjectDevice::Params> params(
-      EjectDevice::Params::Create(*args_));
+      EjectDevice::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   StorageMonitor::GetInstance()->EnsureInitialized(
@@ -92,8 +91,7 @@ void SystemStorageEjectDeviceFunction::HandleResponse(
       result = api::system_storage::EJECT_DEVICE_RESULT_CODE_FAILURE;
   }
 
-  Respond(OneArgument(
-      std::make_unique<base::Value>(api::system_storage::ToString(result))));
+  Respond(OneArgument(base::Value(api::system_storage::ToString(result))));
 }
 
 SystemStorageGetAvailableCapacityFunction::
@@ -110,7 +108,7 @@ SystemStorageGetAvailableCapacityFunction::Run() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   std::unique_ptr<GetAvailableCapacity::Params> params(
-      GetAvailableCapacity::Params::Create(*args_));
+      GetAvailableCapacity::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   StorageMonitor::GetInstance()->EnsureInitialized(base::BindOnce(
@@ -139,7 +137,7 @@ void SystemStorageGetAvailableCapacityFunction::OnQueryCompleted(
     api::system_storage::StorageAvailableCapacityInfo result;
     result.id = transient_id;
     result.available_capacity = available_capacity;
-    Respond(OneArgument(result.ToValue()));
+    Respond(OneArgument(base::Value::FromUniquePtrValue(result.ToValue())));
   } else {
     Respond(Error("Error occurred when querying available capacity."));
   }

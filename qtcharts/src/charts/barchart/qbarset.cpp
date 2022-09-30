@@ -1,38 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Charts module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QtCharts/QBarSet>
 #include <private/qbarset_p.h>
 #include <private/charthelpers_p.h>
 #include <private/qchart_p.h>
 
-QT_CHARTS_BEGIN_NAMESPACE
+QT_BEGIN_NAMESPACE
 
 /*!
     \class QBarSet
@@ -407,7 +381,25 @@ QBarSet &QBarSet::operator << (const qreal &value)
 void QBarSet::insert(const int index, const qreal value)
 {
     d_ptr->insert(index, value);
+
+    bool callSignal = false;
+    if (!d_ptr->m_selectedBars.isEmpty()) {
+        // if value was inserted we need to move already selected bars by 1
+        QSet<int> selectedAfterInsert;
+        for (const auto &value : qAsConst(d_ptr->m_selectedBars)) {
+            if (value >= index) {
+                selectedAfterInsert << value + 1;
+                callSignal = true;
+            } else {
+                selectedAfterInsert << value;
+            }
+        }
+        d_ptr->m_selectedBars = selectedAfterInsert;
+    }
+
     emit valuesAdded(index, 1);
+    if (callSignal)
+        emit selectedBarsChanged(selectedBars());
 }
 
 /*!
@@ -659,6 +651,172 @@ void QBarSet::setLabelColor(QColor color)
     }
 }
 
+/*!
+    Returns the color of the selected bars.
+
+    This is the fill (brush) color of bars marked as selected. If not specified,
+    value of QBarSet::color is used as default.
+    \sa color
+    \since 6.2
+*/
+QColor QBarSet::selectedColor() const
+{
+    return d_ptr->m_selectedColor;
+}
+
+/*!
+    Sets the \a color of the selected bars.
+    \sa selectedColor
+    \since 6.2
+*/
+void QBarSet::setSelectedColor(const QColor &color)
+{
+    if (d_ptr->m_selectedColor != color) {
+        d_ptr->m_selectedColor = color;
+        d_ptr->setLabelsDirty(true);
+        emit d_ptr->updatedBars();
+        emit selectedColorChanged(color);
+    }
+}
+
+/*!
+   Returns \c true if the bar at the given \a index is among selected bars and \c false otherwise.
+   \note Selected bars are drawn using the selected color if it was specified using QBarSet::setSelectedColor.
+   \sa selectedBars(), setBarSelected(), setSelectedColor()
+   \since 6.2
+ */
+bool QBarSet::isBarSelected(int index) const
+{
+    return d_ptr->isBarSelected(index);
+}
+
+/*!
+  Marks the bar at \a index as selected.
+  \note Emits QBarSet::selectedBarsChanged.
+  \sa setBarSelected()
+  \since 6.2
+ */
+void QBarSet::selectBar(int index)
+{
+    setBarSelected(index, true);
+}
+
+/*!
+  Deselects the bar at \a index.
+  \note Emits QBarSet::selectedBarsChanged.
+  \sa setBarSelected()
+  \since 6.2
+ */
+void QBarSet::deselectBar(int index)
+{
+    setBarSelected(index, false);
+}
+
+/*!
+  Marks the bar at \a index as either selected or deselected as specified by \a selected.
+  \note Selected bars are drawn using the selected color if it was specified. Emits QBarSet::selectedBarsChanged.
+  \sa setSelectedColor()
+  \since 6.2
+ */
+void QBarSet::setBarSelected(int index, bool selected)
+{
+    bool callSignal = false;
+    d_ptr->setBarSelected(index, selected, callSignal);
+
+    if (callSignal)
+        emit selectedBarsChanged(selectedBars());
+}
+
+/*!
+  Marks all bars in the series as selected.
+  \note Emits QBarSet::selectedBarsChanged.
+  \sa setBarSelected()
+  \since 6.2
+ */
+void QBarSet::selectAllBars()
+{
+    bool callSignal = false;
+    for (int i = 0; i < d_ptr->m_values.count(); ++i)
+        d_ptr->setBarSelected(i, true, callSignal);
+
+    if (callSignal)
+        emit selectedBarsChanged(selectedBars());
+}
+
+/*!
+  Deselects all bars in the series.
+  \note Emits QBarSet::selectedBarsChanged.
+  \sa setBarSelected()
+  \since 6.2
+ */
+void QBarSet::deselectAllBars()
+{
+    bool callSignal = false;
+    for (int i = 0; i < d_ptr->m_values.count(); ++i)
+        d_ptr->setBarSelected(i, false, callSignal);
+
+    if (callSignal)
+        emit selectedBarsChanged(selectedBars());
+}
+
+/*!
+  Marks multiple bars passed in an \a indexes list as selected.
+  \note Emits QBarSet::selectedBarsChanged.
+  \sa setBarSelected()
+  \since 6.2
+ */
+void QBarSet::selectBars(const QList<int> &indexes)
+{
+    bool callSignal = false;
+    for (const int &index : indexes)
+        d_ptr->setBarSelected(index, true, callSignal);
+
+    if (callSignal)
+        emit selectedBarsChanged(selectedBars());
+}
+
+/*!
+  Marks multiple bars passed in an \a indexes list as deselected.
+  \note Emits QBarSet::selectedBarsChanged.
+  \sa setBarSelected()
+  \since 6.2
+ */
+void QBarSet::deselectBars(const QList<int> &indexes)
+{
+    bool callSignal = false;
+    for (const int &index : indexes)
+        d_ptr->setBarSelected(index, false, callSignal);
+
+    if (callSignal)
+        emit selectedBarsChanged(selectedBars());
+}
+
+/*!
+  Changes the selection state of bars at the given \a indexes to the opposite one.
+  \note Emits QBarSet::selectedBarsChanged.
+  \sa setBarSelected()
+  \since 6.2
+ */
+void QBarSet::toggleSelection(const QList<int> &indexes)
+{
+    bool callSignal = false;
+    for (const int &index : indexes)
+        d_ptr->setBarSelected(index, !isBarSelected(index), callSignal);
+
+    if (callSignal)
+        emit selectedBarsChanged(selectedBars());
+}
+
+/*!
+  Returns a list of bars marked as selected.
+  \sa setBarSelected()
+  \since 6.2
+ */
+QList<int> QBarSet::selectedBars() const
+{
+    return QList<int>(d_ptr->m_selectedBars.begin(), d_ptr->m_selectedBars.end());
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 QBarSetPrivate::QBarSetPrivate(const QString label, QBarSet *parent) : QObject(parent),
@@ -683,23 +841,23 @@ void QBarSetPrivate::append(QPointF value)
     }
 }
 
-void QBarSetPrivate::append(QList<QPointF> values)
+void QBarSetPrivate::append(const QList<QPointF> &values)
 {
     int originalIndex = m_values.count();
-    for (int i = 0; i < values.count(); i++) {
-        if (isValidValue(values.at(i)))
-            m_values.append(values.at(i));
+    for (const auto &value : values) {
+        if (isValidValue(value))
+            m_values.append(value);
     }
     emit valueAdded(originalIndex, values.size());
 }
 
-void QBarSetPrivate::append(QList<qreal> values)
+void QBarSetPrivate::append(const QList<qreal> &values)
 {
     int originalIndex = m_values.count();
     int index = originalIndex;
-    for (int i = 0; i < values.count(); i++) {
-        if (isValidValue(values.at(i))) {
-            m_values.append(QPointF(index, values.at(i)));
+    for (const auto value : values) {
+        if (isValidValue(value)) {
+            m_values.append(QPointF(index, value));
             index++;
         }
     }
@@ -732,7 +890,29 @@ int QBarSetPrivate::remove(const int index, const int count)
         m_values.removeAt(index);
         c++;
     }
+
+    bool callSignal = false;
+    if (!m_selectedBars.empty()) {
+        QSet<int> selectedAfterRemoving;
+
+        for (const int &selectedBarIndex : qAsConst(m_selectedBars)) {
+            if (selectedBarIndex < index) {
+                selectedAfterRemoving << selectedBarIndex;
+            } else if (selectedBarIndex >= index + removeCount) {
+                selectedAfterRemoving << selectedBarIndex - removeCount;
+                callSignal = true;
+            } else {
+                callSignal = true;
+            }
+        }
+
+        m_selectedBars = selectedAfterRemoving;
+    }
+
     emit valueRemoved(index, removeCount);
+    if (callSignal)
+        emit q_ptr->selectedBarsChanged(q_ptr->selectedBars());
+
     return removeCount;
 }
 
@@ -756,7 +936,33 @@ qreal QBarSetPrivate::value(const int index)
     return m_values.at(index).y();
 }
 
-QT_CHARTS_END_NAMESPACE
+void QBarSetPrivate::setBarSelected(int index, bool selected, bool &callSignal)
+{
+    if (index < 0 || index > m_values.count() - 1)
+        return;
+
+    if (selected) {
+        if (!isBarSelected(index)) {
+            m_selectedBars << index;
+            callSignal = true;
+        }
+    } else {
+        if (isBarSelected(index)) {
+            m_selectedBars.remove(index);
+            callSignal = true;
+        }
+    }
+
+    if (callSignal)
+        setVisualsDirty(true);
+}
+
+bool QBarSetPrivate::isBarSelected(int index) const
+{
+    return m_selectedBars.contains(index);
+}
+
+QT_END_NAMESPACE
 
 #include "moc_qbarset.cpp"
 #include "moc_qbarset_p.cpp"

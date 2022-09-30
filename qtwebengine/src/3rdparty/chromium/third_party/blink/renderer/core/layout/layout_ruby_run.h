@@ -82,13 +82,13 @@ class LayoutRubyRun : public LayoutBlockFlow {
     return "LayoutRubyRun";
   }
 
+  // The argument must be nullptr.
+  explicit LayoutRubyRun(ContainerNode*);
+
  protected:
   LayoutRubyBase* CreateRubyBase() const;
 
  private:
-  // The argument must be nullptr.
-  explicit LayoutRubyRun(Element*);
-
   bool IsOfType(LayoutObjectType type) const override {
     NOT_DESTROYED();
     return type == kLayoutObjectRubyRun || LayoutBlockFlow::IsOfType(type);
@@ -102,7 +102,12 @@ class LayoutRubyRun : public LayoutBlockFlow {
   friend class LayoutNGMixin<LayoutRubyRun>;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutRubyRun, IsRubyRun());
+template <>
+struct DowncastTraits<LayoutRubyRun> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsRubyRun();
+  }
+};
 
 }  // namespace blink
 

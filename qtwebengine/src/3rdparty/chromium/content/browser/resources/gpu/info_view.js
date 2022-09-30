@@ -2,18 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {define as crUiDefine} from 'chrome://resources/js/cr/ui.m.js';
+import {$} from 'chrome://resources/js/util.m.js';
+
+import {VulkanInfo} from './vulkan_info.js';
 
 /**
  * @fileoverview This view displays information on the current GPU
  * hardware.  Its primary usefulness is to allow users to copy-paste
  * their data in an easy to read format for bug reports.
  */
-cr.define('gpu', function() {
+export function makeInfoView(browserBridge) {
   /**
    * Provides information on the GPU process and underlying graphics hardware.
    * @constructor
    */
-  const InfoView = cr.ui.define('div');
+  const InfoView = crUiDefine('div');
 
   InfoView.prototype = {
     __proto__: HTMLDivElement.prototype,
@@ -96,6 +100,8 @@ cr.define('gpu', function() {
       const workaroundsList = this.querySelector('.workarounds-list');
       const ANGLEFeaturesDiv = this.querySelector('.angle-features-div');
       const ANGLEFeaturesList = this.querySelector('.angle-features-list');
+      const DAWNInfoDiv = this.querySelector('.dawn-info-div');
+      const DAWNInfoList = this.querySelector('.dawn-info-list');
 
       const basicInfoForHardwareGpuDiv =
           this.querySelector('.basic-info-for-hardware-gpu-div');
@@ -115,7 +121,7 @@ cr.define('gpu', function() {
       const gpuInfo = browserBridge.gpuInfo;
       let i;
       if (gpuInfo) {
-        // Not using jstemplate here for blacklist status because we construct
+        // Not using jstemplate here for blocklist status because we construct
         // href from data, which jstemplate can't seem to do.
         if (gpuInfo.featureStatus) {
           this.appendFeatureInfo_(
@@ -185,13 +191,21 @@ cr.define('gpu', function() {
           if (gpuInfo.ANGLEFeatures.length) {
             ANGLEFeaturesDiv.hidden = false;
             ANGLEFeaturesList.textContent = '';
-            for (i = 0; i < gpuInfo.ANGLEFeatures.length; i++) {
-              const ANGLEFeature = gpuInfo.ANGLEFeatures[i];
+            for (const ANGLEFeature of gpuInfo.ANGLEFeatures) {
               const ANGLEFeatureEl = this.createANGLEFeatureEl_(ANGLEFeature);
               ANGLEFeaturesList.appendChild(ANGLEFeatureEl);
             }
           } else {
             ANGLEFeaturesDiv.hidden = true;
+          }
+        }
+
+        if (gpuInfo.dawnInfo) {
+          if (gpuInfo.dawnInfo.length) {
+            DAWNInfoDiv.hidden = false;
+            this.createDawnInfoEl_(DAWNInfoList, gpuInfo.dawnInfo);
+          } else {
+            DAWNInfoDiv.hidden = true;
           }
         }
 
@@ -210,7 +224,7 @@ cr.define('gpu', function() {
         }
 
         if (gpuInfo.vulkanInfo) {
-          const vulkanInfo = new gpu.VulkanInfo(gpuInfo.vulkanInfo);
+          const vulkanInfo = new VulkanInfo(gpuInfo.vulkanInfo);
           const data = [{
             'description': 'info',
             'value': vulkanInfo.toString(),
@@ -231,6 +245,7 @@ cr.define('gpu', function() {
         diagnosticsDiv.hidden = true;
         featureStatusList.textContent = '';
         problemsDiv.hidden = true;
+        DAWNInfoDiv.hidden = true;
       }
 
       // Log messages
@@ -251,7 +266,6 @@ cr.define('gpu', function() {
         'texture_sharing': 'Texture Sharing',
         'video_decode': 'Video Decode',
         'rasterization': 'Rasterization',
-        'oop_rasterization': 'Out-of-process Rasterization',
         'opengl': 'OpenGL',
         'metal': 'Metal',
         'vulkan': 'Vulkan',
@@ -262,6 +276,12 @@ cr.define('gpu', function() {
         'vpx_decode': 'VPx Video Decode',
         'webgl2': 'WebGL2',
         'skia_renderer': 'Skia Renderer',
+        'canvas_oop_rasterization': 'Canvas out-of-process rasterization',
+        'raw_draw': 'Raw Draw',
+        'video_encode': 'Video Encode',
+        'direct_rendering_display_compositor':
+            'Direct Rendering Display Compositor',
+        'webgpu': 'WebGPU',
       };
 
       const statusMap = {
@@ -300,7 +320,7 @@ cr.define('gpu', function() {
 
         const nameEl = document.createElement('span');
         if (!featureLabelMap[featureName]) {
-          console.log('Missing featureLabel for', featureName);
+          console.info('Missing featureLabel for', featureName);
         }
         nameEl.textContent = featureLabelMap[featureName] + ': ';
         featureEl.appendChild(nameEl);
@@ -308,7 +328,7 @@ cr.define('gpu', function() {
         const statusEl = document.createElement('span');
         const statusInfo = statusMap[featureStatus];
         if (!statusInfo) {
-          console.log('Missing status for ', featureStatus);
+          console.info('Missing status for ', featureStatus);
           statusEl.textContent = 'Unknown';
           statusEl.className = 'feature-red';
         } else {
@@ -324,8 +344,7 @@ cr.define('gpu', function() {
       if (featureInfo.problems.length) {
         problemsDiv.hidden = false;
         problemsList.textContent = '';
-        for (i = 0; i < featureInfo.problems.length; i++) {
-          const problem = featureInfo.problems[i];
+        for (const problem of featureInfo.problems) {
           const problemEl = this.createProblemEl_(problem);
           problemsList.appendChild(problemEl);
         }
@@ -337,9 +356,9 @@ cr.define('gpu', function() {
       if (featureInfo.workarounds.length) {
         workaroundsDiv.hidden = false;
         workaroundsList.textContent = '';
-        for (i = 0; i < featureInfo.workarounds.length; i++) {
+        for (const workaround of featureInfo.workarounds) {
           const workaroundEl = document.createElement('li');
-          workaroundEl.textContent = featureInfo.workarounds[i];
+          workaroundEl.textContent = workaround;
           workaroundsList.appendChild(workaroundEl);
         }
       } else {
@@ -533,8 +552,73 @@ cr.define('gpu', function() {
 
       peg.innerHTML = trustedTypes.emptyHTML;
       peg.appendChild(template);
-    }
+    },
+
+    createDawnInfoEl_: function(DAWNInfoList, gpuDawnInfo) {
+      DAWNInfoList.textContent = '';
+      let inProcessingToggles = false;
+
+      for (let i = 0; i < gpuDawnInfo.length; ++i) {
+        let infoString = gpuDawnInfo[i];
+        let infoEl;
+
+        if (infoString.startsWith('<')) {
+          // GPU type and backend type.
+          // Add an empty line for the next adaptor.
+          const separator = document.createElement('br');
+          separator.textContent = '';
+          DAWNInfoList.appendChild(separator);
+
+          // e.g. <Discrete GPU> D3D12 backend
+          infoEl = document.createElement('b');
+          infoEl.textContent = infoString;
+          DAWNInfoList.appendChild(infoEl);
+          // Go to the next line.
+          infoEl = document.createElement('br');
+          infoEl.textContent = '';
+          inProcessingToggles = false;
+        } else if (infoString.startsWith('[')) {
+          // e.g. [Default Toggle Names]
+          infoEl = document.createElement('span');
+          infoEl.classList.add('feature-green');
+          infoEl.textContent = infoString;
+
+          if (infoString === '[Supported Features]') {
+            inProcessingToggles = false;
+          } else {
+            inProcessingToggles = true;
+          }
+        } else if (inProcessingToggles) {
+          // Each toggle takes 3 strings
+          infoEl = document.createElement('li');
+
+          // The toggle name comes first, bolded.
+          const name = document.createElement('b');
+          name.textContent = infoString + ':  ';
+          infoEl.appendChild(name);
+
+          // URL
+          infoString = gpuDawnInfo[++i];
+          const url = document.createElement('a');
+          url.textContent = infoString;
+          url.href = infoString;
+          infoEl.appendChild(url);
+
+          // Description, italicized
+          infoString = gpuDawnInfo[++i];
+          const description = document.createElement('i');
+          description.textContent = ':  ' + infoString;
+          infoEl.appendChild(description);
+        } else {
+          // Display supported extensions
+          infoEl = document.createElement('li');
+          infoEl.textContent = infoString;
+        }
+
+        DAWNInfoList.appendChild(infoEl);
+      }
+    },
   };
 
-  return {InfoView: InfoView};
-});
+  return InfoView;
+}

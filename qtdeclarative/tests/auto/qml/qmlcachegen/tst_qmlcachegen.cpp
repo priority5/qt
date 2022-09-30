@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <qtest.h>
 
@@ -37,16 +12,25 @@
 #include <QLoggingCategory>
 #include <private/qqmlcomponent_p.h>
 #include <private/qqmlscriptdata_p.h>
+#include <private/qv4compileddata_p.h>
 #include <qtranslator.h>
+#include <qqmlscriptstring.h>
+#include <QString>
 
-#include "../../shared/util.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include "scriptstringprops.h"
+
+using namespace Qt::StringLiterals;
 
 class tst_qmlcachegen: public QQmlDataTest
 {
     Q_OBJECT
 
+public:
+    tst_qmlcachegen();
+
 private slots:
-    void initTestCase();
+    void initTestCase() override;
 
     void loadGeneratedFile();
     void translationExpressionSupport();
@@ -78,6 +62,9 @@ private slots:
     void parameterAdjustment();
     void inlineComponent();
     void posthocRequired();
+
+    void scriptStringCachegenInteraction();
+    void saveableUnitPointer();
 };
 
 // A wrapper around QQmlComponent to ensure the temporary reference counts
@@ -104,10 +91,15 @@ public:
 
 static bool generateCache(const QString &qmlFileName, QByteArray *capturedStderr = nullptr)
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QTest::qFail("You cannot call qmlcachegen on the target.", __FILE__, __LINE__);
+    return false;
+#endif
     QProcess proc;
     if (capturedStderr == nullptr)
         proc.setProcessChannelMode(QProcess::ForwardedChannels);
-    proc.setProgram(QLibraryInfo::location(QLibraryInfo::BinariesPath) + QDir::separator() + QLatin1String("qmlcachegen"));
+    proc.setProgram(QLibraryInfo::path(QLibraryInfo::LibraryExecutablesPath)
+                    + QLatin1String("/qmlcachegen"));
     proc.setArguments(QStringList() << qmlFileName);
     proc.start();
     if (!proc.waitForFinished())
@@ -119,6 +111,11 @@ static bool generateCache(const QString &qmlFileName, QByteArray *capturedStderr
     if (proc.exitStatus() != QProcess::NormalExit)
         return false;
     return proc.exitCode() == 0;
+}
+
+tst_qmlcachegen::tst_qmlcachegen()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
+{
 }
 
 void tst_qmlcachegen::initTestCase()
@@ -136,6 +133,10 @@ void tst_qmlcachegen::initTestCase()
 
 void tst_qmlcachegen::loadGeneratedFile()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
 
@@ -171,6 +172,7 @@ void tst_qmlcachegen::loadGeneratedFile()
 
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, QUrl::fromLocalFile(testFilePath));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(!obj.isNull());
     QCOMPARE(obj->property("value").toInt(), 42);
@@ -198,6 +200,10 @@ public:
 
 void tst_qmlcachegen::translationExpressionSupport()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
 
@@ -235,6 +241,7 @@ void tst_qmlcachegen::translationExpressionSupport()
 
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, QUrl::fromLocalFile(testFilePath));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(!obj.isNull());
     QCOMPARE(obj->property("text").toString(), QString("ALL Ok"));
@@ -243,6 +250,10 @@ void tst_qmlcachegen::translationExpressionSupport()
 
 void tst_qmlcachegen::signalHandlerParameters()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
 
@@ -277,6 +288,7 @@ void tst_qmlcachegen::signalHandlerParameters()
 
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, QUrl::fromLocalFile(testFilePath));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(!obj.isNull());
     QMetaObject::invokeMethod(obj.data(), "runTest");
@@ -306,6 +318,10 @@ void tst_qmlcachegen::signalHandlerParameters()
 
 void tst_qmlcachegen::errorOnArgumentsInSignalHandler()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
 
@@ -331,6 +347,10 @@ void tst_qmlcachegen::errorOnArgumentsInSignalHandler()
 
 void tst_qmlcachegen::aheadOfTimeCompilation()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
 
@@ -355,6 +375,7 @@ void tst_qmlcachegen::aheadOfTimeCompilation()
 
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, QUrl::fromLocalFile(testFilePath));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(!obj.isNull());
     QVariant result;
@@ -364,6 +385,20 @@ void tst_qmlcachegen::aheadOfTimeCompilation()
 
 static QQmlPrivate::CachedQmlUnit *temporaryModifiedCachedUnit = nullptr;
 
+static const char *versionCheckErrorString(QQmlMetaType::CachedUnitLookupError error)
+{
+    switch (error) {
+    case QQmlMetaType::CachedUnitLookupError::NoError:
+        return "no error";
+    case QQmlMetaType::CachedUnitLookupError::NoUnitFound:
+        return "no unit found";
+    case QQmlMetaType::CachedUnitLookupError::VersionMismatch:
+        return "version mismatch";
+    }
+
+    return "wat?";
+}
+
 void tst_qmlcachegen::versionChecksForAheadOfTimeUnits()
 {
     QVERIFY(QFile::exists(":/data/versionchecks.qml"));
@@ -371,19 +406,33 @@ void tst_qmlcachegen::versionChecksForAheadOfTimeUnits()
 
     Q_ASSERT(!temporaryModifiedCachedUnit);
     QQmlMetaType::CachedUnitLookupError error = QQmlMetaType::CachedUnitLookupError::NoError;
-    const QV4::CompiledData::Unit *originalUnit = QQmlMetaType::findCachedCompilationUnit(
+    QLoggingCategory::setFilterRules("qt.qml.diskcache.debug=true");
+    const QQmlPrivate::CachedQmlUnit *originalUnit = QQmlMetaType::findCachedCompilationUnit(
             QUrl("qrc:/data/versionchecks.qml"), &error);
-    QVERIFY(originalUnit);
-    QV4::CompiledData::Unit *tweakedUnit = (QV4::CompiledData::Unit *)malloc(originalUnit->unitSize);
-    memcpy(reinterpret_cast<void *>(tweakedUnit), reinterpret_cast<const void *>(originalUnit), originalUnit->unitSize);
+    QLoggingCategory::setFilterRules(QString());
+    QVERIFY2(originalUnit, versionCheckErrorString(error));
+    QV4::CompiledData::Unit *tweakedUnit = (QV4::CompiledData::Unit *)malloc(originalUnit->qmlData->unitSize);
+    memcpy(reinterpret_cast<void *>(tweakedUnit),
+           reinterpret_cast<const void *>(originalUnit->qmlData),
+           originalUnit->qmlData->unitSize);
     tweakedUnit->version = QV4_DATA_STRUCTURE_VERSION - 1;
-    temporaryModifiedCachedUnit = new QQmlPrivate::CachedQmlUnit{tweakedUnit, nullptr, nullptr};
 
-    auto testHandler = [](const QUrl &url) -> const QQmlPrivate::CachedQmlUnit * {
+    const auto testHandler = [](const QUrl &url) -> const QQmlPrivate::CachedQmlUnit * {
         if (url == QUrl("qrc:/data/versionchecks.qml"))
             return temporaryModifiedCachedUnit;
         return nullptr;
     };
+
+    const auto dropModifiedUnit = qScopeGuard([&testHandler]() {
+        Q_ASSERT(temporaryModifiedCachedUnit);
+        free(const_cast<QV4::CompiledData::Unit *>(temporaryModifiedCachedUnit->qmlData));
+        delete temporaryModifiedCachedUnit;
+        temporaryModifiedCachedUnit = nullptr;
+
+        QQmlMetaType::removeCachedUnitLookupFunction(testHandler);
+    });
+
+    temporaryModifiedCachedUnit = new QQmlPrivate::CachedQmlUnit{tweakedUnit, nullptr, nullptr};
     QQmlMetaType::prependCachedUnitLookupFunction(testHandler);
 
     {
@@ -397,13 +446,6 @@ void tst_qmlcachegen::versionChecksForAheadOfTimeUnits()
         CleanlyLoadingComponent component(&engine, QUrl("qrc:/data/versionchecks.qml"));
         QCOMPARE(component.status(), QQmlComponent::Ready);
     }
-
-    Q_ASSERT(temporaryModifiedCachedUnit);
-    free(const_cast<QV4::CompiledData::Unit *>(temporaryModifiedCachedUnit->qmlData));
-    delete temporaryModifiedCachedUnit;
-    temporaryModifiedCachedUnit = nullptr;
-
-    QQmlMetaType::removeCachedUnitLookupFunction(testHandler);
 }
 
 void tst_qmlcachegen::retainedResources()
@@ -420,7 +462,8 @@ void tst_qmlcachegen::skippedResources()
     QVERIFY(file.readAll().startsWith("import QtQml 2.0"));
 
     QQmlMetaType::CachedUnitLookupError error = QQmlMetaType::CachedUnitLookupError::NoError;
-    const auto *unit = QQmlMetaType::findCachedCompilationUnit(QUrl("qrc:/not/Skip.qml"), &error);
+    const QQmlPrivate::CachedQmlUnit *unit = QQmlMetaType::findCachedCompilationUnit(
+            QUrl("qrc:/not/Skip.qml"), &error);
     QCOMPARE(unit, nullptr);
     QCOMPARE(error, QQmlMetaType::CachedUnitLookupError::NoUnitFound);
 }
@@ -440,6 +483,10 @@ void tst_qmlcachegen::workerScripts()
 
 void tst_qmlcachegen::functionExpressions()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
 
@@ -487,6 +534,7 @@ void tst_qmlcachegen::functionExpressions()
 
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, QUrl::fromLocalFile(testFilePath));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(!obj.isNull());
 
@@ -537,6 +585,10 @@ void tst_qmlcachegen::qrcScriptImport()
 
 void tst_qmlcachegen::fsScriptImport()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
 
@@ -584,6 +636,7 @@ void tst_qmlcachegen::fsScriptImport()
 
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, QUrl::fromLocalFile(testFilePath));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(!obj.isNull());
     QCOMPARE(obj->property("value").toInt(), 42);
@@ -612,11 +665,11 @@ void tst_qmlcachegen::moduleScriptImport()
         QVERIFY(unitData->flags & QV4::CompiledData::Unit::IsESModule);
 
         QQmlMetaType::CachedUnitLookupError error = QQmlMetaType::CachedUnitLookupError::NoError;
-        const QV4::CompiledData::Unit *unitFromResources = QQmlMetaType::findCachedCompilationUnit(
+        const QQmlPrivate::CachedQmlUnit *unitFromResources = QQmlMetaType::findCachedCompilationUnit(
                 QUrl("qrc:/data/script.mjs"), &error);
         QVERIFY(unitFromResources);
 
-        QCOMPARE(unitFromResources, compilationUnit->unitData());
+        QCOMPARE(unitFromResources->qmlData, compilationUnit->unitData());
     }
 }
 
@@ -643,11 +696,11 @@ void tst_qmlcachegen::sourceFileIndices()
     QVERIFY(QFileInfo(":/data/versionchecks.qml").size() > 0);
 
     QQmlMetaType::CachedUnitLookupError error = QQmlMetaType::CachedUnitLookupError::NoError;
-    const QV4::CompiledData::Unit *unitFromResources = QQmlMetaType::findCachedCompilationUnit(
+    const QQmlPrivate::CachedQmlUnit *unitFromResources = QQmlMetaType::findCachedCompilationUnit(
             QUrl("qrc:/data/versionchecks.qml"), &error);
     QVERIFY(unitFromResources);
-    QVERIFY(unitFromResources->flags & QV4::CompiledData::Unit::PendingTypeCompilation);
-    QCOMPARE(uint(unitFromResources->sourceFileIndex), uint(0));
+    QVERIFY(unitFromResources->qmlData->flags & QV4::CompiledData::Unit::PendingTypeCompilation);
+    QCOMPARE(uint(unitFromResources->qmlData->sourceFileIndex), uint(0));
 }
 
 void tst_qmlcachegen::reproducibleCache_data()
@@ -662,6 +715,10 @@ void tst_qmlcachegen::reproducibleCache_data()
 
 void tst_qmlcachegen::reproducibleCache()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     QFETCH(QString, filePath);
 
     QFile file(filePath);
@@ -693,10 +750,16 @@ void tst_qmlcachegen::parameterAdjustment()
 
 void tst_qmlcachegen::inlineComponent()
 {
-    bool ok = generateCache(testFile("inlineComponentWithId.qml"));
-    QVERIFY(ok);
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
+    QByteArray errors;
+    bool ok = generateCache(testFile("inlineComponentWithId.qml"), &errors);
+    QVERIFY2(ok, errors);
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, testFileUrl("inlineComponentWithId.qml"));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QTest::ignoreMessage(QtMsgType::QtInfoMsg, "42");
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(!obj.isNull());
@@ -704,13 +767,138 @@ void tst_qmlcachegen::inlineComponent()
 
 void tst_qmlcachegen::posthocRequired()
 {
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
     bool ok = generateCache(testFile("posthocrequired.qml"));
     QVERIFY(ok);
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, testFileUrl("posthocrequired.qml"));
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(obj.isNull() && component.isError());
-    QVERIFY(component.errorString().contains(QStringLiteral("Required property x was not initialized")));
+    QVERIFY2(component.errorString().contains(
+                 QStringLiteral("Required property x was not initialized")),
+             qPrintable(component.errorString()));
+}
+
+void tst_qmlcachegen::scriptStringCachegenInteraction()
+{
+#if defined(QTEST_CROSS_COMPILED)
+    QSKIP("Cannot call qmlcachegen on cross-compiled target.");
+#endif
+
+    bool ok = generateCache(testFile("scriptstring.qml"));
+    QVERIFY(ok);
+    QQmlEngine engine;
+    CleanlyLoadingComponent component(&engine, testFileUrl("scriptstring.qml"));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(!root.isNull(), qPrintable(component.errorString()));
+    auto scripty = qobject_cast<ScriptStringProps *>(root.get());
+    QVERIFY(scripty);
+
+    QVERIFY(scripty->m_undef.isUndefinedLiteral());
+    QVERIFY(scripty->m_nul.isNullLiteral());
+    QCOMPARE(scripty->m_str.stringLiteral(), u"hello"_s);
+    QCOMPARE(scripty->m_num.numberLiteral(&ok), 42);
+    ok = false;
+    scripty->m_bol.booleanLiteral(&ok);
+    QVERIFY(ok);
+}
+
+void tst_qmlcachegen::saveableUnitPointer()
+{
+    QV4::CompiledData::Unit unit;
+    unit.flags = QV4::CompiledData::Unit::StaticData | QV4::CompiledData::Unit::IsJavascript;
+    const auto flags = unit.flags;
+
+    QV4::CompiledData::SaveableUnitPointer pointer(&unit);
+
+    QVERIFY(pointer.saveToDisk<char>([](const char *, quint32) { return true; }));
+    QCOMPARE(unit.flags, flags);
+}
+
+const QQmlScriptString &ScriptStringProps::undef() const
+{
+    return m_undef;
+}
+
+
+
+void ScriptStringProps::setUndef(const QQmlScriptString &newUndef)
+{
+    if (m_undef == newUndef)
+        return;
+    m_undef = newUndef;
+    emit undefChanged();
+}
+
+
+
+const QQmlScriptString &ScriptStringProps::nul() const
+{
+    return m_nul;
+}
+
+
+
+void ScriptStringProps::setNul(const QQmlScriptString &newNul)
+{
+    if (m_nul == newNul)
+        return;
+    m_nul = newNul;
+    emit nulChanged();
+}
+
+
+
+const QQmlScriptString &ScriptStringProps::str() const
+{
+    return m_str;
+}
+
+
+
+void ScriptStringProps::setStr(const QQmlScriptString &newStr)
+{
+    if (m_str == newStr)
+        return;
+    m_str = newStr;
+    emit strChanged();
+}
+
+
+
+const QQmlScriptString &ScriptStringProps::num() const
+{
+    return m_num;
+}
+
+
+
+void ScriptStringProps::setNum(const QQmlScriptString &newNum)
+{
+    if (m_num == newNum)
+        return;
+    m_num = newNum;
+    emit numChanged();
+}
+
+
+
+const QQmlScriptString &ScriptStringProps::bol() const
+{
+    return m_bol;
+}
+
+
+
+void ScriptStringProps::setBol(const QQmlScriptString &newBol)
+{
+    if (m_bol == newBol)
+        return;
+    m_bol = newBol;
+    emit bolChanged();
 }
 
 QTEST_GUILESS_MAIN(tst_qmlcachegen)

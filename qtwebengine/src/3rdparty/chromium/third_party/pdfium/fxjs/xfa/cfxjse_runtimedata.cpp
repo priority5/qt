@@ -11,6 +11,13 @@
 #include "fxjs/cfxjs_engine.h"
 #include "fxjs/fxv8.h"
 #include "fxjs/xfa/cfxjse_isolatetracker.h"
+#include "third_party/base/check_op.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-external.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-object.h"
+#include "v8/include/v8-primitive.h"
+#include "v8/include/v8-template.h"
 
 CFXJSE_RuntimeData::CFXJSE_RuntimeData() = default;
 
@@ -31,11 +38,10 @@ std::unique_ptr<CFXJSE_RuntimeData> CFXJSE_RuntimeData::Create(
   v8::Local<v8::Context> hContext =
       v8::Context::New(pIsolate, 0, hGlobalTemplate);
 
-  ASSERT(hContext->Global()->InternalFieldCount() == 0);
-  ASSERT(hContext->Global()
-             ->GetPrototype()
-             .As<v8::Object>()
-             ->InternalFieldCount() == 0);
+  DCHECK_EQ(hContext->Global()->InternalFieldCount(), 0);
+  DCHECK_EQ(
+      hContext->Global()->GetPrototype().As<v8::Object>()->InternalFieldCount(),
+      0);
 
   hContext->SetSecurityToken(v8::External::New(pIsolate, pIsolate));
   pRuntimeData->m_hRootContextGlobalTemplate.Reset(pIsolate, hFuncTemplate);

@@ -9,15 +9,14 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -212,16 +211,24 @@ class SimpleHttpServer {
     virtual ~Parser() {}
   };
 
-  using SendCallback = base::Callback<void(const std::string&)>;
-  using ParserFactory = base::Callback<Parser*(const SendCallback&)>;
+  using SendCallback = base::RepeatingCallback<void(const std::string&)>;
+  using ParserFactory = base::RepeatingCallback<Parser*(const SendCallback&)>;
 
   SimpleHttpServer(const ParserFactory& factory, net::IPEndPoint endpoint);
+
+  SimpleHttpServer(const SimpleHttpServer&) = delete;
+  SimpleHttpServer& operator=(const SimpleHttpServer&) = delete;
+
   virtual ~SimpleHttpServer();
 
  private:
   class Connection {
    public:
     Connection(net::StreamSocket* socket, const ParserFactory& factory);
+
+    Connection(const Connection&) = delete;
+    Connection& operator=(const Connection&) = delete;
+
     virtual ~Connection();
 
    private:
@@ -241,8 +248,6 @@ class SimpleHttpServer {
     SEQUENCE_CHECKER(sequence_checker_);
 
     base::WeakPtrFactory<Connection> weak_factory_{this};
-
-    DISALLOW_COPY_AND_ASSIGN(Connection);
   };
 
   void OnConnect();
@@ -255,8 +260,6 @@ class SimpleHttpServer {
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<SimpleHttpServer> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SimpleHttpServer);
 };
 
 SimpleHttpServer::SimpleHttpServer(const ParserFactory& factory,
@@ -274,8 +277,8 @@ SimpleHttpServer::~SimpleHttpServer() {
 SimpleHttpServer::Connection::Connection(net::StreamSocket* socket,
                                          const ParserFactory& factory)
     : socket_(socket),
-      parser_(
-          factory.Run(base::Bind(&Connection::Send, base::Unretained(this)))),
+      parser_(factory.Run(
+          base::BindRepeating(&Connection::Send, base::Unretained(this)))),
       input_buffer_(base::MakeRefCounted<net::GrowableIOBuffer>()),
       output_buffer_(base::MakeRefCounted<net::GrowableIOBuffer>()),
       bytes_to_write_(0),
@@ -510,21 +513,21 @@ class AdbParser : public SimpleHttpServer::Parser,
   SEQUENCE_CHECKER(sequence_checker_);
 };
 
-static SimpleHttpServer* mock_adb_server_ = NULL;
+static SimpleHttpServer* mock_adb_server_ = nullptr;
 
 void StartMockAdbServerOnIOThread(FlushMode flush_mode) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  CHECK(mock_adb_server_ == NULL);
+  CHECK(mock_adb_server_ == nullptr);
   net::IPEndPoint endpoint(net::IPAddress(127, 0, 0, 1), kAdbPort);
   mock_adb_server_ = new SimpleHttpServer(
-      base::Bind(&AdbParser::Create, flush_mode), endpoint);
+      base::BindRepeating(&AdbParser::Create, flush_mode), endpoint);
 }
 
 void StopMockAdbServerOnIOThread() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  CHECK(mock_adb_server_ != NULL);
+  CHECK(mock_adb_server_ != nullptr);
   delete mock_adb_server_;
-  mock_adb_server_ = NULL;
+  mock_adb_server_ = nullptr;
 }
 
 } // namespace

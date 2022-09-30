@@ -12,7 +12,6 @@
 
 #include "base/feature_list.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "components/autofill/core/browser/data_model/autofill_structured_address_test_utils.h"
 #include "components/autofill/core/browser/data_model/autofill_structured_address_utils.h"
 #include "components/autofill/core/common/autofill_features.h"
@@ -26,12 +25,12 @@ namespace structured_address {
 using AddressComponentTestValues = std::vector<AddressComponentTestValue>;
 
 struct AddressLineParsingTestCase {
-  std::string country_code = "";
-  std::string street_address = "";
-  std::string street_name = "";
-  std::string house_number = "";
-  std::string floor = "";
-  std::string apartment = "";
+  std::string country_code;
+  std::string street_address;
+  std::string street_name;
+  std::string house_number;
+  std::string floor;
+  std::string apartment;
 };
 
 std::ostream& operator<<(std::ostream& out,
@@ -169,7 +168,40 @@ TEST(AutofillStructuredAddress, ParseStreetAddress) {
        .street_name = "Av. Paulista",
        .house_number = "1098",
        .floor = "1",
-       .apartment = "101"}};
+       .apartment = "101"},
+      // Examples for Mexico.
+      {.street_address = "Street Name 12 - Piso 13 - 14",
+       .street_name = "Street Name",
+       .house_number = "12",
+       .floor = "13",
+       .apartment = "14"},
+      {.street_address = "Street Name 12 - 14",
+       .street_name = "Street Name",
+       .house_number = "12",
+       .floor = "",
+       .apartment = "14"},
+      {.street_address = "Street Name 12 - Piso 13",
+       .street_name = "Street Name",
+       .house_number = "12",
+       .floor = "13",
+       .apartment = ""},
+      // Examples for Spain.
+      {.street_address = "Street Name 1, 2º, 3ª",
+       .street_name = "Street Name",
+       .house_number = "1",
+       .floor = "2",
+       .apartment = "3"},
+      {.street_address = "Street Name 1, 2º",
+       .street_name = "Street Name",
+       .house_number = "1",
+       .floor = "2",
+       .apartment = ""},
+      {.street_address = "Street Name 1, 3ª",
+       .street_name = "Street Name",
+       .house_number = "1",
+       .floor = "",
+       .apartment = "3"},
+  };
 
   for (const auto& test_case : test_cases)
     TestAddressLineParsing(test_case);
@@ -229,7 +261,46 @@ TEST(AutofillStructuredAddress, TestStreetAddressFormatting) {
        .street_name = "Amphitheatre Parkway",
        .house_number = "1600",
        .floor = "6",
-       .apartment = "12"}};
+       .apartment = "12"},
+      // Examples for Mexico.
+      {.country_code = "MX",
+       .street_address = "StreetName 12 - Piso 13 - 14",
+       .street_name = "StreetName",
+       .house_number = "12",
+       .floor = "13",
+       .apartment = "14"},
+      {.country_code = "MX",
+       .street_address = "StreetName 12 - 14",
+       .street_name = "StreetName",
+       .house_number = "12",
+       .floor = "",
+       .apartment = "14"},
+      {.country_code = "MX",
+       .street_address = "StreetName 12 - Piso 13",
+       .street_name = "StreetName",
+       .house_number = "12",
+       .floor = "13",
+       .apartment = ""},
+      // Examples for Spain.
+      {.country_code = "ES",
+       .street_address = "Street Name 1, 3ª",
+       .street_name = "Street Name",
+       .house_number = "1",
+       .floor = "",
+       .apartment = "3"},
+      {.country_code = "ES",
+       .street_address = "Street Name 1, 2º",
+       .street_name = "Street Name",
+       .house_number = "1",
+       .floor = "2",
+       .apartment = ""},
+      {.country_code = "ES",
+       .street_address = "Street Name 1, 2º, 3ª",
+       .street_name = "Street Name",
+       .house_number = "1",
+       .floor = "2",
+       .apartment = "3"},
+  };
 
   for (const auto& test_case : test_cases)
     TestAddressLineFormatting(test_case);
@@ -482,6 +553,92 @@ TEST(AutofillStructuredAddress, TestMigrationAndFinalization_AlreadyMigrated) {
   // Verify that the address was not changed by the migration.
   VerifyTestValues(&address, test_values);
 }
+
+// Tests that a valid address structure is not wiped.
+TEST(AutofillStructuredAddress,
+     TestWipingAnInvalidSubstructure_ValidStructure) {
+  Address address;
+  AddressComponentTestValues address_with_valid_structure = {
+      // This structure is valid because all structured components are contained
+      // in the unstructured representation.
+      {.type = ADDRESS_HOME_STREET_ADDRESS,
+       .value = "123 Street name",
+       .status = VerificationStatus::kObserved},
+      {.type = ADDRESS_HOME_STREET_NAME,
+       .value = "Street name",
+       .status = VerificationStatus::kParsed},
+      {.type = ADDRESS_HOME_HOUSE_NUMBER,
+       .value = "123",
+       .status = VerificationStatus::kParsed},
+  };
+
+  SetTestValues(&address, address_with_valid_structure, /*finalize=*/false);
+
+  EXPECT_FALSE(address.WipeInvalidStructure());
+  VerifyTestValues(&address, address_with_valid_structure);
+}
+
+// Tests that an invalid address structure is wiped.
+TEST(AutofillStructuredAddress,
+     TestWipingAnInvalidSubstructure_InValidStructure) {
+  Address address;
+  AddressComponentTestValues address_with_valid_structure = {
+      {.type = ADDRESS_HOME_STREET_ADDRESS,
+       .value = "Some other name",
+       .status = VerificationStatus::kObserved},
+      {.type = ADDRESS_HOME_STREET_NAME,
+       .value = "Street name",
+       .status = VerificationStatus::kParsed},
+      // The structure is invalid, because the house number is not contained in
+      // the unstructured street address.
+      {.type = ADDRESS_HOME_HOUSE_NUMBER,
+       .value = "123",
+       .status = VerificationStatus::kParsed},
+  };
+
+  SetTestValues(&address, address_with_valid_structure, /*finalize=*/false);
+
+  EXPECT_TRUE(address.WipeInvalidStructure());
+
+  AddressComponentTestValues address_with_wiped_structure = {
+      {.type = ADDRESS_HOME_STREET_ADDRESS,
+       .value = "Some other name",
+       .status = VerificationStatus::kObserved},
+      {.type = ADDRESS_HOME_STREET_NAME,
+       .value = "",
+       .status = VerificationStatus::kNoStatus},
+      {.type = ADDRESS_HOME_HOUSE_NUMBER,
+       .value = "",
+       .status = VerificationStatus::kNoStatus},
+  };
+  VerifyTestValues(&address, address_with_wiped_structure);
+}
+
+// Test that the correct country for merging structured addresses is computed.
+TEST(AutofillStructuredAddress, TestGetCommonCountryForMerge) {
+  CountryCode country1(nullptr);
+  CountryCode country2(nullptr);
+
+  // No countries set.
+  EXPECT_EQ(country1.GetCommonCountryForMerge(country2), u"");
+  EXPECT_EQ(country2.GetCommonCountryForMerge(country1), u"");
+
+  // If exactly one country is set, use it as their common one.
+  country1.SetValue(u"AT", VerificationStatus::kObserved);
+  EXPECT_EQ(country1.GetCommonCountryForMerge(country2), u"AT");
+  EXPECT_EQ(country2.GetCommonCountryForMerge(country1), u"AT");
+
+  // If both are set to the same value, use it as their common one.
+  country2.SetValue(u"AT", VerificationStatus::kObserved);
+  EXPECT_EQ(country1.GetCommonCountryForMerge(country2), u"AT");
+  EXPECT_EQ(country2.GetCommonCountryForMerge(country1), u"AT");
+
+  // If both have a different value, there is no common one.
+  country2.SetValue(u"DE", VerificationStatus::kObserved);
+  EXPECT_EQ(country1.GetCommonCountryForMerge(country2), u"");
+  EXPECT_EQ(country2.GetCommonCountryForMerge(country1), u"");
+}
+
 }  // namespace
 }  // namespace structured_address
 }  // namespace autofill

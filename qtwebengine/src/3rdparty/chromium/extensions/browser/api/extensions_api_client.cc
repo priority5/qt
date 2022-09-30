@@ -4,6 +4,7 @@
 
 #include "extensions/browser/api/extensions_api_client.h"
 
+#include "build/build_config.h"
 #include "extensions/browser/api/device_permissions_prompt.h"
 #include "extensions/browser/api/system_display/display_info_provider.h"
 #include "extensions/browser/api/virtual_keyboard_private/virtual_keyboard_delegate.h"
@@ -28,9 +29,8 @@ ExtensionsAPIClient* ExtensionsAPIClient::Get() { return g_instance; }
 
 void ExtensionsAPIClient::AddAdditionalValueStoreCaches(
     content::BrowserContext* context,
-    const scoped_refptr<ValueStoreFactory>& factory,
-    const scoped_refptr<base::ObserverListThreadSafe<SettingsObserver>>&
-        observers,
+    const scoped_refptr<value_store::ValueStoreFactory>& factory,
+    SettingsChangedCallback observer,
     std::map<settings_namespace::Namespace, ValueStoreCache*>* caches) {}
 
 void ExtensionsAPIClient::AttachWebContentsHelpers(
@@ -82,7 +82,7 @@ ExtensionsAPIClient::CreateGuestViewManagerDelegate(
 std::unique_ptr<MimeHandlerViewGuestDelegate>
 ExtensionsAPIClient::CreateMimeHandlerViewGuestDelegate(
     MimeHandlerViewGuest* guest) const {
-  return std::unique_ptr<MimeHandlerViewGuestDelegate>();
+  return nullptr;
 }
 
 WebViewGuestDelegate* ExtensionsAPIClient::CreateWebViewGuestDelegate(
@@ -109,6 +109,12 @@ ExtensionsAPIClient::CreateDevicePermissionsPrompt(
   return nullptr;
 }
 
+#if BUILDFLAG(IS_CHROMEOS)
+bool ExtensionsAPIClient::ShouldAllowDetachingUsb(int vid, int pid) const {
+  return false;
+}
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
 std::unique_ptr<VirtualKeyboardDelegate>
 ExtensionsAPIClient::CreateVirtualKeyboardDelegate(
     content::BrowserContext* context) const {
@@ -134,11 +140,6 @@ MetricsPrivateDelegate* ExtensionsAPIClient::GetMetricsPrivateDelegate() {
   return nullptr;
 }
 
-NetworkingCastPrivateDelegate*
-ExtensionsAPIClient::GetNetworkingCastPrivateDelegate() {
-  return nullptr;
-}
-
 FileSystemDelegate* ExtensionsAPIClient::GetFileSystemDelegate() {
   return nullptr;
 }
@@ -151,7 +152,7 @@ FeedbackPrivateDelegate* ExtensionsAPIClient::GetFeedbackPrivateDelegate() {
   return nullptr;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 NonNativeFileSystemDelegate*
 ExtensionsAPIClient::GetNonNativeFileSystemDelegate() {
   return nullptr;
@@ -161,14 +162,16 @@ MediaPerceptionAPIDelegate*
 ExtensionsAPIClient::GetMediaPerceptionAPIDelegate() {
   return nullptr;
 }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
+#if BUILDFLAG(IS_CHROMEOS)
 void ExtensionsAPIClient::SaveImageDataToClipboard(
-    const std::vector<char>& image_data,
+    std::vector<uint8_t> image_data,
     api::clipboard::ImageType type,
     AdditionalDataItemList additional_items,
     base::OnceClosure success_callback,
     base::OnceCallback<void(const std::string&)> error_callback) {}
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 AutomationInternalApiDelegate*
 ExtensionsAPIClient::GetAutomationInternalApiDelegate() {

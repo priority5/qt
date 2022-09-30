@@ -27,6 +27,7 @@
 
 #include "base/location.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_buffer.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
@@ -35,6 +36,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/worker_pool.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
@@ -73,7 +75,7 @@ void AsyncAudioDecoder::DecodeOnBackgroundThread(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   DCHECK(!IsMainThread());
   scoped_refptr<AudioBus> bus = CreateBusFromInMemoryAudioFile(
-      audio_data->Data(), audio_data->ByteLengthAsSizeT(), false, sample_rate);
+      audio_data->Data(), audio_data->ByteLength(), false, sample_rate);
 
   // Decoding is finished, but we need to do the callbacks on the main thread.
   // A reference to |*bus| is retained by base::OnceCallback and will be removed

@@ -11,12 +11,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "components/payments/content/content_payment_request_delegate.h"
 #include "components/payments/content/payment_request.h"
 #include "components/payments/core/currency_formatter.h"
 #include "components/payments/core/method_strings.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/elide_url.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/url_constants.h"
 
 namespace payments {
 
@@ -30,9 +32,9 @@ SecurePaymentConfirmationController::~SecurePaymentConfirmationController() =
     default;
 
 void SecurePaymentConfirmationController::ShowDialog() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   NOTREACHED();
-#endif  // OS_ANDROID
+#endif  // BUILDFLAG(IS_ANDROID)
 
   if (!request_ || !request_->spec())
     return;
@@ -72,7 +74,21 @@ void SecurePaymentConfirmationController::
       request_->spec()->request_shipping() ||
       request_->spec()->request_payer_name() ||
       request_->spec()->request_payer_email() ||
-      request_->spec()->request_payer_phone()) {
+      request_->spec()->request_payer_phone() ||
+      request_->spec()->method_data().size() != 1 ||
+      !request_->spec()->method_data().front() ||
+      request_->spec()->method_data().front()->supported_method !=
+          methods::kSecurePaymentConfirmation ||
+      !request_->spec()->method_data().front()->secure_payment_confirmation ||
+      (request_->spec()
+           ->method_data()
+           .front()
+           ->secure_payment_confirmation->payee_origin.has_value() &&
+       request_->spec()
+               ->method_data()
+               .front()
+               ->secure_payment_confirmation->payee_origin->scheme() !=
+           url::kHttpsScheme)) {
     OnCancel();
     return;
   }
@@ -87,9 +103,26 @@ void SecurePaymentConfirmationController::
 
   model_.set_merchant_label(
       l10n_util::GetStringUTF16(IDS_SECURE_PAYMENT_CONFIRMATION_STORE_LABEL));
-  model_.set_merchant_value(url_formatter::FormatUrlForSecurityDisplay(
-      request_->state()->GetTopOrigin(),
-      url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC));
+  absl::optional<std::string>& payee_name =
+      request_->spec()
+          ->method_data()
+          .front()
+          ->secure_payment_confirmation->payee_name;
+  if (payee_name.has_value()) {
+    model_.set_merchant_name(
+        absl::optional<std::u16string>(base::UTF8ToUTF16(payee_name.value())));
+  }
+  absl::optional<url::Origin>& origin =
+      request_->spec()
+          ->method_data()
+          .front()
+          ->secure_payment_confirmation->payee_origin;
+  if (origin.has_value()) {
+    model_.set_merchant_origin(absl::optional<std::u16string>(
+        url_formatter::FormatUrlForSecurityDisplay(
+            origin.value().GetURL(),
+            url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC)));
+  }
 
   model_.set_instrument_label(l10n_util::GetStringUTF16(
       IDS_PAYMENT_REQUEST_PAYMENT_METHOD_SECTION_NAME));
@@ -100,20 +133,34 @@ void SecurePaymentConfirmationController::
   model_.set_total_label(
       l10n_util::GetStringUTF16(IDS_SECURE_PAYMENT_CONFIRMATION_TOTAL_LABEL));
   const mojom::PaymentItemPtr& total = request_->spec()->GetTotal(app);
-  base::string16 total_value = base::UTF8ToUTF16(total->amount->currency);
-  model_.set_total_value(base::StrCat(
-      {base::UTF8ToUTF16(total->amount->currency), base::ASCIIToUTF16(" "),
-       CurrencyFormatter(total->amount->currency,
-                         request_->state()->GetApplicationLocale())
-           .Format(total->amount->value)}));
+  std::u16string total_value = base::UTF8ToUTF16(total->amount->currency);
+  model_.set_total_value(
+      base::StrCat({base::UTF8ToUTF16(total->amount->currency), u" ",
+                    CurrencyFormatter(total->amount->currency,
+                                      request_->state()->GetApplicationLocale())
+                        .Format(total->amount->value)}));
 
-  view_ = SecurePaymentConfirmationView::Create();
+  view_ = SecurePaymentConfirmationView::Create(
+      request_->state()->GetPaymentRequestDelegate()->GetPaymentUIObserver());
   view_->ShowDialog(
       request_->web_contents(), model_.GetWeakPtr(),
       base::BindOnce(&SecurePaymentConfirmationController::OnConfirm,
                      weak_ptr_factory_.GetWeakPtr()),
       base::BindOnce(&SecurePaymentConfirmationController::OnCancel,
                      weak_ptr_factory_.GetWeakPtr()));
+
+  // For automated testing, SPC can be placed in an 'autoaccept' or
+  // 'autoreject' mode, where the dialog should immediately be
+  // accepted/rejected without user interaction. We deliberately wait until
+  // after the dialog is created and shown to handle this, in order to keep the
+  // automation codepath as close to the 'real' one as possible.
+  if (request_->spc_transaction_mode() != SPCTransactionMode::NONE) {
+    if (request_->spc_transaction_mode() == SPCTransactionMode::AUTOACCEPT) {
+      OnConfirm();
+    } else {
+      OnCancel();
+    }
+  }
 }
 
 void SecurePaymentConfirmationController::RetryDialog() {
@@ -149,7 +196,7 @@ void SecurePaymentConfirmationController::ShowCvcUnmaskPrompt(
     const autofill::CreditCard& credit_card,
     base::WeakPtr<autofill::payments::FullCardRequest::ResultDelegate>
         result_delegate,
-    content::WebContents* web_contents) {
+    content::RenderFrameHost* render_frame_host) {
   // CVC unmasking is nut supported.
   NOTREACHED();
 }
@@ -182,7 +229,7 @@ void SecurePaymentConfirmationController::OnCancel() {
     return;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(&PaymentRequest::UserCancelled, request_));
+      FROM_HERE, base::BindOnce(&PaymentRequest::OnUserCancelled, request_));
 }
 
 void SecurePaymentConfirmationController::OnConfirm() {

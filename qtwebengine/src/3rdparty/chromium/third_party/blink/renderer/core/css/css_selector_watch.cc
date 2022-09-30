@@ -38,7 +38,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -173,6 +173,7 @@ void CSSSelectorWatch::WatchCSSSelectors(const Vector<String>& selectors) {
 
 void CSSSelectorWatch::Trace(Visitor* visitor) const {
   visitor->Trace(watched_callback_selectors_);
+  visitor->Trace(callback_selector_change_timer_);
   Supplement<Document>::Trace(visitor);
 }
 

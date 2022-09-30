@@ -135,6 +135,8 @@ bool SimNetwork::FillNavigationParamsResponse(WebNavigationParams* params) {
   auto body_loader = std::make_unique<StaticDataNavigationBodyLoader>();
   request->UsedForNavigation(body_loader.get());
   params->body_loader = std::move(body_loader);
+  params->referrer = request->referrer_;
+  params->requestor_origin = request->requestor_origin_;
   return true;
 }
 

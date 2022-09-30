@@ -1,183 +1,102 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the examples of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:BSD$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** BSD License Usage
-** Alternatively, you may use this file under the terms of the BSD license
-** as follows:
-**
-** "Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions are
-** met:
-**   * Redistributions of source code must retain the above copyright
-**     notice, this list of conditions and the following disclaimer.
-**   * Redistributions in binary form must reproduce the above copyright
-**     notice, this list of conditions and the following disclaimer in
-**     the documentation and/or other materials provided with the
-**     distribution.
-**   * Neither the name of The Qt Company Ltd nor the names of its
-**     contributors may be used to endorse or promote products derived
-**     from this software without specific prior written permission.
-**
-**
-** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-** "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-** LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-** A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-** OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-** SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-** LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-** OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
-import QtQuick 2.15
+import QtQuick
 
-Component {
-    Item {
-        property variant stickies
+Image {
+    id: corkPanel
+    source: "content/cork.jpg"
+    width: ListView.view.width
+    height: ListView.view.height
+    fillMode: Image.PreserveAspectCrop
 
-        id: page
-        width: ListView.view.width + 40
-        height: ListView.view.height
+    TapHandler {
+        objectName: name
+        onTapped: corkPanel.Window.activeFocusItem.focus = false
+    }
 
-        Image {
-            source: "cork.jpg"
-            width: page.ListView.view.width
-            height: page.ListView.view.height
-            fillMode: Image.PreserveAspectCrop
-            clip: true
-        }
+    Text {
+        text: name
+        x: 15
+        y: 8
+        height: 40
+        width: 370
+        font.pixelSize: 18
+        font.bold: true
+        color: "white"
+        style: Text.Outline
+        styleColor: "black"
+        wrapMode: Text.Wrap
+    }
 
-        MouseArea {
-            anchors.fill: parent
-            onClicked: page.focus = false;
-        }
+    Repeater {
+        model: notes
+        Item {
+            id: fulcrum
 
-        Text {
-            text: name
-            x: 15
-            y: 8
-            height: 40
-            width: 370
-            font.pixelSize: 18
-            font.bold: true
-            color: "white"
-            style: Text.Outline
-            styleColor: "black"
-            wrapMode: Text.Wrap
-        }
+            x: 100 + Math.random() * (corkPanel.width - 0.5 * paper.width)
+            y: 50 + Math.random() * (corkPanel.height - 0.5 * paper.height)
 
-        Repeater {
-            model: notes
             Item {
-                id: stickyPage
+                id: note
+                scale: 0.7
 
-                property int randomX: Math.random()
-                                      * (page.ListView.view.width - 0.5 * stickyImage.width)
-                                      + 100
-                property int randomY: Math.random()
-                                      * (page.ListView.view.height - 0.5 * stickyImage.height)
-                                      + 50
+                Image {
+                    id: paper
+                    x: 8 + -width * 0.6 / 2
+                    y: -20
+                    source: "note-yellow.png"
+                    scale: 0.6
+                    transformOrigin: Item.TopLeft
+                    antialiasing: true
 
-                x: randomX
-                y: randomY
+                    DragHandler {
+                        target: fulcrum
+                        xAxis.minimum: 100
+                        xAxis.maximum: corkPanel.width - 80
+                        yAxis.minimum: 0
+                        yAxis.maximum: corkPanel.height - 80
+                    }
+                }
 
-                rotation: -flickable.horizontalVelocity / 100;
+                TextEdit {
+                    id: text
+                    x: -104
+                    y: 36
+                    width: 215
+                    height: 24
+                    font.pixelSize: 24
+                    readOnly: false
+                    selectByMouse: activeFocus
+                    rotation: -8
+                    text: noteText
+                    wrapMode: Text.Wrap
+                }
+
+                rotation: -flickable.horizontalVelocity / 100
                 Behavior on rotation {
                     SpringAnimation { spring: 2.0; damping: 0.15 }
                 }
+            }
 
-                Item {
-                    id: sticky
-                    scale: 0.7
+            Image {
+                x: -width / 2
+                y: -height * 0.5 / 2
+                source: "tack.png"
+                scale: 0.7
+                transformOrigin: Item.TopLeft
+            }
 
-                    Image {
-                        id: stickyImage
-                        x: 8 + -width * 0.6 / 2
-                        y: -20
-                        source: "note-yellow.png"
-                        scale: 0.6
-                        transformOrigin: Item.TopLeft
-                    }
+            states: State {
+                name: "pressed"
+                when: text.activeFocus
+                PropertyChanges { target: note; rotation: 8; scale: 1 }
+                PropertyChanges { target: fulcrum; z: 8 }
+            }
 
-                    TextEdit {
-                        id: myText
-                        x: -104
-                        y: 36
-                        width: 215
-                        height: 200
-                        font.pixelSize: 24
-                        readOnly: false
-                        rotation: -8
-                        text: noteText
-                        wrapMode: Text.Wrap
-                    }
-
-                    Item {
-                        x: stickyImage.x
-                        y: -20
-                        width: stickyImage.width * stickyImage.scale
-                        height: stickyImage.height * stickyImage.scale
-
-                        MouseArea {
-                            id: mouse
-                            anchors.fill: parent
-                            drag.target: stickyPage
-                            drag.axis: Drag.XAndYAxis
-                            drag.minimumY: 0
-                            drag.maximumY: page.height - 80
-                            drag.minimumX: 100
-                            drag.maximumX: page.width - 140
-                            onClicked: myText.forceActiveFocus()
-                        }
-                    }
-                }
-
-                Image {
-                    x: -width / 2
-                    y: -height * 0.5 / 2
-                    source: "tack.png"
-                    scale: 0.7
-                    transformOrigin: Item.TopLeft
-                }
-
-                states: State {
-                    name: "pressed"
-                    when: mouse.pressed
-                    PropertyChanges { target: sticky; rotation: 8; scale: 1 }
-                    PropertyChanges { target: page; z: 8 }
-                }
-
-                transitions: Transition {
-                    NumberAnimation { properties: "rotation,scale"; duration: 200 }
-                }
+            transitions: Transition {
+                NumberAnimation { properties: "rotation,scale"; duration: 200 }
             }
         }
     }
 }
-
-
-
-
-
-
-
-

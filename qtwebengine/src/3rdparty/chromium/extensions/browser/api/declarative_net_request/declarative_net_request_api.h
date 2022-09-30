@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "extensions/browser/extension_function.h"
 
 namespace extensions {
@@ -30,7 +29,7 @@ class DeclarativeNetRequestUpdateDynamicRulesFunction
   ExtensionFunction::ResponseAction Run() override;
 
  private:
-  void OnDynamicRulesUpdated(base::Optional<std::string> error);
+  void OnDynamicRulesUpdated(absl::optional<std::string> error);
 };
 
 class DeclarativeNetRequestGetDynamicRulesFunction : public ExtensionFunction {
@@ -50,6 +49,36 @@ class DeclarativeNetRequestGetDynamicRulesFunction : public ExtensionFunction {
       declarative_net_request::ReadJSONRulesResult read_json_result);
 };
 
+class DeclarativeNetRequestUpdateSessionRulesFunction
+    : public ExtensionFunction {
+ public:
+  DeclarativeNetRequestUpdateSessionRulesFunction();
+  DECLARE_EXTENSION_FUNCTION("declarativeNetRequest.updateSessionRules",
+                             DECLARATIVENETREQUEST_UPDATESESSIONRULES)
+
+ protected:
+  ~DeclarativeNetRequestUpdateSessionRulesFunction() override;
+
+  // ExtensionFunction override:
+  ExtensionFunction::ResponseAction Run() override;
+
+ private:
+  void OnSessionRulesUpdated(absl::optional<std::string> error);
+};
+
+class DeclarativeNetRequestGetSessionRulesFunction : public ExtensionFunction {
+ public:
+  DeclarativeNetRequestGetSessionRulesFunction();
+  DECLARE_EXTENSION_FUNCTION("declarativeNetRequest.getSessionRules",
+                             DECLARATIVENETREQUEST_GETSESSIONRULES)
+
+ protected:
+  ~DeclarativeNetRequestGetSessionRulesFunction() override;
+
+  // ExtensionFunction override:
+  ExtensionFunction::ResponseAction Run() override;
+};
+
 class DeclarativeNetRequestUpdateEnabledRulesetsFunction
     : public ExtensionFunction {
  public:
@@ -61,7 +90,7 @@ class DeclarativeNetRequestUpdateEnabledRulesetsFunction
   ~DeclarativeNetRequestUpdateEnabledRulesetsFunction() override;
 
  private:
-  void OnEnabledStaticRulesetsUpdated(base::Optional<std::string> error);
+  void OnEnabledStaticRulesetsUpdated(absl::optional<std::string> error);
 
   // ExtensionFunction override:
   ExtensionFunction::ResponseAction Run() override;
@@ -105,15 +134,15 @@ class DeclarativeNetRequestGetMatchedRulesFunction : public ExtensionFunction {
   static bool disable_throttling_for_test_;
 };
 
-class DeclarativeNetRequestSetActionCountAsBadgeTextFunction
+class DeclarativeNetRequestSetExtensionActionOptionsFunction
     : public ExtensionFunction {
  public:
-  DeclarativeNetRequestSetActionCountAsBadgeTextFunction();
-  DECLARE_EXTENSION_FUNCTION("declarativeNetRequest.setActionCountAsBadgeText",
+  DeclarativeNetRequestSetExtensionActionOptionsFunction();
+  DECLARE_EXTENSION_FUNCTION("declarativeNetRequest.setExtensionActionOptions",
                              DECLARATIVENETREQUEST_SETACTIONCOUNTASBADGETEXT)
 
  protected:
-  ~DeclarativeNetRequestSetActionCountAsBadgeTextFunction() override;
+  ~DeclarativeNetRequestSetExtensionActionOptionsFunction() override;
 
   ExtensionFunction::ResponseAction Run() override;
 };
@@ -126,6 +155,21 @@ class DeclarativeNetRequestIsRegexSupportedFunction : public ExtensionFunction {
 
  protected:
   ~DeclarativeNetRequestIsRegexSupportedFunction() override;
+
+  // ExtensionFunction override:
+  ExtensionFunction::ResponseAction Run() override;
+};
+
+class DeclarativeNetRequestGetAvailableStaticRuleCountFunction
+    : public ExtensionFunction {
+ public:
+  DeclarativeNetRequestGetAvailableStaticRuleCountFunction();
+  DECLARE_EXTENSION_FUNCTION(
+      "declarativeNetRequest.getAvailableStaticRuleCount",
+      DECLARATIVENETREQUEST_GETAVAILABLESTATICRULECOUNT)
+
+ protected:
+  ~DeclarativeNetRequestGetAvailableStaticRuleCountFunction() override;
 
   // ExtensionFunction override:
   ExtensionFunction::ResponseAction Run() override;

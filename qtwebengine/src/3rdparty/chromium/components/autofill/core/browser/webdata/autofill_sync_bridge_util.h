@@ -9,7 +9,6 @@
 #include <string>
 
 #include "components/sync/model/entity_change.h"
-#include "components/sync/model/entity_data.h"
 
 namespace autofill {
 

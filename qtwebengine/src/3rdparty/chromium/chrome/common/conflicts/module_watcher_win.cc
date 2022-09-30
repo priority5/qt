@@ -15,11 +15,10 @@
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -115,7 +114,7 @@ constexpr char kLdrUnregisterDllNotification[] = "LdrUnregisterDllNotification";
 // Helper function for converting a UNICODE_STRING to a FilePath.
 base::FilePath ToFilePath(const UNICODE_STRING* str) {
   return base::FilePath(
-      base::StringPiece16(str->Buffer, str->Length / sizeof(wchar_t)));
+      base::WStringPiece(str->Buffer, str->Length / sizeof(wchar_t)));
 }
 
 template <typename NotificationDataType>

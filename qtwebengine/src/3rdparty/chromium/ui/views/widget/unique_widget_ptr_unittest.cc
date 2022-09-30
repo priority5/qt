@@ -5,8 +5,10 @@
 #include "ui/views/widget/unique_widget_ptr.h"
 
 #include <memory>
+#include <utility>
 
-#include "base/scoped_observer.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -29,7 +31,7 @@ class UniqueWidgetPtrTest : public ViewsTestBase, public WidgetObserver {
   std::unique_ptr<Widget> AllocateTestWidget() override {
     auto widget = ViewsTestBase::AllocateTestWidget();
     widget->Init(CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS));
-    widget_observer_.Add(widget.get());
+    widget_observation_.Observe(widget.get());
     return widget;
   }
 
@@ -46,13 +48,14 @@ class UniqueWidgetPtrTest : public ViewsTestBase, public WidgetObserver {
   void OnWidgetDestroying(Widget* widget) override {
     ASSERT_NE(widget_, nullptr);
     ASSERT_EQ(widget_, widget);
-    widget_observer_.Remove(widget_);
+    ASSERT_TRUE(widget_observation_.IsObservingSource(widget_.get()));
+    widget_observation_.Reset();
     widget_ = nullptr;
   }
 
  private:
-  Widget* widget_ = nullptr;
-  ScopedObserver<Widget, WidgetObserver> widget_observer_{this};
+  raw_ptr<Widget> widget_ = nullptr;
+  base::ScopedObservation<Widget, WidgetObserver> widget_observation_{this};
 };
 
 // Make sure explicitly resetting the |unique_widget_ptr| variable properly

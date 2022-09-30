@@ -1,44 +1,7 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWidgets module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qsidebar_p.h"
-#include "qfilesystemmodel.h"
 
 #include <qaction.h>
 #include <qurl.h>
@@ -48,10 +11,13 @@
 #include <qmimedata.h>
 #include <qevent.h>
 #include <qdebug.h>
-#include <qfileiconprovider.h>
+#include <qfilesystemmodel.h>
+#include <qabstractfileiconprovider.h>
 #include <qfiledialog.h>
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 void QSideBarDelegate::initStyleOption(QStyleOptionViewItem *option,
                                          const QModelIndex &index) const
@@ -82,7 +48,7 @@ QUrlModel::QUrlModel(QObject *parent) : QStandardItemModel(parent), showFullPath
 */
 QStringList QUrlModel::mimeTypes() const
 {
-    return QStringList(QLatin1String("text/uri-list"));
+    return QStringList("text/uri-list"_L1);
 }
 
 /*!
@@ -198,9 +164,9 @@ void QUrlModel::setUrl(const QModelIndex &index, const QUrl &url, const QModelIn
 
         QIcon newIcon = qvariant_cast<QIcon>(dirIndex.data(Qt::DecorationRole));
         if (!dirIndex.isValid()) {
-            const QFileIconProvider *provider = fileSystemModel->iconProvider();
+            const QAbstractFileIconProvider *provider = fileSystemModel->iconProvider();
             if (provider)
-                newIcon = provider->icon(QFileIconProvider::Folder);
+                newIcon = provider->icon(QAbstractFileIconProvider::Folder);
             newName = QFileInfo(url.toLocalFile()).fileName();
             if (!invalidUrls.contains(url))
                 invalidUrls.append(url);
@@ -247,7 +213,7 @@ void QUrlModel::addUrls(const QList<QUrl> &list, int row, bool move)
     row = qMin(row, rowCount());
     for (int i = list.count() - 1; i >= 0; --i) {
         QUrl url = list.at(i);
-        if (!url.isValid() || url.scheme() != QLatin1String("file"))
+        if (!url.isValid() || url.scheme() != "file"_L1)
             continue;
         //this makes sure the url is clean
         const QString cleanUrl = QDir::cleanPath(url.toLocalFile());

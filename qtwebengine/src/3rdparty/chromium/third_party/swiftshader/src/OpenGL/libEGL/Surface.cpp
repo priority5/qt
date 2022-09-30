@@ -18,15 +18,15 @@
 
 #include "Surface.hpp"
 
-#include "main.h"
+#include "Context.hpp"
 #include "Display.h"
+#include "Main/FrameBuffer.hpp"
 #include "Texture.hpp"
 #include "common/Image.hpp"
-#include "Context.hpp"
 #include "common/debug.h"
-#include "Main/FrameBuffer.hpp"
+#include "main.h"
 
-#if defined(USE_X11)
+#if defined(SWIFTSHADER_USE_X11)
 #include "Main/libX11.hpp"
 #elif defined(_WIN32)
 #include <tchar.h>
@@ -77,10 +77,6 @@ bool Surface::initialize()
 			backBuffer = libGLESv2->createBackBuffer(width, height, config->mRenderTargetFormat, config->mSamples);
 		}
 	}
-	else if(libGLES_CM)
-	{
-		backBuffer = libGLES_CM->createBackBuffer(width, height, config->mRenderTargetFormat, config->mSamples);
-	}
 
 	if(!backBuffer)
 	{
@@ -94,10 +90,6 @@ bool Surface::initialize()
 		if(libGLESv2)
 		{
 			depthStencil = libGLESv2->createDepthStencil(width, height, config->mDepthStencilFormat, config->mSamples);
-		}
-		else if(libGLES_CM)
-		{
-			depthStencil = libGLES_CM->createDepthStencil(width, height, config->mDepthStencilFormat, config->mSamples);
 		}
 
 		if(!depthStencil)
@@ -344,14 +336,9 @@ bool WindowSurface::checkForResize()
 		int windowWidth = client.right - client.left;
 		int windowHeight = client.bottom - client.top;
 	#elif defined(__ANDROID__)
-	#ifdef ANDROID_NDK_BUILD
 		int windowWidth = ANativeWindow_getWidth(window);
 		int windowHeight = ANativeWindow_getHeight(window);
-	#else
-		int windowWidth;  window->query(window, NATIVE_WINDOW_WIDTH, &windowWidth);
-		int windowHeight; window->query(window, NATIVE_WINDOW_HEIGHT, &windowHeight);
-	#endif
-	#elif defined(USE_X11)
+	#elif defined(SWIFTSHADER_USE_X11)
 		XWindowAttributes windowAttributes;
 		Status status = libX11->XGetWindowAttributes((::Display*)display->getNativeDisplay(), window, &windowAttributes);
 
@@ -413,10 +400,6 @@ bool WindowSurface::reset(int backBufferWidth, int backBufferHeight)
 		if(libGLESv2)
 		{
 			frameBuffer = libGLESv2->createFrameBuffer(display->getNativeDisplay(), window, width, height);
-		}
-		else if(libGLES_CM)
-		{
-			frameBuffer = libGLES_CM->createFrameBuffer(display->getNativeDisplay(), window, width, height);
 		}
 
 		if(!frameBuffer)

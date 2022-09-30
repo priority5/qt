@@ -7,11 +7,11 @@
 #include <set>
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/observer_list.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/render_view_host.h"
 #include "ui/aura/client/cursor_client.h"
@@ -19,6 +19,7 @@
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/pointer/touch_editing_controller.h"
 #include "ui/events/event_observer.h"
 #include "ui/gfx/geometry/point_conversions.h"
@@ -67,6 +68,9 @@ class TouchSelectionControllerClientAura::EnvEventObserver
     env->AddEventObserver(this, env, types);
   }
 
+  EnvEventObserver(const EnvEventObserver&) = delete;
+  EnvEventObserver& operator=(const EnvEventObserver&) = delete;
+
   ~EnvEventObserver() override {
     aura::Env::GetInstance()->RemoveEventObserver(this);
   }
@@ -97,10 +101,8 @@ class TouchSelectionControllerClientAura::EnvEventObserver
     selection_controller_->HideAndDisallowShowingAutomatically();
   }
 
-  ui::TouchSelectionController* selection_controller_;
-  aura::Window* window_;
-
-  DISALLOW_COPY_AND_ASSIGN(EnvEventObserver);
+  raw_ptr<ui::TouchSelectionController> selection_controller_;
+  raw_ptr<aura::Window> window_;
 };
 
 TouchSelectionControllerClientAura::TouchSelectionControllerClientAura(
@@ -110,7 +112,7 @@ TouchSelectionControllerClientAura::TouchSelectionControllerClientAura(
       active_client_(&internal_client_),
       active_menu_client_(this),
       quick_menu_timer_(FROM_HERE,
-                        base::TimeDelta::FromMilliseconds(kQuickMenuDelayInMs),
+                        base::Milliseconds(kQuickMenuDelayInMs),
                         base::BindRepeating(
                             &TouchSelectionControllerClientAura::ShowQuickMenu,
                             base::Unretained(this))),
@@ -359,7 +361,7 @@ void TouchSelectionControllerClientAura::OnSelectionEvent(
   switch (event) {
     case ui::SELECTION_HANDLES_SHOWN:
       quick_menu_requested_ = true;
-      FALLTHROUGH;
+      [[fallthrough]];
     case ui::INSERTION_HANDLE_SHOWN:
       UpdateQuickMenu();
       env_event_observer_ = std::make_unique<EnvEventObserver>(
@@ -398,9 +400,11 @@ void TouchSelectionControllerClientAura::InternalClient::OnSelectionEvent(
 }
 
 void TouchSelectionControllerClientAura::OnDragUpdate(
+    const ui::TouchSelectionDraggable::Type type,
     const gfx::PointF& position) {}
 
 void TouchSelectionControllerClientAura::InternalClient::OnDragUpdate(
+    const ui::TouchSelectionDraggable::Type type,
     const gfx::PointF& position) {
   NOTREACHED();
 }
@@ -439,9 +443,11 @@ bool TouchSelectionControllerClientAura::IsCommandIdEnabled(
     case ui::TouchEditable::kCopy:
       return readable && has_selection;
     case ui::TouchEditable::kPaste: {
-      base::string16 result;
+      std::u16string result;
+      ui::DataTransferEndpoint data_dst = ui::DataTransferEndpoint(
+          ui::EndpointType::kDefault, /*notify_if_restricted=*/false);
       ui::Clipboard::GetForCurrentThread()->ReadText(
-          ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr, &result);
+          ui::ClipboardBuffer::kCopyPaste, &data_dst, &result);
       return editable && !result.empty();
     }
     default:
@@ -492,7 +498,7 @@ bool TouchSelectionControllerClientAura::ShouldShowQuickMenu() {
          !handle_drag_in_progress_ && IsQuickMenuAvailable();
 }
 
-base::string16 TouchSelectionControllerClientAura::GetSelectedText() {
+std::u16string TouchSelectionControllerClientAura::GetSelectedText() {
   return rwhva_->GetSelectedText();
 }
 

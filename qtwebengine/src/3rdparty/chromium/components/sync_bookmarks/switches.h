@@ -9,14 +9,13 @@
 
 namespace switches {
 
-extern const base::Feature kSyncDoNotCommitBookmarksWithoutFavicon;
-// TODO(crbug.com/1066962): remove this code when most of bookmarks are
-// reuploaded.
-extern const base::Feature kSyncReuploadBookmarkFullTitles;
-// This switch is used to disable removing of bookmark duplicates by GUID.
-extern const base::Feature kSyncDeduplicateAllBookmarksWithSameGUID;
-// TODO(crbug.com/1075709): remove after launch.
-extern const base::Feature kSyncIgnoreChangesInTouchIcons;
+inline constexpr base::Feature kSyncOmitLargeBookmarkFaviconUrl{
+    "SyncOmitLargeBookmarkFaviconUrl", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// TODO(crbug.com/1232951): remove the feature toggle once most of bookmarks
+// have been reuploaded.
+inline constexpr base::Feature kSyncReuploadBookmarks{
+    "SyncReuploadBookmarks", base::FEATURE_ENABLED_BY_DEFAULT};
 
 }  // namespace switches
 

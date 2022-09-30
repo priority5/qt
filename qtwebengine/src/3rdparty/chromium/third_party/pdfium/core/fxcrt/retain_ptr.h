@@ -5,12 +5,14 @@
 #ifndef CORE_FXCRT_RETAIN_PTR_H_
 #define CORE_FXCRT_RETAIN_PTR_H_
 
+#include <stdint.h>
+
 #include <functional>
 #include <memory>
 #include <utility>
 
-#include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "third_party/base/check.h"
 
 namespace fxcrt {
 
@@ -127,7 +129,7 @@ class Retainable {
 
   void Retain() const { ++m_nRefCount; }
   void Release() const {
-    ASSERT(m_nRefCount > 0);
+    DCHECK(m_nRefCount > 0);
     if (--m_nRefCount == 0)
       delete this;
   }

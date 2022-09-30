@@ -72,8 +72,7 @@ NGLogicalStaticPosition LayoutBoxUtils::ComputeStaticPositionFromLegacy(
     const LayoutBox& box,
     const NGBoxStrut& container_border_scrollbar,
     const NGBoxFragmentBuilder* container_builder) {
-  const LayoutBoxModelObject* css_container =
-      ToLayoutBoxModelObject(box.Container());
+  const auto* css_container = To<LayoutBoxModelObject>(box.Container());
   const TextDirection parent_direction = box.Parent()->StyleRef().Direction();
 
   // These two values represent the available-size for the OOF-positioned
@@ -140,7 +139,7 @@ NGLogicalStaticPosition LayoutBoxUtils::ComputeStaticPositionFromLegacy(
                      box.StyleRef().GetWritingMode());
 
   const LayoutBox* container = css_container->IsBox()
-                                   ? ToLayoutBox(css_container)
+                                   ? To<LayoutBox>(css_container)
                                    : box.ContainingBlock();
   const WritingMode container_writing_mode =
       container->StyleRef().GetWritingMode();
@@ -169,6 +168,17 @@ NGLogicalStaticPosition LayoutBoxUtils::ComputeStaticPositionFromLegacy(
 bool LayoutBoxUtils::SkipContainingBlockForPercentHeightCalculation(
     const LayoutBlock* cb) {
   return LayoutBox::SkipContainingBlockForPercentHeightCalculation(cb);
+}
+
+LayoutUnit LayoutBoxUtils::InlineSize(const LayoutBox& box) {
+  DCHECK_GT(box.PhysicalFragmentCount(), 0u);
+
+  // TODO(almaher): We can't assume all fragments will have the same inline
+  // size.
+  return box.GetPhysicalFragment(0u)
+      ->Size()
+      .ConvertToLogical(box.StyleRef().GetWritingMode())
+      .inline_size;
 }
 
 LayoutUnit LayoutBoxUtils::TotalBlockSize(const LayoutBox& box) {

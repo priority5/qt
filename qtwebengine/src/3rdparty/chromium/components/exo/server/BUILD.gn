@@ -2,7 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-assert(is_chromeos)
+import("//build/config/chromeos/ui_mode.gni")
+import("//components/exo/buildflags.gni")
+
+assert(is_chromeos_ash)
 
 source_set("server") {
   sources = [
@@ -17,5 +20,26 @@ source_set("server") {
     "//components/exo",
     "//components/exo/wayland",
     "//skia",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "arc_overlay_manager_unittest.cc",
+    "wayland_server_controller_unittest.cc",
+  ]
+
+  deps = [
+    ":server",
+    "//ash:test_support",
+    "//ash/public/cpp",
+    "//ash/public/cpp/external_arc",
+    "//base/test:test_support",
+    "//components/exo",
+    "//components/exo:test_support",
+    "//testing/gmock",
+    "//testing/gtest",
+    "//ui/aura",
   ]
 }

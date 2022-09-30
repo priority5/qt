@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickgridview_p.h"
 #include "qquickflickable_p_p.h"
@@ -208,6 +172,8 @@ public:
     void updateHeader() override;
     void updateFooter() override;
 
+    void initializeComponentItem(QQuickItem *item) const override;
+
     void changedVisibleIndex(int newIndex) override;
     void initializeCurrentItem() override;
 
@@ -349,9 +315,27 @@ qreal QQuickGridViewPrivate::rowPosAt(int modelIndex) const
             return lastItem->rowPos() + rows * rowSize();
         }
     }
-    return (modelIndex / columns) * rowSize();
-}
 
+    qreal rowPos = ((modelIndex / columns) * rowSize());
+
+    if (flow == QQuickGridView::FlowLeftToRight && verticalLayoutDirection == QQuickItemView::TopToBottom) {
+        // Add the effective startpos of row 0. Start by subtracting minExtent, which will contain the
+        // height of the rows outside the beginning of the content item. (Rows can end up outside if
+        // e.g flicking the viewport a long way down, changing cellSize, and then flick back).
+        // NOTE: It's not clearly understood why the flow == QQuickGridView::FlowLeftToRight guard is
+        // needed, since the flow shouldn't normally affect the y postition of an index. But without
+        // it, several auto tests start failing, so we keep it until this part is better understood.
+        rowPos -= minExtent;
+        // minExtent will also contain the size of the topMargin (vData.startMargin), the header, and
+        // the highlightRangeStart. Those should be added before the start of row 0. So we need to subtract
+        // them from the rowPos. But only the largest of topMargin and highlightRangeStart will need
+        // to be taken into account, since having a topMargin will also ensure that currentItem ends
+        // up within the requested highlight range when view is positioned at the beginning.
+        rowPos += qMax(vData.startMargin, highlightRangeStart) + headerSize();
+    }
+
+    return rowPos;
+}
 
 qreal QQuickGridViewPrivate::snapPosAt(qreal pos) const
 {
@@ -400,7 +384,7 @@ int QQuickGridViewPrivate::snapIndex() const
         if (item->index == -1)
             continue;
         qreal itemTop = item->position();
-        FxGridItemSG *hItem = static_cast<FxGridItemSG*>(highlight);
+        FxGridItemSG *hItem = static_cast<FxGridItemSG*>(highlight.get());
         if (itemTop >= hItem->rowPos()-rowSize()/2 && itemTop < hItem->rowPos()+rowSize()/2) {
             FxGridItemSG *gridItem = static_cast<FxGridItemSG*>(item);
             index = gridItem->index;
@@ -700,10 +684,9 @@ void QQuickGridViewPrivate::createHighlight(bool onDestruction)
 {
     bool changed = false;
     if (highlight) {
-        if (trackedItem == highlight)
+        if (trackedItem == highlight.get())
             trackedItem = nullptr;
-        delete highlight;
-        highlight = nullptr;
+        highlight.reset();
 
         delete highlightXAnimator;
         delete highlightYAnimator;
@@ -720,7 +703,8 @@ void QQuickGridViewPrivate::createHighlight(bool onDestruction)
     if (currentItem) {
         QQuickItem *item = createHighlightItem();
         if (item) {
-            FxGridItemSG *newHighlight = new FxGridItemSG(item, q, true);
+            std::unique_ptr<FxGridItemSG> newHighlight
+                    = std::make_unique<FxGridItemSG>(item, q, true);
             newHighlight->trackGeometry(true);
             if (autoHighlight)
                 resetHighlightPosition();
@@ -731,7 +715,7 @@ void QQuickGridViewPrivate::createHighlight(bool onDestruction)
             highlightYAnimator->target = QQmlProperty(item, QLatin1String("y"));
             highlightYAnimator->userDuration = highlightMoveDuration;
 
-            highlight = newHighlight;
+            highlight = std::move(newHighlight);
             changed = true;
         }
     }
@@ -762,7 +746,7 @@ void QQuickGridViewPrivate::resetHighlightPosition()
 {
     if (highlight && currentItem) {
         FxGridItemSG *cItem = static_cast<FxGridItemSG*>(currentItem);
-        static_cast<FxGridItemSG*>(highlight)->setPosition(cItem->colPos(), cItem->rowPos());
+        static_cast<FxGridItemSG *>(highlight.get())->setPosition(cItem->colPos(), cItem->rowPos());
     }
 }
 
@@ -833,6 +817,14 @@ void QQuickGridViewPrivate::updateFooter()
 
     if (created)
         emit q->footerItemChanged();
+}
+
+void QQuickGridViewPrivate::initializeComponentItem(QQuickItem *item) const
+{
+    QQuickGridViewAttached *attached = static_cast<QQuickGridViewAttached *>(
+        qmlAttachedPropertiesObject<QQuickGridView>(item));
+    if (attached)
+        attached->setView(const_cast<QQuickGridView*>(q_func()));
 }
 
 void QQuickGridViewPrivate::updateHeader()
@@ -1247,10 +1239,6 @@ QQuickGridView::QQuickGridView(QQuickItem *parent)
 {
 }
 
-QQuickGridView::~QQuickGridView()
-{
-}
-
 void QQuickGridView::setHighlightFollowsCurrentItem(bool autoHighlight)
 {
     Q_D(QQuickGridView);
@@ -1315,8 +1303,8 @@ void QQuickGridView::setHighlightFollowsCurrentItem(bool autoHighlight)
 
     The model provides the set of data that is used to create the items
     in the view. Models can be created directly in QML using \l ListModel,
-    \l XmlListModel, \l DelegateModel, or \l ObjectModel, or provided by C++
-    model classes. If a C++ model class is used, it must be a subclass of
+    \l DelegateModel, \l ObjectModel, or provided by C++ model classes.
+    If a C++ model class is used, it must be a subclass of
     \l QAbstractItemModel or a simple list.
 
   \sa {qml-data-models}{Data Models}
@@ -1653,6 +1641,7 @@ void QQuickGridView::setCellWidth(qreal cellWidth)
         d->updateViewport();
         emit cellWidthChanged();
         d->forceLayoutPolish();
+        QQuickFlickable::setContentX(d->contentXForPosition(d->position()));
     }
 }
 
@@ -1670,6 +1659,7 @@ void QQuickGridView::setCellHeight(qreal cellHeight)
         d->updateViewport();
         emit cellHeightChanged();
         d->forceLayoutPolish();
+        QQuickFlickable::setContentY(d->contentYForPosition(d->position()));
     }
 }
 /*!
@@ -1758,7 +1748,8 @@ void QQuickGridView::setSnapMode(SnapMode mode)
     \list
     \li The view is first created
     \li The view's \l model changes in such a way that the visible delegates are completely replaced
-    \li The view's \l model is \l {QAbstractItemModel::reset()}{reset}, if the model is a QAbstractItemModel subclass
+    \li The view's \l model is \l {QAbstractItemModel::beginResetModel()}{reset},
+        if the model is a QAbstractItemModel subclass
     \endlist
 
     For example, here is a view that specifies such a transition:
@@ -2099,7 +2090,8 @@ void QQuickGridView::viewportMoved(Qt::Orientations orient)
             if (pos != d->highlight->position()) {
                 d->highlightXAnimator->stop();
                 d->highlightYAnimator->stop();
-                static_cast<FxGridItemSG*>(d->highlight)->setPosition(static_cast<FxGridItemSG*>(d->highlight)->colPos(), pos);
+                FxGridItemSG *sgHighlight = static_cast<FxGridItemSG *>(d->highlight.get());
+                sgHighlight->setPosition(sgHighlight->colPos(), pos);
             } else {
                 d->updateHighlight();
             }
@@ -2108,7 +2100,10 @@ void QQuickGridView::viewportMoved(Qt::Orientations orient)
             int idx = d->snapIndex();
             if (idx >= 0 && idx != d->currentIndex) {
                 d->updateCurrent(idx);
-                if (d->currentItem && static_cast<FxGridItemSG*>(d->currentItem)->colPos() != static_cast<FxGridItemSG*>(d->highlight)->colPos() && d->autoHighlight) {
+                if (d->currentItem
+                        && static_cast<FxGridItemSG*>(d->currentItem)->colPos()
+                            != static_cast<FxGridItemSG*>(d->highlight.get())->colPos()
+                        && d->autoHighlight) {
                     if (d->flow == FlowLeftToRight)
                         d->highlightXAnimator->to = d->currentItem->itemX();
                     else
@@ -2153,7 +2148,7 @@ void QQuickGridView::keyPressEvent(QKeyEvent *event)
     QQuickItemView::keyPressEvent(event);
 }
 
-void QQuickGridView::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
+void QQuickGridView::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     Q_D(QQuickGridView);
     d->resetColumns();
@@ -2167,7 +2162,7 @@ void QQuickGridView::geometryChanged(const QRectF &newGeometry, const QRectF &ol
         QQuickFlickable::setContentY(d->contentYForPosition(d->position()));
     }
 
-    QQuickItemView::geometryChanged(newGeometry, oldGeometry);
+    QQuickItemView::geometryChange(newGeometry, oldGeometry);
 }
 
 void QQuickGridView::initItem(int index, QObject *obj)
@@ -2634,27 +2629,50 @@ bool QQuickGridViewPrivate::needsRefillForAddedOrRemovedIndex(int modelIndex) co
 /*!
     \qmlmethod int QtQuick::GridView::indexAt(real x, real y)
 
-    Returns the index of the visible item containing the point \a x, \a y in content
-    coordinates.  If there is no item at the point specified, or the item is
-    not visible -1 is returned.
+    Returns the index of the visible item containing the point \a x, \a y in
+    \l {QQuickFlickable::contentItem}{content item} coordinates.  If there is
+    no item at the point specified, or the item is not visible -1 is returned.
 
     If the item is outside the visible area, -1 is returned, regardless of
     whether an item will exist at that point when scrolled into view.
 
+    \note if you add a MouseArea as a child of the GridView, it will return
+    positions in GridView coordinates rather than content item coordinates.
+    To use those positions in a call to this function, you need to map them
+    first:
+
+    \code
+    GridView {
+        id: view
+        MouseArea {
+            anchors.fill: parent
+            onClicked: (mouse) => {
+                let posInGridView = Qt.point(mouse.x, mouse.y)
+                let posInContentItem = mapToItem(view.contentItem, posInGridView)
+                let index = view.indexAt(posInContentItem.x, posInContentItem.y)
+            }
+        }
+    }
+    \endcode
+
     \b Note: methods should only be called after the Component has completed.
+
+    \sa itemAt
 */
 
 /*!
     \qmlmethod Item QtQuick::GridView::itemAt(real x, real y)
 
-    Returns the visible item containing the point \a x, \a y in content
-    coordinates.  If there is no item at the point specified, or the item is
-    not visible null is returned.
+    Returns the visible item containing the point \a x, \a y in
+    \l {QQuickFlickable::contentItem}{content item} coordinates. If there
+    is no item at the point specified, or the item is not visible null is returned.
 
     If the item is outside the visible area, null is returned, regardless of
     whether an item will exist at that point when scrolled into view.
 
     \b Note: methods should only be called after the Component has completed.
+
+    \sa indexAt
 */
 
 /*!

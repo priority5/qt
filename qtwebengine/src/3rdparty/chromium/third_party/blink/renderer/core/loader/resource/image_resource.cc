@@ -48,7 +48,6 @@
 #include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/reporting_disposition.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -64,7 +63,7 @@ namespace {
 // The amount of time to wait before informing the clients that the image has
 // been updated (in seconds). This effectively throttles invalidations that
 // result from new data arriving for this image.
-constexpr auto kFlushDelay = base::TimeDelta::FromSeconds(1);
+constexpr auto kFlushDelay = base::Seconds(1);
 
 }  // namespace
 
@@ -101,10 +100,10 @@ class ImageResource::ImageResourceInfoImpl final
   bool HasCacheControlNoStoreHeader() const override {
     return resource_->HasCacheControlNoStoreHeader();
   }
-  base::Optional<ResourceError> GetResourceError() const override {
+  absl::optional<ResourceError> GetResourceError() const override {
     if (resource_->LoadFailedOrCanceled())
       return resource_->GetResourceError();
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   void SetDecodedSize(size_t size) override { resource_->SetDecodedSize(size); }
@@ -119,7 +118,7 @@ class ImageResource::ImageResourceInfoImpl final
       const KURL& url,
       const AtomicString& initiator_name) override {
     fetcher->EmulateLoadStartedForInspector(
-        resource_.Get(), url, mojom::RequestContextType::IMAGE,
+        resource_.Get(), url, mojom::blink::RequestContextType::IMAGE,
         network::mojom::RequestDestination::kImage, initiator_name);
   }
 
@@ -133,6 +132,12 @@ class ImageResource::ImageResourceInfoImpl final
 
   bool IsAdResource() const override {
     return resource_->GetResourceRequest().IsAdResource();
+  }
+
+  const HashSet<String>* GetUnsupportedImageMimeTypes() const override {
+    if (!resource_->Options().unsupported_image_mime_types)
+      return nullptr;
+    return &resource_->Options().unsupported_image_mime_types->data;
   }
 
   const Member<ImageResource> resource_;
@@ -155,19 +160,28 @@ class ImageResource::ImageResourceFactory : public NonTextResourceFactory {
 ImageResource* ImageResource::Fetch(FetchParameters& params,
                                     ResourceFetcher* fetcher) {
   if (params.GetResourceRequest().GetRequestContext() ==
-      mojom::RequestContextType::UNSPECIFIED) {
-    params.SetRequestContext(mojom::RequestContextType::IMAGE);
+      mojom::blink::RequestContextType::UNSPECIFIED) {
+    params.SetRequestContext(mojom::blink::RequestContextType::IMAGE);
     params.SetRequestDestination(network::mojom::RequestDestination::kImage);
   }
 
-  ImageResource* resource = ToImageResource(
+  // If the fetch originated from user agent CSS we do not need to check CSP.
+  bool is_user_agent_resource = params.Options().initiator_info.name ==
+                                fetch_initiator_type_names::kUacss;
+  if (is_user_agent_resource) {
+    params.SetContentSecurityCheck(
+        network::mojom::CSPDisposition::DO_NOT_CHECK);
+  }
+
+  auto* resource = To<ImageResource>(
       fetcher->RequestResource(params, ImageResourceFactory(), nullptr));
 
   // If the fetch originated from user agent CSS we should mark it as a user
   // agent resource.
-  if (params.Options().initiator_info.name ==
-      fetch_initiator_type_names::kUacss)
+  if (is_user_agent_resource) {
     resource->FlagAsUserAgentResource();
+  }
+
   return resource;
 }
 
@@ -226,8 +240,8 @@ void ImageResource::OnMemoryDump(WebMemoryDumpLevelOfDetail level_of_detail,
   Resource::OnMemoryDump(level_of_detail, memory_dump);
   const String name = GetMemoryDumpName() + "/image_content";
   auto* dump = memory_dump->CreateMemoryAllocatorDump(name);
-  if (content_->HasImage() && content_->GetImage()->Data())
-    dump->AddScalar("size", "bytes", content_->GetImage()->Data()->size());
+  if (content_->HasImage() && content_->GetImage()->HasData())
+    dump->AddScalar("size", "bytes", content_->GetImage()->DataSize());
 }
 
 void ImageResource::Trace(Visitor* visitor) const {

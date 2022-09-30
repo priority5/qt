@@ -10,18 +10,17 @@
 #include "xfa/fwl/cfwl_themebackground.h"
 #include "xfa/fwl/cfwl_widget.h"
 
-CFWL_BarcodeTP::CFWL_BarcodeTP() {}
+CFWL_BarcodeTP::CFWL_BarcodeTP() = default;
 
 CFWL_BarcodeTP::~CFWL_BarcodeTP() = default;
 
 void CFWL_BarcodeTP::DrawBackground(const CFWL_ThemeBackground& pParams) {
   switch (pParams.m_iPart) {
-    case CFWL_Part::Border:
-      DrawBorder(pParams.m_pGraphics.Get(), pParams.m_PartRect,
-                 pParams.m_matrix);
+    case CFWL_ThemePart::Part::kBorder:
+      DrawBorder(pParams.GetGraphics(), pParams.m_PartRect, pParams.m_matrix);
       break;
-    case CFWL_Part::Background:
-      FillBackground(pParams.m_pGraphics.Get(), pParams.m_PartRect,
+    case CFWL_ThemePart::Part::kBackground:
+      FillBackground(pParams.GetGraphics(), pParams.m_PartRect,
                      pParams.m_matrix);
       break;
     default:

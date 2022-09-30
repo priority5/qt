@@ -20,7 +20,8 @@ bool IsVideoInputMediaType(mojom::MediaStreamType type) {
   return (type == mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE ||
           type == mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE ||
           type == mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE ||
-          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE);
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE ||
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_THIS_TAB);
 }
 
 bool IsScreenCaptureMediaType(mojom::MediaStreamType type) {
@@ -39,12 +40,14 @@ bool IsDesktopCaptureMediaType(mojom::MediaStreamType type) {
 
 bool IsVideoDesktopCaptureMediaType(mojom::MediaStreamType type) {
   return (type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE ||
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_THIS_TAB ||
           type == mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE);
 }
 
 bool IsTabCaptureMediaType(mojom::MediaStreamType type) {
   return (type == mojom::MediaStreamType::GUM_TAB_AUDIO_CAPTURE ||
-          type == mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE);
+          type == mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE ||
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_THIS_TAB);
 }
 
 bool IsDeviceMediaType(mojom::MediaStreamType type) {
@@ -70,7 +73,7 @@ MediaStreamDevice::MediaStreamDevice(
     const std::string& name,
     const media::VideoCaptureControlSupport& control_support,
     media::VideoFacingMode facing,
-    const base::Optional<std::string>& group_id)
+    const absl::optional<std::string>& group_id)
     : type(type),
       id(id),
       video_control_support(control_support),
@@ -106,7 +109,7 @@ MediaStreamDevice::MediaStreamDevice(const MediaStreamDevice& other)
       input(other.input),
       session_id_(other.session_id_) {
   DCHECK(!session_id_.has_value() || !session_id_->is_empty());
-  if (other.display_media_info.has_value())
+  if (other.display_media_info)
     display_media_info = other.display_media_info->Clone();
 }
 
@@ -126,7 +129,7 @@ MediaStreamDevice& MediaStreamDevice::operator=(
   input = other.input;
   session_id_ = other.session_id_;
   DCHECK(!session_id_.has_value() || !session_id_->is_empty());
-  if (other.display_media_info.has_value())
+  if (other.display_media_info)
     display_media_info = other.display_media_info->Clone();
   return *this;
 }

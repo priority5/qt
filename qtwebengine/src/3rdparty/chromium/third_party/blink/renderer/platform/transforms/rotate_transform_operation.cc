@@ -26,9 +26,9 @@
 namespace blink {
 namespace {
 TransformOperation::OperationType GetTypeForRotation(const Rotation& rotation) {
-  float x = rotation.axis.X();
-  float y = rotation.axis.Y();
-  float z = rotation.axis.Z();
+  float x = rotation.axis.x();
+  float y = rotation.axis.y();
+  float z = rotation.axis.z();
   if (x && !y && !z)
     return TransformOperation::kRotateX;
   if (y && !x && !z)
@@ -50,7 +50,7 @@ bool RotateTransformOperation::operator==(
 
 bool RotateTransformOperation::GetCommonAxis(const RotateTransformOperation* a,
                                              const RotateTransformOperation* b,
-                                             FloatPoint3D& result_axis,
+                                             gfx::Vector3dF& result_axis,
                                              double& result_angle_a,
                                              double& result_angle_b) {
   return Rotation::GetCommonAxis(a ? a->rotation_ : Rotation(),
@@ -71,8 +71,7 @@ scoped_refptr<TransformOperation> RotateTransformOperation::Blend(
     const TransformOperation* from,
     double progress,
     bool blend_to_identity) {
-  if (from && !IsMatchingOperationType(from->GetType()))
-    return this;
+  DCHECK(!from || CanBlendWith(*from));
 
   if (blend_to_identity)
     return RotateTransformOperation::Create(
@@ -96,23 +95,18 @@ scoped_refptr<TransformOperation> RotateTransformOperation::Blend(
       Rotation::Slerp(from_rotate.rotation_, rotation_, progress), type);
 }
 
-bool RotateTransformOperation::CanBlendWith(
-    const TransformOperation& other) const {
-  return other.IsSameType(*this);
-}
-
 RotateAroundOriginTransformOperation::RotateAroundOriginTransformOperation(
     double angle,
     double origin_x,
     double origin_y)
-    : RotateTransformOperation(Rotation(FloatPoint3D(0, 0, 1), angle),
+    : RotateTransformOperation(Rotation(gfx::Vector3dF(0, 0, 1), angle),
                                kRotateAroundOrigin),
       origin_x_(origin_x),
       origin_y_(origin_y) {}
 
 void RotateAroundOriginTransformOperation::Apply(
     TransformationMatrix& transform,
-    const FloatSize& box_size) const {
+    const gfx::SizeF& box_size) const {
   transform.Translate(origin_x_, origin_y_);
   RotateTransformOperation::Apply(transform, box_size);
   transform.Translate(-origin_x_, -origin_y_);
@@ -134,8 +128,8 @@ scoped_refptr<TransformOperation> RotateAroundOriginTransformOperation::Blend(
     const TransformOperation* from,
     double progress,
     bool blend_to_identity) {
-  if (from && !from->IsSameType(*this))
-    return this;
+  DCHECK(!from || CanBlendWith(*from));
+
   if (blend_to_identity) {
     return RotateAroundOriginTransformOperation::Create(
         Angle() * (1 - progress), origin_x_, origin_y_);

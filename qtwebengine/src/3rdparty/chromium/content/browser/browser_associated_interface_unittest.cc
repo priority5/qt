@@ -11,8 +11,8 @@
 #include "base/message_loop/message_pump_type.h"
 #include "base/pickle.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "content/public/browser/browser_associated_interface.h"
 #include "content/public/browser/browser_message_filter.h"
@@ -76,14 +76,12 @@ class ProxyRunner : public IPC::Listener {
 class TestDriverMessageFilter
     : public BrowserMessageFilter,
       public BrowserAssociatedInterface<
-          mojom::BrowserAssociatedInterfaceTestDriver>,
-      public mojom::BrowserAssociatedInterfaceTestDriver {
+          mojom::BrowserAssociatedInterfaceTestDriver> {
  public:
   TestDriverMessageFilter()
       : BrowserMessageFilter(0),
         BrowserAssociatedInterface<mojom::BrowserAssociatedInterfaceTestDriver>(
-            this, this) {
-  }
+            this) {}
 
  private:
   ~TestDriverMessageFilter() override {}

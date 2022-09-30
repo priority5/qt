@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QQMLVME_P_H
 #define QQMLVME_P_H
@@ -52,7 +16,6 @@
 //
 
 #include "qqmlerror.h"
-#include <private/qbitfield_p.h>
 #include <private/qrecursionwatcher_p.h>
 
 #include <QtCore/QStack>
@@ -69,49 +32,20 @@
 QT_BEGIN_NAMESPACE
 
 class QObject;
-class QJSValue;
-class QQmlScriptData;
-class QQmlContextData;
-
-namespace QQmlVMETypes {
-    struct List
-    {
-        List() : type(0) {}
-        List(int t) : type(t) {}
-
-        int type;
-        QQmlListProperty<void> qListProperty;
-    };
-    struct State {
-        enum Flag { Deferred = 0x00000001 };
-
-        State() : flags(0), context(nullptr), instructionStream(nullptr) {}
-        quint32 flags;
-        QQmlContextData *context;
-        const char *instructionStream;
-        QBitField bindingSkipList;
-    };
-}
-Q_DECLARE_TYPEINFO(QQmlVMETypes::List, Q_PRIMITIVE_TYPE  | Q_MOVABLE_TYPE);
-template<>
-class QTypeInfo<QQmlVMETypes::State> : public QTypeInfoMerger<QQmlVMETypes::State, QBitField> {}; //Q_DECLARE_TYPEINFO
 
 class QQmlInstantiationInterrupt {
 public:
     inline QQmlInstantiationInterrupt();
-    // ### Qt 6: remove
-    inline QQmlInstantiationInterrupt(volatile bool *runWhile, qint64 nsecs=0);
     inline QQmlInstantiationInterrupt(std::atomic<bool> *runWhile, qint64 nsecs = 0);
     inline QQmlInstantiationInterrupt(qint64 nsecs);
 
     inline void reset();
     inline bool shouldInterrupt() const;
 private:
-    enum Mode { None, Time, LegacyFlag, Flag }; // ### Qt 6: remove LegacyFlag
+    enum Mode { None, Time, Flag };
     Mode mode;
     QElapsedTimer timer;
     qint64 nsecs = 0;
-    volatile bool *runWhileLegacy = nullptr; // ### Qt 6: remove
     std::atomic<bool> *runWhile = nullptr;
 };
 
@@ -146,18 +80,13 @@ public:
 
 private:
     int m_objectCount;
-    QPointer<QObject> *m_objects;
+    QQmlGuard<QObject> *m_objects;
     int m_contextCount;
     QQmlGuardedContextData *m_contexts;
 };
 
 QQmlInstantiationInterrupt::QQmlInstantiationInterrupt()
     : mode(None)
-{
-}
-
-QQmlInstantiationInterrupt::QQmlInstantiationInterrupt(volatile bool *runWhile, qint64 nsecs)
-    : mode(LegacyFlag), nsecs(nsecs), runWhileLegacy(runWhile)
 {
 }
 
@@ -184,8 +113,6 @@ bool QQmlInstantiationInterrupt::shouldInterrupt() const
         return false;
     case Time:
         return timer.nsecsElapsed() > nsecs;
-    case LegacyFlag:
-        return !*runWhileLegacy || (nsecs && timer.nsecsElapsed() > nsecs);
     case Flag:
         return !runWhile->load(std::memory_order_acquire) || (nsecs && timer.nsecsElapsed() > nsecs);
     }

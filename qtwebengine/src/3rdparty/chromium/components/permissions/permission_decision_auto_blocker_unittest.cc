@@ -48,12 +48,11 @@ class PermissionDecisionAutoBlockerUnitTest : public testing::Test {
         &browser_context_);
   }
 
-  void SetLastEmbargoStatus(base::Closure quit_closure, bool status) {
+  void SetLastEmbargoStatus(base::OnceClosure quit_closure, bool status) {
     callback_was_run_ = true;
     last_embargoed_status_ = status;
     if (quit_closure) {
-      quit_closure.Run();
-      quit_closure.Reset();
+      std::move(quit_closure).Run();
     }
   }
 
@@ -307,7 +306,8 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, RemoveEmbargoAndResetCounts_All) {
   EXPECT_EQ(
       2, autoblocker()->GetIgnoreCount(url2, ContentSettingsType::GEOLOCATION));
 
-  autoblocker()->RemoveEmbargoAndResetCounts(base::Bind(&FilterGoogle));
+  autoblocker()->RemoveEmbargoAndResetCounts(
+      base::BindRepeating(&FilterGoogle));
 
   // Expect that url1's actions are gone, but url2's remain.
   EXPECT_EQ(0, autoblocker()->GetDismissCount(
@@ -358,7 +358,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, RemoveEmbargoAndResetCounts_All) {
       1, autoblocker()->GetIgnoreCount(url2, ContentSettingsType::MIDI_SYSEX));
 
   // Remove everything and expect that it's all gone.
-  autoblocker()->RemoveEmbargoAndResetCounts(base::Bind(&FilterAll));
+  autoblocker()->RemoveEmbargoAndResetCounts(base::BindRepeating(&FilterAll));
 
   EXPECT_EQ(0, autoblocker()->GetDismissCount(
                    url1, ContentSettingsType::GEOLOCATION));
@@ -377,82 +377,6 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, RemoveEmbargoAndResetCounts_All) {
                    url2, ContentSettingsType::DURABLE_STORAGE));
   EXPECT_EQ(
       0, autoblocker()->GetIgnoreCount(url2, ContentSettingsType::MIDI_SYSEX));
-}
-
-// Check that we do not apply embargo to the plugins content type, as prompts
-// should be triggered only when necessary by Html5ByDefault.
-TEST_F(PermissionDecisionAutoBlockerUnitTest,
-       PluginsNotEmbargoedByMultipleDismissesOrIgnores) {
-  GURL url("https://www.google.com");
-
-  // Check dismisses first.
-  autoblocker()->RecordDismissAndEmbargo(url, ContentSettingsType::PLUGINS,
-                                         false);
-  autoblocker()->RecordDismissAndEmbargo(url, ContentSettingsType::PLUGINS,
-                                         false);
-  PermissionResult result =
-      autoblocker()->GetEmbargoResult(url, ContentSettingsType::PLUGINS);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
-  EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
-  EXPECT_EQ(2,
-            autoblocker()->GetDismissCount(url, ContentSettingsType::PLUGINS));
-
-  // The third dismiss would normally embargo, but this shouldn't happen for
-  // plugins.
-  EXPECT_FALSE(autoblocker()->RecordDismissAndEmbargo(
-      url, ContentSettingsType::PLUGINS, false));
-  result = autoblocker()->GetEmbargoResult(url, ContentSettingsType::PLUGINS);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
-  EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
-  EXPECT_EQ(3,
-            autoblocker()->GetDismissCount(url, ContentSettingsType::PLUGINS));
-
-  // Extra one for sanity checking.
-  EXPECT_FALSE(autoblocker()->RecordDismissAndEmbargo(
-      url, ContentSettingsType::PLUGINS, false));
-  result = autoblocker()->GetEmbargoResult(url, ContentSettingsType::PLUGINS);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
-  EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
-  EXPECT_EQ(4,
-            autoblocker()->GetDismissCount(url, ContentSettingsType::PLUGINS));
-
-  // Check ignores.
-  autoblocker()->RecordIgnoreAndEmbargo(url, ContentSettingsType::PLUGINS,
-                                        false);
-  autoblocker()->RecordIgnoreAndEmbargo(url, ContentSettingsType::PLUGINS,
-                                        false);
-  autoblocker()->RecordIgnoreAndEmbargo(url, ContentSettingsType::PLUGINS,
-                                        false);
-  result = autoblocker()->GetEmbargoResult(url, ContentSettingsType::PLUGINS);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
-  EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
-  EXPECT_EQ(3,
-            autoblocker()->GetIgnoreCount(url, ContentSettingsType::PLUGINS));
-
-  // The fourth ignore would normally embargo, but this shouldn't happen for
-  // plugins.
-  EXPECT_FALSE(autoblocker()->RecordIgnoreAndEmbargo(
-      url, ContentSettingsType::PLUGINS, false));
-  result = autoblocker()->GetEmbargoResult(url, ContentSettingsType::PLUGINS);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
-  EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
-  EXPECT_EQ(4,
-            autoblocker()->GetIgnoreCount(url, ContentSettingsType::PLUGINS));
-
-  // Extra one for sanity checking.
-  EXPECT_FALSE(autoblocker()->RecordIgnoreAndEmbargo(
-      url, ContentSettingsType::PLUGINS, false));
-  result = autoblocker()->GetEmbargoResult(url, ContentSettingsType::PLUGINS);
-
-  EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
-  EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
-  EXPECT_EQ(5,
-            autoblocker()->GetIgnoreCount(url, ContentSettingsType::PLUGINS));
 }
 
 // Check that GetEmbargoedOrigins only returns origins where embargo is the
@@ -502,7 +426,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoedOrigins) {
   EXPECT_EQ(1UL, origins.count(url2));
 
   // Expire the remaining embargo and confirm the origin is removed
-  clock()->Advance(base::TimeDelta::FromDays(8));
+  clock()->Advance(base::Days(8));
   origins = autoblocker()->GetEmbargoedOrigins(content_types);
   EXPECT_EQ(0UL, origins.size());
 }
@@ -538,7 +462,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStatus) {
   EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
 
   // Confirm embargo status during the embargo period.
-  clock()->Advance(base::TimeDelta::FromDays(5));
+  clock()->Advance(base::Days(5));
   result =
       autoblocker()->GetEmbargoResult(url, ContentSettingsType::GEOLOCATION);
   EXPECT_EQ(CONTENT_SETTING_BLOCK, result.content_setting);
@@ -547,14 +471,14 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStatus) {
   // Check embargo is lifted on expiry day. A small offset after the exact
   // embargo expiration date has been added to account for any precision errors
   // when removing the date stored as a double from the permission dictionary.
-  clock()->Advance(base::TimeDelta::FromHours(3 * 24 + 1));
+  clock()->Advance(base::Hours(3 * 24 + 1));
   result =
       autoblocker()->GetEmbargoResult(url, ContentSettingsType::GEOLOCATION);
   EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
   EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
 
   // Check embargo is lifted well after the expiry day.
-  clock()->Advance(base::TimeDelta::FromDays(1));
+  clock()->Advance(base::Days(1));
   result =
       autoblocker()->GetEmbargoResult(url, ContentSettingsType::GEOLOCATION);
   EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
@@ -567,7 +491,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStatus) {
       url, ContentSettingsType::NOTIFICATIONS, false));
   EXPECT_TRUE(autoblocker()->RecordDismissAndEmbargo(
       url, ContentSettingsType::NOTIFICATIONS, false));
-  clock()->Advance(base::TimeDelta::FromDays(1));
+  clock()->Advance(base::Days(1));
   result =
       autoblocker()->GetEmbargoResult(url, ContentSettingsType::NOTIFICATIONS);
   EXPECT_EQ(CONTENT_SETTING_BLOCK, result.content_setting);
@@ -589,7 +513,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStartTime) {
   // aliasing the current time by passing it through a double. This allows us
   // to directly compare the test time and times retrieved from storage.
   base::Time test_time = base::Time::FromDeltaSinceWindowsEpoch(
-      base::TimeDelta::FromMicroseconds(static_cast<double>(
+      base::Microseconds(static_cast<double>(
           base::Time::Now().ToDeltaSinceWindowsEpoch().InMicroseconds())));
   clock()->SetNow(test_time);
 
@@ -619,14 +543,14 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStartTime) {
 
   // Ensure moving clock while within embargo period does not affect embargo
   // start time.
-  clock()->Advance(base::TimeDelta::FromDays(5));
+  clock()->Advance(base::Days(5));
   embargo_start_time =
       autoblocker()->GetEmbargoStartTime(url, ContentSettingsType::GEOLOCATION);
   EXPECT_EQ(test_time, embargo_start_time);
 
   // Move clock beyond embaro (plus a small offset for potential precision
   // errors) and confirm start time is unaffected but embargo is suspended.
-  clock()->Advance(base::TimeDelta::FromHours(3 * 24 + 1));
+  clock()->Advance(base::Hours(3 * 24 + 1));
   embargo_start_time =
       autoblocker()->GetEmbargoStartTime(url, ContentSettingsType::GEOLOCATION);
   EXPECT_EQ(test_time, embargo_start_time);
@@ -636,9 +560,9 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStartTime) {
   EXPECT_EQ(PermissionStatusSource::UNSPECIFIED, result.source);
 
   // Advance time, reinstate embargo and confirm that time is updated.
-  test_time += base::TimeDelta::FromDays(9);
+  test_time += base::Days(9);
   test_time = base::Time::FromDeltaSinceWindowsEpoch(
-      base::TimeDelta::FromMicroseconds(static_cast<double>(
+      base::Microseconds(static_cast<double>(
           test_time.ToDeltaSinceWindowsEpoch().InMicroseconds())));
   clock()->SetNow(test_time);
 
@@ -649,9 +573,9 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStartTime) {
   EXPECT_EQ(test_time, embargo_start_time);
 
   // Advance time to expire dismiss embargo and create new embargo for ignoring.
-  test_time += base::TimeDelta::FromDays(7);
+  test_time += base::Days(7);
   test_time = base::Time::FromDeltaSinceWindowsEpoch(
-      base::TimeDelta::FromMicroseconds(static_cast<double>(
+      base::Microseconds(static_cast<double>(
           test_time.ToDeltaSinceWindowsEpoch().InMicroseconds())));
   clock()->SetNow(test_time);
 
@@ -671,9 +595,9 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStartTime) {
 
   // Advance time, reinstate the dismiss embargo via a single action, and
   // confirm that time is updated.
-  test_time += base::TimeDelta::FromDays(1);
+  test_time += base::Days(1);
   test_time = base::Time::FromDeltaSinceWindowsEpoch(
-      base::TimeDelta::FromMicroseconds(static_cast<double>(
+      base::Microseconds(static_cast<double>(
           test_time.ToDeltaSinceWindowsEpoch().InMicroseconds())));
   clock()->SetNow(test_time);
 
@@ -685,7 +609,8 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, CheckEmbargoStartTime) {
 
   // Remove records of dismiss and ignore embargoes and confirm start time
   // reverts to default.
-  autoblocker()->RemoveEmbargoAndResetCounts(base::Bind(&FilterGoogle));
+  autoblocker()->RemoveEmbargoAndResetCounts(
+      base::BindRepeating(&FilterGoogle));
   embargo_start_time =
       autoblocker()->GetEmbargoStartTime(url, ContentSettingsType::GEOLOCATION);
   EXPECT_EQ(base::Time(), embargo_start_time);
@@ -723,7 +648,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, TestDismissEmbargoBackoff) {
 
   // Accelerate time forward, check that the embargo status is lifted and the
   // request won't be automatically blocked.
-  clock()->Advance(base::TimeDelta::FromDays(8));
+  clock()->Advance(base::Days(8));
   result =
       autoblocker()->GetEmbargoResult(url, ContentSettingsType::GEOLOCATION);
   EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
@@ -739,7 +664,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, TestDismissEmbargoBackoff) {
 
   // Accelerate time again, check embargo is lifted and another permission
   // request is let through.
-  clock()->Advance(base::TimeDelta::FromDays(8));
+  clock()->Advance(base::Days(8));
   result =
       autoblocker()->GetEmbargoResult(url, ContentSettingsType::GEOLOCATION);
   EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
@@ -784,7 +709,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, TestIgnoreEmbargoBackoff) {
 
   // Accelerate time forward, check that the embargo status is lifted and the
   // request won't be automatically blocked.
-  clock()->Advance(base::TimeDelta::FromDays(8));
+  clock()->Advance(base::Days(8));
   result =
       autoblocker()->GetEmbargoResult(url, ContentSettingsType::MIDI_SYSEX);
   EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);
@@ -800,7 +725,7 @@ TEST_F(PermissionDecisionAutoBlockerUnitTest, TestIgnoreEmbargoBackoff) {
 
   // Accelerate time again, check embargo is lifted and another permission
   // request is let through.
-  clock()->Advance(base::TimeDelta::FromDays(8));
+  clock()->Advance(base::Days(8));
   result =
       autoblocker()->GetEmbargoResult(url, ContentSettingsType::MIDI_SYSEX);
   EXPECT_EQ(CONTENT_SETTING_ASK, result.content_setting);

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickloader_p_p.h"
 
@@ -439,9 +403,8 @@ void QQuickLoader::loadFromSource()
     }
 
     if (isComponentComplete()) {
-        QQmlComponent::CompilationMode mode = d->asynchronous ? QQmlComponent::Asynchronous : QQmlComponent::PreferSynchronous;
         if (!d->component)
-            d->component.setObject(new QQmlComponent(qmlEngine(this), d->source, mode, this), this);
+            d->createComponent();
         d->load();
     }
 }
@@ -651,9 +614,9 @@ void QQuickLoaderPrivate::setInitialState(QObject *obj)
         // does, then set the item's size now before bindings are
         // evaluated, otherwise we will end up resizing the item
         // later and triggering any affected bindings/anchors.
-        if (widthValid && !QQuickItemPrivate::get(item)->widthValid)
+        if (widthValid() && !QQuickItemPrivate::get(item)->widthValid())
             item->setWidth(q->width());
-        if (heightValid && !QQuickItemPrivate::get(item)->heightValid)
+        if (heightValid() && !QQuickItemPrivate::get(item)->heightValid())
             item->setHeight(q->height());
         item->setParentItem(q);
     }
@@ -737,6 +700,9 @@ void QQuickLoaderPrivate::_q_sourceLoaded()
         return;
     }
 
+    if (!active)
+        return;
+
     QQmlContext *creationContext = component->creationContext();
     if (!creationContext) creationContext = qmlContext(q);
     itemContext = new QQmlContext(creationContext);
@@ -803,11 +769,8 @@ void QQuickLoader::componentComplete()
     Q_D(QQuickLoader);
     QQuickItem::componentComplete();
     if (active()) {
-        if (d->loadingFromSource) {
-            QQmlComponent::CompilationMode mode = d->asynchronous ? QQmlComponent::Asynchronous : QQmlComponent::PreferSynchronous;
-            if (!d->component)
-                d->component.setObject(new QQmlComponent(qmlEngine(this), d->source, mode, this), this);
-        }
+        if (d->loadingFromSource)
+            d->createComponent();
         d->load();
     }
 }
@@ -943,7 +906,7 @@ void QQuickLoaderPrivate::_q_updateSize(bool loaderGeometryChanged)
 }
 
 /*!
-    \qmlproperty object QtQuick::Loader::item
+    \qmlproperty QtObject QtQuick::Loader::item
     This property holds the top-level object that is currently loaded.
 
     Since \c {QtQuick 2.0}, Loader can load any object type.
@@ -954,13 +917,13 @@ QObject *QQuickLoader::item() const
     return d->object;
 }
 
-void QQuickLoader::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
+void QQuickLoader::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     Q_D(QQuickLoader);
     if (newGeometry != oldGeometry) {
         d->_q_updateSize();
     }
-    QQuickItem::geometryChanged(newGeometry, oldGeometry);
+    QQuickItem::geometryChange(newGeometry, oldGeometry);
 }
 
 QUrl QQuickLoaderPrivate::resolveSourceUrl(QQmlV4Function *args)
@@ -970,12 +933,7 @@ QUrl QQuickLoaderPrivate::resolveSourceUrl(QQmlV4Function *args)
     if (v->isUndefined())
         return QUrl();
     QString arg = v->toQString();
-    if (arg.isEmpty())
-        return QUrl();
-
-    QQmlContextData *context = scope.engine->callingQmlContext();
-    Q_ASSERT(context);
-    return context->resolvedUrl(QUrl(arg));
+    return arg.isEmpty() ? QUrl() : scope.engine->callingQmlContext()->resolvedUrl(QUrl(arg));
 }
 
 QV4::ReturnedValue QQuickLoaderPrivate::extractInitialPropertyValues(QQmlV4Function *args, QObject *loader, bool *error)
@@ -1041,6 +999,23 @@ void QQuickLoaderPrivate::updateStatus()
     }
 }
 
-#include <moc_qquickloader_p.cpp>
+void QQuickLoaderPrivate::createComponent()
+{
+    Q_Q(QQuickLoader);
+    const QQmlComponent::CompilationMode mode = asynchronous
+            ? QQmlComponent::Asynchronous
+            : QQmlComponent::PreferSynchronous;
+    if (QQmlContext *context = qmlContext(q)) {
+        if (QQmlEngine *engine = context->engine()) {
+            component.setObject(new QQmlComponent(
+                                    engine, context->resolvedUrl(source), mode, q), q);
+            return;
+        }
+    }
+
+    qmlWarning(q) << "createComponent: Cannot find a QML engine.";
+}
 
 QT_END_NAMESPACE
+
+#include <moc_qquickloader_p.cpp>

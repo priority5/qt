@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <qtest.h>
 #include <QTextDocument>
 #include <QTcpServer>
@@ -47,13 +22,13 @@
 #include <QQuickImageProvider>
 #include <QQmlAbstractUrlInterceptor>
 
-#include "../../shared/util.h"
-#include "../../shared/testhttpserver.h"
-#include "../shared/visualtestutil.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include <QtQuickTestUtils/private/testhttpserver_p.h>
+#include <QtQuickTestUtils/private/visualtestutils_p.h>
 
 // #define DEBUG_WRITE_OUTPUT
 
-using namespace QQuickVisualTestUtil;
+using namespace QQuickVisualTestUtils;
 
 Q_DECLARE_METATYPE(QQuickImageBase::Status)
 
@@ -64,7 +39,7 @@ public:
     tst_qquickimage();
 
 private slots:
-    void initTestCase();
+    void initTestCase() override;
     void cleanup();
     void noSource();
     void imageSource();
@@ -110,6 +85,7 @@ private:
 };
 
 tst_qquickimage::tst_qquickimage()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
 {
 }
 
@@ -169,7 +145,7 @@ void tst_qquickimage::imageSource_data()
         QTest::newRow("remote svg") << "/heart.svg" << 595.0 << 841.0 << true << false << false << "";
     if (QImageReader::supportedImageFormats().contains("svgz"))
         QTest::newRow("remote svgz") << "/heart.svgz" << 595.0 << 841.0 << true << false << false << "";
-    if (graphicsApi == QSGRendererInterface::OpenGL) {
+    if (graphicsApi == QSGRendererInterface::OpenGLRhi) {
         QTest::newRow("texturefile pkm format") << testFileUrl("logo.pkm").toString() << 256.0 << 256.0 << false << false << true << "";
         QTest::newRow("texturefile ktx format") << testFileUrl("car.ktx").toString() << 146.0 << 80.0 << false << false << true << "";
         QTest::newRow("texturefile async") << testFileUrl("logo.pkm").toString() << 256.0 << 256.0 << false << true << true << "";
@@ -183,7 +159,7 @@ void tst_qquickimage::imageSource_data()
         << false << true << "<Unknown File>:2:1: QML Image: Cannot open: " + testFileUrl("no-such-file").toString();
     // Test that texture file is preferred over image file, when supported.
     // Since pattern.pkm has different size than pattern.png, these tests verify that the right file has been loaded
-    if (graphicsApi == QSGRendererInterface::OpenGL) {
+    if (graphicsApi != QSGRendererInterface::Software) {
         QTest::newRow("extless prefer-tex") << testFileUrl("pattern").toString() << 64.0 << 64.0 << false << false << true << "";
         QTest::newRow("extless prefer-tex async") << testFileUrl("pattern").toString() << 64.0 << 64.0 << false << true << true << "";
     } else {
@@ -339,9 +315,8 @@ void tst_qquickimage::smooth()
 
 void tst_qquickimage::mirror()
 {
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
     QMap<QQuickImage::FillMode, QImage> screenshots;
     QList<QQuickImage::FillMode> fillModes;
@@ -554,9 +529,8 @@ void tst_qquickimage::big()
 
 void tst_qquickimage::tiling_QTBUG_6716()
 {
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
     QFETCH(QString, source);
 
@@ -904,6 +878,12 @@ void tst_qquickimage::sourceClipRect_data()
                                 << (QList<QPoint>() << QPoint(54, 54) << QPoint(15, 59));
 }
 
+static QImage toUnscaledImage(const QImage &image)
+{
+    auto dpr = image.devicePixelRatio();
+    return image.scaled(image.width() / dpr, image.height() / dpr);
+}
+
 void tst_qquickimage::sourceClipRect()
 {
     QFETCH(QRectF, sourceClipRect);
@@ -928,10 +908,9 @@ void tst_qquickimage::sourceClipRect()
     QCOMPARE(image->implicitWidth(), sourceClipRect.isNull() ? 300 : sourceClipRect.width());
     QCOMPARE(image->implicitHeight(), sourceClipRect.isNull() ? 300 : sourceClipRect.height());
 
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
         QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
-    QImage contents = window->grabWindow();
+    QImage contents = toUnscaledImage(window->grabWindow());
     if (contents.width() < sourceClipRect.width())
         QSKIP("Skipping due to grabWindow not functional");
 #ifdef DEBUG_WRITE_OUTPUT
@@ -1012,7 +991,7 @@ class TestQImageProvider : public QQuickImageProvider
 public:
     TestQImageProvider() : QQuickImageProvider(Image) {}
 
-    QImage requestImage(const QString &id, QSize *size, const QSize& requestedSize)
+    QImage requestImage(const QString &id, QSize *size, const QSize& requestedSize) override
     {
         Q_UNUSED(requestedSize);
         if (id == QLatin1String("first-image.png")) {
@@ -1157,16 +1136,16 @@ void tst_qquickimage::highDpiFillModesAndSizes()
 
 void tst_qquickimage::hugeImages()
 {
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
     QQuickView view;
     view.setSource(testFileUrl("hugeImages.qml"));
     view.setGeometry(0, 0, 200, 200);
-    view.create();
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
 
-    QImage contents = view.grabWindow();
+    QImage contents = toUnscaledImage(view.grabWindow());
 
     QCOMPARE(contents.pixel(0, 0), qRgba(255, 0, 0, 255));
     QCOMPARE(contents.pixel(99, 99), qRgba(255, 0, 0, 255));
@@ -1179,7 +1158,7 @@ class MyInterceptor : public QQmlAbstractUrlInterceptor
 {
 public:
     MyInterceptor(QUrl url) : QQmlAbstractUrlInterceptor(), m_url(url) {}
-    QUrl intercept(const QUrl &url, QQmlAbstractUrlInterceptor::DataType)
+    QUrl intercept(const QUrl &url, QQmlAbstractUrlInterceptor::DataType) override
     {
         if (url.scheme() == "interceptthis")
             return m_url;
@@ -1193,7 +1172,7 @@ void tst_qquickimage::urlInterceptor()
 {
     QQmlEngine engine;
     MyInterceptor interceptor {testFileUrl("colors.png")};
-    engine.setUrlInterceptor(&interceptor);
+    engine.addUrlInterceptor(&interceptor);
 
     QQmlComponent c(&engine);
 
@@ -1215,13 +1194,12 @@ void tst_qquickimage::multiFrame_data()
 
 void tst_qquickimage::multiFrame()
 {
-    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
-        || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
+    if (QGuiApplication::platformName() == QLatin1String("minimal"))
+        QSKIP("Skipping due to grabWindow not functional on minimal platforms");
 
     QFETCH(QString, qmlfile);
     QFETCH(bool, asynchronous);
-    Q_UNUSED(asynchronous)
+    Q_UNUSED(asynchronous);
 
     QQuickView view(testFileUrl(qmlfile));
     QQuickImage *image = qobject_cast<QQuickImage*>(view.rootObject());
@@ -1239,7 +1217,7 @@ void tst_qquickimage::multiFrame()
     view.show();
     QVERIFY(QTest::qWaitForWindowExposed(&view));
 
-    QImage contents = view.grabWindow();
+    QImage contents = toUnscaledImage(view.grabWindow());
     if (contents.width() < 40)
         QSKIP("Skipping due to grabWindow not functional");
     // The first frame is a blue ball, approximately qRgba(0x33, 0x6d, 0xcc, 0xff)
@@ -1252,7 +1230,7 @@ void tst_qquickimage::multiFrame()
     QTRY_COMPARE(image->status(), QQuickImageBase::Ready);
     QCOMPARE(currentSpy.count(), 1);
     QCOMPARE(image->currentFrame(), 1);
-    contents = view.grabWindow();
+    contents = toUnscaledImage(view.grabWindow());
     // The second frame is a green ball, approximately qRgba(0x27, 0xc8, 0x22, 0xff)
     color = contents.pixel(16, 16);
     QVERIFY(qRed(color) < 0xc0);

@@ -14,7 +14,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "net/base/completion_once_callback.h"
@@ -107,14 +107,13 @@ void TestURLFetcher::SetReferrer(const std::string& referrer) {
 
 void TestURLFetcher::SetReferrerPolicy(ReferrerPolicy referrer_policy) {}
 
-void TestURLFetcher::SetExtraRequestHeaders(
-    const std::string& extra_request_headers) {
+void TestURLFetcher::ClearExtraRequestHeaders() {
   fake_extra_request_headers_.Clear();
-  fake_extra_request_headers_.AddHeadersFromString(extra_request_headers);
 }
 
-void TestURLFetcher::AddExtraRequestHeader(const std::string& header_line) {
-  fake_extra_request_headers_.AddHeaderFromString(header_line);
+void TestURLFetcher::AddExtraRequestHeader(const std::string& name,
+                                           const std::string& value) {
+  fake_extra_request_headers_.SetHeader(name, value);
 }
 
 void TestURLFetcher::SetRequestContext(
@@ -122,7 +121,7 @@ void TestURLFetcher::SetRequestContext(
 }
 
 void TestURLFetcher::SetInitiator(
-    const base::Optional<url::Origin>& initiator) {}
+    const absl::optional<url::Origin>& initiator) {}
 
 void TestURLFetcher::SetURLRequestUserData(
     const void* key,
@@ -144,7 +143,7 @@ int TestURLFetcher::GetMaxRetriesOn5xx() const {
 }
 
 base::TimeDelta TestURLFetcher::GetBackoffDelay() const {
-  return fake_backoff_delay_;
+  return base::TimeDelta();
 }
 
 void TestURLFetcher::SetAutomaticallyRetryOnNetworkChanges(int max_retries) {
@@ -287,10 +286,6 @@ void TestURLFetcher::set_was_cached(bool flag) {
 void TestURLFetcher::set_response_headers(
     scoped_refptr<HttpResponseHeaders> headers) {
   fake_response_headers_ = headers;
-}
-
-void TestURLFetcher::set_backoff_delay(base::TimeDelta backoff_delay) {
-  fake_backoff_delay_ = backoff_delay;
 }
 
 void TestURLFetcher::SetDelegateForTests(DelegateForTests* delegate_for_tests) {

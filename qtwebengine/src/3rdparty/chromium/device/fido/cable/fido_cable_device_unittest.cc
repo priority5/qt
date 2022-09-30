@@ -12,7 +12,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "crypto/aead.h"
@@ -23,6 +23,7 @@
 #include "device/fido/test_callback_receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 
@@ -32,7 +33,7 @@ using ::testing::_;
 using ::testing::Invoke;
 using ::testing::Test;
 using TestDeviceCallbackReceiver =
-    test::ValueCallbackReceiver<base::Optional<std::vector<uint8_t>>>;
+    test::ValueCallbackReceiver<absl::optional<std::vector<uint8_t>>>;
 using NiceMockBluetoothAdapter = ::testing::NiceMock<MockBluetoothAdapter>;
 
 // Sufficiently large test control point length as we are not interested
@@ -167,7 +168,7 @@ class FidoCableDeviceTest : public Test {
   scoped_refptr<MockBluetoothAdapter> adapter_ =
       base::MakeRefCounted<NiceMockBluetoothAdapter>();
   FakeCableAuthenticator authenticator_;
-  MockFidoBleConnection* connection_;
+  raw_ptr<MockFidoBleConnection> connection_;
   std::unique_ptr<FidoCableDevice> device_;
 };
 
@@ -181,11 +182,11 @@ TEST_F(FidoCableDeviceTest, ConnectionFailureTest) {
 
 TEST_F(FidoCableDeviceTest, StaticGetIdTest) {
   std::string address = BluetoothTestBase::kTestDeviceAddress1;
-  EXPECT_EQ("ble:" + address, FidoCableDevice::GetIdForAddress(address));
+  EXPECT_EQ("ble-" + address, FidoCableDevice::GetIdForAddress(address));
 }
 
 TEST_F(FidoCableDeviceTest, GetIdTest) {
-  EXPECT_EQ(std::string("ble:") + BluetoothTestBase::kTestDeviceAddress1,
+  EXPECT_EQ(std::string("ble-") + BluetoothTestBase::kTestDeviceAddress1,
             device()->GetId());
 }
 

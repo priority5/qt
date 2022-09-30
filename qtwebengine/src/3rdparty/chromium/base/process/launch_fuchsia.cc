@@ -4,6 +4,8 @@
 
 #include "base/process/launch.h"
 
+#include <tuple>
+
 #include <lib/fdio/limits.h>
 #include <lib/fdio/namespace.h>
 #include <lib/fdio/spawn.h>
@@ -21,6 +23,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/process/environment_internal.h"
 #include "base/scoped_generic.h"
+#include "base/threading/scoped_blocking_call.h"
+#include "base/trace_event/base_tracing.h"
 
 namespace base {
 
@@ -31,6 +35,7 @@ bool GetAppOutputInternal(const CommandLine& cmd_line,
                           std::string* output,
                           int* exit_code) {
   DCHECK(exit_code);
+  TRACE_EVENT0("base", "GetAppOutput");
 
   LaunchOptions options;
 
@@ -60,6 +65,10 @@ bool GetAppOutputInternal(const CommandLine& cmd_line,
   }
   close(pipe_fd[0]);
 
+  // It is okay to allow this process to wait on the launched process as a
+  // process launched with GetAppOutput*() shouldn't wait back on the process
+  // that launched it.
+  internal::GetAppOutputScopedAllowBaseSyncPrimitives allow_wait;
   return process.WaitForExit(exit_code);
 }
 
@@ -115,13 +124,13 @@ Process LaunchProcess(const CommandLine& cmdline,
   return LaunchProcess(cmdline.argv(), options);
 }
 
-// TODO(768416): Investigate whether we can make LaunchProcess() create
-// unprivileged processes by default (no implicit capabilities are granted).
 Process LaunchProcess(const std::vector<std::string>& argv,
                       const LaunchOptions& options) {
   // fdio_spawn_etc() accepts an array of |fdio_spawn_action_t|, describing
   // namespace entries, descriptors and handles to launch the child process
-  // with.
+  // with. |fdio_spawn_action_t| does not own any values assigned to its
+  // members, so strings assigned to members must be valid through the
+  // fdio_spawn_etc() call.
   std::vector<fdio_spawn_action_t> spawn_actions;
 
   // Handles to be transferred to the child are owned by this vector, so that
@@ -165,7 +174,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     environ_modifications["PWD"] = cwd.value();
   }
 
-  std::unique_ptr<char* []> new_environ;
+  std::unique_ptr<char*[]> new_environ;
   if (!environ_modifications.empty()) {
     char* const empty_environ = nullptr;
     char* const* old_environ =
@@ -193,7 +202,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
     for (const auto& path_to_clone : options.paths_to_clone) {
       fidl::InterfaceHandle<::fuchsia::io::Directory> directory =
-          base::fuchsia::OpenDirectory(path_to_clone);
+          base::OpenDirectoryHandle(path_to_clone);
       if (!directory) {
         LOG(WARNING) << "Could not open handle for path: " << path_to_clone;
         return base::Process();
@@ -217,7 +226,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
   // If |process_name_suffix| is specified then set process name as
   // "<file_name><suffix>", otherwise leave the default value.
-  std::string process_name;
+  std::string process_name;  // Must outlive the fdio_spawn_etc() call.
   if (!options.process_name_suffix.empty()) {
     process_name = base::FilePath(argv[0]).BaseName().value() +
                    options.process_name_suffix;
@@ -236,7 +245,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
   // fdio_spawn_etc() will close all handles specified in add-handle actions,
   // regardless of whether it succeeds or fails, so release our copies.
   for (auto& transferred_handle : transferred_handles)
-    ignore_result(transferred_handle.release());
+    std::ignore = transferred_handle.release();
 
   if (status != ZX_OK) {
     ZX_LOG(ERROR, status) << "fdio_spawn: " << error_message;

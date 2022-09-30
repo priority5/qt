@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Data Visualization module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QtTest/QtTest>
 
@@ -34,8 +8,6 @@
 #include <QtWidgets/QTableWidget>
 
 #include "cpptestutil.h"
-
-using namespace QtDataVisualization;
 
 class tst_proxy: public QObject
 {
@@ -149,20 +121,20 @@ void tst_proxy::initialProperties()
     QCOMPARE(m_proxy->autoRowCategories(), true);
     QCOMPARE(m_proxy->columnCategories(), QStringList());
     QCOMPARE(m_proxy->columnRole(), QString());
-    QCOMPARE(m_proxy->columnRolePattern(), QRegExp());
+    QCOMPARE(m_proxy->columnRolePattern(), QRegularExpression());
     QCOMPARE(m_proxy->columnRoleReplace(), QString());
     QVERIFY(!m_proxy->itemModel());
     QCOMPARE(m_proxy->multiMatchBehavior(), QItemModelBarDataProxy::MMBLast);
     QCOMPARE(m_proxy->rotationRole(), QString());
-    QCOMPARE(m_proxy->rotationRolePattern(), QRegExp());
+    QCOMPARE(m_proxy->rotationRolePattern(), QRegularExpression());
     QCOMPARE(m_proxy->rotationRoleReplace(), QString());
     QCOMPARE(m_proxy->rowCategories(), QStringList());
     QCOMPARE(m_proxy->rowRole(), QString());
-    QCOMPARE(m_proxy->rowRolePattern(), QRegExp());
+    QCOMPARE(m_proxy->rowRolePattern(), QRegularExpression());
     QCOMPARE(m_proxy->rowRoleReplace(), QString());
     QCOMPARE(m_proxy->useModelCategories(), false);
     QCOMPARE(m_proxy->valueRole(), QString());
-    QCOMPARE(m_proxy->valueRolePattern(), QRegExp());
+    QCOMPARE(m_proxy->valueRolePattern(), QRegularExpression());
     QCOMPARE(m_proxy->valueRoleReplace(), QString());
 
     QCOMPARE(m_proxy->columnLabels().count(), 0);
@@ -183,40 +155,40 @@ void tst_proxy::initializeProperties()
     m_proxy->setAutoRowCategories(false);
     m_proxy->setColumnCategories(QStringList() << "col1" << "col2");
     m_proxy->setColumnRole("column");
-    m_proxy->setColumnRolePattern(QRegExp("/^.*-(\\d\\d)$/"));
+    m_proxy->setColumnRolePattern(QRegularExpression("/^.*-(\\d\\d)$/"));
     m_proxy->setColumnRoleReplace("\\\\1");
     m_proxy->setItemModel(table.model());
     m_proxy->setMultiMatchBehavior(QItemModelBarDataProxy::MMBAverage);
     m_proxy->setRotationRole("rotation");
-    m_proxy->setRotationRolePattern(QRegExp("/-/"));
+    m_proxy->setRotationRolePattern(QRegularExpression("/-/"));
     m_proxy->setRotationRoleReplace("\\\\1");
     m_proxy->setRowCategories(QStringList() << "row1" << "row2");
     m_proxy->setRowRole("row");
-    m_proxy->setRowRolePattern(QRegExp("/^(\\d\\d\\d\\d).*$/"));
+    m_proxy->setRowRolePattern(QRegularExpression("/^(\\d\\d\\d\\d).*$/"));
     m_proxy->setRowRoleReplace("\\\\1");
     m_proxy->setUseModelCategories(true);
     m_proxy->setValueRole("value");
-    m_proxy->setValueRolePattern(QRegExp("/-/"));
+    m_proxy->setValueRolePattern(QRegularExpression("/-/"));
     m_proxy->setValueRoleReplace("\\\\1");
 
     QCOMPARE(m_proxy->autoColumnCategories(), false);
     QCOMPARE(m_proxy->autoRowCategories(), false);
     QCOMPARE(m_proxy->columnCategories().count(), 2);
     QCOMPARE(m_proxy->columnRole(), QString("column"));
-    QCOMPARE(m_proxy->columnRolePattern(), QRegExp("/^.*-(\\d\\d)$/"));
+    QCOMPARE(m_proxy->columnRolePattern(), QRegularExpression("/^.*-(\\d\\d)$/"));
     QCOMPARE(m_proxy->columnRoleReplace(), QString("\\\\1"));
     QVERIFY(m_proxy->itemModel());
     QCOMPARE(m_proxy->multiMatchBehavior(), QItemModelBarDataProxy::MMBAverage);
     QCOMPARE(m_proxy->rotationRole(), QString("rotation"));
-    QCOMPARE(m_proxy->rotationRolePattern(), QRegExp("/-/"));
+    QCOMPARE(m_proxy->rotationRolePattern(), QRegularExpression("/-/"));
     QCOMPARE(m_proxy->rotationRoleReplace(), QString("\\\\1"));
     QCOMPARE(m_proxy->rowCategories().count(), 2);
     QCOMPARE(m_proxy->rowRole(), QString("row"));
-    QCOMPARE(m_proxy->rowRolePattern(), QRegExp("/^(\\d\\d\\d\\d).*$/"));
+    QCOMPARE(m_proxy->rowRolePattern(), QRegularExpression("/^(\\d\\d\\d\\d).*$/"));
     QCOMPARE(m_proxy->rowRoleReplace(), QString("\\\\1"));
     QCOMPARE(m_proxy->useModelCategories(), true);
     QCOMPARE(m_proxy->valueRole(), QString("value"));
-    QCOMPARE(m_proxy->valueRolePattern(), QRegExp("/-/"));
+    QCOMPARE(m_proxy->valueRolePattern(), QRegularExpression("/-/"));
     QCOMPARE(m_proxy->valueRoleReplace(), QString("\\\\1"));
 }
 
@@ -247,12 +219,13 @@ void tst_proxy::multiMatch()
     m_proxy->setItemModel(table.model());
     m_proxy->setRowRole(table.model()->roleNames().value(Qt::DisplayRole));
     m_proxy->setColumnRole(table.model()->roleNames().value(Qt::DisplayRole));
-    m_proxy->setRowRolePattern(QRegExp(QStringLiteral("^(\\d*)\\/(\\d*)\\/\\d*[\\.\\,]?\\d*\\/\\d*[\\.\\,]?\\d*$")));
+    m_proxy->setRowRolePattern(QRegularExpression(QStringLiteral("^(\\d*)\\/(\\d*)\\/\\d*[\\.\\,]?\\d*\\/\\d*[\\.\\,]?\\d*$")));
     m_proxy->setRowRoleReplace(QStringLiteral("\\2"));
-    m_proxy->setValueRolePattern(QRegExp(QStringLiteral("^\\d*(\\/)(\\d*)\\/(\\d*[\\.\\,]?\\d*)\\/\\d*[\\.\\,]?\\d*$")));
+    m_proxy->setValueRolePattern(QRegularExpression(QStringLiteral("^\\d*(\\/)(\\d*)\\/(\\d*[\\.\\,]?\\d*)\\/\\d*[\\.\\,]?\\d*$")));
     m_proxy->setValueRoleReplace(QStringLiteral("\\3"));
-    m_proxy->setColumnRolePattern(QRegExp(QStringLiteral("^(\\d*)(\\/)(\\d*)\\/\\d*[\\.\\,]?\\d*\\/\\d*[\\.\\,]?\\d*$")));
+    m_proxy->setColumnRolePattern(QRegularExpression(QStringLiteral("^(\\d*)(\\/)(\\d*)\\/\\d*[\\.\\,]?\\d*\\/\\d*[\\.\\,]?\\d*$")));
     m_proxy->setColumnRoleReplace(QStringLiteral("\\1"));
+    QCoreApplication::processEvents();
 
     QBar3DSeries *series = new QBar3DSeries(m_proxy);
 

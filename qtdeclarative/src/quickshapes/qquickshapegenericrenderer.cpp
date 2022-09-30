@@ -1,55 +1,14 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickshapegenericrenderer_p.h"
 #include <QtGui/private/qtriangulator_p.h>
 #include <QtGui/private/qtriangulatingstroker_p.h>
+#include <QtGui/private/qrhi_p.h>
 #include <QSGVertexColorMaterial>
 
 #if QT_CONFIG(thread)
 #include <QThreadPool>
-#endif
-
-#if QT_CONFIG(opengl)
-#include <QOpenGLContext>
-#include <QOffscreenSurface>
-#include <QtGui/private/qopenglextensions_p.h>
 #endif
 
 QT_BEGIN_NAMESPACE
@@ -68,11 +27,13 @@ struct ColoredVertex // must match QSGGeometry::ColoredPoint2D
 
 static inline QQuickShapeGenericRenderer::Color4ub colorToColor4ub(const QColor &c)
 {
+    float r, g, b, a;
+    c.getRgbF(&r, &g, &b, &a);
     QQuickShapeGenericRenderer::Color4ub color = {
-        uchar(qRound(c.redF() * c.alphaF() * 255)),
-        uchar(qRound(c.greenF() * c.alphaF() * 255)),
-        uchar(qRound(c.blueF() * c.alphaF() * 255)),
-        uchar(qRound(c.alphaF() * 255))
+        uchar(qRound(r * a * 255)),
+        uchar(qRound(g * a * 255)),
+        uchar(qRound(b * a * 255)),
+        uchar(qRound(a * 255))
     };
     return color;
 }
@@ -114,47 +75,6 @@ void QQuickShapeGenericStrokeFillNode::activateMaterial(QQuickWindow *window, Ma
         setMaterial(m_material.data());
 }
 
-static bool q_supportsElementIndexUint(QSGRendererInterface::GraphicsApi api)
-{
-    static bool elementIndexUint = true;
-#if QT_CONFIG(opengl)
-    if (api == QSGRendererInterface::OpenGL) {
-        static bool elementIndexUintChecked = false;
-        if (!elementIndexUintChecked) {
-            elementIndexUintChecked = true;
-            QOpenGLContext *context = QOpenGLContext::currentContext();
-            const bool needsTempContext = !context;
-            QScopedPointer<QOpenGLContext> dummyContext;
-            QScopedPointer<QOffscreenSurface> dummySurface;
-            bool ok = true;
-            if (needsTempContext) {
-                dummyContext.reset(new QOpenGLContext);
-                dummyContext->create();
-                context = dummyContext.data();
-                dummySurface.reset(new QOffscreenSurface);
-                dummySurface->setFormat(context->format());
-                dummySurface->create();
-                ok = context->makeCurrent(dummySurface.data());
-            }
-            if (ok) {
-                elementIndexUint = static_cast<QOpenGLExtensions *>(context->functions())->hasOpenGLExtension(
-                            QOpenGLExtensions::ElementIndexUint);
-
-                if (needsTempContext) {
-                    // Must not let the temprary context be destroyed while current and
-                    // the associated surface already gone, because some implementations
-                    // (Mesa on drm) do not like that.
-                    context->doneCurrent();
-                }
-            }
-        }
-    }
-#else
-    Q_UNUSED(api);
-#endif
-    return elementIndexUint;
-}
-
 QQuickShapeGenericRenderer::~QQuickShapeGenericRenderer()
 {
     for (ShapePathData &d : m_sp) {
@@ -168,11 +88,14 @@ QQuickShapeGenericRenderer::~QQuickShapeGenericRenderer()
 // sync, and so triangulation too, happens on the gui thread
 //    - except when async is set, in which case triangulation is moved to worker threads
 
-void QQuickShapeGenericRenderer::beginSync(int totalCount)
+void QQuickShapeGenericRenderer::beginSync(int totalCount, bool *countChanged)
 {
     if (m_sp.count() != totalCount) {
         m_sp.resize(totalCount);
         m_accDirty |= DirtyList;
+        *countChanged = true;
+    } else {
+        *countChanged = false;
     }
     for (ShapePathData &d : m_sp)
         d.syncDirty = 0;
@@ -342,6 +265,14 @@ void QQuickShapeGenericRenderer::endSync(bool async)
             pathWorkThreadPool->setMaxThreadCount(idealCount > 0 ? idealCount * 2 : 4);
         }
 #endif
+        auto testFeatureIndexUint = [](QQuickItem *item) -> bool {
+            if (auto *w = item->window()) {
+                if (auto *rhi = QQuickWindowPrivate::get(w)->rhi)
+                    return rhi->isFeatureSupported(QRhi::ElementIndexUint);
+            }
+            return true;
+        };
+        static bool supportsElementIndexUint = testFeatureIndexUint(m_item);
         if ((d.syncDirty & DirtyFillGeom) && d.fillColor.a) {
             d.path.setFillRule(d.fillRule);
             if (m_api == QSGRendererInterface::Unknown)
@@ -354,7 +285,7 @@ void QQuickShapeGenericRenderer::endSync(bool async)
                 d.pendingFill = r;
                 r->path = d.path;
                 r->fillColor = d.fillColor;
-                r->supportsElementIndexUint = q_supportsElementIndexUint(m_api);
+                r->supportsElementIndexUint = supportsElementIndexUint;
                 // Unlikely in practice but in theory m_sp could be
                 // resized. Therefore, capture 'i' instead of 'd'.
                 QObject::connect(r, &QQuickShapeFillRunnable::done, qApp, [this, i](QQuickShapeFillRunnable *r) {
@@ -379,7 +310,7 @@ void QQuickShapeGenericRenderer::endSync(bool async)
                 pathWorkThreadPool->start(r);
 #endif
             } else {
-                triangulateFill(d.path, d.fillColor, &d.fillVertices, &d.fillIndices, &d.indexType, q_supportsElementIndexUint(m_api));
+                triangulateFill(d.path, d.fillColor, &d.fillVertices, &d.fillIndices, &d.indexType, supportsElementIndexUint);
             }
         }
 
@@ -756,51 +687,6 @@ QSGMaterial *QQuickShapeGenericMaterialFactory::createConicalGradient(QQuickWind
     return nullptr;
 }
 
-#if QT_CONFIG(opengl)
-
-QQuickShapeLinearGradientShader::QQuickShapeLinearGradientShader()
-{
-    setShaderSourceFile(QOpenGLShader::Vertex,
-                        QStringLiteral(":/qt-project.org/shapes/shaders/lineargradient.vert"));
-    setShaderSourceFile(QOpenGLShader::Fragment,
-                        QStringLiteral(":/qt-project.org/shapes/shaders/lineargradient.frag"));
-}
-
-void QQuickShapeLinearGradientShader::initialize()
-{
-    m_opacityLoc = program()->uniformLocation("opacity");
-    m_matrixLoc = program()->uniformLocation("matrix");
-    m_gradStartLoc = program()->uniformLocation("gradStart");
-    m_gradEndLoc = program()->uniformLocation("gradEnd");
-}
-
-void QQuickShapeLinearGradientShader::updateState(const RenderState &state, QSGMaterial *mat, QSGMaterial *)
-{
-    QQuickShapeLinearGradientMaterial *m = static_cast<QQuickShapeLinearGradientMaterial *>(mat);
-
-    if (state.isOpacityDirty())
-        program()->setUniformValue(m_opacityLoc, state.opacity());
-
-    if (state.isMatrixDirty())
-        program()->setUniformValue(m_matrixLoc, state.combinedMatrix());
-
-    QQuickShapeGenericStrokeFillNode *node = m->node();
-    program()->setUniformValue(m_gradStartLoc, QVector2D(node->m_fillGradient.a));
-    program()->setUniformValue(m_gradEndLoc, QVector2D(node->m_fillGradient.b));
-
-    const QQuickShapeGradientCacheKey cacheKey(node->m_fillGradient.stops, node->m_fillGradient.spread);
-    QSGTexture *tx = QQuickShapeGradientOpenGLCache::currentCache()->get(cacheKey);
-    tx->bind();
-}
-
-char const *const *QQuickShapeLinearGradientShader::attributeNames() const
-{
-    static const char *const attr[] = { "vertexCoord", "vertexColor", nullptr };
-    return attr;
-}
-
-#endif // QT_CONFIG(opengl)
-
 QQuickShapeLinearGradientRhiShader::QQuickShapeLinearGradientRhiShader()
 {
     setShaderFileName(VertexStage, QStringLiteral(":/qt-project.org/shapes/shaders_ng/lineargradient.vert.qsb"));
@@ -856,7 +742,7 @@ void QQuickShapeLinearGradientRhiShader::updateSampledImage(RenderState &state, 
     QQuickShapeGenericStrokeFillNode *node = m->node();
     const QQuickShapeGradientCacheKey cacheKey(node->m_fillGradient.stops, node->m_fillGradient.spread);
     QSGTexture *t = QQuickShapeGradientCache::cacheForRhi(state.rhi())->get(cacheKey);
-    t->updateRhiTexture(state.rhi(), state.resourceUpdateBatch());
+    t->commitTextureOperations(state.rhi(), state.resourceUpdateBatch());
     *texture = t;
 }
 
@@ -905,74 +791,11 @@ int QQuickShapeLinearGradientMaterial::compare(const QSGMaterial *other) const
     return 0;
 }
 
-QSGMaterialShader *QQuickShapeLinearGradientMaterial::createShader() const
+QSGMaterialShader *QQuickShapeLinearGradientMaterial::createShader(QSGRendererInterface::RenderMode renderMode) const
 {
-    if (flags().testFlag(RhiShaderWanted))
-        return new QQuickShapeLinearGradientRhiShader;
-#if QT_CONFIG(opengl)
-    else
-        return new QQuickShapeLinearGradientShader;
-#else
-    return nullptr;
-#endif
+    Q_UNUSED(renderMode);
+    return new QQuickShapeLinearGradientRhiShader;
 }
-
-#if QT_CONFIG(opengl)
-
-QQuickShapeRadialGradientShader::QQuickShapeRadialGradientShader()
-{
-    setShaderSourceFile(QOpenGLShader::Vertex,
-                        QStringLiteral(":/qt-project.org/shapes/shaders/radialgradient.vert"));
-    setShaderSourceFile(QOpenGLShader::Fragment,
-                        QStringLiteral(":/qt-project.org/shapes/shaders/radialgradient.frag"));
-}
-
-void QQuickShapeRadialGradientShader::initialize()
-{
-    QOpenGLShaderProgram *prog = program();
-    m_opacityLoc = prog->uniformLocation("opacity");
-    m_matrixLoc = prog->uniformLocation("matrix");
-    m_translationPointLoc = prog->uniformLocation("translationPoint");
-    m_focalToCenterLoc = prog->uniformLocation("focalToCenter");
-    m_centerRadiusLoc = prog->uniformLocation("centerRadius");
-    m_focalRadiusLoc = prog->uniformLocation("focalRadius");
-}
-
-void QQuickShapeRadialGradientShader::updateState(const RenderState &state, QSGMaterial *mat, QSGMaterial *)
-{
-    QQuickShapeRadialGradientMaterial *m = static_cast<QQuickShapeRadialGradientMaterial *>(mat);
-
-    if (state.isOpacityDirty())
-        program()->setUniformValue(m_opacityLoc, state.opacity());
-
-    if (state.isMatrixDirty())
-        program()->setUniformValue(m_matrixLoc, state.combinedMatrix());
-
-    QQuickShapeGenericStrokeFillNode *node = m->node();
-
-    const QPointF centerPoint = node->m_fillGradient.a;
-    const QPointF focalPoint = node->m_fillGradient.b;
-    const QPointF focalToCenter = centerPoint - focalPoint;
-    const GLfloat centerRadius = node->m_fillGradient.v0;
-    const GLfloat focalRadius = node->m_fillGradient.v1;
-
-    program()->setUniformValue(m_translationPointLoc, focalPoint);
-    program()->setUniformValue(m_centerRadiusLoc, centerRadius);
-    program()->setUniformValue(m_focalRadiusLoc, focalRadius);
-    program()->setUniformValue(m_focalToCenterLoc, focalToCenter);
-
-    const QQuickShapeGradientCacheKey cacheKey(node->m_fillGradient.stops, node->m_fillGradient.spread);
-    QSGTexture *tx = QQuickShapeGradientOpenGLCache::currentCache()->get(cacheKey);
-    tx->bind();
-}
-
-char const *const *QQuickShapeRadialGradientShader::attributeNames() const
-{
-    static const char *const attr[] = { "vertexCoord", "vertexColor", nullptr };
-    return attr;
-}
-
-#endif // QT_CONFIG(opengl)
 
 QQuickShapeRadialGradientRhiShader::QQuickShapeRadialGradientRhiShader()
 {
@@ -1048,7 +871,7 @@ void QQuickShapeRadialGradientRhiShader::updateSampledImage(RenderState &state, 
     QQuickShapeGenericStrokeFillNode *node = m->node();
     const QQuickShapeGradientCacheKey cacheKey(node->m_fillGradient.stops, node->m_fillGradient.spread);
     QSGTexture *t = QQuickShapeGradientCache::cacheForRhi(state.rhi())->get(cacheKey);
-    t->updateRhiTexture(state.rhi(), state.resourceUpdateBatch());
+    t->commitTextureOperations(state.rhi(), state.resourceUpdateBatch());
     *texture = t;
 }
 
@@ -1102,67 +925,11 @@ int QQuickShapeRadialGradientMaterial::compare(const QSGMaterial *other) const
     return 0;
 }
 
-QSGMaterialShader *QQuickShapeRadialGradientMaterial::createShader() const
+QSGMaterialShader *QQuickShapeRadialGradientMaterial::createShader(QSGRendererInterface::RenderMode renderMode) const
 {
-    if (flags().testFlag(RhiShaderWanted))
-        return new QQuickShapeRadialGradientRhiShader;
-#if QT_CONFIG(opengl)
-    else
-        return new QQuickShapeRadialGradientShader;
-#else
-    return nullptr;
-#endif
+    Q_UNUSED(renderMode);
+    return new QQuickShapeRadialGradientRhiShader;
 }
-
-#if QT_CONFIG(opengl)
-
-QQuickShapeConicalGradientShader::QQuickShapeConicalGradientShader()
-{
-    setShaderSourceFile(QOpenGLShader::Vertex,
-                        QStringLiteral(":/qt-project.org/shapes/shaders/conicalgradient.vert"));
-    setShaderSourceFile(QOpenGLShader::Fragment,
-                        QStringLiteral(":/qt-project.org/shapes/shaders/conicalgradient.frag"));
-}
-
-void QQuickShapeConicalGradientShader::initialize()
-{
-    QOpenGLShaderProgram *prog = program();
-    m_opacityLoc = prog->uniformLocation("opacity");
-    m_matrixLoc = prog->uniformLocation("matrix");
-    m_angleLoc = prog->uniformLocation("angle");
-    m_translationPointLoc = prog->uniformLocation("translationPoint");
-}
-
-void QQuickShapeConicalGradientShader::updateState(const RenderState &state, QSGMaterial *mat, QSGMaterial *)
-{
-    QQuickShapeConicalGradientMaterial *m = static_cast<QQuickShapeConicalGradientMaterial *>(mat);
-
-    if (state.isOpacityDirty())
-        program()->setUniformValue(m_opacityLoc, state.opacity());
-
-    if (state.isMatrixDirty())
-        program()->setUniformValue(m_matrixLoc, state.combinedMatrix());
-
-    QQuickShapeGenericStrokeFillNode *node = m->node();
-
-    const QPointF centerPoint = node->m_fillGradient.a;
-    const GLfloat angle = -qDegreesToRadians(node->m_fillGradient.v0);
-
-    program()->setUniformValue(m_angleLoc, angle);
-    program()->setUniformValue(m_translationPointLoc, centerPoint);
-
-    const QQuickShapeGradientCacheKey cacheKey(node->m_fillGradient.stops, QQuickShapeGradient::RepeatSpread);
-    QSGTexture *tx = QQuickShapeGradientOpenGLCache::currentCache()->get(cacheKey);
-    tx->bind();
-}
-
-char const *const *QQuickShapeConicalGradientShader::attributeNames() const
-{
-    static const char *const attr[] = { "vertexCoord", "vertexColor", nullptr };
-    return attr;
-}
-
-#endif // QT_CONFIG(opengl)
 
 QQuickShapeConicalGradientRhiShader::QQuickShapeConicalGradientRhiShader()
 {
@@ -1222,7 +989,7 @@ void QQuickShapeConicalGradientRhiShader::updateSampledImage(RenderState &state,
     QQuickShapeGenericStrokeFillNode *node = m->node();
     const QQuickShapeGradientCacheKey cacheKey(node->m_fillGradient.stops, node->m_fillGradient.spread);
     QSGTexture *t = QQuickShapeGradientCache::cacheForRhi(state.rhi())->get(cacheKey);
-    t->updateRhiTexture(state.rhi(), state.resourceUpdateBatch());
+    t->commitTextureOperations(state.rhi(), state.resourceUpdateBatch());
     *texture = t;
 }
 
@@ -1267,16 +1034,12 @@ int QQuickShapeConicalGradientMaterial::compare(const QSGMaterial *other) const
     return 0;
 }
 
-QSGMaterialShader *QQuickShapeConicalGradientMaterial::createShader() const
+QSGMaterialShader *QQuickShapeConicalGradientMaterial::createShader(QSGRendererInterface::RenderMode renderMode) const
 {
-    if (flags().testFlag(RhiShaderWanted))
-        return new QQuickShapeConicalGradientRhiShader;
-#if QT_CONFIG(opengl)
-    else
-        return new QQuickShapeConicalGradientShader;
-#else
-    return nullptr;
-#endif
+    Q_UNUSED(renderMode);
+    return new QQuickShapeConicalGradientRhiShader;
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qquickshapegenericrenderer_p.cpp"

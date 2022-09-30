@@ -28,8 +28,7 @@ class SendTabToSelfFeaturesTest : public testing::Test {
   base::test::TaskEnvironment task_environment_;
 };
 
-TEST_F(SendTabToSelfFeaturesTest,
-       IsReceivingEnabledByUserOnThisDevice_Enabled) {
+TEST_F(SendTabToSelfFeaturesTest, ReceivingEnabledIfSyncTheFeatureEnabled) {
   sync_prefs_->SetSyncRequested(true);
   sync_prefs_->SetFirstSetupComplete();
   sync_prefs_->SetSelectedTypes(
@@ -41,7 +40,7 @@ TEST_F(SendTabToSelfFeaturesTest,
 }
 
 TEST_F(SendTabToSelfFeaturesTest,
-       IsReceivingEnabledByUserOnThisDevice_SyncNotRequested) {
+       ReceivingDisabledIfSyncTheFeatureEnabledButStopped) {
   sync_prefs_->SetSyncRequested(false);
   sync_prefs_->SetFirstSetupComplete();
   sync_prefs_->SetSelectedTypes(
@@ -53,19 +52,7 @@ TEST_F(SendTabToSelfFeaturesTest,
 }
 
 TEST_F(SendTabToSelfFeaturesTest,
-       IsReceivingEnabledByUserOnThisDevice_FirstSetupNotCompleted) {
-  sync_prefs_->SetSyncRequested(true);
-  // Skip setting FirstSetupComplete.
-  sync_prefs_->SetSelectedTypes(
-      /*keep_everything_synced=*/false,
-      /*registered_types=*/syncer::UserSelectableTypeSet::All(),
-      /*selected_types=*/{syncer::UserSelectableType::kTabs});
-
-  EXPECT_FALSE(IsReceivingEnabledByUserOnThisDevice(&prefs_));
-}
-
-TEST_F(SendTabToSelfFeaturesTest,
-       IsReceivingEnabledByUserOnThisDevice_TabsNotSelected) {
+       ReceivingDisabledIfSyncTheFeatureEnabledButTabsNotSelected) {
   sync_prefs_->SetSyncRequested(true);
   sync_prefs_->SetFirstSetupComplete();
   sync_prefs_->SetSelectedTypes(
@@ -74,6 +61,31 @@ TEST_F(SendTabToSelfFeaturesTest,
       /*selected_types=*/{});
 
   EXPECT_FALSE(IsReceivingEnabledByUserOnThisDevice(&prefs_));
+}
+
+TEST_F(SendTabToSelfFeaturesTest,
+       ReceivingEnabledIfSyncSetupIncomplete_SendTabToSelfWhenSignedInEnabled) {
+  sync_prefs_->SetSyncRequested(true);
+  // Skip setting FirstSetupComplete.
+  sync_prefs_->SetSelectedTypes(
+      /*keep_everything_synced=*/false,
+      /*registered_types=*/syncer::UserSelectableTypeSet::All(),
+      /*selected_types=*/{syncer::UserSelectableType::kTabs});
+
+  // While the setup isn't complete, the client is still treated as having
+  // sync-the-feature disabled.
+  EXPECT_TRUE(IsReceivingEnabledByUserOnThisDevice(&prefs_));
+}
+
+TEST_F(
+    SendTabToSelfFeaturesTest,
+    ReceivingEnabledIfSyncTheFeatureDisabled_SendTabToSelfWhenSignedInEnabled) {
+  sync_prefs_->SetSelectedTypes(
+      /*keep_everything_synced=*/false,
+      /*registered_types=*/syncer::UserSelectableTypeSet::All(),
+      /*selected_types=*/{});
+
+  EXPECT_TRUE(IsReceivingEnabledByUserOnThisDevice(&prefs_));
 }
 
 }  // namespace

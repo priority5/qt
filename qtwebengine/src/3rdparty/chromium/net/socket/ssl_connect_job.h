@@ -5,10 +5,13 @@
 #ifndef NET_SOCKET_SSL_CONNECT_JOB_H_
 #define NET_SOCKET_SSL_CONNECT_JOB_H_
 
-#include <memory>
-#include <string>
+#include <stdint.h>
 
-#include "base/macros.h"
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "net/base/completion_once_callback.h"
@@ -16,12 +19,14 @@
 #include "net/base/net_export.h"
 #include "net/base/network_isolation_key.h"
 #include "net/base/privacy_mode.h"
+#include "net/dns/host_resolver_results.h"
 #include "net/dns/public/resolve_error_info.h"
 #include "net/socket/connect_job.h"
 #include "net/socket/connection_attempts.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_config_service.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -45,6 +50,9 @@ class NET_EXPORT_PRIVATE SSLSocketParams
                   const SSLConfig& ssl_config,
                   PrivacyMode privacy_mode,
                   NetworkIsolationKey network_isolation_key);
+
+  SSLSocketParams(const SSLSocketParams&) = delete;
+  SSLSocketParams& operator=(const SSLSocketParams&) = delete;
 
   // Returns the type of the underlying connection.
   ConnectionType GetConnectionType() const;
@@ -77,8 +85,6 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   const SSLConfig ssl_config_;
   const PrivacyMode privacy_mode_;
   const NetworkIsolationKey network_isolation_key_;
-
-  DISALLOW_COPY_AND_ASSIGN(SSLSocketParams);
 };
 
 // SSLConnectJob establishes a connection, through a proxy if needed, and then
@@ -86,6 +92,20 @@ class NET_EXPORT_PRIVATE SSLSocketParams
 class NET_EXPORT_PRIVATE SSLConnectJob : public ConnectJob,
                                          public ConnectJob::Delegate {
  public:
+  class NET_EXPORT_PRIVATE Factory {
+   public:
+    Factory() = default;
+    virtual ~Factory() = default;
+
+    virtual std::unique_ptr<SSLConnectJob> Create(
+        RequestPriority priority,
+        const SocketTag& socket_tag,
+        const CommonConnectJobParams* common_connect_job_params,
+        scoped_refptr<SSLSocketParams> params,
+        ConnectJob::Delegate* delegate,
+        const NetLogWithSource* net_log);
+  };
+
   // Note: the SSLConnectJob does not own |messenger| so it must outlive the
   // job.
   SSLConnectJob(RequestPriority priority,
@@ -94,6 +114,10 @@ class NET_EXPORT_PRIVATE SSLConnectJob : public ConnectJob,
                 scoped_refptr<SSLSocketParams> params,
                 ConnectJob::Delegate* delegate,
                 const NetLogWithSource* net_log);
+
+  SSLConnectJob(const SSLConnectJob&) = delete;
+  SSLConnectJob& operator=(const SSLConnectJob&) = delete;
+
   ~SSLConnectJob() override;
 
   // ConnectJob methods.
@@ -180,7 +204,20 @@ class NET_EXPORT_PRIVATE SSLConnectJob : public ConnectJob,
   // through an HTTPS CONNECT request or a SOCKS proxy).
   IPEndPoint server_address_;
 
-  DISALLOW_COPY_AND_ASSIGN(SSLConnectJob);
+  // Any DNS aliases for the remote endpoint. Includes all known aliases, e.g.
+  // from A, AAAA, or HTTPS, not just from the address used for the connection,
+  // in no particular order. Stored because `nested_connect_job_` has a limited
+  // lifetime and the aliases can no longer be retrieved from there by by the
+  // time that the aliases are needed to be passed in SetSocket.
+  std::set<std::string> dns_aliases_;
+
+  // The endpoint result used by `nested_connect_job_`. Stored because
+  // `nested_connect_job_` has a limited lifetime.
+  absl::optional<HostResolverEndpointResult> endpoint_result_;
+
+  // If not `absl::nullopt`, the ECH retry configs to use in the ECH recovery
+  // flow. `endpoint_result_` will then contain the endpoint to reconnect to.
+  absl::optional<std::vector<uint8_t>> ech_retry_configs_;
 };
 
 }  // namespace net

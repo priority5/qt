@@ -14,7 +14,7 @@
 // logger in this file.  (We implement about:ipc on Mac but implement
 // the loggers here anyway).  We need to do this real early to be sure
 // IPC_MESSAGE_MACROS_LOG_ENABLED doesn't get undefined.
-#if defined(OS_POSIX) && BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
+#if BUILDFLAG(IS_POSIX) && BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
 #include "content/public/common/content_ipc_logging.h"
 #define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger) \
@@ -22,7 +22,7 @@
 #include "chrome/common/all_messages.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
@@ -47,6 +47,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -54,11 +55,11 @@
 #include "content/public/common/content_switches.h"
 #include "ipc/ipc_logging.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/constants/chromeos_switches.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_switches.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <initguid.h>
 #include "base/logging_win.h"
 #include "base/syslog_logging.h"
@@ -84,7 +85,7 @@ bool chrome_logging_failed_ = false;
 // InitChromeLogging() and the beginning of CleanupChromeLogging().
 bool chrome_logging_redirected_ = false;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // {7FE69228-633E-4f06-80C1-527FEA23E3A7}
 const GUID kChromeTraceProviderName = {
     0x7fe69228, 0x633e, 0x4f06,
@@ -110,7 +111,7 @@ void SuppressDialogs() {
   assert_handler_ = new ScopedLogAssertHandler(
       base::BindRepeating(SilentRuntimeAssertHandler));
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   UINT new_flags = SEM_FAILCRITICALERRORS |
                    SEM_NOGPFAULTERRORBOX |
                    SEM_NOOPENFILEERRORBOX;
@@ -127,15 +128,22 @@ void SuppressDialogs() {
 
 LoggingDestination DetermineLoggingDestination(
     const base::CommandLine& command_line) {
-// only use OutputDebugString in debug mode
-#ifdef NDEBUG
-  bool enable_logging = false;
-  const char *kInvertLoggingSwitch = switches::kEnableLogging;
+#if BUILDFLAG(IS_FUCHSIA)
+  // On Fuchsia, the default logging mode is the system log in both debug and
+  // release mode.
+  const LoggingDestination kDefaultLoggingMode = LOG_TO_SYSTEM_DEBUG_LOG;
+#elif NDEBUG
   const LoggingDestination kDefaultLoggingMode = LOG_TO_FILE;
 #else
-  bool enable_logging = true;
-  const char *kInvertLoggingSwitch = switches::kDisableLogging;
   const LoggingDestination kDefaultLoggingMode = LOG_TO_ALL;
+#endif  // BUILDFLAG(IS_FUCHSIA)
+
+#ifdef NDEBUG
+  bool enable_logging = false;
+  const char* kInvertLoggingSwitch = switches::kEnableLogging;
+#else
+  bool enable_logging = true;
+  const char* kInvertLoggingSwitch = switches::kDisableLogging;
 #endif
 
   if (command_line.HasSwitch(kInvertLoggingSwitch))
@@ -157,7 +165,7 @@ LoggingDestination DetermineLoggingDestination(
   return kDefaultLoggingMode;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 base::FilePath SetUpSymlinkIfNeeded(const base::FilePath& symlink_path,
                                     bool new_log) {
   DCHECK(!symlink_path.empty());
@@ -237,11 +245,11 @@ base::FilePath GetSessionLogDir(const base::CommandLine& command_line) {
   if (env->GetVar(env_vars::kSessionLogDir, &log_dir_str) &&
       !log_dir_str.empty()) {
     log_dir = base::FilePath(log_dir_str);
-  } else if (command_line.HasSwitch(chromeos::switches::kLoginProfile)) {
+  } else if (command_line.HasSwitch(ash::switches::kLoginProfile)) {
     base::PathService::Get(chrome::DIR_USER_DATA, &log_dir);
     base::FilePath profile_dir;
     std::string login_profile_value =
-        command_line.GetSwitchValueASCII(chromeos::switches::kLoginProfile);
+        command_line.GetSwitchValueASCII(ash::switches::kLoginProfile);
     if (login_profile_value == chrome::kLegacyProfileDir ||
         login_profile_value == chrome::kTestUserProfileDir) {
       profile_dir = base::FilePath(login_profile_value);
@@ -261,7 +269,7 @@ base::FilePath GetSessionLogFile(const base::CommandLine& command_line) {
       .Append(GetLogFileName(command_line).BaseName());
 }
 
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 void InitChromeLogging(const base::CommandLine& command_line,
                        OldFileDeletionState delete_old_log_file) {
@@ -270,7 +278,7 @@ void InitChromeLogging(const base::CommandLine& command_line,
   LoggingDestination logging_dest = DetermineLoggingDestination(command_line);
   LogLockingState log_locking_state = LOCK_LOG_FILE;
   base::FilePath log_path;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   base::FilePath target_path;
 #endif
 
@@ -279,11 +287,11 @@ void InitChromeLogging(const base::CommandLine& command_line,
   if ((logging_dest & LOG_TO_FILE) != 0) {
     log_path = GetLogFileName(command_line);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     // For BWSI (Incognito) logins, we want to put the logs in the user
     // profile directory that is created for the temporary session instead
     // of in the system log directory, for privacy reasons.
-    if (command_line.HasSwitch(chromeos::switches::kGuestSession))
+    if (command_line.HasSwitch(ash::switches::kGuestSession))
       log_path = GetSessionLogFile(command_line);
 
     // On ChromeOS we log to the symlink.  We force creation of a new
@@ -296,7 +304,7 @@ void InitChromeLogging(const base::CommandLine& command_line,
     // the link, it shouldn't remove the old file in the logging code,
     // since that will remove the newly created link instead.
     delete_old_log_file = APPEND_TO_OLD_LOG_FILE;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   } else {
     log_locking_state = DONT_LOCK_LOG_FILE;
   }
@@ -308,7 +316,7 @@ void InitChromeLogging(const base::CommandLine& command_line,
   settings.delete_old = delete_old_log_file;
   bool success = InitLogging(settings);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (!success) {
     DPLOG(ERROR) << "Unable to initialize logging to " << log_path.value()
                 << " (which should be a link to " << target_path.value() << ")";
@@ -316,13 +324,13 @@ void InitChromeLogging(const base::CommandLine& command_line,
     chrome_logging_failed_ = true;
     return;
   }
-#else   // defined(OS_CHROMEOS)
+#else   // BUILDFLAG(IS_CHROMEOS_ASH)
   if (!success) {
     DPLOG(ERROR) << "Unable to initialize logging to " << log_path.value();
     chrome_logging_failed_ = true;
     return;
   }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   // We call running in unattended mode "headless", and allow headless mode to
   // be configured either by the Environment Variable or by the Command Line
@@ -357,19 +365,19 @@ void InitChromeLogging(const base::CommandLine& command_line,
         command_line.GetSwitchValueASCII(switches::kLoggingLevel);
     int level = 0;
     if (base::StringToInt(log_level, &level) && level >= 0 &&
-        level < LOG_NUM_SEVERITIES) {
+        level < LOGGING_NUM_SEVERITIES) {
       SetMinLogLevel(level);
     } else {
       DLOG(WARNING) << "Bad log level: " << log_level;
     }
   }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Enable trace control and transport through event tracing for Windows.
   LogEventProvider::Initialize(kChromeTraceProviderName);
 
   // Enable logging to the Windows Event Log.
-  SetEventSource(base::UTF16ToASCII(
+  SetEventSource(base::WideToASCII(
                      install_static::InstallDetails::Get().install_full_name()),
                  BROWSER_CATEGORY, MSG_LOG_MESSAGE);
 #endif
@@ -395,11 +403,14 @@ void CleanupChromeLogging() {
 }
 
 base::FilePath GetLogFileName(const base::CommandLine& command_line) {
-  std::string filename = command_line.GetSwitchValueASCII(switches::kLogFile);
-  if (filename.empty())
-    base::Environment::Create()->GetVar(env_vars::kLogFileName, &filename);
+  auto filename = command_line.GetSwitchValueNative(switches::kLogFile);
   if (!filename.empty())
-    return base::FilePath::FromUTF8Unsafe(filename);
+    return base::FilePath(filename);
+
+  std::string env_filename;
+  base::Environment::Create()->GetVar(env_vars::kLogFileName, &env_filename);
+  if (!env_filename.empty())
+    return base::FilePath::FromUTF8Unsafe(env_filename);
 
   const base::FilePath log_filename(FILE_PATH_LITERAL("chrome_debug.log"));
   base::FilePath log_path;
@@ -417,11 +428,11 @@ bool DialogsAreSuppressed() {
   return dialogs_are_suppressed_;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 base::FilePath GenerateTimestampedName(const base::FilePath& base_path,
                                        base::Time timestamp) {
   base::Time::Exploded time_deets;
-  timestamp.LocalExplode(&time_deets);
+  timestamp.UTCExplode(&time_deets);
   std::string suffix = base::StringPrintf("_%02d%02d%02d-%02d%02d%02d",
                                           time_deets.year,
                                           time_deets.month,
@@ -431,6 +442,6 @@ base::FilePath GenerateTimestampedName(const base::FilePath& base_path,
                                           time_deets.second);
   return base_path.InsertBeforeExtensionASCII(suffix);
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace logging

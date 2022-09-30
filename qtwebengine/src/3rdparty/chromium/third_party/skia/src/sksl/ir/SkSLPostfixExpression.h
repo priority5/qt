@@ -8,8 +8,7 @@
 #ifndef SKSL_POSTFIXEXPRESSION
 #define SKSL_POSTFIXEXPRESSION
 
-#include "src/sksl/SkSLCompiler.h"
-#include "src/sksl/SkSLLexer.h"
+#include "include/sksl/SkSLOperator.h"
 #include "src/sksl/ir/SkSLExpression.h"
 
 namespace SkSL {
@@ -17,31 +16,56 @@ namespace SkSL {
 /**
  * An expression modified by a unary operator appearing after it, such as 'i++'.
  */
-struct PostfixExpression : public Expression {
-    static constexpr Kind kExpressionKind = Kind::kPostfix;
+class PostfixExpression final : public Expression {
+public:
+    inline static constexpr Kind kExpressionKind = Kind::kPostfix;
 
-    PostfixExpression(std::unique_ptr<Expression> operand, Token::Kind op)
-    : INHERITED(operand->fOffset, kExpressionKind, &operand->type())
-    , fOperand(std::move(operand))
-    , fOperator(op) {}
+    PostfixExpression(Position pos, std::unique_ptr<Expression> operand, Operator op)
+        : INHERITED(pos, kExpressionKind, &operand->type())
+        , fOperand(std::move(operand))
+        , fOperator(op) {}
+
+    // Creates an SkSL postfix expression; uses the ErrorReporter to report errors.
+    static std::unique_ptr<Expression> Convert(const Context& context,
+                                               Position pos,
+                                               std::unique_ptr<Expression> base,
+                                               Operator op);
+
+    // Creates an SkSL postfix expression; reports errors via ASSERT.
+    static std::unique_ptr<Expression> Make(const Context& context,
+                                            Position pos,
+                                            std::unique_ptr<Expression> base,
+                                            Operator op);
+
+    Operator getOperator() const {
+        return fOperator;
+    }
+
+    std::unique_ptr<Expression>& operand() {
+        return fOperand;
+    }
+
+    const std::unique_ptr<Expression>& operand() const {
+        return fOperand;
+    }
 
     bool hasProperty(Property property) const override {
-        if (property == Property::kSideEffects) {
-            return true;
-        }
-        return fOperand->hasProperty(property);
+        return (property == Property::kSideEffects) ||
+               this->operand()->hasProperty(property);
     }
 
     std::unique_ptr<Expression> clone() const override {
-        return std::unique_ptr<Expression>(new PostfixExpression(fOperand->clone(), fOperator));
+        return std::make_unique<PostfixExpression>(fPosition, this->operand()->clone(),
+                this->getOperator());
     }
 
-    String description() const override {
-        return fOperand->description() + Compiler::OperatorName(fOperator);
+    std::string description() const override {
+        return this->operand()->description() + this->getOperator().operatorName();
     }
 
+private:
     std::unique_ptr<Expression> fOperand;
-    const Token::Kind fOperator;
+    Operator fOperator;
 
     using INHERITED = Expression;
 };

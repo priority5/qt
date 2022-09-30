@@ -6,6 +6,5 @@ import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/linux/gtk/gtk.gni")
 
 declare_args() {
-  use_pangocairo =
-      use_gtk && !chromeos_is_browser_only
+  use_pangocairo = use_gtk
 }

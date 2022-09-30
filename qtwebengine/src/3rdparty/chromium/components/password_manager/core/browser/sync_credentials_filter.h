@@ -7,16 +7,16 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/password_manager/core/browser/credentials_filter.h"
-#include "components/password_manager/core/browser/password_form_forward.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/sync/driver/sync_service.h"
 
 namespace password_manager {
+
+struct PasswordForm;
 
 // The sync- and GAIA- aware implementation of the filter.
 class SyncCredentialsFilter : public CredentialsFilter {
@@ -30,6 +30,10 @@ class SyncCredentialsFilter : public CredentialsFilter {
   SyncCredentialsFilter(
       PasswordManagerClient* client,
       SyncServiceFactoryFunction sync_service_factory_function);
+
+  SyncCredentialsFilter(const SyncCredentialsFilter&) = delete;
+  SyncCredentialsFilter& operator=(const SyncCredentialsFilter&) = delete;
+
   ~SyncCredentialsFilter() override;
 
   // CredentialsFilter
@@ -42,11 +46,9 @@ class SyncCredentialsFilter : public CredentialsFilter {
   bool IsSyncAccountEmail(const std::string& username) const override;
 
  private:
-  PasswordManagerClient* const client_;
+  const raw_ptr<PasswordManagerClient> client_;
 
   const SyncServiceFactoryFunction sync_service_factory_function_;
-
-  DISALLOW_COPY_AND_ASSIGN(SyncCredentialsFilter);
 };
 
 }  // namespace password_manager

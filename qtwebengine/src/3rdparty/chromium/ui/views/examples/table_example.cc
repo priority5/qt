@@ -73,29 +73,30 @@ void TableExample::CreateExampleView(View* container) {
   icon1_.allocN32Pixels(16, 16);
   icon2_.allocN32Pixels(16, 16);
 
-  SkCanvas canvas1(icon1_), canvas2(icon2_);
+  SkCanvas canvas1(icon1_, SkSurfaceProps{}), canvas2(icon2_, SkSurfaceProps{});
   canvas1.drawColor(SK_ColorRED);
   canvas2.drawColor(SK_ColorBLUE);
 
-  auto make_checkbox =
-      [this](base::string16 text) -> std::unique_ptr<Checkbox> {
-    auto result = std::make_unique<Checkbox>(text, this);
-    result->SetChecked(true);
-    return result;
-  };
-
-  // Make buttons
   auto* button_panel = container->AddChildView(std::make_unique<View>());
   button_panel->SetLayoutManager(std::make_unique<views::FlexLayout>())
       ->SetOrientation(LayoutOrientation::kHorizontal);
-  column1_visible_checkbox_ = button_panel->AddChildView(
-      make_checkbox(ASCIIToUTF16("Fruit column visible")));
-  column2_visible_checkbox_ = button_panel->AddChildView(
-      make_checkbox(ASCIIToUTF16("Color column visible")));
-  column3_visible_checkbox_ = button_panel->AddChildView(
-      make_checkbox(ASCIIToUTF16("Origin column visible")));
-  column4_visible_checkbox_ = button_panel->AddChildView(
-      make_checkbox(ASCIIToUTF16("Price column visible")));
+
+  const auto make_checkbox = [&](std::u16string label, int id) {
+    auto* const checkbox =
+        button_panel->AddChildView(std::make_unique<Checkbox>(
+            std::move(label), Button::PressedCallback()));
+    checkbox->SetCallback(base::BindRepeating(
+        [](TableView* table, int id, Checkbox* checkbox) {
+          table->SetColumnVisibility(id, checkbox->GetChecked());
+        },
+        base::Unretained(table_), id, checkbox));
+    checkbox->SetChecked(true);
+    return checkbox;
+  };
+  column1_visible_checkbox_ = make_checkbox(u"Fruit column visible", 0);
+  column2_visible_checkbox_ = make_checkbox(u"Color column visible", 1);
+  column3_visible_checkbox_ = make_checkbox(u"Origin column visible", 2);
+  column4_visible_checkbox_ = make_checkbox(u"Price column visible", 3);
 
   for (View* child : button_panel->children())
     child->SetProperty(views::kFlexBehaviorKey, full_flex);
@@ -105,33 +106,34 @@ int TableExample::RowCount() {
   return 10;
 }
 
-base::string16 TableExample::GetText(int row, int column_id) {
+std::u16string TableExample::GetText(int row, int column_id) {
   if (row == -1)
-    return base::string16();
+    return std::u16string();
 
   const char* const cells[5][4] = {
-      {"Orange", "Orange", "South america", "$5"},
+      {"Orange", "Orange", "South America", "$5"},
       {"Apple", "Green", "Canada", "$3"},
-      {"Blue berries", "Blue", "Mexico", "$10.3"},
+      {"Blueberries", "Blue", "Mexico", "$10.30"},
       {"Strawberries", "Red", "California", "$7"},
-      {"Cantaloupe", "Orange", "South america", "$5"},
+      {"Cantaloupe", "Orange", "South America", "$5"},
   };
   return ASCIIToUTF16(cells[row % 5][column_id]);
 }
 
-gfx::ImageSkia TableExample::GetIcon(int row) {
+ui::ImageModel TableExample::GetIcon(int row) {
   SkBitmap row_icon = row % 2 ? icon1_ : icon2_;
-  return gfx::ImageSkia::CreateFrom1xBitmap(row_icon);
+  return ui::ImageModel::FromImageSkia(
+      gfx::ImageSkia::CreateFrom1xBitmap(row_icon));
 }
 
-base::string16 TableExample::GetTooltip(int row) {
+std::u16string TableExample::GetTooltip(int row) {
   if (row == -1)
-    return base::string16();
+    return std::u16string();
 
   const char* const tooltips[5] = {
       "Orange - Orange you glad I didn't say banana?",
       "Apple - An apple a day keeps the doctor away",
-      "Blue berries - Bet you can't eat just one",
+      "Blueberries - Bet you can't eat just one",
       "Strawberries - Always better when homegrown",
       "Cantaloupe - So nice when perfectly ripe"};
 
@@ -168,25 +170,6 @@ void TableExample::OnDoubleClick() {
 void TableExample::OnMiddleClick() {}
 
 void TableExample::OnKeyDown(ui::KeyboardCode virtual_keycode) {}
-
-void TableExample::ButtonPressed(Button* sender, const ui::Event& event) {
-  int index = 0;
-  bool show = true;
-  if (sender == column1_visible_checkbox_) {
-    index = 0;
-    show = column1_visible_checkbox_->GetChecked();
-  } else if (sender == column2_visible_checkbox_) {
-    index = 1;
-    show = column2_visible_checkbox_->GetChecked();
-  } else if (sender == column3_visible_checkbox_) {
-    index = 2;
-    show = column3_visible_checkbox_->GetChecked();
-  } else if (sender == column4_visible_checkbox_) {
-    index = 3;
-    show = column4_visible_checkbox_->GetChecked();
-  }
-  table_->SetColumnVisibility(index, show);
-}
 
 }  // namespace examples
 }  // namespace views

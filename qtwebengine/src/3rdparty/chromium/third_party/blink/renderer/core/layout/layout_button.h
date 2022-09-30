@@ -35,6 +35,7 @@ class LayoutButton final : public LayoutFlexibleBox {
  public:
   explicit LayoutButton(Element*);
   ~LayoutButton() override;
+  void Trace(Visitor*) const override;
 
   const char* GetName() const override {
     NOT_DESTROYED();
@@ -42,8 +43,7 @@ class LayoutButton final : public LayoutFlexibleBox {
   }
   bool IsOfType(LayoutObjectType type) const override {
     NOT_DESTROYED();
-    return type == kLayoutObjectLayoutButton ||
-           LayoutFlexibleBox::IsOfType(type);
+    return type == kLayoutObjectButton || LayoutFlexibleBox::IsOfType(type);
   }
 
   void AddChild(LayoutObject* new_child,
@@ -62,14 +62,15 @@ class LayoutButton final : public LayoutFlexibleBox {
 
   static void UpdateAnonymousChildStyle(const ComputedStyle& parent_sytle,
                                         ComputedStyle& child_style);
-  static bool ShouldCountWrongBaseline(const ComputedStyle& style,
+  static bool ShouldCountWrongBaseline(const LayoutBox& button_box,
+                                       const ComputedStyle& style,
                                        const ComputedStyle* parent_style);
 
  private:
   void UpdateAnonymousChildStyle(const LayoutObject* child,
                                  ComputedStyle& child_style) const override;
 
-  LayoutBlock* inner_;
+  Member<LayoutBlock> inner_;
 };
 
 }  // namespace blink

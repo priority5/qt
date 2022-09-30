@@ -64,6 +64,9 @@ Polymer({
      */
     deviceState: Object,
 
+    /** @type {!chromeos.networkConfig.mojom.GlobalPolicy|undefined} */
+    globalPolicy: Object,
+
     /**
      * Contains |networks| + |customItems|.
      * @private {!Array<!NetworkList.NetworkListItemType>}
@@ -74,11 +77,51 @@ Polymer({
         return [];
       },
     },
+
+    /**
+     * Used by FocusRowBehavior to track the last focused element on a row.
+     * @private
+     */
+    lastFocused_: Object,
+
+    /**
+     * Used by FocusRowBehavior to track if the list has been blurred.
+     * @private
+     */
+    listBlurred_: Boolean,
+
+    /** Disables all the network items. */
+    disabled: Boolean,
   },
 
-  behaviors: [CrScrollableBehavior],
+  behaviors: [CrScrollableBehavior, ListPropertyUpdateBehavior],
 
   observers: ['updateListItems_(networks, customItems)'],
+
+  /** @type {ResizeObserver} used to observer size changes to this element */
+  resizeObserver_: null,
+
+  /** @override */
+  attached() {
+    // This is a required work around to get the iron-list to display on first
+    // view. Currently iron-list won't generate item elements on attach if the
+    // element is not visible. Because there are some instances where this
+    // component might not be visible when the items are bound, we listen for
+    // resize events and manually call notifyResize on the iron-list
+    this.resizeObserver_ = new ResizeObserver(entries => {
+      const networkList =
+          /** @type {IronListElement} */ (this.$$('#networkList'));
+      if (networkList) {
+        networkList.notifyResize();
+      }
+    });
+    this.resizeObserver_.observe(this);
+  },
+
+  /** @override */
+  detached() {
+    this.resizeObserver_.disconnect();
+  },
 
   /** @private {boolean} */
   focusRequested_: false,
@@ -89,16 +132,15 @@ Polymer({
   },
 
   /** @private */
-  updateListItems_() {
-    this.saveScroll(/** @type {!IronListElement} */ (this.$.networkList));
-    const beforeNetworks = this.customItems.filter(function(item) {
-      return item.showBeforeNetworksList === true;
-    });
-    const afterNetworks = this.customItems.filter(function(item) {
-      return item.showBeforeNetworksList !== true;
-    });
-    this.listItems_ = beforeNetworks.concat(this.networks, afterNetworks);
-    this.restoreScroll(/** @type {!IronListElement} */ (this.$.networkList));
+  updateListItems_: function() {
+    const beforeNetworks =
+        this.customItems.filter(n => n.showBeforeNetworksList === true);
+    const afterNetworks =
+        this.customItems.filter(n => n.showBeforeNetworksList === false);
+    const newList = beforeNetworks.concat(this.networks, afterNetworks);
+
+    this.updateList('listItems_', item => item.guid, newList);
+
     this.updateScrollableContents();
     if (this.focusRequested_) {
       this.async(function() {
@@ -116,29 +158,5 @@ Polymer({
     }
     item.focus();
     this.focusRequested_ = false;
-  },
-
-  /**
-   * Use iron-list selection (which is not the same as focus) to trigger
-   * tap (requires selection-enabled) or keyboard selection.
-   * @private
-   */
-  selectedItemChanged_() {
-    if (this.selectedItem) {
-      this.onItemAction_(this.selectedItem);
-    }
-  },
-
-  /**
-   * @param {!NetworkList.NetworkListItemType} item
-   * @private
-   */
-  onItemAction_(item) {
-    if (item.hasOwnProperty('customItemName')) {
-      this.fire('custom-item-selected', item);
-    } else {
-      this.fire('selected', item);
-      this.focusRequested_ = true;
-    }
   },
 });

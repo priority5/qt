@@ -19,16 +19,14 @@
 #include <string>
 
 #include "absl/types/optional.h"
+#include "api/sequence_checker.h"
 #include "p2p/base/basic_packet_socket_factory.h"
 #include "rtc_base/async_packet_socket.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/ignore_wundef.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/synchronization/mutex.h"
-#include "rtc_base/synchronization/sequence_checker.h"
 #include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread_annotations.h"
-#include "rtc_base/thread_checker.h"
 #include "rtc_tools/network_tester/packet_logger.h"
 #include "rtc_tools/network_tester/packet_sender.h"
 
@@ -52,6 +50,9 @@ class TestController : public sigslot::has_slots<> {
                  const std::string& config_file_path,
                  const std::string& log_file_path);
 
+  TestController(const TestController&) = delete;
+  TestController& operator=(const TestController&) = delete;
+
   void Run();
 
   void SendConnectTo(const std::string& hostname, int port);
@@ -69,7 +70,7 @@ class TestController : public sigslot::has_slots<> {
                     size_t len,
                     const rtc::SocketAddress& remote_addr,
                     const int64_t& packet_time_us);
-  rtc::ThreadChecker test_controller_thread_checker_;
+  SequenceChecker test_controller_thread_checker_;
   SequenceChecker packet_sender_checker_;
   rtc::BasicPacketSocketFactory socket_factory_;
   const std::string config_file_path_;
@@ -81,8 +82,6 @@ class TestController : public sigslot::has_slots<> {
   std::unique_ptr<rtc::AsyncPacketSocket> udp_socket_;
   rtc::SocketAddress remote_address_;
   std::unique_ptr<PacketSender> packet_sender_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(TestController);
 };
 
 }  // namespace webrtc

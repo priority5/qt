@@ -1,39 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWaylandCompositor module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
-#include "waylandeglclientbufferintegration.h"
+#include "waylandeglclientbufferintegration_p.h"
 
 #include <QtWaylandCompositor/QWaylandCompositor>
 #include <qpa/qplatformnativeinterface.h>
+#include <QtOpenGL/QOpenGLTexture>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QOpenGLContext>
-#include <QtGui/QOpenGLTexture>
 #include <QtGui/QOffscreenSurface>
 #include <qpa/qplatformscreen.h>
 #include <QtGui/QWindow>
@@ -42,8 +16,9 @@
 
 #include <QMutex>
 #include <QMutexLocker>
+#include <QVarLengthArray>
 #include <QtCore/private/qcore_unix_p.h>
-#include <QtEglSupport/private/qeglstreamconvenience_p.h>
+#include <QtGui/private/qeglstreamconvenience_p.h>
 
 #ifndef GL_TEXTURE_EXTERNAL_OES
 #define GL_TEXTURE_EXTERNAL_OES     0x8D65
@@ -178,7 +153,7 @@ public:
     ::wl_display *wlDisplay = nullptr;
     QOffscreenSurface *offscreenSurface = nullptr;
     QOpenGLContext *localContext = nullptr;
-    QVector<QOpenGLTexture *> orphanedTextures;
+    QList<QOpenGLTexture *> orphanedTextures;
 
     PFNEGLBINDWAYLANDDISPLAYWL egl_bind_wayland_display = nullptr;
     PFNEGLUNBINDWAYLANDDISPLAYWL egl_unbind_wayland_display = nullptr;
@@ -259,7 +234,14 @@ void WaylandEglClientBufferIntegrationPrivate::initEglTexture(WaylandEglClientBu
     }
 
     for (int i = 0; i < planes; i++) {
-        const EGLint attribs[] = { EGL_WAYLAND_PLANE_WL, i, EGL_NONE };
+        EGLint attribs[5] = { EGL_WAYLAND_PLANE_WL, i, EGL_NONE };
+#ifdef EGL_EXT_protected_content
+        if (buffer->isProtected()) {
+            attribs[2] = EGL_PROTECTED_CONTENT_EXT;
+            attribs[3] = EGL_TRUE;
+            attribs[4] = EGL_NONE;
+        }
+#endif
         EGLImageKHR image = egl_create_image(egl_display,
                                              EGL_NO_CONTEXT,
                                              EGL_WAYLAND_BUFFER_WL,
@@ -450,15 +432,8 @@ void WaylandEglClientBufferIntegration::initializeHardware(struct wl_display *di
 
     if (d->egl_bind_wayland_display && d->egl_unbind_wayland_display) {
         d->display_bound = d->egl_bind_wayland_display(d->egl_display, display);
-        if (!d->display_bound) {
-            if (!ignoreBindDisplay) {
-                qCWarning(qLcWaylandCompositorHardwareIntegration)
-                        << "Failed to initialize EGL display. Could not bind Wayland display.";
-                return;
-            } else {
-                qCWarning(qLcWaylandCompositorHardwareIntegration) << "Could not bind Wayland display. Ignoring.";
-            }
-        }
+        if (!d->display_bound)
+            qCDebug(qLcWaylandCompositorHardwareIntegration) << "Wayland display already bound by other client buffer integration.";
         d->wlDisplay = display;
     }
 
@@ -468,7 +443,10 @@ void WaylandEglClientBufferIntegration::initializeHardware(struct wl_display *di
 
 QtWayland::ClientBuffer *WaylandEglClientBufferIntegration::createBufferFor(wl_resource *buffer)
 {
-    if (wl_shm_buffer_get(buffer))
+    Q_D(WaylandEglClientBufferIntegration);
+    int w = -1;
+    bool q = d->egl_query_wayland_buffer(d->egl_display, buffer, EGL_WIDTH, &w);
+    if (!q || w <= 0)
         return nullptr;
     return new WaylandEglClientBuffer(this, buffer);
 }
@@ -566,9 +544,14 @@ QOpenGLTexture *WaylandEglClientBuffer::toOpenGlTexture(int plane)
     }
 
     if (m_textureDirty) {
+        m_textureDirty = false;
         texture->bind();
         glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         p->gl_egl_image_target_texture_2d(target, d->egl_images[plane]);
+#ifdef GL_EXT_protected_textures
+        if (isProtected())
+            glTexParameteri(target, GL_TEXTURE_PROTECTED_EXT, GL_TRUE);
+#endif
     }
     return texture;
 }
@@ -581,6 +564,15 @@ void WaylandEglClientBuffer::setCommitted(QRegion &damage)
         p->handleEglstreamTexture(this, waylandBufferHandle());
     }
 }
+
+bool WaylandEglClientBuffer::isProtected()
+{
+    if (m_integration && m_buffer)
+        return m_integration->isProtected(m_buffer);
+
+    return false;
+}
+
 
 QWaylandSurface::Origin WaylandEglClientBuffer::origin() const
 {

@@ -15,12 +15,15 @@
 #include "ui/events/event.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/events/platform/scoped_event_dispatcher.h"
+#include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/vector2d.h"
+#include "ui/ozone/platform/wayland/common/wayland_object.h"
 #include "ui/ozone/platform/wayland/gpu/wayland_surface_factory.h"
 #include "ui/ozone/platform/wayland/host/wayland_data_device.h"
 #include "ui/ozone/platform/wayland/host/wayland_data_source.h"
 #include "ui/ozone/platform/wayland/host/wayland_pointer.h"
 #include "ui/ozone/platform/wayland/host/wayland_toplevel_window.h"
+#include "ui/ozone/platform/wayland/host/wayland_touch.h"
 #include "ui/ozone/platform/wayland/host/wayland_window_observer.h"
 
 namespace ui {
@@ -44,15 +47,22 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
  public:
   // Constants used to keep track of the drag controller state.
   enum class State {
-    kIdle,      // No DnD session nor drag loop running.
-    kAttached,  // DnD session ongoing but no drag loop running.
-    kDetached,  // Drag loop running. ie: blocked in a Drag() call.
-    kDropped    // Drop event was just received.
+    kIdle,       // No DnD session nor drag loop running.
+    kAttached,   // DnD session ongoing but no drag loop running.
+    kDetached,   // Drag loop running. ie: blocked in a Drag() call.
+    kDropped,    // Drop event was just received.
+    kCancelled,  // Drag cancel event was just received.
+    kAttaching,  // About to transition back to |kAttached|.
+  };
+  enum class DragSource {
+    kMouse,
+    kTouch,
   };
 
   WaylandWindowDragController(WaylandConnection* connection,
                               WaylandDataDeviceManager* device_manager,
-                              WaylandPointer::Delegate* pointer_delegate);
+                              WaylandPointer::Delegate* pointer_delegate,
+                              WaylandTouch::Delegate* touch_delegate);
   WaylandWindowDragController(const WaylandWindowDragController&) = delete;
   WaylandWindowDragController& operator=(const WaylandWindowDragController&) =
       delete;
@@ -68,7 +78,24 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
 
   State state() const { return state_; }
 
+  void OnToplevelWindowCreated(WaylandToplevelWindow* window);
+
+  // Tells if "extended drag" extension is available.
+  bool IsExtendedDragAvailable() const;
+
+  // Makes IsExtendedDragAvailable() always return true.
+  void SetExtendedDragAvailableForTesting() {
+    set_extended_drag_available_for_testing_ = true;
+  }
+
+  WaylandWindow* origin_window_for_testing() { return origin_window_; }
+
  private:
+  class ExtendedDragSource;
+
+  FRIEND_TEST_ALL_PREFIXES(WaylandWindowDragControllerTest,
+                           HandleDraggedWindowDestructionAfterMoveLoop);
+
   // WaylandDataDevice::DragDelegate:
   bool IsDragSource() const override;
   void DrawIcon() override;
@@ -94,7 +121,7 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
 
   // Handles drag/move mouse |event|, while in |kDetached| mode, forwarding it
   // as a bounds change event to the upper layer handlers.
-  void HandleMotionEvent(MouseEvent* event);
+  void HandleMotionEvent(LocatedEvent* event);
   // Handles the mouse button release (i.e: drop). Dispatches the required
   // events and resets the internal state.
   void HandleDropAndResetState();
@@ -103,14 +130,25 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
   void RunLoop();
   // Unregisters the internal event dispatcher and asks to quit the nested loop.
   void QuitLoop();
+  // Set |window| as the current dragged window and |offset| as the drag offset,
+  // which makes |window| to appear anchored to the pointer cursor, if
+  // extended-drag extension is available.
+  void SetDraggedWindow(WaylandToplevelWindow* window,
+                        const gfx::Vector2d& offset);
+  // Tells if "extended drag" extension is available, ignoring
+  // |set_extended_drag_available_for_testing_|.
+  bool IsExtendedDragAvailableInternal() const;
 
   WaylandConnection* const connection_;
   WaylandDataDeviceManager* const data_device_manager_;
   WaylandDataDevice* const data_device_;
   WaylandWindowManager* const window_manager_;
   WaylandPointer::Delegate* const pointer_delegate_;
+  WaylandTouch::Delegate* const touch_delegate_;
 
   State state_ = State::kIdle;
+  absl::optional<DragSource> drag_source_;
+
   gfx::Vector2d drag_offset_;
 
   // The last known pointer location in DIP.
@@ -118,6 +156,8 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
 
   std::unique_ptr<WaylandDataSource> data_source_;
   std::unique_ptr<WaylandDataOffer> data_offer_;
+
+  std::unique_ptr<ExtendedDragSource> extended_drag_source_;
 
   // The current toplevel window being dragged, when in detached mode.
   WaylandToplevelWindow* dragged_window_ = nullptr;
@@ -137,6 +177,14 @@ class WaylandWindowDragController : public WaylandDataDevice::DragDelegate,
 
   std::unique_ptr<ScopedEventDispatcher> nested_dispatcher_;
   base::OnceClosure quit_loop_closure_;
+
+  // Tells if the current drag event should be processed. Buggy compositors may
+  // send wl_pointer::motion events, for example, while a DND session is still
+  // in progress, which leads to issues in window dragging sessions, this flag
+  // is used to make window drag controller resistant to such scenarios.
+  bool should_process_drag_event_ = false;
+
+  bool set_extended_drag_available_for_testing_ = false;
 
   base::WeakPtrFactory<WaylandWindowDragController> weak_factory_{this};
 };

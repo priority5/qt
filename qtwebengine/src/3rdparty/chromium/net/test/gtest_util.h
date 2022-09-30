@@ -9,7 +9,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/strings/string_piece.h"
 #include "base/test/mock_log.h"
 #include "net/base/net_errors.h"
@@ -48,10 +47,13 @@ class StringPieceHasSubstrMatcher {
  public:
   explicit StringPieceHasSubstrMatcher(const std::string& substring)
       : substring_(substring) {}
+  StringPieceHasSubstrMatcher(const StringPieceHasSubstrMatcher&) = default;
+  StringPieceHasSubstrMatcher& operator=(const StringPieceHasSubstrMatcher&) =
+      default;
 
   bool MatchAndExplain(base::StringPiece s,
                        ::testing::MatchResultListener* listener) const {
-    return s.as_string().find(substring_) != std::string::npos;
+    return s.find(substring_) != std::string::npos;
   }
 
   // Describe what this matcher matches.
@@ -64,9 +66,7 @@ class StringPieceHasSubstrMatcher {
   }
 
  private:
-  const std::string substring_;
-
-  DISALLOW_ASSIGN(StringPieceHasSubstrMatcher);
+  std::string substring_;
 };
 
 // Internal implementation for the EXPECT_DFATAL and ASSERT_DFATAL

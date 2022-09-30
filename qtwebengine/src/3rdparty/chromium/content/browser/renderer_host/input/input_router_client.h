@@ -7,7 +7,6 @@
 
 #include "cc/input/touch_action.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
-#include "content/common/content_export.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
@@ -20,7 +19,7 @@ struct DidOverscrollParams;
 
 namespace content {
 
-class CONTENT_EXPORT InputRouterClient {
+class InputRouterClient {
  public:
   virtual ~InputRouterClient() {}
 
@@ -80,7 +79,6 @@ class CONTENT_EXPORT InputRouterClient {
   virtual void SetMouseCapture(bool capture) = 0;
   virtual void RequestMouseLock(
       bool from_user_gesture,
-      bool privileged,
       bool unadjusted_movement,
       blink::mojom::WidgetInputHandlerHost::RequestMouseLockCallback
           response) = 0;

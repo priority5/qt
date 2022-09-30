@@ -13,6 +13,13 @@ then
 fi
 
 version="$1"
+
+# Makes ("68" "1") from "68-1".
+readonly major_minor_version=(${version//-/ })
+
+# Just the major part of the ICU version number, e.g. "68".
+readonly major_version="${major_minor_version[0]}"
+
 repoprefix="https://github.com/unicode-org/icu/tags/release-"
 repo="${repoprefix}${version}/icu4c"
 treeroot="$(dirname "$0")/.."
@@ -34,7 +41,7 @@ do
 done
 
 echo "deleting directories we don't care about ..."
-for d in layoutex data/xml test allinone
+for d in layoutex data/xml allinone
 do
   rm -rf "${treeroot}/source/${d}"
 done
@@ -49,9 +56,9 @@ do
   git checkout -- "${treeroot}/source/data/"${line}
 done < "${treeroot}/scripts/data_files_to_preserve.txt"
 
-echo "Patching configure to work without source/{layoutex,test}  ..."
+echo "Patching configure to work without source/{layoutex}  ..."
 sed -i.orig -e '/^ac_config_files=/ s:\ layoutex/Makefile::g' \
-  -e '/^ac_config_files=/ s: test/.* samples/M: samples/M:' \
+  -e '/^ac_config_files=/ s: samples/M: samples/M:' \
   "${treeroot}/source/configure"
 rm -f "${treeroot}/source/configure.orig"
 
@@ -122,5 +129,18 @@ sed   -i \
       /source\/common/ d
    }' icu.gypi
 
+# Update the major version number registered in version.gni.
+cat << EOF > version.gni
+# Copyright 2020 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+declare_args() {
+  # Contains the major version number of the ICU library, for dependencies that
+  # need different configuration based on the library version. Currently this
+  # is only useful in Fuchsia.
+  icu_major_version_number = "${major_version}"
+}
+EOF
 
 echo "Done"

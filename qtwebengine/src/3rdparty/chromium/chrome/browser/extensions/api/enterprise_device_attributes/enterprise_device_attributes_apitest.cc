@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/constants/ash_features.h"
 #include "base/files/file_path.h"
 #include "base/values.h"
+#include "chrome/browser/ash/policy/affiliation/affiliation_mixin.h"
+#include "chrome/browser/ash/policy/affiliation/affiliation_test_helper.h"
+#include "chrome/browser/ash/policy/core/device_policy_builder.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/policy/affiliation_test_helper.h"
-#include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/extensions/api/force_installed_affiliated_extension_apitest.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
@@ -27,8 +29,10 @@ constexpr char kAnnotatedLocation[] = "annotated_location";
 constexpr char kHostname[] = "hostname";
 
 constexpr char kTestExtensionID[] = "nbiliclbejdndfpchgkbmfoppjplbdok";
-constexpr char kUpdateManifestPath[] =
-    "/extensions/api_test/enterprise_device_attributes/update_manifest.xml";
+constexpr char kExtensionPath[] =
+    "extensions/api_test/enterprise_device_attributes/";
+constexpr char kExtensionPemPath[] =
+    "extensions/api_test/enterprise_device_attributes.pem";
 
 base::Value BuildCustomArg(const std::string& expected_directory_device_id,
                            const std::string& expected_serial_number,
@@ -53,10 +57,11 @@ namespace extensions {
 
 class EnterpriseDeviceAttributesTest
     : public ForceInstalledAffiliatedExtensionApiTest,
-      public ::testing::WithParamInterface<bool> {
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {
  public:
   EnterpriseDeviceAttributesTest()
-      : ForceInstalledAffiliatedExtensionApiTest(GetParam()) {
+      : ForceInstalledAffiliatedExtensionApiTest(std::get<0>(GetParam()),
+                                                 std::get<1>(GetParam())) {
     fake_statistics_provider_.SetMachineStatistic(
         chromeos::system::kSerialNumberKeyForTest, kSerialNumber);
   }
@@ -88,17 +93,17 @@ class EnterpriseDeviceAttributesTest
 };
 
 IN_PROC_BROWSER_TEST_P(EnterpriseDeviceAttributesTest, PRE_Success) {
-  policy::AffiliationTestHelper::PreLoginUser(affiliated_account_id_);
+  policy::AffiliationTestHelper::PreLoginUser(affiliation_mixin_.account_id());
 }
 
 IN_PROC_BROWSER_TEST_P(EnterpriseDeviceAttributesTest, Success) {
-  const bool is_affiliated = GetParam();
+  const bool is_affiliated = std::get<0>(GetParam());
   EXPECT_EQ(is_affiliated, user_manager::UserManager::Get()
-                               ->FindUser(affiliated_account_id_)
+                               ->FindUser(affiliation_mixin_.account_id())
                                ->IsAffiliated());
 
   const Extension* extension =
-      ForceInstallExtension(kTestExtensionID, kUpdateManifestPath);
+      ForceInstallExtension(kExtensionPath, kExtensionPemPath);
   const GURL test_url = extension->GetResourceURL("basic.html");
 
   // Device attributes are available only for affiliated user.
@@ -117,7 +122,8 @@ IN_PROC_BROWSER_TEST_P(EnterpriseDeviceAttributesTest, Success) {
 // Both cases of affiliated and non-affiliated users are tested.
 INSTANTIATE_TEST_SUITE_P(AffiliationCheck,
                          EnterpriseDeviceAttributesTest,
-                         ::testing::Bool());
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
 
 // Ensure that extensions that are not pre-installed by policy throw an install
 // warning if they request the enterprise.deviceAttributes permission in the
@@ -126,9 +132,9 @@ INSTANTIATE_TEST_SUITE_P(AffiliationCheck,
 IN_PROC_BROWSER_TEST_F(
     ExtensionApiTest,
     EnterpriseDeviceAttributesIsRestrictedToPolicyExtension) {
-  ASSERT_TRUE(RunExtensionSubtest("enterprise_device_attributes",
-                                  "api_not_available.html",
-                                  kFlagIgnoreManifestWarnings, kFlagNone));
+  ASSERT_TRUE(RunExtensionTest("enterprise_device_attributes",
+                               {.page_url = "api_not_available.html"},
+                               {.ignore_manifest_warnings = true}));
 
   base::FilePath extension_path =
       test_data_dir_.AppendASCII("enterprise_device_attributes");

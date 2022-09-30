@@ -17,7 +17,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/win/windows_version.h"
@@ -140,7 +140,7 @@ void AudioManagerWin::InitializeOnAudioThread() {
   output_device_listener_ = std::make_unique<AudioDeviceListenerWin>(
       BindToCurrentLoop(base::BindRepeating(
           &AudioManagerWin::NotifyAllOutputDeviceChangeListeners,
-          base::Unretained(this))));
+          base::Unretained(this)), FROM_HERE));
 }
 
 void AudioManagerWin::GetAudioDeviceNamesImpl(bool input,

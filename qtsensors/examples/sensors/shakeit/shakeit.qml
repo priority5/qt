@@ -1,76 +1,16 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtSensors module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:BSD$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** BSD License Usage
-** Alternatively, you may use this file under the terms of the BSD license
-** as follows:
-**
-** "Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions are
-** met:
-**   * Redistributions of source code must retain the above copyright
-**     notice, this list of conditions and the following disclaimer.
-**   * Redistributions in binary form must reproduce the above copyright
-**     notice, this list of conditions and the following disclaimer in
-**     the documentation and/or other materials provided with the
-**     distribution.
-**   * Neither the name of The Qt Company Ltd nor the names of its
-**     contributors may be used to endorse or promote products derived
-**     from this software without specific prior written permission.
-**
-**
-** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-** "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-** LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-** A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-** OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-** SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-** LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-** OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
-import QtQuick 2.0
+import QtQuick
 //! [0]
-import QtSensors 5.0
+import QtSensors
 //! [0]
-import QtMultimedia 5.0
-
-
 
 Rectangle {
     id: window
-    width: 320
-    height: 480
+    anchors.fill: parent
 
     state: "default"
-
-    Audio {
-        id :phone
-        source: "audio/phone.wav" //mono
-    }
-    Audio {
-        id :loopy2a_mono
-        source: "audio/loopy2a_mono.wav" //mono
-    }
 
     Text {
         id: label
@@ -105,7 +45,6 @@ Rectangle {
         source: "content/triangle3.png"
         x: parent.width / 2 + (triangle1.width / 2)
         y: parent.height / 2 + (triangle3.height / 2);
-
         Behavior on x { SmoothedAnimation { velocity: 200 } }
         Behavior on y { SmoothedAnimation { velocity: 200 } }
     }
@@ -121,21 +60,26 @@ Rectangle {
             name: "default"
             PropertyChanges { target: triangle1; rotation: 0;
                 x: parent.width / 2 - (triangle1.width / 2)
-                y: parent.height / 2 - (triangle1.height);
+                y: parent.height / 2 - (triangle1.height)
+                scale: 1;
+
             }
             PropertyChanges { target: triangle2; rotation: 0;
                 x: parent.width / 2 - (triangle1.width + triangle2.width / 2)
                 y: parent.height / 2 + (triangle2.height / 2);
+                scale: 1;
             }
             PropertyChanges { target: triangle3; rotation: 0;
                 x: parent.width / 2 + (triangle1.width / 2)
                 y: parent.height / 2 + (triangle3.height / 2);
+                scale: 1;
             }
         },
         State {
             name: "whipped"
             PropertyChanges { target: triangle1; rotation: 0; x:0; }
-            PropertyChanges { target: triangle2; rotation: 0; x:0; y:triangle1.x + triangle1.height; }
+            PropertyChanges { target: triangle2; rotation: 0; x:0;
+                y: triangle1.x + triangle1.height; }
             PropertyChanges { target: triangle3; rotation: 0; x:0;
                 y: triangle2.y + triangle2.height; }
         },
@@ -218,6 +162,24 @@ Rectangle {
             PropertyChanges { target: triangle2; rotation: 120;
                 transformOrigin: Item.BottomLeft
             }
+        },
+        State {
+            name: "turnedover"
+            PropertyChanges { target: triangle1; rotation: 180;
+            }
+            PropertyChanges { target: triangle2; rotation: 180;
+            }
+            PropertyChanges { target: triangle3; rotation: 180;
+            }
+        },
+        State {
+            name: "pickedup"
+            PropertyChanges { target: triangle1; scale: 1.5;
+            }
+            PropertyChanges { target: triangle2; scale: 1.5;
+            }
+            PropertyChanges { target: triangle3; scale: 1.5;
+            }
         }
     ]
 
@@ -226,7 +188,8 @@ Rectangle {
         Transition {
 
         ParallelAnimation {
-            NumberAnimation { properties: "x,y"; easing.type: Easing.OutBounce;duration: 2000; }
+            NumberAnimation { properties: "x,y"; easing.type: Easing.OutBounce;
+                duration: 2000; }
             RotationAnimation { id: t1Rotation; target: triangle1; duration: 1000;
                 direction: RotationAnimation.Clockwise }
             RotationAnimation { id: t2Rotation; target: triangle2; duration: 2000;
@@ -246,15 +209,46 @@ Rectangle {
             SequentialAnimation {
                 PropertyAction { target: triangle1; property: "transformOrigin" }
                 PropertyAction { target: triangle2; property: "transformOrigin" }
-                NumberAnimation {  target: triangle1; properties: "rotation"; easing.type: Easing.OutBounce;duration: 500; }
-                NumberAnimation {  target: triangle2; properties: "rotation"; easing.type: Easing.OutBounce;duration: 1500; }
+                NumberAnimation {  target: triangle1; properties: "rotation";
+                    easing.type: Easing.OutBounce;duration: 500; }
+                NumberAnimation {  target: triangle2; properties: "rotation";
+                    easing.type: Easing.OutBounce;duration: 1500; }
             }
         }, Transition {
             from: "doubletapped"
             SequentialAnimation {
-                NumberAnimation { properties: "rotation"; easing.type: Easing.OutBounce;duration: 1500; }
+                NumberAnimation { properties: "rotation";
+                    easing.type: Easing.OutBounce;duration: 1500; }
                 PropertyAction { target: triangle1; property: "transformOrigin" }
                 PropertyAction { target: triangle2; property: "transformOrigin" }
+            }
+        }, Transition {
+            to: "turnedover"
+            SequentialAnimation {
+                NumberAnimation { properties: "rotation";
+                    easing.type: Easing.OutBounce;duration: 750; }
+                PropertyAction { target: triangle1; property: "transformOrigin" }
+                PropertyAction { target: triangle2; property: "transformOrigin" }
+            }
+        }, Transition {
+            from: "turnedover"
+            SequentialAnimation {
+                NumberAnimation { properties: "rotation";
+                    easing.type: Easing.OutBounce;duration: 750; }
+                PropertyAction { target: triangle1; property: "transformOrigin" }
+                PropertyAction { target: triangle2; property: "transformOrigin" }
+            }
+        }, Transition {
+            to: "pickedup"
+            SequentialAnimation {
+                NumberAnimation { properties: "scale";
+                easing.type: Easing.OutBounce;duration: 750; }
+            }
+        }, Transition {
+            from: "pickedup"
+            SequentialAnimation {
+                NumberAnimation { properties: "scale";
+                easing.type: Easing.OutBounce;duration: 750; }
             }
         }
     ]
@@ -268,11 +262,13 @@ Rectangle {
 //! [3]
 //! [2]
         gestures : ["QtSensors.shake", "QtSensors.whip", "QtSensors.twist", "QtSensors.cover",
-            "QtSensors.hover", "QtSensors.turnover", "QtSensors.pickup", "QtSensors.slam" , "QtSensors.doubletap"]
+            "QtSensors.hover", "QtSensors.turnover", "QtSensors.pickup", "QtSensors.slam",
+            "QtSensors.doubletap"]
 //! [2]
 //! [4]
         onDetected:{
             console.debug(gesture)
+
             label.text = gesture
 
             if (gesture == "shake") {
@@ -300,13 +296,11 @@ Rectangle {
                 timer.start()
             }
             if (gesture == "turnover") {
-                window.state = "default"
-                loopy2a_mono.play();
+                window.state == "turnedover" ? window.state = "default" : window.state = "hovered"
                 timer.start()
             }
             if (gesture == "pickup") {
-                window.state = "default"
-                phone.play()
+                window.state == "pickedup" ? window.state = "default" : window.state = "pickedup"
                 timer.start()
             }
             if (gesture == "slam") {

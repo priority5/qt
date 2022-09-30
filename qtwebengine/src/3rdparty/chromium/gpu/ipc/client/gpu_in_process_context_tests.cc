@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/viz/test/test_gpu_memory_buffer_manager.h"
@@ -41,7 +42,9 @@ class ContextTestBase : public testing::Test {
         /*surface=*/nullptr, /*offscreen=*/true,
         /*window=*/gpu::kNullSurfaceHandle, attributes,
         gpu::SharedMemoryLimits(), gpu_memory_buffer_manager_.get(),
-        /*image_factory=*/nullptr, base::ThreadTaskRunnerHandle::Get());
+        /*image_factory=*/nullptr, /*gpu_task_runner_helper=*/nullptr,
+        /*display_compositor_memory_and_task_contoller_on_gpu=*/nullptr,
+        base::ThreadTaskRunnerHandle::Get());
     DCHECK_EQ(result, gpu::ContextResult::kSuccess);
     return context;
   }
@@ -60,8 +63,8 @@ class ContextTestBase : public testing::Test {
   }
 
  protected:
-  gpu::gles2::GLES2Interface* gl_;
-  gpu::ContextSupport* context_support_;
+  raw_ptr<gpu::gles2::GLES2Interface> gl_;
+  raw_ptr<gpu::ContextSupport> context_support_;
   std::unique_ptr<gpu::GpuMemoryBufferManager> gpu_memory_buffer_manager_;
 
  private:
@@ -85,7 +88,8 @@ TEST_F(GLInProcessCommandBufferTest, CreateImage) {
   // Calling CreateImageCHROMIUM() should allocate an image id starting at 1.
   std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer1 =
       gpu_memory_buffer_manager_->CreateGpuMemoryBuffer(
-          kBufferSize, kBufferFormat, kBufferUsage, gpu::kNullSurfaceHandle);
+          kBufferSize, kBufferFormat, kBufferUsage, gpu::kNullSurfaceHandle,
+          nullptr);
   GLuint image_id1 = gl_->CreateImageCHROMIUM(
       gpu_memory_buffer1->AsClientBuffer(), kBufferSize.width(),
       kBufferSize.height(), GL_RGBA);
@@ -99,7 +103,8 @@ TEST_F(GLInProcessCommandBufferTest, CreateImage) {
       CreateGLInProcessContext();
   std::unique_ptr<gfx::GpuMemoryBuffer> buffer2 =
       gpu_memory_buffer_manager_->CreateGpuMemoryBuffer(
-          kBufferSize, kBufferFormat, kBufferUsage, gpu::kNullSurfaceHandle);
+          kBufferSize, kBufferFormat, kBufferUsage, gpu::kNullSurfaceHandle,
+          nullptr);
   GLuint image_id2 = context2->GetImplementation()->CreateImageCHROMIUM(
       buffer2->AsClientBuffer(), kBufferSize.width(), kBufferSize.height(),
       GL_RGBA);

@@ -1,39 +1,20 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 Thibaut Cuvelier
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*
-  xmlgenerator.cpp
-*/
+// Copyright (C) 2019 Thibaut Cuvelier
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "xmlgenerator.h"
+
+#include "enumnode.h"
+#include "examplenode.h"
+#include "functionnode.h"
 #include "qdocdatabase.h"
+#include "typedefnode.h"
 
 QT_BEGIN_NAMESPACE
+
+const QRegularExpression XmlGenerator::m_funcLeftParen(QStringLiteral("^\\S+(\\(.*\\))$"));
+
+XmlGenerator::XmlGenerator(FileResolver& file_resolver) : Generator(file_resolver) {}
 
 /*!
   Do not display \brief for QML/JS types, document and collection nodes
@@ -71,9 +52,10 @@ int XmlGenerator::hOffset(const Node *node)
     case Node::Module:
         return 2;
     case Node::QmlModule:
-    case Node::QmlBasicType:
+    case Node::QmlValueType:
     case Node::QmlType:
     case Node::Page:
+    case Node::Group:
         return 1;
     case Node::Enum:
     case Node::TypeAlias:
@@ -146,16 +128,16 @@ void XmlGenerator::setImageFileName(const Node *relative, const QString &fileNam
   returns the content of the list entry \a atom (first member of the pair).
   It also returns the number of items to skip ahead (second member of the pair).
  */
-QPair<QString, int> XmlGenerator::getAtomListValue(const Atom *atom)
+std::pair<QString, int> XmlGenerator::getAtomListValue(const Atom *atom)
 {
     const Atom *lookAhead = atom->next();
     if (!lookAhead)
-        return QPair<QString, int>(QString(), 1);
+        return std::pair<QString, int>(QString(), 1);
 
     QString t = lookAhead->string();
     lookAhead = lookAhead->next();
     if (!lookAhead || lookAhead->type() != Atom::ListTagRight)
-        return QPair<QString, int>(QString(), 1);
+        return std::pair<QString, int>(QString(), 1);
 
     lookAhead = lookAhead->next();
     int skipAhead;
@@ -170,7 +152,7 @@ QPair<QString, int> XmlGenerator::getAtomListValue(const Atom *atom)
     } else {
         skipAhead = 1;
     }
-    return QPair<QString, int>(t, skipAhead);
+    return std::pair<QString, int>(t, skipAhead);
 }
 
 /*!
@@ -179,7 +161,7 @@ QPair<QString, int> XmlGenerator::getAtomListValue(const Atom *atom)
   the attribute for this table (either "generic" or
   "borderless").
  */
-QPair<QString, QString> XmlGenerator::getTableWidthAttr(const Atom *atom)
+std::pair<QString, QString> XmlGenerator::getTableWidthAttr(const Atom *atom)
 {
     QString p0, p1;
     QString attr = "generic";
@@ -201,7 +183,21 @@ QPair<QString, QString> XmlGenerator::getTableWidthAttr(const Atom *atom)
         else if (p1.contains(QLatin1Char('%')))
             width = p1;
     }
-    return QPair<QString, QString>(width, attr);
+
+    // Many times, in the documentation, there is a space before the % sign:
+    // this breaks the parsing logic above.
+    if (width == QLatin1String("%")) {
+        // The percentage is typically stored in p0, parse it as an int.
+        bool ok = false;
+        int widthPercentage = p0.toInt(&ok);
+        if (ok) {
+            width = QString::number(widthPercentage) + "%";
+        } else {
+            width = {};
+        }
+    }
+
+    return {width, attr};
 }
 
 /*!
@@ -211,9 +207,9 @@ QPair<QString, QString> XmlGenerator::getTableWidthAttr(const Atom *atom)
   To ensure unicity throughout the document, this method
   uses the \a refMap cache.
  */
-QString XmlGenerator::registerRef(const QString &ref)
+QString XmlGenerator::registerRef(const QString &ref, bool xmlCompliant)
 {
-    QString clean = Generator::cleanRef(ref);
+    QString clean = Generator::cleanRef(ref, xmlCompliant);
 
     for (;;) {
         QString &prevRef = refMap[clean.toLower()];
@@ -240,15 +236,14 @@ QString XmlGenerator::refForNode(const Node *node)
     case Node::Enum:
         ref = node->name() + "-enum";
         break;
-    case Node::TypeAlias:
-        ref = node->name() + "-alias";
-        break;
     case Node::Typedef: {
-        const auto tdn = static_cast<const TypedefNode *>(node);
-        if (tdn->associatedEnum())
-            return refForNode(tdn->associatedEnum());
+        const auto *tdf = static_cast<const TypedefNode *>(node);
+        if (tdf->associatedEnum())
+            return refForNode(tdf->associatedEnum());
+    } Q_FALLTHROUGH();
+    case Node::TypeAlias:
         ref = node->name() + "-typedef";
-    } break;
+        break;
     case Node::Function: {
         const auto fn = static_cast<const FunctionNode *>(node);
         switch (fn->metaness()) {
@@ -277,6 +272,10 @@ QString XmlGenerator::refForNode(const Node *node)
             break;
         }
     } break;
+    case Node::SharedComment: {
+        if (!node->isPropertyGroup())
+            break;
+    } Q_FALLTHROUGH();
     case Node::JsProperty:
     case Node::QmlProperty:
         if (node->isAttached())
@@ -289,10 +288,6 @@ QString XmlGenerator::refForNode(const Node *node)
         break;
     case Node::Variable:
         ref = node->name() + "-var";
-        break;
-    case Node::SharedComment:
-        if (node->isPropertyGroup())
-            ref = node->name() + "-prop";
         break;
     default:
         break;
@@ -312,7 +307,7 @@ QString XmlGenerator::linkForNode(const Node *node, const Node *relative)
 {
     if (node == nullptr)
         return QString();
-    if (!node->url().isEmpty())
+    if (!node->url().isNull())
         return node->url();
     if (fileBase(node).isEmpty())
         return QString();
@@ -320,14 +315,15 @@ QString XmlGenerator::linkForNode(const Node *node, const Node *relative)
         return QString();
 
     QString fn = fileName(node);
-    if (node && node->parent() && (node->parent()->isQmlType() || node->parent()->isJsType())
+    if (node->parent() && (node->parent()->isQmlType() || node->parent()->isJsType())
         && node->parent()->isAbstract()) {
         if (Generator::qmlTypeContext()) {
             if (Generator::qmlTypeContext()->inherits(node->parent())) {
                 fn = fileName(Generator::qmlTypeContext());
-            } else if (node->parent()->isInternal()) {
-                node->doc().location().warning(tr("Cannot link to property in internal type '%1'")
-                                                       .arg(node->parent()->name()));
+            } else if (node->parent()->isInternal() && !noLinkErrors()) {
+                node->doc().location().warning(
+                        QStringLiteral("Cannot link to property in internal type '%1'")
+                                .arg(node->parent()->name()));
                 return QString();
             }
         }
@@ -350,7 +346,7 @@ QString XmlGenerator::linkForNode(const Node *node, const Node *relative)
       the link must go up to the parent directory and then
       back down into the other subdirectory.
      */
-    if (node && relative && (node != relative)) {
+    if (relative && (node != relative)) {
         if (useOutputSubdirs() && !node->isExternalPage()
             && node->outputSubdirectory() != relative->outputSubdirectory()) {
             if (link.startsWith(QString(node->outputSubdirectory() + QLatin1Char('/')))) {
@@ -378,6 +374,10 @@ QString XmlGenerator::linkForNode(const Node *node, const Node *relative)
 QString XmlGenerator::getLink(const Atom *atom, const Node *relative, const Node **node)
 {
     const QString &t = atom->string();
+
+    if (t.isEmpty())
+        return t;
+
     if (t.at(0) == QChar('h')) {
         if (t.startsWith("http:") || t.startsWith("https:"))
             return t;
@@ -394,8 +394,7 @@ QString XmlGenerator::getLink(const Atom *atom, const Node *relative, const Node
 /*!
   This function is called for autolinks, i.e. for words that
   are not marked with the qdoc link command that qdoc has
-  reason to believe should be links. For links marked with
-  the qdoc link command, the getLink() function is called.
+  reason to believe should be links.
 
   It returns the string for a link found by using the data
   in the \a atom to search the database. It also sets \a node
@@ -403,19 +402,23 @@ QString XmlGenerator::getLink(const Atom *atom, const Node *relative, const Node
   to the node holding the qdoc comment where the link command
   was found.
  */
-QString XmlGenerator::getAutoLink(const Atom *atom, const Node *relative, const Node **node)
+QString XmlGenerator::getAutoLink(const Atom *atom, const Node *relative, const Node **node,
+                                  Node::Genus genus)
 {
     QString ref;
 
-    *node = qdb_->findNodeForAtom(atom, relative, ref);
+    *node = m_qdb->findNodeForAtom(atom, relative, ref, genus);
     if (!(*node))
         return QString();
 
     QString link = (*node)->url();
-    if (link.isEmpty())
+    if (link.isNull()) {
         link = linkForNode(*node, relative);
+    } else if (link.isEmpty()) {
+        return link; // Explicit empty url (node is ignored as a link target)
+    }
     if (!ref.isEmpty()) {
-        int hashtag = link.lastIndexOf(QChar('#'));
+        qsizetype hashtag = link.lastIndexOf(QChar('#'));
         if (hashtag != -1)
             link.truncate(hashtag);
         link += QLatin1Char('#') + ref;
@@ -423,9 +426,9 @@ QString XmlGenerator::getAutoLink(const Atom *atom, const Node *relative, const 
     return link;
 }
 
-const QPair<QString, QString> XmlGenerator::anchorForNode(const Node *node)
+std::pair<QString, QString> XmlGenerator::anchorForNode(const Node *node)
 {
-    QPair<QString, QString> anchorPair;
+    std::pair<QString, QString> anchorPair;
 
     anchorPair.first = Generator::fileName(node);
     if (node->isTextPageNode())

@@ -10,10 +10,12 @@ import android.os.SystemClock;
 import org.chromium.base.ContextUtils;
 import org.chromium.components.external_intents.AuthenticatorNavigationInterceptor;
 import org.chromium.components.external_intents.ExternalNavigationHandler;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingAsyncActionType;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResultType;
 import org.chromium.components.external_intents.InterceptNavigationDelegateClient;
 import org.chromium.components.external_intents.InterceptNavigationDelegateImpl;
 import org.chromium.components.external_intents.RedirectHandler;
-import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
@@ -104,6 +106,16 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
     }
 
     @Override
+    public boolean areIntentLaunchesAllowedInHiddenTabsForNavigation(
+            NavigationHandle navigationHandle) {
+        NavigationImpl navigation = mTab.getNavigationControllerImpl().getNavigationImplFromId(
+                navigationHandle.getNavigationId());
+        if (navigation == null) return false;
+
+        return navigation.areIntentLaunchesAllowedInBackground();
+    }
+
+    @Override
     public Activity getActivity() {
         return ContextUtils.activityFromContext(mTab.getBrowser().getContext());
     }
@@ -129,17 +141,40 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
     }
 
     @Override
-    public void onNavigationStarted(NavigationParams params) {
-        if (params.hasUserGesture || params.hasUserGestureCarryover) {
+    public void onNavigationStarted(NavigationHandle navigationHandle) {
+        if (navigationHandle.hasUserGesture()) {
             mLastNavigationWithUserGestureTime = SystemClock.elapsedRealtime();
         }
     }
 
-    static void closeTab(TabImpl tab) {
-        // Prior to 84 the client was not equipped to handle the case of WebLayer initiating the
-        // last tab being closed, so we simply short-circuit out here in that case.
-        if (WebLayerFactoryImpl.getClientMajorVersion() < 84) return;
+    @Override
+    public void onDecisionReachedForNavigation(
+            NavigationHandle navigationHandle, OverrideUrlLoadingResult overrideUrlLoadingResult) {
+        NavigationImpl navigation = mTab.getNavigationControllerImpl().getNavigationImplFromId(
+                navigationHandle.getNavigationId());
 
+        // As the navigation is still ongoing at this point there should be a NavigationImpl
+        // instance for it.
+        assert navigation != null;
+
+        switch (overrideUrlLoadingResult.getResultType()) {
+            case OverrideUrlLoadingResultType.OVERRIDE_WITH_EXTERNAL_INTENT:
+                navigation.setIntentLaunched();
+                break;
+            case OverrideUrlLoadingResultType.OVERRIDE_WITH_ASYNC_ACTION:
+                if (overrideUrlLoadingResult.getAsyncActionType()
+                        == OverrideUrlLoadingAsyncActionType.UI_GATING_INTENT_LAUNCH) {
+                    navigation.setIsUserDecidingIntentLaunch();
+                }
+                break;
+            case OverrideUrlLoadingResultType.OVERRIDE_WITH_CLOBBERING_TAB:
+            case OverrideUrlLoadingResultType.NO_OVERRIDE:
+            default:
+                break;
+        }
+    }
+
+    static void closeTab(TabImpl tab) {
         tab.getBrowser().destroyTab(tab);
     }
 }

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qqmllocale_p.h"
 #include "qqmlengine_p.h"
@@ -314,7 +278,7 @@ ReturnedValue QQmlDateExtension::method_fromLocaleDateString(const QV4::Function
             QLocale locale;
             QString dateString = s->toQString();
             QDate date = locale.toDate(dateString);
-            RETURN_RESULT(engine->newDateObject(date.startOfDay()));
+            RETURN_RESULT(engine->newDateObject(date.startOfDay(Qt::UTC)));
         }
     }
 
@@ -341,7 +305,7 @@ ReturnedValue QQmlDateExtension::method_fromLocaleDateString(const QV4::Function
         dt = r->d()->locale->toDate(dateString, enumFormat);
     }
 
-    RETURN_RESULT(engine->newDateObject(dt.startOfDay()));
+    RETURN_RESULT(engine->newDateObject(dt.startOfDay(Qt::UTC)));
 }
 
 ReturnedValue QQmlDateExtension::method_timeZoneUpdated(const QV4::FunctionObject *b, const QV4::Value *, const QV4::Value *, int argc)
@@ -493,6 +457,41 @@ ReturnedValue QQmlLocaleData::method_set_numberOptions(const QV4::FunctionObject
     int const numberOptions = argc ? int(argv[0].toNumber()) : QLocale::DefaultNumberOptions;
     locale->setNumberOptions(QLocale::NumberOptions {numberOptions});
     return Encode::undefined();
+}
+
+ReturnedValue QQmlLocaleData::method_get_formattedDataSize(const QV4::FunctionObject *b, const QV4::Value *thisObject, const QV4::Value *argv, int argc)
+{
+    QV4::Scope scope(b);
+    const QLocale *locale = getThisLocale(scope, thisObject);
+    if (!locale)
+        return Encode::undefined();
+
+    if (argc < 1 || argc > 3) {
+        THROW_ERROR(QString::fromLatin1(
+            "Locale: formattedDataSize(): Expected 1-3 arguments, but received %1").arg(argc).toLatin1());
+    }
+
+    const qint64 bytes = static_cast<qint64>(argv[0].toInteger());
+    if (argc == 1)
+        RETURN_RESULT(scope.engine->newString(locale->formattedDataSize(bytes)));
+
+    int precision = 0;
+    if (argc >= 2) {
+        if (!argv[1].isInteger())
+            THROW_ERROR("Locale: formattedDataSize(): Invalid argument ('precision' must be an int)");
+
+        precision = argv[1].toInt32();
+        if (argc == 2)
+            RETURN_RESULT(scope.engine->newString(locale->formattedDataSize(bytes, precision)));
+    }
+
+    // argc >= 3
+    if (!argv[2].isNumber())
+        THROW_ERROR("Locale: formattedDataSize(): Invalid argument ('format' must be DataSizeFormat)");
+
+    const quint32 intFormat = argv[2].toUInt32();
+    const auto format = QLocale::DataSizeFormats(intFormat);
+    RETURN_RESULT(scope.engine->newString(locale->formattedDataSize(bytes, precision, format)));
 }
 
 ReturnedValue QQmlLocaleData::method_get_measurementSystem(const QV4::FunctionObject *b, const QV4::Value *thisObject, const QV4::Value *, int)
@@ -668,7 +667,8 @@ ReturnedValue QQmlLocaleData::method_get_ ## VARIABLE (const QV4::FunctionObject
 
 LOCALE_STRING_PROPERTY(name)
 LOCALE_STRING_PROPERTY(nativeLanguageName)
-LOCALE_STRING_PROPERTY(nativeCountryName)
+QT_IGNORE_DEPRECATIONS(LOCALE_STRING_PROPERTY(nativeCountryName))
+LOCALE_STRING_PROPERTY(nativeTerritoryName)
 LOCALE_STRING_PROPERTY(decimalPoint)
 LOCALE_STRING_PROPERTY(groupSeparator)
 LOCALE_STRING_PROPERTY(percent)
@@ -701,6 +701,7 @@ QV4LocaleDataDeletable::QV4LocaleDataDeletable(QV4::ExecutionEngine *engine)
     o->defineDefaultProperty(QStringLiteral("monthName"), QQmlLocaleData::method_monthName, 0);
     o->defineDefaultProperty(QStringLiteral("currencySymbol"), QQmlLocaleData::method_currencySymbol, 0);
     o->defineDefaultProperty(QStringLiteral("dateTimeFormat"), QQmlLocaleData::method_dateTimeFormat, 0);
+    o->defineDefaultProperty(QStringLiteral("formattedDataSize"), QQmlLocaleData::method_get_formattedDataSize, 0);
     o->defineAccessorProperty(QStringLiteral("name"), QQmlLocaleData::method_get_name, nullptr);
     o->defineAccessorProperty(QStringLiteral("positiveSign"), QQmlLocaleData::method_get_positiveSign, nullptr);
     o->defineAccessorProperty(QStringLiteral("uiLanguages"), QQmlLocaleData::method_get_uiLanguages, nullptr);
@@ -714,6 +715,7 @@ QV4LocaleDataDeletable::QV4LocaleDataDeletable(QV4::ExecutionEngine *engine)
     o->defineAccessorProperty(QStringLiteral("decimalPoint"), QQmlLocaleData::method_get_decimalPoint, nullptr);
     o->defineAccessorProperty(QStringLiteral("nativeLanguageName"), QQmlLocaleData::method_get_nativeLanguageName, nullptr);
     o->defineAccessorProperty(QStringLiteral("nativeCountryName"), QQmlLocaleData::method_get_nativeCountryName, nullptr);
+    o->defineAccessorProperty(QStringLiteral("nativeTerritoryName"), QQmlLocaleData::method_get_nativeTerritoryName, nullptr);
     o->defineAccessorProperty(QStringLiteral("zeroDigit"), QQmlLocaleData::method_get_zeroDigit, nullptr);
     o->defineAccessorProperty(QStringLiteral("amText"), QQmlLocaleData::method_get_amText, nullptr);
     o->defineAccessorProperty(QStringLiteral("measurementSystem"), QQmlLocaleData::method_get_measurementSystem, nullptr);
@@ -731,7 +733,7 @@ V4_DEFINE_EXTENSION(QV4LocaleDataDeletable, localeV4Data);
 
 /*!
     \qmltype Locale
-    \instantiates QQmlLocale
+    //! \instantiates QQmlLocale
     \inqmlmodule QtQml
     \brief Provides locale specific properties and formatted data.
 
@@ -823,19 +825,11 @@ V4_DEFINE_EXTENSION(QV4LocaleDataDeletable, localeV4Data);
     \sa Date, Number
 */
 
-QQmlLocale::QQmlLocale()
-{
-}
-
-QQmlLocale::~QQmlLocale()
-{
-}
-
 QV4::ReturnedValue QQmlLocale::locale(ExecutionEngine *engine, const QString &localeName)
 {
     QLocale qlocale;
     if (!localeName.isEmpty())
-        qlocale = localeName;
+        qlocale = QLocale(localeName);
     return wrap(engine, qlocale);
 }
 
@@ -956,6 +950,20 @@ ReturnedValue QQmlLocale::method_localeCompare(const QV4::FunctionObject *b, con
     \a type specifies the FormatType to return.
 
     \sa Date
+*/
+
+/*!
+    \qmlmethod string QtQml::Locale::formattedDataSize(int bytes, int precision, DataSizeFormat format)
+    \since 6.2
+
+    Converts a size in \a bytes to a human-readable localized string, comprising a
+    number and a quantified unit.
+
+    The \a precision and \a format arguments are optional.
+
+    For more information, see \l QLocale::formattedDataSize().
+
+    \sa QLocale::DataSizeFormats
 */
 
 /*!
@@ -1093,8 +1101,18 @@ ReturnedValue QQmlLocale::method_localeCompare(const QV4::FunctionObject *b, con
 
 /*!
     \qmlproperty string QtQml::Locale::nativeCountryName
+    \deprecated [6.4] Use nativeTerritoryName instead.
 
     Holds a native name of the country for the locale. For example
+    "España" for Spanish/Spain locale.
+
+    \sa nativeLanguageName
+*/
+
+/*!
+    \qmlproperty string QtQml::Locale::nativeTerritoryName
+
+    Holds a native name of the territory for the locale. For example
     "España" for Spanish/Spain locale.
 
     \sa nativeLanguageName

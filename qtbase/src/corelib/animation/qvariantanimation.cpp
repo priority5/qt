@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qvariantanimation.h"
 #include "qvariantanimation_p.h"
@@ -190,14 +154,15 @@ QVariantAnimationPrivate::QVariantAnimationPrivate() : duration(250), interpolat
 
 void QVariantAnimationPrivate::convertValues(int t)
 {
+    auto type = QMetaType(t);
     //this ensures that all the keyValues are of type t
     for (int i = 0; i < keyValues.count(); ++i) {
         QVariantAnimation::KeyValue &pair = keyValues[i];
-        pair.second.convert(t);
+        pair.second.convert(type);
     }
     //we also need update to the current interval if needed
-    currentInterval.start.second.convert(t);
-    currentInterval.end.second.convert(t);
+    currentInterval.start.second.convert(type);
+    currentInterval.end.second.convert(type);
 
     //... and the interpolator
     updateInterpolator();
@@ -229,7 +194,8 @@ void QVariantAnimationPrivate::recalculateCurrentInterval(bool force/*=false*/)
         return;
 
     const qreal endProgress = (direction == QAbstractAnimation::Forward) ? qreal(1) : qreal(0);
-    const qreal progress = easing.valueForProgress(((duration == 0) ? endProgress : qreal(currentTime) / qreal(duration)));
+    const qreal progress = easing.value().valueForProgress(
+            duration == 0 ? endProgress : qreal(currentTime) / qreal(duration));
 
     //0 and 1 are still the boundaries
     if (force || (currentInterval.start.first > 0 && progress < currentInterval.start.first)
@@ -276,14 +242,16 @@ void QVariantAnimationPrivate::setCurrentValueForProgress(const qreal progress)
 
     const qreal startProgress = currentInterval.start.first;
     const qreal endProgress = currentInterval.end.first;
-    const qreal localProgress = (progress - startProgress) / (endProgress - startProgress);
+    const qreal localProgress =
+            qIsNull(progress - startProgress) ? 0.0 // avoid 0/0 below
+            /* else */                        : (progress - startProgress) / (endProgress - startProgress);
 
     QVariant ret = q->interpolated(currentInterval.start.second,
                                    currentInterval.end.second,
                                    localProgress);
     qSwap(currentValue, ret);
     q->updateCurrentValue(currentValue);
-    static QBasicAtomicInt changedSignalIndex = Q_BASIC_ATOMIC_INITIALIZER(0);
+    Q_CONSTINIT static QBasicAtomicInt changedSignalIndex = Q_BASIC_ATOMIC_INITIALIZER(0);
     if (!changedSignalIndex.loadRelaxed()) {
         //we keep the mask so that we emit valueChanged only when needed (for performance reasons)
         changedSignalIndex.testAndSetRelaxed(0, signalIndex("valueChanged(QVariant)"));
@@ -385,13 +353,22 @@ QEasingCurve QVariantAnimation::easingCurve() const
 void QVariantAnimation::setEasingCurve(const QEasingCurve &easing)
 {
     Q_D(QVariantAnimation);
+    const bool valueChanged = easing != d->easing;
     d->easing = easing;
     d->recalculateCurrentInterval();
+    if (valueChanged)
+        d->easing.notify();
 }
 
-typedef QVector<QVariantAnimation::Interpolator> QInterpolatorVector;
+QBindable<QEasingCurve> QVariantAnimation::bindableEasingCurve()
+{
+    Q_D(QVariantAnimation);
+    return &d->easing;
+}
+
+typedef QList<QVariantAnimation::Interpolator> QInterpolatorVector;
 Q_GLOBAL_STATIC(QInterpolatorVector, registeredInterpolators)
-static QBasicMutex registeredInterpolatorsMutex;
+Q_CONSTINIT static QBasicMutex registeredInterpolatorsMutex;
 
 /*!
     \fn template <typename T> void qRegisterAnimationInterpolator(QVariant (*func)(const T &from, const T &to, qreal progress))
@@ -428,8 +405,8 @@ void QVariantAnimation::registerInterpolator(QVariantAnimation::Interpolator fun
     // to continue causes the app to crash on exit with a SEGV
     if (interpolators) {
         const auto locker = qt_scoped_lock(registeredInterpolatorsMutex);
-        if (int(interpolationType) >= interpolators->count())
-            interpolators->resize(int(interpolationType) + 1);
+        if (interpolationType >= interpolators->count())
+            interpolators->resize(interpolationType + 1);
         interpolators->replace(interpolationType, func);
     }
 }
@@ -505,10 +482,19 @@ void QVariantAnimation::setDuration(int msecs)
         qWarning("QVariantAnimation::setDuration: cannot set a negative duration");
         return;
     }
-    if (d->duration == msecs)
+    if (d->duration == msecs) {
+        d->duration.removeBindingUnlessInWrapper();
         return;
+    }
     d->duration = msecs;
     d->recalculateCurrentInterval();
+    d->duration.notify();
+}
+
+QBindable<int> QVariantAnimation::bindableDuration()
+{
+    Q_D(QVariantAnimation);
+    return &d->duration;
 }
 
 /*!
@@ -571,7 +557,7 @@ QVariant QVariantAnimation::keyValueAt(qreal step) const
 /*!
     \typedef QVariantAnimation::KeyValues
 
-    This is a typedef for QVector<KeyValue>
+    This is a typedef for QList<KeyValue>
 */
 
 /*!

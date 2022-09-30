@@ -4,6 +4,8 @@
 
 #include "ui/display/mojom/display_snapshot_mojom_traits.h"
 
+#include <cstdint>
+
 #include "mojo/public/cpp/base/file_path_mojom_traits.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/color_space.h"
@@ -81,6 +83,10 @@ bool StructTraits<display::mojom::DisplaySnapshotDataView,
   if (!data.ReadType(&type))
     return false;
 
+  std::vector<uint64_t> path_topology;
+  if (!data.ReadPathTopology(&path_topology))
+    return false;
+
   display::PrivacyScreenState privacy_screen_state;
   if (!data.ReadPrivacyScreenState(&privacy_screen_state))
     return false;
@@ -91,6 +97,10 @@ bool StructTraits<display::mojom::DisplaySnapshotDataView,
 
   gfx::ColorSpace color_space;
   if (!data.ReadColorSpace(&color_space))
+    return false;
+
+  absl::optional<gfx::HDRStaticMetadata> hdr_static_metadata;
+  if (!data.ReadHdrStaticMetadata(&hdr_static_metadata))
     return false;
 
   std::string display_name;
@@ -138,13 +148,16 @@ bool StructTraits<display::mojom::DisplaySnapshotDataView,
     return false;
 
   *out = std::make_unique<display::DisplaySnapshot>(
-      data.display_id(), origin, physical_size, type,
+      data.display_id(), data.port_display_id(), data.edid_display_id(),
+      data.connector_index(), origin, physical_size, type,
+      data.base_connector_id(), path_topology,
       data.is_aspect_preserving_scaling(), data.has_overscan(),
       privacy_screen_state, data.has_color_correction_matrix(),
       data.color_correction_in_linear_space(), color_space,
-      data.bits_per_channel(), display_name, file_path, std::move(modes),
-      panel_orientation, std::move(edid), current_mode, native_mode,
-      data.product_code(), data.year_of_manufacture(), maximum_cursor_size);
+      data.bits_per_channel(), hdr_static_metadata, display_name, file_path,
+      std::move(modes), panel_orientation, std::move(edid), current_mode,
+      native_mode, data.product_code(), data.year_of_manufacture(),
+      maximum_cursor_size);
   return true;
 }
 

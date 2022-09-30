@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt SVG module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qsvggenerator.h"
 
@@ -48,7 +12,6 @@
 #include "private/qdrawhelper_p.h"
 
 #include "qfile.h"
-#include "qtextcodec.h"
 #include "qtextstream.h"
 #include "qbuffer.h"
 #include "qmath.h"
@@ -73,7 +36,7 @@ static void translate_color(const QColor &color, QString *color_string,
     *opacity_string = QString::number(color.alphaF());
 }
 
-static void translate_dashPattern(const QVector<qreal> &pattern, qreal width, QString *pattern_string)
+static void translate_dashPattern(const QList<qreal> &pattern, qreal width, QString *pattern_string)
 {
     Q_ASSERT(pattern_string);
 
@@ -91,7 +54,7 @@ public:
     {
         size = QSize();
         viewBox = QRectF();
-        outputDevice = 0;
+        outputDevice = nullptr;
         resolution = 72;
 
         attributes.document_title = QLatin1String("Qt SVG Document");
@@ -239,7 +202,7 @@ public:
 
     QString savePatternBrush(const QString &color, const QBrush &brush)
     {
-        QString patternId = QString(QStringLiteral("fillpattern%1_")).arg(brush.style()) + color.midRef(1);
+        QString patternId = QString(QStringLiteral("fillpattern%1_")).arg(brush.style()) + QStringView{color}.mid(1);
         if (!d_func()->savedPatternBrushes.contains(patternId)) {
             QString maskId = savePatternMask(brush.style());
             QString geo(QStringLiteral("x=\"0\" y=\"0\" width=\"8\" height=\"8\""));
@@ -522,22 +485,7 @@ public:
         else
             d->attributes.font_size = QString::number(d->font.pixelSize());
 
-        int svgWeight = d->font.weight();
-        switch (svgWeight) {
-        case QFont::Light:
-            svgWeight = 100;
-            break;
-        case QFont::Normal:
-            svgWeight = 400;
-            break;
-        case QFont::Bold:
-            svgWeight = 700;
-            break;
-        default:
-            svgWeight *= 10;
-        }
-
-        d->attributes.font_weight = QString::number(svgWeight);
+        d->attributes.font_weight = QString::number(d->font.weight());
         d->attributes.font_family = d->font.family();
         d->attributes.font_style = d->font.italic() ? QLatin1String("italic") : QLatin1String("normal");
 
@@ -938,9 +886,6 @@ bool QSvgPaintEngine::end()
     *d->stream << "</defs>\n";
 
     d->stream->setDevice(d->outputDevice);
-#ifndef QT_NO_TEXTCODEC
-    d->stream->setCodec(QTextCodec::codecForName("UTF-8"));
-#endif
 
     *d->stream << d->header;
     *d->stream << d->defs;
@@ -970,12 +915,19 @@ void QSvgPaintEngine::drawImage(const QRectF &r, const QImage &image,
 
     Q_UNUSED(sr);
     Q_UNUSED(flags);
+    QString quality;
+    if (state->renderHints() & QPainter::SmoothPixmapTransform) {
+        quality = QLatin1String("optimizeQuality");
+    } else {
+        quality = QLatin1String("optimizeSpeed");
+    }
     stream() << "<image ";
     stream() << "x=\""<<r.x()<<"\" "
                 "y=\""<<r.y()<<"\" "
                 "width=\""<<r.width()<<"\" "
                 "height=\""<<r.height()<<"\" "
-                "preserveAspectRatio=\"none\" ";
+                "preserveAspectRatio=\"none\" "
+                "image-rendering=\""<<quality<<"\" ";
 
     QByteArray data;
     QBuffer buffer(&data);

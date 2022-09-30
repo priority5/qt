@@ -28,6 +28,11 @@ class GLImageNativePixmapTestDelegate : public GLImageTestDelegateBase {
     client_native_pixmap_factory_ = ui::CreateClientNativePixmapFactoryOzone();
   }
 
+  GLImageNativePixmapTestDelegate(const GLImageNativePixmapTestDelegate&) =
+      delete;
+  GLImageNativePixmapTestDelegate& operator=(
+      const GLImageNativePixmapTestDelegate&) = delete;
+
   ~GLImageNativePixmapTestDelegate() override = default;
 
   scoped_refptr<GLImage> CreateSolidColorImage(const gfx::Size& size,
@@ -40,7 +45,7 @@ class GLImageNativePixmapTestDelegate : public GLImageTestDelegateBase {
     DCHECK(pixmap) << "Offending format: " << gfx::BufferFormatToString(format);
     if (usage == gfx::BufferUsage::GPU_READ_CPU_READ_WRITE ||
         usage == gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE ||
-        usage == gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE) {
+        usage == gfx::BufferUsage::VEA_READ_CAMERA_AND_CPU_READ_WRITE) {
       auto client_pixmap = client_native_pixmap_factory_->ImportFromHandle(
           pixmap->ExportHandle(), size, format, usage);
       bool mapped = client_pixmap->Map();
@@ -78,15 +83,21 @@ class GLImageNativePixmapTestDelegate : public GLImageTestDelegateBase {
 
  private:
   std::unique_ptr<gfx::ClientNativePixmapFactory> client_native_pixmap_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(GLImageNativePixmapTestDelegate);
 };
 
 using GLImageScanoutType = testing::Types<
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::SCANOUT,
                                     gfx::BufferFormat::BGRA_8888>>;
 
-INSTANTIATE_TYPED_TEST_SUITE_P(GLImageNativePixmapScanoutBGRA,
+#if BUILDFLAG(IS_CHROMEOS)
+// Disabled due to failures on ChromeOS MSan builder.
+// TODO(crbug.com/1314304) Reenable the test.
+#define MAYBE_GLImageNativePixmapScanoutBGRA \
+  DISABLED_GLImageNativePixmapScanoutBGRA
+#else
+#define MAYBE_GLImageNativePixmapScanoutBGRA GLImageNativePixmapScanoutBGRA
+#endif
+INSTANTIATE_TYPED_TEST_SUITE_P(MAYBE_GLImageNativePixmapScanoutBGRA,
                                GLImageTest,
                                GLImageScanoutType);
 
@@ -120,14 +131,14 @@ using GLImageBindTestTypes = testing::Types<
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
                                     gfx::BufferFormat::YVU_420>,
     GLImageNativePixmapTestDelegate<
-        gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE,
+        gfx::BufferUsage::VEA_READ_CAMERA_AND_CPU_READ_WRITE,
         gfx::BufferFormat::YVU_420>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
                                     gfx::BufferFormat::YUV_420_BIPLANAR>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE,
                                     gfx::BufferFormat::YUV_420_BIPLANAR>,
     GLImageNativePixmapTestDelegate<
-        gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE,
+        gfx::BufferUsage::VEA_READ_CAMERA_AND_CPU_READ_WRITE,
         gfx::BufferFormat::YUV_420_BIPLANAR>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
                                     gfx::BufferFormat::P010>>;

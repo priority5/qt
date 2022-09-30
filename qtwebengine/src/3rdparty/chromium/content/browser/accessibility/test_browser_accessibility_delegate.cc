@@ -47,7 +47,8 @@ gfx::NativeViewAccessible TestBrowserAccessibilityDelegate::
   return nullptr;
 }
 
-WebContents* TestBrowserAccessibilityDelegate::AccessibilityWebContents() {
+RenderFrameHostImpl*
+TestBrowserAccessibilityDelegate::AccessibilityRenderFrameHost() {
   return nullptr;
 }
 
@@ -61,6 +62,11 @@ void TestBrowserAccessibilityDelegate::AccessibilityHitTest(
     int opt_request_id,
     base::OnceCallback<void(BrowserAccessibilityManager* hit_manager,
                             int hit_node_id)> opt_callback) {}
+
+WebContentsAccessibility*
+TestBrowserAccessibilityDelegate::AccessibilityGetWebContentsAccessibility() {
+  return nullptr;
+}
 
 bool TestBrowserAccessibilityDelegate::got_fatal_error() const {
   return got_fatal_error_;

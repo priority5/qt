@@ -6,20 +6,30 @@
 
 #include <tuple>
 
-#include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_form.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_ui_utils.h"
 #include "url/gurl.h"
 
 namespace extensions {
 
 api::passwords_private::UrlCollection CreateUrlCollectionFromForm(
-    const autofill::PasswordForm& form) {
+    const password_manager::PasswordForm& form) {
   api::passwords_private::UrlCollection urls;
   GURL link_url;
   std::tie(urls.shown, link_url) =
       password_manager::GetShownOriginAndLinkUrl(form);
   urls.origin = form.signon_realm;
   urls.link = link_url.spec();
+  return urls;
+}
+
+api::passwords_private::UrlCollection CreateUrlCollectionFromGURL(
+    const GURL& url) {
+  api::passwords_private::UrlCollection urls;
+  urls.shown = password_manager::GetShownOrigin(url::Origin::Create(url));
+  urls.origin = password_manager_util::GetSignonRealm(url);
+  urls.link = url.spec();
   return urls;
 }
 

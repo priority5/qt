@@ -72,7 +72,7 @@ TEST_F(TestComponentContextForProcessTest, NoServices) {
 
 TEST_F(TestComponentContextForProcessTest, InjectTestInterface) {
   // Publish a fake TestInterface for the process' ComponentContext to expose.
-  base::fuchsia::ScopedServiceBinding<testfidl::TestInterface> service_binding(
+  base::ScopedServiceBinding<testfidl::TestInterface> service_binding(
       test_context_.additional_services(), this);
 
   // Verify that the TestInterface is accessible & usable.
@@ -81,7 +81,7 @@ TEST_F(TestComponentContextForProcessTest, InjectTestInterface) {
 
 TEST_F(TestComponentContextForProcessTest, PublishTestInterface) {
   // Publish TestInterface to the process' outgoing-directory.
-  base::fuchsia::ScopedServiceBinding<testfidl::TestInterface> service_binding(
+  base::ScopedServiceBinding<testfidl::TestInterface> service_binding(
       ComponentContextForProcess()->outgoing().get(), this);
 
   // Attempt to use the TestInterface from the outgoing-directory.
@@ -111,7 +111,7 @@ TEST_F(TestComponentContextForProcessTest, ProvideSystemService) {
   // Load the component containing this test since we know it exists.
   // TODO(https://fxbug.dev/51490): Use a programmatic mechanism to obtain this.
   const char kComponentUrl[] =
-      "fuchsia-pkg://fuchsia.com/base_unittests#meta/base_unittests.cmx";
+      "fuchsia-pkg://fuchsia.com/base_unittests#meta/base_unittests.cm";
   loader->LoadUrl(kComponentUrl, [quit_loop = wait_loop.QuitClosure(),
                                   expected_path = kComponentUrl](
                                      ::fuchsia::sys::PackagePtr package) {

@@ -28,6 +28,10 @@ class ImageSkia;
 class Rect;
 }  // namespace gfx
 
+namespace ui {
+class PaintContext;
+}  // namespace ui
+
 namespace views {
 namespace corewm {
 class Tooltip;
@@ -69,8 +73,8 @@ class VIEWS_EXPORT DesktopWindowTreeHost {
   // Creates and returns the DragDropClient implementation to use. Return value
   // is owned by DesktopNativeWidgetAura and lives as long as
   // DesktopWindowTreeHost.
-  virtual std::unique_ptr<aura::client::DragDropClient> CreateDragDropClient(
-      DesktopNativeCursorManager* cursor_manager) = 0;
+  virtual std::unique_ptr<aura::client::DragDropClient>
+  CreateDragDropClient() = 0;
 
   // Creates the ScreenPositionClient to use for the WindowTreeHost. Default
   // implementation creates DesktopScreenPositionClient.
@@ -138,10 +142,11 @@ class VIEWS_EXPORT DesktopWindowTreeHost {
   virtual bool IsVisibleOnAllWorkspaces() const = 0;
 
   // Returns true if the title changed.
-  virtual bool SetWindowTitle(const base::string16& title) = 0;
+  virtual bool SetWindowTitle(const std::u16string& title) = 0;
 
   virtual void ClearNativeFocus() = 0;
 
+  virtual bool IsMoveLoopSupported() const;
   virtual Widget::MoveLoopResult RunMoveLoop(
       const gfx::Vector2d& drag_offset,
       Widget::MoveLoopSource source,
@@ -198,6 +203,11 @@ class VIEWS_EXPORT DesktopWindowTreeHost {
   // Sets the bounds in screen coordinate DIPs (WindowTreeHost generally
   // operates in pixels). This function is implemented in terms of Screen.
   virtual void SetBoundsInDIP(const gfx::Rect& bounds);
+
+  // Updates window shape by clipping the canvas before paint starts.
+  virtual void UpdateWindowShapeIfNeeded(const ui::PaintContext& context);
+
+  virtual DesktopNativeCursorManager* GetSingletonDesktopNativeCursorManager();
 };
 
 }  // namespace views

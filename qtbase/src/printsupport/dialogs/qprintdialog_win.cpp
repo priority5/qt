@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtGui module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <QtPrintSupport/qtprintsupportglobal.h>
 
@@ -47,7 +11,7 @@
 #include <private/qapplication_p.h>
 
 #include "qabstractprintdialog_p.h"
-#include "../kernel/qprintengine_win_p.h"
+#include <private/qprintengine_win_p.h>
 #include "../kernel/qprinter_p.h"
 
 #if !defined(PD_NOCURRENTPAGE)
@@ -58,6 +22,8 @@
 #endif
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 //extern void qt_win_eatMouseMove();
 
@@ -98,21 +64,21 @@ static void qt_win_setup_PRINTDLGEX(PRINTDLGEX *pd, QWidget *parent,
     pd->Flags = PD_RETURNDC;
     pd->Flags |= PD_USEDEVMODECOPIESANDCOLLATE;
 
-    if (!pdlg->isOptionEnabled(QPrintDialog::PrintSelection))
+    if (!pdlg->testOption(QPrintDialog::PrintSelection))
         pd->Flags |= PD_NOSELECTION;
-    if (pdlg->isOptionEnabled(QPrintDialog::PrintPageRange)) {
+    if (pdlg->testOption(QPrintDialog::PrintPageRange)) {
         pd->nMinPage = pdlg->minPage();
         pd->nMaxPage = pdlg->maxPage();
     }
 
-    if(!pdlg->isOptionEnabled(QPrintDialog::PrintToFile))
+    if (!pdlg->testOption(QPrintDialog::PrintToFile))
         pd->Flags |= PD_DISABLEPRINTTOFILE;
 
-    if (pdlg->isOptionEnabled(QPrintDialog::PrintSelection) && pdlg->printRange() == QPrintDialog::Selection)
+    if (pdlg->testOption(QPrintDialog::PrintSelection) && pdlg->printRange() == QPrintDialog::Selection)
         pd->Flags |= PD_SELECTION;
-    else if (pdlg->isOptionEnabled(QPrintDialog::PrintPageRange) && pdlg->printRange() == QPrintDialog::PageRange)
+    else if (pdlg->testOption(QPrintDialog::PrintPageRange) && pdlg->printRange() == QPrintDialog::PageRange)
         pd->Flags |= PD_PAGENUMS;
-    else if (pdlg->isOptionEnabled(QPrintDialog::PrintCurrentPage) && pdlg->printRange() == QPrintDialog::CurrentPage)
+    else if (pdlg->testOption(QPrintDialog::PrintCurrentPage) && pdlg->printRange() == QPrintDialog::CurrentPage)
         pd->Flags |= PD_CURRENTPAGE;
     else
         pd->Flags |= PD_ALLPAGES;
@@ -123,7 +89,7 @@ static void qt_win_setup_PRINTDLGEX(PRINTDLGEX *pd, QWidget *parent,
         pd->Flags |= PD_NOPAGENUMS;
 
     // Disable Current Page option if not required as default is Enabled
-    if (!pdlg->isOptionEnabled(QPrintDialog::PrintCurrentPage))
+    if (!pdlg->testOption(QPrintDialog::PrintCurrentPage))
         pd->Flags |= PD_NOCURRENTPAGE;
 
     // Default to showing the General tab first
@@ -147,16 +113,16 @@ static void qt_win_read_back_PRINTDLGEX(PRINTDLGEX *pd, QPrintDialog *pdlg, QPri
 {
     if (pd->Flags & PD_SELECTION) {
         pdlg->setPrintRange(QPrintDialog::Selection);
-        pdlg->setFromTo(0, 0);
+        pdlg->printer()->setPageRanges(QPageRanges());
     } else if (pd->Flags & PD_PAGENUMS) {
         pdlg->setPrintRange(QPrintDialog::PageRange);
         pdlg->setFromTo(pd->lpPageRanges[0].nFromPage, pd->lpPageRanges[0].nToPage);
     } else if (pd->Flags & PD_CURRENTPAGE) {
         pdlg->setPrintRange(QPrintDialog::CurrentPage);
-        pdlg->setFromTo(0, 0);
+       pdlg->printer()->setPageRanges(QPageRanges());
     } else { // PD_ALLPAGES
         pdlg->setPrintRange(QPrintDialog::AllPages);
-        pdlg->setFromTo(0, 0);
+        pdlg->printer()->setPageRanges(QPageRanges());
     }
 
     d->ep->printToFile = (pd->Flags & PD_PRINTTOFILE) != 0;
@@ -164,8 +130,8 @@ static void qt_win_read_back_PRINTDLGEX(PRINTDLGEX *pd, QPrintDialog *pdlg, QPri
     d->engine->setGlobalDevMode(pd->hDevNames, pd->hDevMode);
 
     if (d->ep->printToFile && d->ep->fileName.isEmpty())
-        d->ep->fileName = QLatin1String("FILE:");
-    else if (!d->ep->printToFile && d->ep->fileName == QLatin1String("FILE:"))
+        d->ep->fileName = "FILE:"_L1;
+    else if (!d->ep->printToFile && d->ep->fileName == "FILE:"_L1)
         d->ep->fileName.clear();
 }
 
@@ -261,9 +227,9 @@ int QPrintDialogPrivate::openWindowsPrintDialogModally()
         }
 
         if (!done) {
-            QMessageBox::warning(0, QPrintDialog::tr("Print"),
-                                 QPrintDialog::tr("The 'From' value cannot be greater than the 'To' value."),
-                                 QPrintDialog::tr("OK"));
+            QMessageBox::warning(nullptr,
+                                 QPrintDialog::tr("Print"),
+                                 QPrintDialog::tr("The 'From' value cannot be greater than the 'To' value."));
         }
     } while (!done);
 

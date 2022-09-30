@@ -23,26 +23,22 @@ mojom("mojom") {
 }
 
 component("userspace_swap") {
-  configs += [
-    ":chromeos_implementation",
-    "//build/config/linux/nss:system_nss_no_ssl_config",
-  ]
-
-  public_deps = [ "//chromeos/constants" ]
+  configs += [ ":chromeos_implementation" ]
   deps = [
     ":mojom",
     "//base",
-    "//base/util/memory_pressure",
     "//chromeos:chromeos_export",
     "//chromeos/dbus",
     "//chromeos/dbus/constants",
     "//chromeos/memory",
+    "//components/memory_pressure",
     "//crypto",
     "//crypto:platform",
     "//services/resource_coordinator/public/cpp/memory_instrumentation",
     "//third_party/zlib/google:compression_utils",
   ]
   sources = [
+    "region.cc",
     "region.h",
     "swap_storage.cc",
     "swap_storage.h",
@@ -50,15 +46,17 @@ component("userspace_swap") {
     "userfaultfd.h",
     "userspace_swap.cc",
     "userspace_swap.h",
+    "userspace_swap_renderer_initialization_impl.cc",
+    "userspace_swap_renderer_initialization_impl.h",
   ]
 }
 
 source_set("unit_tests") {
   testonly = true
-  configs += [ "//build/config/linux/nss:system_nss_no_ssl_config" ]
   deps = [
     ":mojom",
     ":userspace_swap",
+    "//base/allocator:buildflags",
     "//base/test:test_support",
     "//build:chromeos_buildflags",
     "//mojo/core/embedder",
@@ -67,6 +65,7 @@ source_set("unit_tests") {
     "//testing/gtest",
   ]
   sources = [
+    "region_unittest.cc",
     "swap_storage_unittest.cc",
     "userfaultfd_unittest.cc",
     "userspace_swap_unittest.cc",

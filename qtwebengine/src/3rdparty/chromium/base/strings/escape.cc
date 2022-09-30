@@ -4,6 +4,7 @@
 
 #include "base/strings/escape.h"
 
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "base/third_party/icu/icu_utf.h"
@@ -95,7 +96,7 @@ bool UnescapeUTF8CharacterAtIndex(StringPiece escaped_text,
     // reach max character length number of bytes, or hit an unescaped
     // character. No need to check length of escaped_text, as
     // UnescapeUnsignedByteAtIndex checks lengths.
-    while (num_bytes < size(bytes) &&
+    while (num_bytes < std::size(bytes) &&
            UnescapeUnsignedByteAtIndex(escaped_text, index + num_bytes * 3,
                                        &bytes[num_bytes]) &&
            CBU8_IS_TRAIL(bytes[num_bytes])) {
@@ -262,7 +263,7 @@ std::string UnescapeURLWithAdjustmentsImpl(
     adjustments->clear();
   // Do not unescape anything, return the |escaped_text| text.
   if (rules == UnescapeRule::NONE)
-    return escaped_text.as_string();
+    return std::string(escaped_text);
 
   // The output of the unescaping is always smaller than the input, so we can
   // reserve the input size to make sure we have enough buffer and don't have
@@ -335,11 +336,11 @@ std::string UnescapeURLComponent(StringPiece escaped_text,
   return UnescapeURLWithAdjustmentsImpl(escaped_text, rules, nullptr);
 }
 
-string16 UnescapeAndDecodeUTF8URLComponentWithAdjustments(
+std::u16string UnescapeAndDecodeUTF8URLComponentWithAdjustments(
     StringPiece text,
     UnescapeRule::Type rules,
     OffsetAdjuster::Adjustments* adjustments) {
-  string16 result;
+  std::u16string result;
   OffsetAdjuster::Adjustments unescape_adjustments;
   std::string unescaped_url(
       UnescapeURLWithAdjustmentsImpl(text, rules, &unescape_adjustments));

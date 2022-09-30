@@ -6,8 +6,8 @@
 
 #include <utility>
 
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "components/performance_manager/performance_manager_impl.h"
 
 namespace performance_manager {
@@ -24,7 +24,7 @@ NoopSiteDataStore::~NoopSiteDataStore() = default;
 void NoopSiteDataStore::ReadSiteDataFromStore(
     const url::Origin& origin,
     ReadSiteDataFromStoreCallback callback) {
-  std::move(callback).Run(base::nullopt);
+  std::move(callback).Run(absl::nullopt);
 }
 
 void NoopSiteDataStore::WriteSiteDataIntoStore(
@@ -37,7 +37,7 @@ void NoopSiteDataStore::RemoveSiteDataFromStore(
 void NoopSiteDataStore::ClearStore() {}
 
 void NoopSiteDataStore::GetStoreSize(GetStoreSizeCallback callback) {
-  std::move(callback).Run(base::nullopt, base::nullopt);
+  std::move(callback).Run(absl::nullopt, absl::nullopt);
 }
 
 void NoopSiteDataStore::SetInitializationCallbackForTesting(

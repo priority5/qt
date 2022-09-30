@@ -16,13 +16,11 @@
 #include "base/pickle.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/unix_domain_socket.h"
-#include "base/stl_util.h"
 #include "content/common/zygote/zygote_commands_linux.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "sandbox/policy/switches.h"
-#include "services/service_manager/switches.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 
 namespace content {
@@ -246,12 +244,12 @@ void ZygoteCommunication::Init(
       sandbox::policy::switches::kDisableSeccompFilterSandbox,
       sandbox::policy::switches::kNoSandbox,
 #if defined(TOOLKIT_QT)
-      service_manager::switches::kApplicationName,
-      service_manager::switches::kCdmWidevinePath,
+      switches::kApplicationName,
+      switches::kCdmWidevinePath,
 #endif
   };
   cmd_line.CopySwitchesFrom(browser_command_line, kForwardSwitches,
-                            base::size(kForwardSwitches));
+                            std::size(kForwardSwitches));
 
   pid_ = std::move(launcher).Run(&cmd_line, &control_fd_);
 

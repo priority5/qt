@@ -19,9 +19,9 @@ TEST_F(EventTargetTest, UseCountPassiveTouchEventListener) {
       GetDocument().IsUseCounted(WebFeature::kPassiveTouchEventListener));
   GetDocument().GetSettings()->SetScriptEnabled(true);
   ClassicScript::CreateUnspecifiedScript(
-      ScriptSourceCode("window.addEventListener('touchstart', function() {}, "
-                       "{passive: true});"))
-      ->RunScript(GetDocument().GetFrame());
+      "window.addEventListener('touchstart', function() {}, "
+      "{passive: true});")
+      ->RunScript(GetDocument().domWindow());
   EXPECT_TRUE(
       GetDocument().IsUseCounted(WebFeature::kPassiveTouchEventListener));
   EXPECT_FALSE(
@@ -33,9 +33,9 @@ TEST_F(EventTargetTest, UseCountNonPassiveTouchEventListener) {
       GetDocument().IsUseCounted(WebFeature::kNonPassiveTouchEventListener));
   GetDocument().GetSettings()->SetScriptEnabled(true);
   ClassicScript::CreateUnspecifiedScript(
-      ScriptSourceCode("window.addEventListener('touchstart', function() {}, "
-                       "{passive: false});"))
-      ->RunScript(GetDocument().GetFrame());
+      "window.addEventListener('touchstart', function() {}, "
+      "{passive: false});")
+      ->RunScript(GetDocument().domWindow());
   EXPECT_TRUE(
       GetDocument().IsUseCounted(WebFeature::kNonPassiveTouchEventListener));
   EXPECT_FALSE(
@@ -47,8 +47,8 @@ TEST_F(EventTargetTest, UseCountPassiveTouchEventListenerPassiveNotSpecified) {
       GetDocument().IsUseCounted(WebFeature::kPassiveTouchEventListener));
   GetDocument().GetSettings()->SetScriptEnabled(true);
   ClassicScript::CreateUnspecifiedScript(
-      ScriptSourceCode("window.addEventListener('touchstart', function() {});"))
-      ->RunScript(GetDocument().GetFrame());
+      "window.addEventListener('touchstart', function() {});")
+      ->RunScript(GetDocument().domWindow());
   EXPECT_TRUE(
       GetDocument().IsUseCounted(WebFeature::kPassiveTouchEventListener));
   EXPECT_FALSE(
@@ -59,14 +59,29 @@ TEST_F(EventTargetTest, UseCountBeforematch) {
   EXPECT_FALSE(
       GetDocument().IsUseCounted(WebFeature::kBeforematchHandlerRegistered));
   GetDocument().GetSettings()->SetScriptEnabled(true);
-  ClassicScript::CreateUnspecifiedScript(ScriptSourceCode(R"HTML(
+  ClassicScript::CreateUnspecifiedScript(R"HTML(
                        const element = document.createElement('div');
                        document.body.appendChild(element);
                        element.addEventListener('beforematch', () => {});
-                      )HTML"))
-      ->RunScript(GetDocument().GetFrame());
+                      )HTML")
+      ->RunScript(GetDocument().domWindow());
   EXPECT_TRUE(
       GetDocument().IsUseCounted(WebFeature::kBeforematchHandlerRegistered));
+}
+
+TEST_F(EventTargetTest, UseCountAbortSignal) {
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kAddEventListenerWithAbortSignal));
+  GetDocument().GetSettings()->SetScriptEnabled(true);
+  ClassicScript::CreateUnspecifiedScript(R"HTML(
+                       const element = document.createElement('div');
+                       const ac = new AbortController();
+                       element.addEventListener(
+                         'test', () => {}, {signal: ac.signal});
+                      )HTML")
+      ->RunScript(GetDocument().domWindow());
+  EXPECT_TRUE(
+      GetDocument().IsUseCounted(WebFeature::kAddEventListenerWithAbortSignal));
 }
 
 }  // namespace blink

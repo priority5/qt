@@ -8,11 +8,34 @@
 #ifndef SkSVGDevice_DEFINED
 #define SkSVGDevice_DEFINED
 
+#include "include/core/SkCanvas.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkTypes.h"
 #include "include/private/SkTArray.h"
-#include "include/private/SkTemplates.h"
+#include "include/utils/SkParsePath.h"
 #include "src/core/SkClipStackDevice.h"
 
+#include <memory>
+
+class SkBaseDevice;
+class SkBitmap;
+class SkBlender;
+class SkClipStack;
+class SkData;
+class SkGlyphRunList;
+class SkImage;
+class SkPaint;
+class SkPath;
+class SkRRect;
+class SkVertices;
 class SkXMLWriter;
+struct SkISize;
+struct SkPoint;
+struct SkRect;
+struct SkSamplingOptions;
+#ifdef SK_ENABLE_SKSL
+struct SkCustomMesh;
+#endif
 
 class SkSVGDevice final : public SkClipStackDevice {
 public:
@@ -25,7 +48,8 @@ protected:
     void drawPoints(SkCanvas::PointMode mode, size_t count,
                     const SkPoint[], const SkPaint& paint) override;
     void drawImageRect(const SkImage* image, const SkRect* src, const SkRect& dst,
-                       const SkPaint& paint, SkCanvas::SrcRectConstraint constraint) override;
+                       const SkSamplingOptions&, const SkPaint& paint,
+                       SkCanvas::SrcRectConstraint constraint) override;
     void drawRect(const SkRect& r, const SkPaint& paint) override;
     void drawOval(const SkRect& oval, const SkPaint& paint) override;
     void drawRRect(const SkRRect& rr, const SkPaint& paint) override;
@@ -33,12 +57,11 @@ protected:
                   const SkPaint& paint,
                   bool pathIsMutable = false) override;
 
-    void drawGlyphRunList(const SkGlyphRunList& glyphRunList) override;
-    void drawVertices(const SkVertices*, SkBlendMode, const SkPaint&) override;
-
-    void drawDevice(SkBaseDevice*, int x, int y,
-                    const SkPaint&) override;
-
+    void onDrawGlyphRunList(SkCanvas*, const SkGlyphRunList&, const SkPaint&) override;
+    void drawVertices(const SkVertices*, sk_sp<SkBlender>, const SkPaint&, bool) override;
+#ifdef SK_ENABLE_SKSL
+    void drawCustomMesh(SkCustomMesh, sk_sp<SkBlender>, const SkPaint&) override;
+#endif
 private:
     SkSVGDevice(const SkISize& size, std::unique_ptr<SkXMLWriter>, uint32_t);
     ~SkSVGDevice() override;
@@ -47,6 +70,8 @@ private:
     void drawBitmapCommon(const MxCp&, const SkBitmap& bm, const SkPaint& paint);
 
     void syncClipStack(const SkClipStack&);
+
+    SkParsePath::PathEncoding pathEncoding() const;
 
     class AutoElement;
     class ResourceBucket;

@@ -11,6 +11,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "base/check.h"
 #include "base/check_op.h"
 #include "base/containers/util.h"
 #include "base/numerics/checked_math.h"
@@ -128,6 +129,7 @@ class VectorBuffer {
                                     int>::type = 0>
   static void MoveRange(T* from_begin, T* from_end, T* to) {
     CHECK(!RangesOverlap(from_begin, from_end, to));
+
     memcpy(
         to, from_begin,
         CheckSub(get_uintptr(from_end), get_uintptr(from_begin)).ValueOrDie());
@@ -178,6 +180,8 @@ class VectorBuffer {
                 .ValueOrDie() <= from_begin_uintptr);
   }
 
+  // `buffer_` is not a raw_ptr<...> for performance reasons (based on analysis
+  // of sampling profiler data and tab_search:top100:2020).
   T* buffer_ = nullptr;
   size_t capacity_ = 0;
 };

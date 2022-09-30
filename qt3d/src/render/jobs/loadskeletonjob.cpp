@@ -1,38 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 Klaralvdalens Datakonsult AB (KDAB).
-** Contact: http://www.qt-project.org/legal
-**
-** This file is part of the Qt3D module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL3$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPLv3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or later as published by the Free
-** Software Foundation and appearing in the file LICENSE.GPL included in
-** the packaging of this file. Please review the following information to
-** ensure the GNU General Public License version 2.0 requirements will be
-** met: http://www.gnu.org/licenses/gpl-2.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 Klaralvdalens Datakonsult AB (KDAB).
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "loadskeletonjob_p.h"
 #include <Qt3DCore/qjoint.h>
@@ -42,10 +9,10 @@
 #include <Qt3DCore/private/qabstractnodefactory_p.h>
 #include <Qt3DCore/private/qaspectmanager_p.h>
 #include <Qt3DCore/private/qskeletonloader_p.h>
+#include <Qt3DCore/private/qurlhelper_p.h>
 #include <Qt3DRender/private/managers_p.h>
 #include <Qt3DRender/private/nodemanagers_p.h>
 #include <Qt3DRender/private/job_common_p.h>
-#include <Qt3DRender/private/qurlhelper_p.h>
 #include <Qt3DRender/private/gltfskeletonloader_p.h>
 #include <Qt3DRender/private/renderlogging_p.h>
 #include <QtCore/QCoreApplication>
@@ -128,7 +95,7 @@ void LoadSkeletonJob::loadSkeletonFromUrl(Skeleton *skeleton)
     using namespace Qt3DCore;
 
     // TODO: Handle remote files
-    QString filePath = Qt3DRender::QUrlHelper::urlToLocalFileOrQrc(skeleton->source());
+    QString filePath = Qt3DCore::QUrlHelper::urlToLocalFileOrQrc(skeleton->source());
     QFileInfo info(filePath);
     if (!info.exists()) {
         qWarning() << "Could not open skeleton file:" << filePath;
@@ -208,7 +175,7 @@ Qt3DCore::QJoint *LoadSkeletonJob::createFrontendJoints(const SkeletonData &skel
         return nullptr;
 
     // Create frontend joints from the joint info objects
-    QVector<Qt3DCore::QJoint *> frontendJoints;
+    QList<Qt3DCore::QJoint *> frontendJoints;
     const int jointCount = skeletonData.joints.size();
     frontendJoints.reserve(jointCount);
     for (int i = 0; i < jointCount; ++i) {

@@ -81,12 +81,12 @@ public:
     void drawImageRect(const SkImage*,
                        const SkRect* src,
                        const SkRect& dst,
+                       const SkSamplingOptions&,
                        const SkPaint&,
                        SkCanvas::SrcRectConstraint) override;
-    void drawGlyphRunList(const SkGlyphRunList& glyphRunList) override;
-    void drawVertices(const SkVertices*, SkBlendMode, const SkPaint&) override;
-    void drawDevice(SkBaseDevice*, int x, int y,
-                    const SkPaint&) override;
+    void onDrawGlyphRunList(SkCanvas*, const SkGlyphRunList&, const SkPaint&) override;
+    void drawVertices(const SkVertices*, sk_sp<SkBlender>, const SkPaint&, bool) override;
+    void drawCustomMesh(SkCustomMesh, sk_sp<SkBlender>, const SkPaint&) override;
 
     // PDF specific methods.
     void drawSprite(const SkBitmap& bitmap, int x, int y,
@@ -102,8 +102,6 @@ public:
     SkISize size() const { return this->imageInfo().dimensions(); }
     SkIRect bounds() const { return this->imageInfo().bounds(); }
 
-    void DrawGlyphRunAsPath(SkPDFDevice* dev, const SkGlyphRun& glyphRun, SkPoint offset);
-
     const SkMatrix& initialTransform() const { return fInitialTransform; }
 
 protected:
@@ -111,7 +109,10 @@ protected:
 
     void drawAnnotation(const SkRect&, const char key[], SkData* value) override;
 
-    void drawSpecial(SkSpecialImage*, int x, int y, const SkPaint&) override;
+    void drawDevice(SkBaseDevice*, const SkSamplingOptions&, const SkPaint&) override;
+    void drawSpecial(SkSpecialImage*, const SkMatrix&, const SkSamplingOptions&,
+                     const SkPaint&) override;
+
     sk_sp<SkSpecialImage> makeSpecial(const SkBitmap&) override;
     sk_sp<SkSpecialImage> makeSpecial(const SkImage*) override;
     SkImageFilterCache* getImageFilterCache() override;
@@ -166,6 +167,7 @@ private:
     void internalDrawImageRect(SkKeyedImage,
                                const SkRect* src,
                                const SkRect& dst,
+                               const SkSamplingOptions&,
                                const SkPaint&,
                                const SkMatrix& canvasTransformationMatrix);
 

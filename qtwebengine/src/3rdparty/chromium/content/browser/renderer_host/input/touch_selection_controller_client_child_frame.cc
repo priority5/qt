@@ -9,10 +9,9 @@
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
-#include "content/common/widget_messages.h"
 #include "content/public/browser/touch_selection_controller_client_manager.h"
-#include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/pointer/touch_editing_controller.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/geometry/point_conversions.h"
@@ -143,6 +142,7 @@ void TouchSelectionControllerClientChildFrame::OnSelectionEvent(
 }
 
 void TouchSelectionControllerClientChildFrame::OnDragUpdate(
+    const ui::TouchSelectionDraggable::Type type,
     const gfx::PointF& position) {
   NOTREACHED();
 }
@@ -150,7 +150,7 @@ void TouchSelectionControllerClientChildFrame::OnDragUpdate(
 std::unique_ptr<ui::TouchHandleDrawable>
 TouchSelectionControllerClientChildFrame::CreateDrawable() {
   NOTREACHED();
-  return std::unique_ptr<ui::TouchHandleDrawable>();
+  return nullptr;
 }
 
 bool TouchSelectionControllerClientChildFrame::IsCommandIdEnabled(
@@ -165,9 +165,11 @@ bool TouchSelectionControllerClientChildFrame::IsCommandIdEnabled(
     case ui::TouchEditable::kCopy:
       return readable && has_selection;
     case ui::TouchEditable::kPaste: {
-      base::string16 result;
+      std::u16string result;
+      ui::DataTransferEndpoint data_dst = ui::DataTransferEndpoint(
+          ui::EndpointType::kDefault, /*notify_if_restricted=*/false);
       ui::Clipboard::GetForCurrentThread()->ReadText(
-          ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr, &result);
+          ui::ClipboardBuffer::kCopyPaste, &data_dst, &result);
       return editable && !result.empty();
     }
     default:
@@ -221,7 +223,7 @@ bool TouchSelectionControllerClientChildFrame::ShouldShowQuickMenu() {
   return true;
 }
 
-base::string16 TouchSelectionControllerClientChildFrame::GetSelectedText() {
+std::u16string TouchSelectionControllerClientChildFrame::GetSelectedText() {
   return rwhv_->GetSelectedText();
 }
 

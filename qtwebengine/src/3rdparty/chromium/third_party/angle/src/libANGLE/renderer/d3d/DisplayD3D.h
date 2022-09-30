@@ -62,7 +62,8 @@ class DisplayD3D : public DisplayImpl, public d3d::Context
 
     ShareGroupImpl *createShareGroup() override;
 
-    egl::Error makeCurrent(egl::Surface *drawSurface,
+    egl::Error makeCurrent(egl::Display *display,
+                           egl::Surface *drawSurface,
                            egl::Surface *readSurface,
                            gl::Context *context) override;
 
@@ -83,7 +84,9 @@ class DisplayD3D : public DisplayImpl, public d3d::Context
 
     DeviceImpl *createDevice() override;
 
-    std::string getVendorString() const override;
+    std::string getRendererDescription() override;
+    std::string getVendorString() override;
+    std::string getVersionString(bool includeFullVersion) override;
 
     egl::Error waitClient(const gl::Context *context) override;
     egl::Error waitNative(const gl::Context *context, EGLint engine) override;

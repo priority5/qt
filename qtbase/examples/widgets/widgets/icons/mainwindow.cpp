@@ -1,58 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the examples of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:BSD$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** BSD License Usage
-** Alternatively, you may use this file under the terms of the BSD license
-** as follows:
-**
-** "Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions are
-** met:
-**   * Redistributions of source code must retain the above copyright
-**     notice, this list of conditions and the following disclaimer.
-**   * Redistributions in binary form must reproduce the above copyright
-**     notice, this list of conditions and the following disclaimer in
-**     the documentation and/or other materials provided with the
-**     distribution.
-**   * Neither the name of The Qt Company Ltd nor the names of its
-**     contributors may be used to endorse or promote products derived
-**     from this software without specific prior written permission.
-**
-**
-** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-** "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-** LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-** A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-** OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-** SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-** LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-** OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 #include "mainwindow.h"
 #include "iconpreviewarea.h"
 #include "iconsizespinbox.h"
 #include "imagedelegate.h"
 
+#include <QActionGroup>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -172,15 +126,16 @@ void MainWindow::changeStyle(bool checked)
 //! [4]
 
 //! [5]
-void MainWindow::changeSize(int id, bool checked)
+void MainWindow::changeSize(QAbstractButton *button, bool checked)
 {
     if (!checked)
         return;
 
-    const bool other = id == int(OtherSize);
+    const int index = sizeButtonGroup->id(button);
+    const bool other = index == int(OtherSize);
     const int extent = other
         ? otherSpinBox->value()
-        : QApplication::style()->pixelMetric(static_cast<QStyle::PixelMetric>(id));
+        : QApplication::style()->pixelMetric(static_cast<QStyle::PixelMetric>(index));
 
     previewArea->setSize(QSize(extent, extent));
     otherSpinBox->setEnabled(other);
@@ -188,7 +143,7 @@ void MainWindow::changeSize(int id, bool checked)
 
 void MainWindow::triggerChangeSize()
 {
-    changeSize(sizeButtonGroup->checkedId(), true);
+    changeSize(sizeButtonGroup->checkedButton(), true);
 }
 //! [5]
 
@@ -318,12 +273,6 @@ void MainWindow::loadImages(const QStringList &fileNames)
     }
 }
 
-void MainWindow::useHighDpiPixmapsChanged(int checkState)
-{
-    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps, checkState == Qt::Checked);
-    changeIcon();
-}
-
 //! [20]
 void MainWindow::removeAllImages()
 {
@@ -372,7 +321,7 @@ QWidget *MainWindow::createIconSizeGroupBox()
     sizeButtonGroup = new QButtonGroup(this);
     sizeButtonGroup->setExclusive(true);
 
-    connect(sizeButtonGroup, QOverload<int, bool>::of(&QButtonGroup::buttonToggled),
+    connect(sizeButtonGroup, &QButtonGroup::buttonToggled,
             this, &MainWindow::changeSize);
 
     QRadioButton *smallRadioButton = new QRadioButton;
@@ -400,7 +349,7 @@ QWidget *MainWindow::createIconSizeGroupBox()
 //! [26]
 
 //! [27]
-    connect(otherSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+    connect(otherSpinBox, &QSpinBox::valueChanged,
             this, &MainWindow::triggerChangeSize);
 
     QHBoxLayout *otherSizeLayout = new QHBoxLayout;
@@ -423,7 +372,7 @@ QWidget *MainWindow::createIconSizeGroupBox()
 
 void MainWindow::screenChanged()
 {
-    devicePixelRatioLabel->setText(QString::number(devicePixelRatioF()));
+    devicePixelRatioLabel->setText(QString::number(devicePixelRatio()));
     if (const QWindow *window = windowHandle()) {
         const QScreen *screen = window->screen();
         const QString screenDescription =
@@ -442,10 +391,6 @@ QWidget *MainWindow::createHighDpiIconSizeGroupBox()
     screenNameLabel = new QLabel(highDpiGroupBox);
     layout->addRow(tr("Screen:"), screenNameLabel);
     layout->addRow(tr("Device pixel ratio:"), devicePixelRatioLabel);
-    QCheckBox *highDpiPixmapsCheckBox = new QCheckBox(QLatin1String("Qt::AA_UseHighDpiPixmaps"));
-    highDpiPixmapsCheckBox->setChecked(QCoreApplication::testAttribute(Qt::AA_UseHighDpiPixmaps));
-    connect(highDpiPixmapsCheckBox, &QCheckBox::stateChanged, this, &MainWindow::useHighDpiPixmapsChanged);
-    layout->addRow(highDpiPixmapsCheckBox);
     return highDpiGroupBox;
 }
 

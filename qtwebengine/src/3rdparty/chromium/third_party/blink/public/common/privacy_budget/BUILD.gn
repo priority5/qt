@@ -5,6 +5,8 @@
 source_set("internal") {
   sources = [ "identifiability_internal_templates.h" ]
 
+  deps = [ "//base" ]
+
   visibility = [
     ":*",
     "//third_party/blink/common/privacy_budget:*",
@@ -38,6 +40,7 @@ source_set("test_support") {
   testonly = true
 
   sources = [
+    "identifiability_sample_test_utils.h",
     "scoped_identifiability_test_sample_collector.h",
     "scoped_switch_sample_collector.h",
   ]
@@ -48,4 +51,13 @@ source_set("test_support") {
     ":internal",
     "//third_party/blink/public/common:common_export",
   ]
+}
+
+# Adds //tools/privacy_budget targets to the top level "gn_all" group. See the
+# top level //BUILD.gn file for details on how that target is used. Builders
+# that build the "all" target also build the targets in //tools/privacy_budget
+# as a result of this dependency.
+group("gn_all") {
+  testonly = true
+  deps = [ "//tools/privacy_budget:privacy_budget_tools" ]
 }

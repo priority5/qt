@@ -11,8 +11,7 @@ sourcedirs = ..
 exampledirs = .. \
               ../examples
 
-imagedirs = ../images \
-            ../../../../../qtbase/src/widgets/doc/images
+imagedirs = ../images
 
 tagfile = ../html/qdoc.tags
 
@@ -26,38 +25,26 @@ qhp.QDoc.virtualFolder       = qdoc
 qhp.QDoc.indexTitle          = QDoc Manual
 qhp.QDoc.indexRoot           =
 
-qhp.QDoc.filterAttributes    = qdoc $QT_VERSION qtrefdoc
-qhp.QDoc.customFilters.QDoc.name = QDoc $QT_VERSION
-qhp.QDoc.customFilters.QDoc.filterAttributes = qdoc $QT_VERSION
-
 qhp.QDoc.subprojects         = overviews
 qhp.QDoc.subprojects.overviews.title = Overviews
 qhp.QDoc.subprojects.overviews.indexTitle = QDoc Manual
 qhp.QDoc.subprojects.overviews.selectors = doc:page
 
 depends += \
-    activeqt \
-    qtassistant \
-    qtbluetooth \
     qtconcurrent \
     qtcore \
     qtdbus \
     qtdesigner \
     qtdoc \
     qthelp \
-    qtimageformats \
     qtgui \
-    qtlocation \
     qtlinguist \
-    qtmultimedia \
     qtnetwork \
     qtopengl \
     qtprintsupport \
     qtqml \
     qtquick \
-    qtscript \
-    qtscripttools \
-    qtsensors \
+    qtquickcontrols \
     qtsql \
     qtsvg \
     qttestlib \
@@ -68,3 +55,5 @@ depends += \
 ignorewords += QDoc
 
 navigation.landingpage = "QDoc Manual"
+
+warninglimit = 0

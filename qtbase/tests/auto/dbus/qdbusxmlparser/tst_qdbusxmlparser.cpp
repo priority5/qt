@@ -1,37 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-/* -*- C++ -*-
- */
-#include <qcoreapplication.h>
-#include <qmetatype.h>
-#include <QtTest/QtTest>
-#include <QtDBus/QtDBus>
-#include <QtXml/QDomDocument>
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+
+#include <QCoreApplication>
+#include <QDomDocument>
+#include <QMetaType>
+#include <QTest>
 
 #define USE_PRIVATE_CODE
 #include "../qdbusmarshall/common.h"
@@ -486,19 +459,19 @@ void tst_QDBusXmlParser::properties_data()
     prop.type = "s";
     prop.access = QDBusIntrospection::Property::Read;
     map << prop;
-    QTest::newRow("one-readable") << "<property name=\"foo\" type=\"s\" access=\"read\"/>" << map;
+    QTest::newRow("one-readable") << "<property access=\"read\" type=\"s\" name=\"foo\" />" << map;
 
     // one writable signal
     prop.access = QDBusIntrospection::Property::Write;
     map.clear();
     map << prop;
-    QTest::newRow("one-writable") << "<property name=\"foo\" type=\"s\" access=\"write\"/>" << map;
+    QTest::newRow("one-writable") << "<property access=\"write\" type=\"s\" name=\"foo\"/>" << map;
 
     // one read- & writable signal
     prop.access = QDBusIntrospection::Property::ReadWrite;
     map.clear();
     map << prop;
-    QTest::newRow("one-read-writable") << "<property name=\"foo\" type=\"s\" access=\"readwrite\"/>"
+    QTest::newRow("one-read-writable") << "<property access=\"readwrite\" type=\"s\" name=\"foo\"/>"
                                        << map;
 
     // two, mixed properties
@@ -507,13 +480,13 @@ void tst_QDBusXmlParser::properties_data()
     prop.access = QDBusIntrospection::Property::Read;
     map << prop;
     QTest::newRow("two-1") <<
-        "<property name=\"foo\" type=\"s\" access=\"readwrite\"/>"
-        "<property name=\"bar\" type=\"i\" access=\"read\"/>" << map;
+        "<property access=\"readwrite\" type=\"s\" name=\"foo\"/>"
+        "<property access=\"read\" type=\"i\" name=\"bar\"/>" << map;
 
     // invert the order of the declaration
     QTest::newRow("two-2") <<
-        "<property name=\"bar\" type=\"i\" access=\"read\"/>"
-        "<property name=\"foo\" type=\"s\" access=\"readwrite\"/>" << map;
+        "<property access=\"read\" type=\"i\" name=\"bar\"/>"
+        "<property access=\"readwrite\" type=\"s\" name=\"foo\"/>" << map;
 
     // add a third with annotations
     prop.name = "baz";
@@ -523,21 +496,21 @@ void tst_QDBusXmlParser::properties_data()
     prop.annotations.insert("foo.annotation2", "Goodbye, World");
     map << prop;
     QTest::newRow("complex") <<
-        "<property name=\"bar\" type=\"i\" access=\"read\"/>"
-        "<property name=\"baz\" type=\"as\" access=\"write\">"
+        "<property access=\"read\" type=\"i\" name=\"bar\"/>"
+        "<property access=\"write\" type=\"as\" name=\"baz\">"
         "<annotation name=\"foo.annotation\" value=\"Hello, World\" />"
         "<annotation name=\"foo.annotation2\" value=\"Goodbye, World\" />"
         "</property>"
-        "<property name=\"foo\" type=\"s\" access=\"readwrite\"/>" << map;
+        "<property access=\"readwrite\" type=\"s\" name=\"foo\"/>" << map;
 
     // and now change the order
     QTest::newRow("complex2") <<
-        "<property name=\"baz\" type=\"as\" access=\"write\">"
+        "<property access=\"write\" type=\"as\" name=\"baz\">"
         "<annotation name=\"foo.annotation2\" value=\"Goodbye, World\" />"
         "<annotation name=\"foo.annotation\" value=\"Hello, World\" />"
         "</property>"
-        "<property name=\"bar\" type=\"i\" access=\"read\"/>"
-        "<property name=\"foo\" type=\"s\" access=\"readwrite\"/>" << map;
+        "<property access=\"read\" type=\"i\" name=\"bar\"/>"
+        "<property access=\"readwrite\" type=\"s\" name=\"foo\"/>" << map;
 }
 
 void tst_QDBusXmlParser::properties()

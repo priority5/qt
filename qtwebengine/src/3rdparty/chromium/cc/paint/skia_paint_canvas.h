@@ -12,8 +12,26 @@
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
 #include "cc/paint/paint_record.h"
-#include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/gpu/GrRecordingContext.h"
+#include "cc/paint/skottie_color_map.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
+#include "third_party/skia/include/core/SkData.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkScalar.h"
+#include "third_party/skia/include/core/SkTextBlob.h"
+
+class SkCanvas;
+class SkM44;
+class SkMatrix;
+class SkPath;
+class SkRRect;
+class SkSurfaceProps;
+enum class SkClipOp;
+struct SkImageInfo;
+struct SkIPoint;
+struct SkIRect;
+struct SkRect;
 
 namespace cc {
 class ImageProvider;
@@ -70,12 +88,17 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
   void rotate(SkScalar degrees) override;
   void concat(const SkMatrix& matrix) override;
   void setMatrix(const SkMatrix& matrix) override;
+  void concat(const SkM44& matrix) override;
+  void setMatrix(const SkM44& matrix) override;
 
   void clipRect(const SkRect& rect, SkClipOp op, bool do_anti_alias) override;
   void clipRRect(const SkRRect& rrect,
                  SkClipOp op,
                  bool do_anti_alias) override;
-  void clipPath(const SkPath& path, SkClipOp op, bool do_anti_alias) override;
+  void clipPath(const SkPath& path,
+                SkClipOp op,
+                bool do_anti_alias,
+                UsePaintCache) override;
   SkRect getLocalClipBounds() const override;
   bool getLocalClipBounds(SkRect* bounds) const override;
   SkIRect getDeviceClipBounds() const override;
@@ -99,19 +122,26 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
                      SkScalar rx,
                      SkScalar ry,
                      const PaintFlags& flags) override;
-  void drawPath(const SkPath& path, const PaintFlags& flags) override;
+  void drawPath(const SkPath& path,
+                const PaintFlags& flags,
+                UsePaintCache) override;
   void drawImage(const PaintImage& image,
                  SkScalar left,
                  SkScalar top,
+                 const SkSamplingOptions&,
                  const PaintFlags* flags) override;
   void drawImageRect(const PaintImage& image,
                      const SkRect& src,
                      const SkRect& dst,
+                     const SkSamplingOptions&,
                      const PaintFlags* flags,
                      SkCanvas::SrcRectConstraint constraint) override;
   void drawSkottie(scoped_refptr<SkottieWrapper> skottie,
                    const SkRect& dst,
-                   float t) override;
+                   float t,
+                   SkottieFrameDataMap images,
+                   const SkottieColorMap& color_map,
+                   SkottieTextPropertyValueMap text_map) override;
   void drawTextBlob(sk_sp<SkTextBlob> blob,
                     SkScalar x,
                     SkScalar y,
@@ -126,6 +156,9 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
 
   bool isClipEmpty() const override;
   SkMatrix getTotalMatrix() const override;
+  SkM44 getLocalToDevice() const override;
+
+  bool NeedsFlush() const override;
 
   void Annotate(AnnotationType type,
                 const SkRect& rect,
@@ -150,10 +183,7 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
  private:
   void FlushAfterDrawIfNeeded();
 
-  int max_texture_size() const {
-    auto* context = canvas_->recordingContext();
-    return context ? context->maxTextureSize() : 0;
-  }
+  int GetMaxTextureSize() const;
 
   SkCanvas* canvas_;
   SkBitmap bitmap_;

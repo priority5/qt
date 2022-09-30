@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtNetwork module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qnetworkreplywasmimpl_p.h"
 #include "qnetworkrequest.h"
@@ -234,10 +198,13 @@ void QNetworkReplyWasmImplPrivate::doSendRequest()
         }
     }
 
+    QByteArray userName, password;
     // username & password
     if (!request.url().userInfo().isEmpty()) {
-        attr.userName = request.url().userName().toUtf8();
-        attr.password = request.url().password().toUtf8();
+        userName = request.url().userName().toUtf8();
+        password = request.url().password().toUtf8();
+        attr.userName = userName.constData();
+        attr.password = password.constData();
     }
 
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
@@ -265,7 +232,8 @@ void QNetworkReplyWasmImplPrivate::doSendRequest()
     attr.userData = reinterpret_cast<void *>(this);
 
     QString dPath = QStringLiteral("/home/web_user/") + request.url().fileName();
-    attr.destinationPath = dPath.toUtf8();
+    QByteArray destinationPath = dPath.toUtf8();
+    attr.destinationPath = destinationPath.constData();
 
     m_fetch = emscripten_fetch(&attr, request.url().toString().toUtf8());
 }
@@ -308,12 +276,6 @@ void QNetworkReplyWasmImplPrivate::dataReceived(const QByteArray &buffer, int bu
     downloadBuffer.append(buffer, bufferSize);
 
     emit q->readyRead();
-
-    if (downloadBufferCurrentSize == totalDownloadSize) {
-        q->setFinished(true);
-        emit q->readChannelFinished();
-        emit q->finished();
-    }
 }
 
 //taken from qnetworkrequest.cpp
@@ -406,7 +368,7 @@ void QNetworkReplyWasmImplPrivate::_q_bufferOutgoingData()
 
     if (!outgoingDataBuffer) {
         // first call, create our buffer
-        outgoingDataBuffer = QSharedPointer<QRingBuffer>::create();
+        outgoingDataBuffer = std::make_shared<QRingBuffer>();
 
         QObject::connect(outgoingData, SIGNAL(readyRead()), q, SLOT(_q_bufferOutgoingData()));
         QObject::connect(outgoingData, SIGNAL(readChannelFinished()), q, SLOT(_q_bufferOutgoingDataFinished()));
@@ -446,13 +408,25 @@ void QNetworkReplyWasmImplPrivate::_q_bufferOutgoingData()
 void QNetworkReplyWasmImplPrivate::downloadSucceeded(emscripten_fetch_t *fetch)
 {
     auto reply = reinterpret_cast<QNetworkReplyWasmImplPrivate*>(fetch->userData);
-    if (!reply || reply->state == QNetworkReplyPrivate::Aborted)
-        return;
-    QByteArray buffer(fetch->data, fetch->numBytes);
-    reply->dataReceived(buffer, buffer.size());
-
+    if (reply) {
+        if (reply->state != QNetworkReplyPrivate::Aborted) {
+            QByteArray buffer(fetch->data, fetch->numBytes);
+            reply->dataReceived(buffer, buffer.size());
+            QByteArray statusText(fetch->statusText);
+            reply->setStatusCode(fetch->status, statusText);
+            reply->setReplyFinished();
+        }
+        reply->m_fetch = nullptr;
+    }
     emscripten_fetch_close(fetch);
-    reply->m_fetch = nullptr;
+}
+
+void QNetworkReplyWasmImplPrivate::setReplyFinished()
+{
+    Q_Q(QNetworkReplyWasmImpl);
+    q->setFinished(true);
+    emit q->readChannelFinished();
+    emit q->finished();
 }
 
 void QNetworkReplyWasmImplPrivate::setStatusCode(int status, const QByteArray &statusText)
@@ -464,18 +438,13 @@ void QNetworkReplyWasmImplPrivate::setStatusCode(int status, const QByteArray &s
 
 void QNetworkReplyWasmImplPrivate::stateChange(emscripten_fetch_t *fetch)
 {
-    if (fetch) {
-        if (!quintptr(fetch->userData))
-            return;
-        auto reply = reinterpret_cast<QNetworkReplyWasmImplPrivate*>(fetch->userData);
-        if (reply->state != QNetworkReplyPrivate::Aborted) {
-            if (fetch->readyState == /*HEADERS_RECEIVED*/ 2) {
-                size_t headerLength = emscripten_fetch_get_response_headers_length(fetch);
-                QByteArray str(headerLength, Qt::Uninitialized);
-                emscripten_fetch_get_response_headers(fetch, str.data(), str.size());
-
-                reply->headersReceived(str);
-            }
+    auto reply = reinterpret_cast<QNetworkReplyWasmImplPrivate*>(fetch->userData);
+    if (reply && reply->state != QNetworkReplyPrivate::Aborted) {
+        if (fetch->readyState == /*HEADERS_RECEIVED*/ 2) {
+            size_t headerLength = emscripten_fetch_get_response_headers_length(fetch);
+            QByteArray str(headerLength, Qt::Uninitialized);
+            emscripten_fetch_get_response_headers(fetch, str.data(), str.size());
+            reply->headersReceived(str);
         }
     }
 }
@@ -483,36 +452,34 @@ void QNetworkReplyWasmImplPrivate::stateChange(emscripten_fetch_t *fetch)
 void QNetworkReplyWasmImplPrivate::downloadProgress(emscripten_fetch_t *fetch)
 {
     auto reply = reinterpret_cast<QNetworkReplyWasmImplPrivate*>(fetch->userData);
-    if (!reply || reply->state == QNetworkReplyPrivate::Aborted)
-        return;
-    if (fetch->status < 400) {
-        uint64_t bytes = fetch->dataOffset + fetch->numBytes;
-        uint64_t tBytes = fetch->totalBytes; // totalBytes can be 0 if server not reporting content length
-        if (tBytes == 0)
-            tBytes = bytes;
-        reply->emitDataReadProgress(bytes, tBytes);
+    if (reply && reply->state != QNetworkReplyPrivate::Aborted) {
+        if (fetch->status < 400) {
+            uint64_t bytes = fetch->dataOffset + fetch->numBytes;
+            uint64_t tBytes = fetch->totalBytes; // totalBytes can be 0 if server not reporting content length
+            if (tBytes == 0)
+                tBytes = bytes;
+            reply->emitDataReadProgress(bytes, tBytes);
+        }
     }
 }
 
 void QNetworkReplyWasmImplPrivate::downloadFailed(emscripten_fetch_t *fetch)
 {
-
     auto reply = reinterpret_cast<QNetworkReplyWasmImplPrivate*>(fetch->userData);
-
     if (reply) {
-
-        QString reasonStr;
-        if (fetch->status > 600)
-            reasonStr = QStringLiteral("Operation canceled");
-        else
-            reasonStr = QString::fromUtf8(fetch->statusText);
-
-        QByteArray statusText(fetch->statusText);
-        reply->setStatusCode(fetch->status, statusText);
-        reply->emitReplyError(reply->statusCodeFromHttp(fetch->status, reply->request.url()), reasonStr);
+        if (reply->state != QNetworkReplyPrivate::Aborted) {
+            QString reasonStr;
+            if (fetch->status > 600)
+                reasonStr = QStringLiteral("Operation canceled");
+            else
+                reasonStr = QString::fromUtf8(fetch->statusText);
+            QByteArray statusText(fetch->statusText);
+            reply->setStatusCode(fetch->status, statusText);
+            reply->emitReplyError(reply->statusCodeFromHttp(fetch->status, reply->request.url()), reasonStr);
+            reply->setReplyFinished();
+        }
         reply->m_fetch = nullptr;
     }
-
     emscripten_fetch_close(fetch);
 }
 
@@ -591,3 +558,5 @@ QNetworkReply::NetworkError QNetworkReplyWasmImplPrivate::statusCodeFromHttp(int
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qnetworkreplywasmimpl_p.cpp"

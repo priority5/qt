@@ -9,9 +9,10 @@
 #include <vector>
 
 #include "fxjs/cfx_v8.h"
+#include "fxjs/fxv8.h"
 #include "fxjs/js_resources.h"
 #include "fxjs/xfa/cfxjse_engine.h"
-#include "fxjs/xfa/cfxjse_value.h"
+#include "v8/include/v8-object.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
 #include "xfa/fxfa/cxfa_ffnotify.h"
 #include "xfa/fxfa/fxfa.h"
@@ -87,23 +88,28 @@ CJS_Result CJX_Subform::execValidate(
       runtime->NewBoolean(iRet != XFA_EventError::kError));
 }
 
-void CJX_Subform::locale(CFXJSE_Value* pValue,
+void CJX_Subform::locale(v8::Isolate* pIsolate,
+                         v8::Local<v8::Value>* pValue,
                          bool bSetting,
                          XFA_Attribute eAttribute) {
   if (bSetting) {
-    SetCDataImpl(XFA_Attribute::Locale, pValue->ToWideString(), true, true);
+    SetCDataImpl(XFA_Attribute::Locale,
+                 fxv8::ReentrantToWideStringHelper(pIsolate, *pValue), true,
+                 true);
     return;
   }
 
   WideString wsLocaleName = GetXFANode()->GetLocaleName().value_or(L"");
-  pValue->SetString(wsLocaleName.ToUTF8().AsStringView());
+  *pValue =
+      fxv8::NewStringHelper(pIsolate, wsLocaleName.ToUTF8().AsStringView());
 }
 
-void CJX_Subform::instanceManager(CFXJSE_Value* pValue,
+void CJX_Subform::instanceManager(v8::Isolate* pIsolate,
+                                  v8::Local<v8::Value>* pValue,
                                   bool bSetting,
                                   XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
 
@@ -121,11 +127,9 @@ void CJX_Subform::instanceManager(CFXJSE_Value* pValue,
       break;
     }
   }
-  if (!pInstanceMgr) {
-    pValue->SetNull();
-    return;
-  }
-
-  pValue->Assign(GetDocument()->GetScriptContext()->GetOrCreateJSBindingFromMap(
-      pInstanceMgr));
+  *pValue = pInstanceMgr ? GetDocument()
+                               ->GetScriptContext()
+                               ->GetOrCreateJSBindingFromMap(pInstanceMgr)
+                               .As<v8::Value>()
+                         : fxv8::NewNullHelper(pIsolate).As<v8::Value>();
 }

@@ -4,14 +4,13 @@
 
 #include "components/permissions/android/permission_prompt_android.h"
 
-#include <memory>
+#include <vector>
 
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_manager.h"
+#include "components/messages/android/message_dispatcher_bridge.h"
 #include "components/permissions/android/permission_dialog_delegate.h"
 #include "components/permissions/permission_request.h"
-#include "components/permissions/permission_uma_util.h"
-#include "components/permissions/permissions_client.h"
 #include "components/resources/android/theme_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/elide_url.h"
@@ -28,22 +27,28 @@ PermissionPromptAndroid::PermissionPromptAndroid(
       weak_factory_(this) {
   DCHECK(web_contents);
 
-  infobars::InfoBarManager* infobar_manager =
-      PermissionsClient::Get()->GetInfoBarManager(web_contents_);
-  if (infobar_manager) {
-    permission_infobar_ = PermissionsClient::Get()->MaybeCreateInfoBar(
-        web_contents, GetContentSettingType(0u /* position */),
-        weak_factory_.GetWeakPtr());
-    if (permission_infobar_) {
-      infobar_manager->AddObserver(this);
-      return;
-    }
+  auto* permission_client = PermissionsClient::Get();
+  if ((message_delegate_ = permission_client->MaybeCreateMessageUI(
+           web_contents, GetContentSettingType(0u /* position */),
+           weak_factory_.GetWeakPtr()))) {
+    prompt_disposition_ = permissions::PermissionPromptDisposition::MESSAGE_UI;
+  } else if ((permission_infobar_ = permission_client->MaybeCreateInfoBar(
+                  web_contents, GetContentSettingType(0u /* position */),
+                  weak_factory_.GetWeakPtr()))) {
+    prompt_disposition_ =
+        permissions::PermissionPromptDisposition::MINI_INFOBAR;
+    permission_client->GetInfoBarManager(web_contents_)->AddObserver(this);
+  } else {
+    prompt_disposition_ =
+        permissions::PermissionPromptDisposition::MODAL_DIALOG;
+    PermissionDialogDelegate::Create(web_contents_, this);
   }
-
-  PermissionDialogDelegate::Create(web_contents_, this);
 }
 
 PermissionPromptAndroid::~PermissionPromptAndroid() {
+  if (message_delegate_) {
+    return;
+  }
   infobars::InfoBarManager* infobar_manager =
       PermissionsClient::Get()->GetInfoBarManager(web_contents_);
   if (!infobar_manager)
@@ -56,8 +61,8 @@ PermissionPromptAndroid::~PermissionPromptAndroid() {
   }
 }
 
-void PermissionPromptAndroid::UpdateAnchorPosition() {
-  NOTREACHED() << "UpdateAnchorPosition is not implemented";
+void PermissionPromptAndroid::UpdateAnchor() {
+  NOTIMPLEMENTED();
 }
 
 permissions::PermissionPrompt::TabSwitchingBehavior
@@ -67,13 +72,11 @@ PermissionPromptAndroid::GetTabSwitchingBehavior() {
 
 permissions::PermissionPromptDisposition
 PermissionPromptAndroid::GetPromptDisposition() const {
-  return permission_infobar_
-             ? permissions::PermissionPromptDisposition::MINI_INFOBAR
-             : permissions::PermissionPromptDisposition::MODAL_DIALOG;
+  return prompt_disposition_;
 }
 
 void PermissionPromptAndroid::Closing() {
-  delegate_->Closing();
+  delegate_->Dismiss();
 }
 
 void PermissionPromptAndroid::Accept() {
@@ -82,6 +85,23 @@ void PermissionPromptAndroid::Accept() {
 
 void PermissionPromptAndroid::Deny() {
   delegate_->Deny();
+}
+
+void PermissionPromptAndroid::SetManageClicked() {
+  delegate_->SetManageClicked();
+}
+
+void PermissionPromptAndroid::SetLearnMoreClicked() {
+  delegate_->SetLearnMoreClicked();
+}
+
+bool PermissionPromptAndroid::ShouldCurrentRequestUseQuietUI() {
+  return delegate_->ShouldCurrentRequestUseQuietUI();
+}
+
+absl::optional<PermissionUiSelector::QuietUiReason>
+PermissionPromptAndroid::ReasonForUsingQuietUi() const {
+  return delegate_->ReasonForUsingQuietUi();
 }
 
 size_t PermissionPromptAndroid::PermissionCount() const {
@@ -101,14 +121,11 @@ static bool IsValidMediaRequestGroup(
   if (requests.size() < 2)
     return false;
   return (
-      (requests[0]->GetPermissionRequestType() ==
-           permissions::PermissionRequestType::PERMISSION_MEDIASTREAM_MIC &&
-       requests[1]->GetPermissionRequestType() ==
-           permissions::PermissionRequestType::PERMISSION_MEDIASTREAM_CAMERA) ||
-      (requests[0]->GetPermissionRequestType() ==
-           permissions::PermissionRequestType::PERMISSION_MEDIASTREAM_CAMERA &&
-       requests[1]->GetPermissionRequestType() ==
-           permissions::PermissionRequestType::PERMISSION_MEDIASTREAM_MIC));
+      (requests[0]->request_type() == permissions::RequestType::kMicStream &&
+       requests[1]->request_type() ==
+           permissions::RequestType::kCameraStream) ||
+      (requests[0]->request_type() == permissions::RequestType::kCameraStream &&
+       requests[1]->request_type() == permissions::RequestType::kMicStream));
 }
 
 static bool IsValidARCameraAccessRequestGroup(
@@ -116,14 +133,11 @@ static bool IsValidARCameraAccessRequestGroup(
   if (requests.size() < 2)
     return false;
   return (
-      (requests[0]->GetPermissionRequestType() ==
-           permissions::PermissionRequestType::PERMISSION_AR &&
-       requests[1]->GetPermissionRequestType() ==
-           permissions::PermissionRequestType::PERMISSION_MEDIASTREAM_CAMERA) ||
-      (requests[0]->GetPermissionRequestType() ==
-           permissions::PermissionRequestType::PERMISSION_MEDIASTREAM_CAMERA &&
-       requests[1]->GetPermissionRequestType() ==
-           permissions::PermissionRequestType::PERMISSION_AR));
+      (requests[0]->request_type() == permissions::RequestType::kArSession &&
+       requests[1]->request_type() ==
+           permissions::RequestType::kCameraStream) ||
+      (requests[0]->request_type() == permissions::RequestType::kCameraStream &&
+       requests[1]->request_type() == permissions::RequestType::kArSession));
 }
 
 // Grouped permission requests can only be Mic+Camera, Camera+Mic,
@@ -131,7 +145,6 @@ static bool IsValidARCameraAccessRequestGroup(
 static void CheckValidRequestGroup(
     const std::vector<permissions::PermissionRequest*>& requests) {
   DCHECK_EQ(static_cast<size_t>(2u), requests.size());
-  DCHECK_EQ(requests[0]->GetOrigin(), requests[1]->GetOrigin());
   DCHECK((IsValidMediaRequestGroup(requests)) ||
          (IsValidARCameraAccessRequestGroup(requests)));
 }
@@ -140,27 +153,27 @@ int PermissionPromptAndroid::GetIconId() const {
   const std::vector<permissions::PermissionRequest*>& requests =
       delegate_->Requests();
   if (requests.size() == 1)
-    return requests[0]->GetIconId();
+    return permissions::GetIconId(requests[0]->request_type());
   CheckValidRequestGroup(requests);
   return IDR_ANDROID_INFOBAR_MEDIA_STREAM_CAMERA;
 }
 
-base::string16 PermissionPromptAndroid::GetMessageText() const {
+std::u16string PermissionPromptAndroid::GetMessageText() const {
   const std::vector<permissions::PermissionRequest*>& requests =
       delegate_->Requests();
   if (requests.size() == 1) {
-    if (requests[0]->GetContentSettingsType() ==
-        ContentSettingsType::STORAGE_ACCESS) {
+    if (requests[0]->request_type() ==
+        permissions::RequestType::kStorageAccess) {
       return l10n_util::GetStringFUTF16(
           IDS_STORAGE_ACCESS_INFOBAR_TEXT,
           url_formatter::FormatUrlForSecurityDisplay(
-              requests[0]->GetOrigin(),
+              delegate_->GetRequestingOrigin(),
               url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC),
           url_formatter::FormatUrlForSecurityDisplay(
               delegate_->GetEmbeddingOrigin(),
               url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC));
     } else {
-      return requests[0]->GetMessageText();
+      return requests[0]->GetDialogMessageText();
     }
   }
   CheckValidRequestGroup(requests);
@@ -168,13 +181,13 @@ base::string16 PermissionPromptAndroid::GetMessageText() const {
     return l10n_util::GetStringFUTF16(
         IDS_AR_AND_MEDIA_CAPTURE_VIDEO_INFOBAR_TEXT,
         url_formatter::FormatUrlForSecurityDisplay(
-            requests[0]->GetOrigin(),
+            delegate_->GetRequestingOrigin(),
             url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC));
   } else {
     return l10n_util::GetStringFUTF16(
         IDS_MEDIA_CAPTURE_AUDIO_AND_VIDEO_INFOBAR_TEXT,
         url_formatter::FormatUrlForSecurityDisplay(
-            requests[0]->GetOrigin(),
+            delegate_->GetRequestingOrigin(),
             url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC));
   }
 }

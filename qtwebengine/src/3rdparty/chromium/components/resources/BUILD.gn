@@ -37,8 +37,6 @@ grit("components_resources") {
   grit_flags = [
     "-E",
     "about_credits_file=" + rebase_path(about_credits_file, root_build_dir),
-    "-E",
-    "root_gen_dir=" + rebase_path(root_gen_dir, root_build_dir),
   ]
 
   defines = [
@@ -54,10 +52,10 @@ grit("components_resources") {
     deps += [ "//components/resources/ssl/ssl_error_assistant:make_ssl_error_assistant_protobuf" ]
   }
 
-  # TODO(crbug/1056278): Enable this on Fuchsia
-  if (safe_browsing_mode > 0 && !is_fuchsia) {
-    deps +=
-        [ "//components/safe_browsing/core/resources:make_file_types_protobuf" ]
+  if (safe_browsing_mode > 0) {
+    deps += [
+      "//components/safe_browsing/content/resources:make_file_types_protobuf",
+    ]
   }
 }
 
@@ -103,6 +101,11 @@ action("about_credits") {
     "credits",
     rebase_path(about_credits_file, root_build_dir),
   ]
+
+  # Defined by downstream projects.
+  if (defined(extra_third_party_notice_dirs)) {
+    args += [ "--extra-third-party-dirs=$extra_third_party_notice_dirs" ]
+  }
 }
 
 if (is_android) {
@@ -113,6 +116,9 @@ if (is_android) {
       "android/permissions_resource_id.h",
       "android/sms_resource_id.h",
       "android/theme_resources.h",
+      "android/webxr_resource_id.h",
     ]
+
+    public_deps = [ "//device/vr/buildflags" ]
   }
 }

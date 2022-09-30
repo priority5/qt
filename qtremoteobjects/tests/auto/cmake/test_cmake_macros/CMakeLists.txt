@@ -1,12 +1,13 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.16)
 
 project(test_qremoteobjects_module)
 
-find_package(Qt5RemoteObjects REQUIRED)
+find_package(Qt6RemoteObjects REQUIRED)
 
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 set(MAIN_SRCS main.cpp)
-qt5_generate_repc(MAIN_SRCS ../../integration/pod.rep REPLICA)
 add_executable(mainapp ${MAIN_SRCS})
-target_link_libraries(mainapp Qt5::RemoteObjects)
+qt6_add_repc_replicas(mainapp ../../integration/pod.rep)
+
+target_link_libraries(mainapp Qt::RemoteObjects)

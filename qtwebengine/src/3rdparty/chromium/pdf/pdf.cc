@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "build/build_config.h"
 #include "pdf/pdf_engine.h"
 #include "pdf/pdf_init.h"
 #include "ui/gfx/geometry/rect.h"
@@ -21,7 +22,7 @@ class ScopedSdkInitializer {
  public:
   explicit ScopedSdkInitializer(bool enable_v8) {
     if (!IsSDKInitializedViaPlugin())
-      InitializeSDK(enable_v8);
+      InitializeSDK(enable_v8, FontMappingMode::kNoMapping);
   }
 
   ScopedSdkInitializer(const ScopedSdkInitializer&) = delete;
@@ -35,15 +36,15 @@ class ScopedSdkInitializer {
 
 }  // namespace
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
 std::vector<uint8_t> CreateFlattenedPdf(
     base::span<const uint8_t> input_buffer) {
   ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/false);
   return PDFEngineExports::Get()->CreateFlattenedPdf(input_buffer);
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 bool RenderPDFPageToDC(base::span<const uint8_t> pdf_buffer,
                        int page_number,
                        HDC dc,
@@ -70,19 +71,10 @@ bool RenderPDFPageToDC(base::span<const uint8_t> pdf_buffer,
                                            dc);
 }
 
-void SetPDFEnsureTypefaceCharactersAccessible(
-    PDFEnsureTypefaceCharactersAccessible func) {
-  PDFEngineExports::Get()->SetPDFEnsureTypefaceCharactersAccessible(func);
-}
-
-void SetPDFUseGDIPrinting(bool enable) {
-  PDFEngineExports::Get()->SetPDFUseGDIPrinting(enable);
-}
-
 void SetPDFUsePrintMode(int mode) {
   PDFEngineExports::Get()->SetPDFUsePrintMode(mode);
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 bool GetPDFDocInfo(base::span<const uint8_t> pdf_buffer,
                    int* page_count,
@@ -92,7 +84,7 @@ bool GetPDFDocInfo(base::span<const uint8_t> pdf_buffer,
   return engine_exports->GetPDFDocInfo(pdf_buffer, page_count, max_page_width);
 }
 
-base::Optional<bool> IsPDFDocTagged(base::span<const uint8_t> pdf_buffer) {
+absl::optional<bool> IsPDFDocTagged(base::span<const uint8_t> pdf_buffer) {
   ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);
   PDFEngineExports* engine_exports = PDFEngineExports::Get();
   return engine_exports->IsPDFDocTagged(pdf_buffer);
@@ -105,7 +97,7 @@ base::Value GetPDFStructTreeForPage(base::span<const uint8_t> pdf_buffer,
   return engine_exports->GetPDFStructTreeForPage(pdf_buffer, page_index);
 }
 
-base::Optional<gfx::SizeF> GetPDFPageSizeByIndex(
+absl::optional<gfx::SizeF> GetPDFPageSizeByIndex(
     base::span<const uint8_t> pdf_buffer,
     int page_number) {
   ScopedSdkInitializer scoped_sdk_initializer(/*enable_v8=*/true);

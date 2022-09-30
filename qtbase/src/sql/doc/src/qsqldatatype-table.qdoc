@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
   \page sql-types.html
@@ -502,67 +478,4 @@
         \li The value is a BLOB of data, stored exactly as it was input.
         \li Mapped to QByteArray
   \endtable
-
-  \section2 Sybase Adaptive Server Data Types
-
-  \table 90%
-    \header
-        \li Sybase Adaptive Server data type
-        \li SQL type description
-        \li Recommended input (C++ or Qt data type)
-    \row
-        \li BINARY
-        \li Describes a fixed-length binary value up to 255 bytes in size.
-        \li Mapped to QByteArray
-    \row
-        \li CHAR
-        \li Character String
-        \li Mapped to QString
-    \row
-        \li DATETIME
-        \li Date and time. Range: 1753-01-01 00:00:00 through 9999-12-31 23:59:59.
-        \li Mapped to QDateTime
-    \row
-        \li NCHAR
-        \li Character String of fixed length
-        \li Mapped to QString
-    \row
-        \li NVARACHAR
-        \li Character String of variable length
-        \li Mapped to QString
-    \row
-        \li VARCHAR
-        \li Character String of fixed length
-        \li Mapped to QString
-    \row
-        \li CLOB
-        \li Character large string object
-        \li Mapped to QString
-    \row
-        \li TIMESTAMP
-        \li A unique number within a database
-        \li Mapped to QString
-    \row
-        \li SMALLDATETIME
-        \li Date and time. Range: 1900-01-01 00:00 through 2079-12-31 23:59
-        \li Mapped to QDateTime
-    \row
-        \li UNICHAR
-        \li Character String of fixed length.(Unicode)
-        \li Mapped to QString
-    \row
-        \li UNIVARCHAR
-        \li Character String of variable length.(Unicode)
-        \li Mapped to QString
-    \row
-        \li VARBINARY
-        \li Describes a variable-length binary value up to 255 bytes in size
-        \li Mapped to QByteArray
-  \endtable
-
-  \section2 SQLite Version 2
-
-  SQLite version 2 is "typeless". This means that you can store any kind of
-  data you want in any column of any table, regardless of the declared
-  data type of that column. We recommend that you map the data to QString.
 */

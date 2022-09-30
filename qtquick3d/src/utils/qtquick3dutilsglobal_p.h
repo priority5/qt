@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of Qt Quick 3D.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #ifndef QTSSGGLOBAL_P_H
 #define QTSSGGLOBAL_P_H
@@ -42,20 +16,9 @@
 //
 
 #include <QtCore/qglobal.h>
+#include <QtQuick3DUtils/private/qtquick3dutilsexports_p.h>
 
 QT_BEGIN_NAMESPACE
-
-#ifndef QT_STATIC
-#if defined(QT_BUILD_QUICK3DUTILS_LIB)
-#define Q_QUICK3DUTILS_EXPORT Q_DECL_EXPORT
-#else
-#define Q_QUICK3DUTILS_EXPORT Q_DECL_IMPORT
-#endif
-#else
-#define Q_QUICK3DUTILS_EXPORT
-#endif
-
-#define Q_QUICK3DUTILS_PRIVATE_EXPORT Q_QUICK3DUTILS_EXPORT
 
 template<typename T>
 class QSSGRef
@@ -104,9 +67,9 @@ public:
             d->ref.ref();
     }
 
-    QSSGRef(QSSGRef<T> &&other) : d(other.take()) {}
+    QSSGRef(QSSGRef<T> &&other) noexcept : d(other.take()) {}
     template<typename X>
-    QSSGRef(QSSGRef<X> &&other) : d(other.take())
+    QSSGRef(QSSGRef<X> &&other) noexcept : d(other.take())
     {
     }
 
@@ -129,7 +92,7 @@ public:
         return *this;
     }
     template<typename X>
-    QSSGRef<T> &operator=(QSSGRef<X> &&other)
+    QSSGRef<T> &operator=(QSSGRef<X> &&other) noexcept
     {
         clear();
         d = other.take();
@@ -146,7 +109,7 @@ public:
         }
         return *this;
     }
-    QSSGRef<T> &operator=(QSSGRef<T> &&other)
+    QSSGRef<T> &operator=(QSSGRef<T> &&other) noexcept
     {
         qSwap(d, other.d);
         return *this;

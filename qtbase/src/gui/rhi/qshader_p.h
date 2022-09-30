@@ -1,38 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
-**
-** This file is part of the Qt Gui module
-**
-** $QT_BEGIN_LICENSE:LGPL3$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPLv3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or later as published by the Free
-** Software Foundation and appearing in the file LICENSE.GPL included in
-** the packaging of this file. Please review the following information to
-** ensure the GNU General Public License version 2.0 requirements will be
-** met: http://www.gnu.org/licenses/gpl-2.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QSHADER_P_H
 #define QSHADER_P_H
@@ -49,12 +16,18 @@
 //
 
 #include <QtGui/qtguiglobal.h>
+#include <QtCore/qhash.h>
 #include <private/qshaderdescription_p.h>
 
 QT_BEGIN_NAMESPACE
 
 struct QShaderPrivate;
 class QShaderKey;
+
+#ifdef Q_OS_INTEGRITY
+  class QShaderVersion;
+  size_t qHash(const QShaderVersion &, size_t = 0) noexcept;
+#endif
 
 class Q_GUI_EXPORT QShaderVersion
 {
@@ -79,7 +52,10 @@ private:
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(QShaderVersion::Flags)
-Q_DECLARE_TYPEINFO(QShaderVersion, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(QShaderVersion, Q_RELOCATABLE_TYPE);
+
+class QShaderCode;
+Q_GUI_EXPORT size_t qHash(const QShaderCode &, size_t = 0) noexcept;
 
 class Q_GUI_EXPORT QShaderCode
 {
@@ -94,11 +70,13 @@ public:
     void setEntryPoint(const QByteArray &entry) { m_entryPoint = entry; }
 
 private:
+    friend Q_GUI_EXPORT size_t qHash(const QShaderCode &, size_t) noexcept;
+
     QByteArray m_shader;
     QByteArray m_entryPoint;
 };
 
-Q_DECLARE_TYPEINFO(QShaderCode, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(QShaderCode, Q_RELOCATABLE_TYPE);
 
 class Q_GUI_EXPORT QShader
 {
@@ -141,7 +119,7 @@ public:
     QShaderDescription description() const;
     void setDescription(const QShaderDescription &desc);
 
-    QVector<QShaderKey> availableShaders() const;
+    QList<QShaderKey> availableShaders() const;
     QShaderCode shader(const QShaderKey &key) const;
     void setShader(const QShaderKey &key, const QShaderCode &shader);
     void removeShader(const QShaderKey &key);
@@ -150,15 +128,26 @@ public:
     static QShader fromSerialized(const QByteArray &data);
 
     using NativeResourceBindingMap = QHash<int, QPair<int, int> >; // binding -> native_binding[, native_binding]
-    const NativeResourceBindingMap *nativeResourceBindingMap(const QShaderKey &key) const;
+    NativeResourceBindingMap nativeResourceBindingMap(const QShaderKey &key) const;
     void setResourceBindingMap(const QShaderKey &key, const NativeResourceBindingMap &map);
     void removeResourceBindingMap(const QShaderKey &key);
+
+    struct SeparateToCombinedImageSamplerMapping {
+        QByteArray combinedSamplerName;
+        int textureBinding;
+        int samplerBinding;
+    };
+    using SeparateToCombinedImageSamplerMappingList = QList<SeparateToCombinedImageSamplerMapping>;
+    SeparateToCombinedImageSamplerMappingList separateToCombinedImageSamplerMappingList(const QShaderKey &key) const;
+    void setSeparateToCombinedImageSamplerMappingList(const QShaderKey &key,
+                                                      const SeparateToCombinedImageSamplerMappingList &list);
+    void removeSeparateToCombinedImageSamplerMappingList(const QShaderKey &key);
 
 private:
     QShaderPrivate *d;
     friend struct QShaderPrivate;
-    friend Q_GUI_EXPORT bool operator==(const QShader &, const QShader &) Q_DECL_NOTHROW;
-    friend Q_GUI_EXPORT uint qHash(const QShader &, uint) Q_DECL_NOTHROW;
+    friend Q_GUI_EXPORT bool operator==(const QShader &, const QShader &) noexcept;
+    friend Q_GUI_EXPORT size_t qHash(const QShader &, size_t) noexcept;
 #ifndef QT_NO_DEBUG_STREAM
     friend Q_GUI_EXPORT QDebug operator<<(QDebug, const QShader &);
 #endif
@@ -187,36 +176,36 @@ private:
     QShader::Variant m_sourceVariant = QShader::StandardShader;
 };
 
-Q_DECLARE_TYPEINFO(QShaderKey, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(QShaderKey, Q_RELOCATABLE_TYPE);
 
-Q_GUI_EXPORT bool operator==(const QShader &lhs, const QShader &rhs) Q_DECL_NOTHROW;
-Q_GUI_EXPORT uint qHash(const QShader &s, uint seed = 0) Q_DECL_NOTHROW;
+Q_GUI_EXPORT bool operator==(const QShader &lhs, const QShader &rhs) noexcept;
+Q_GUI_EXPORT size_t qHash(const QShader &s, size_t seed = 0) noexcept;
 
-inline bool operator!=(const QShader &lhs, const QShader &rhs) Q_DECL_NOTHROW
+inline bool operator!=(const QShader &lhs, const QShader &rhs) noexcept
 {
     return !(lhs == rhs);
 }
 
-Q_GUI_EXPORT bool operator==(const QShaderVersion &lhs, const QShaderVersion &rhs) Q_DECL_NOTHROW;
-Q_GUI_EXPORT bool operator==(const QShaderKey &lhs, const QShaderKey &rhs) Q_DECL_NOTHROW;
-Q_GUI_EXPORT bool operator==(const QShaderCode &lhs, const QShaderCode &rhs) Q_DECL_NOTHROW;
+Q_GUI_EXPORT bool operator==(const QShaderVersion &lhs, const QShaderVersion &rhs) noexcept;
+Q_GUI_EXPORT bool operator==(const QShaderKey &lhs, const QShaderKey &rhs) noexcept;
+Q_GUI_EXPORT bool operator==(const QShaderCode &lhs, const QShaderCode &rhs) noexcept;
 
-inline bool operator!=(const QShaderVersion &lhs, const QShaderVersion &rhs) Q_DECL_NOTHROW
+inline bool operator!=(const QShaderVersion &lhs, const QShaderVersion &rhs) noexcept
 {
     return !(lhs == rhs);
 }
 
-inline bool operator!=(const QShaderKey &lhs, const QShaderKey &rhs) Q_DECL_NOTHROW
+inline bool operator!=(const QShaderKey &lhs, const QShaderKey &rhs) noexcept
 {
     return !(lhs == rhs);
 }
 
-inline bool operator!=(const QShaderCode &lhs, const QShaderCode &rhs) Q_DECL_NOTHROW
+inline bool operator!=(const QShaderCode &lhs, const QShaderCode &rhs) noexcept
 {
     return !(lhs == rhs);
 }
 
-Q_GUI_EXPORT uint qHash(const QShaderKey &k, uint seed = 0) Q_DECL_NOTHROW;
+Q_GUI_EXPORT size_t qHash(const QShaderKey &k, size_t seed = 0) noexcept;
 
 #ifndef QT_NO_DEBUG_STREAM
 Q_GUI_EXPORT QDebug operator<<(QDebug, const QShader &);

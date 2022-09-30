@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//printing/buildflags/buildflags.gni")
+
 source_set("renderer") {
   sources = [
     "aw_content_renderer_client.cc",
@@ -32,6 +34,7 @@ source_set("renderer") {
     "//android_webview:generate_aw_resources",
     "//android_webview:generate_aw_strings",
     "//android_webview/common",
+    "//android_webview/common:mojom",
     "//base",
     "//components/android_system_error_page",
     "//components/autofill/content/renderer",
@@ -41,12 +44,10 @@ source_set("renderer") {
     "//components/js_injection/common",
     "//components/js_injection/renderer",
     "//components/page_load_metrics/renderer",
-    "//components/printing/common",
-    "//components/printing/renderer",
+    "//components/power_scheduler",
     "//components/resources",
     "//components/safe_browsing/content/common:interfaces",
     "//components/safe_browsing/content/renderer:throttles",
-    "//components/safe_browsing/core:features",
     "//components/safe_browsing/core/common",
     "//components/security_interstitials/content/renderer:security_interstitial_page_controller",
     "//components/security_interstitials/core",
@@ -62,4 +63,11 @@ source_set("renderer") {
     "//ui/base",
     "//url",
   ]
+
+  if (enable_basic_printing) {
+    deps += [
+      "//components/printing/common",
+      "//components/printing/renderer",
+    ]
+  }
 }

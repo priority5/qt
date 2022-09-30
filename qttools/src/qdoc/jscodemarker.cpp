@@ -1,43 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*
-  jscodemarker.cpp
-*/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "jscodemarker.h"
 
 #include "atom.h"
-#include "generator.h"
 #include "node.h"
 #include "qmlmarkupvisitor.h"
 #include "text.h"
-#include "tree.h"
 
 #ifndef QT_NO_DECLARATIVE
 #    include <private/qqmljsast_p.h>
@@ -47,10 +16,6 @@
 #endif
 
 QT_BEGIN_NAMESPACE
-
-JsCodeMarker::JsCodeMarker() {}
-
-JsCodeMarker::~JsCodeMarker() {}
 
 /*!
   Returns \c true if the \a code is recognized by the parser.
@@ -62,12 +27,12 @@ bool JsCodeMarker::recognizeCode(const QString &code)
     QQmlJS::Lexer lexer(&engine);
     QQmlJS::Parser parser(&engine);
 
-    QString newCode = code;
-    QVector<QQmlJS::SourceLocation> pragmas = extractPragmas(newCode);
+    const QString &newCode = code;
     lexer.setCode(newCode, 1);
 
     return parser.parseProgram();
 #else
+    Q_UNUSED(code);
     return false;
 #endif
 }
@@ -112,7 +77,7 @@ QString JsCodeMarker::addMarkUp(const QString &code, const Node * /* relative */
     QQmlJS::Lexer lexer(&engine);
 
     QString newCode = code;
-    QVector<QQmlJS::SourceLocation> pragmas = extractPragmas(newCode);
+    QList<QQmlJS::SourceLocation> pragmas = extractPragmas(newCode);
     lexer.setCode(newCode, 1);
 
     QQmlJS::Parser parser(&engine);
@@ -125,20 +90,23 @@ QString JsCodeMarker::addMarkUp(const QString &code, const Node * /* relative */
         QmlMarkupVisitor visitor(code, pragmas, &engine);
         QQmlJS::AST::Node::accept(ast, &visitor);
         if (visitor.hasError()) {
-            location.warning(location.fileName()
-                             + tr("Unable to analyze JavaScript. The output is incomplete."));
+            location.warning(
+                    location.fileName()
+                    + QStringLiteral("Unable to analyze JavaScript. The output is incomplete."));
         }
         output = visitor.markedUpCode();
     } else {
-        location.warning(location.fileName()
-                         + tr("Unable to parse JavaScript: \"%1\" at line %2, column %3")
-                                   .arg(parser.errorMessage())
-                                   .arg(parser.errorLineNumber())
-                                   .arg(parser.errorColumnNumber()));
+        location.warning(
+                location.fileName()
+                + QStringLiteral("Unable to parse JavaScript: \"%1\" at line %2, column %3")
+                          .arg(parser.errorMessage())
+                          .arg(parser.errorLineNumber())
+                          .arg(parser.errorColumnNumber()));
         output = protect(code);
     }
     return output;
 #else
+    Q_UNUSED(code);
     location.warning("QtDeclarative not installed; cannot parse QML or JS.");
     return QString();
 #endif

@@ -73,9 +73,9 @@
 #include "third_party/base/allocator/partition_allocator/spin_lock.h"
 #include "third_party/base/base_export.h"
 #include "third_party/base/bits.h"
+#include "third_party/base/check.h"
 #include "third_party/base/compiler_specific.h"
-#include "third_party/base/logging.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/sys_byteorder.h"
 
 #if defined(MEMORY_TOOL_REPLACES_ALLOCATOR)

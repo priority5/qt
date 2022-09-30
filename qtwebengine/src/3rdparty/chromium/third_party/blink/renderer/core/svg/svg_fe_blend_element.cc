@@ -25,7 +25,7 @@
 #include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/graphics/filters/fe_blend.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -113,7 +113,9 @@ bool SVGFEBlendElement::SetFilterEffectAttribute(
       effect, attr_name);
 }
 
-void SVGFEBlendElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGFEBlendElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kModeAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
     PrimitiveAttributeChanged(attr_name);
@@ -126,7 +128,7 @@ void SVGFEBlendElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(attr_name);
+  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(params);
 }
 
 FilterEffect* SVGFEBlendElement::Build(SVGFilterBuilder* filter_builder,

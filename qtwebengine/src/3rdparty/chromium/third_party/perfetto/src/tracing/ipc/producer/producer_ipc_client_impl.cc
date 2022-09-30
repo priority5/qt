@@ -16,11 +16,13 @@
 
 #include "src/tracing/ipc/producer/producer_ipc_client_impl.h"
 
-#include <inttypes.h>
+#include <cinttypes>
+
 #include <string.h>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/base/task_runner.h"
+#include "perfetto/ext/base/version.h"
 #include "perfetto/ext/ipc/client.h"
 #include "perfetto/ext/tracing/core/commit_data_request.h"
 #include "perfetto/ext/tracing/core/producer.h"
@@ -29,7 +31,12 @@
 #include "perfetto/tracing/core/data_source_config.h"
 #include "perfetto/tracing/core/data_source_descriptor.h"
 #include "perfetto/tracing/core/trace_config.h"
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#include "src/tracing/ipc/shared_memory_windows.h"
+#else
 #include "src/tracing/ipc/posix_shared_memory.h"
+#endif
 
 // TODO(fmayer): think to what happens when ProducerIPCClientImpl gets destroyed
 // w.r.t. the Producer pointer. Also think to lifetime of the Producer* during
@@ -51,14 +58,17 @@ std::unique_ptr<TracingService::ProducerEndpoint> ProducerIPCClient::Connect(
     ConnectionFlags conn_flags) {
   return std::unique_ptr<TracingService::ProducerEndpoint>(
       new ProducerIPCClientImpl(
-          service_sock_name, producer, producer_name, task_runner,
-          smb_scraping_mode, shared_memory_size_hint_bytes,
-          shared_memory_page_size_hint_bytes, std::move(shm),
-          std::move(shm_arbiter), conn_flags));
+          {service_sock_name,
+           conn_flags ==
+               ProducerIPCClient::ConnectionFlags::kRetryIfUnreachable},
+          producer, producer_name, task_runner, smb_scraping_mode,
+          shared_memory_size_hint_bytes, shared_memory_page_size_hint_bytes,
+          std::move(shm), std::move(shm_arbiter)));
 }
 
-ProducerIPCClientImpl::ProducerIPCClientImpl(
-    const char* service_sock_name,
+// static. (Declared in include/tracing/ipc/producer_ipc_client.h).
+std::unique_ptr<TracingService::ProducerEndpoint> ProducerIPCClient::Connect(
+    ipc::Client::ConnArgs conn_args,
     Producer* producer,
     const std::string& producer_name,
     base::TaskRunner* task_runner,
@@ -66,14 +76,29 @@ ProducerIPCClientImpl::ProducerIPCClientImpl(
     size_t shared_memory_size_hint_bytes,
     size_t shared_memory_page_size_hint_bytes,
     std::unique_ptr<SharedMemory> shm,
-    std::unique_ptr<SharedMemoryArbiter> shm_arbiter,
-    ProducerIPCClient::ConnectionFlags conn_flags)
+    std::unique_ptr<SharedMemoryArbiter> shm_arbiter) {
+  return std::unique_ptr<TracingService::ProducerEndpoint>(
+      new ProducerIPCClientImpl(std::move(conn_args), producer, producer_name,
+                                task_runner, smb_scraping_mode,
+                                shared_memory_size_hint_bytes,
+                                shared_memory_page_size_hint_bytes,
+                                std::move(shm), std::move(shm_arbiter)));
+}
+
+ProducerIPCClientImpl::ProducerIPCClientImpl(
+    ipc::Client::ConnArgs conn_args,
+    Producer* producer,
+    const std::string& producer_name,
+    base::TaskRunner* task_runner,
+    TracingService::ProducerSMBScrapingMode smb_scraping_mode,
+    size_t shared_memory_size_hint_bytes,
+    size_t shared_memory_page_size_hint_bytes,
+    std::unique_ptr<SharedMemory> shm,
+    std::unique_ptr<SharedMemoryArbiter> shm_arbiter)
     : producer_(producer),
       task_runner_(task_runner),
-      ipc_channel_(ipc::Client::CreateInstance(
-          service_sock_name,
-          conn_flags == ProducerIPCClient::ConnectionFlags::kRetryIfUnreachable,
-          task_runner)),
+      ipc_channel_(
+          ipc::Client::CreateInstance(std::move(conn_args), task_runner)),
       producer_port_(this /* event_listener */),
       shared_memory_(std::move(shm)),
       shared_memory_arbiter_(std::move(shm_arbiter)),
@@ -97,7 +122,9 @@ ProducerIPCClientImpl::ProducerIPCClientImpl(
   PERFETTO_DCHECK_THREAD(thread_checker_);
 }
 
-ProducerIPCClientImpl::~ProducerIPCClientImpl() = default;
+ProducerIPCClientImpl::~ProducerIPCClientImpl() {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+}
 
 // Called by the IPC layer if the BindService() succeeds.
 void ProducerIPCClientImpl::OnConnect() {
@@ -112,7 +139,8 @@ void ProducerIPCClientImpl::OnConnect() {
       [this](ipc::AsyncResult<protos::gen::InitializeConnectionResponse> resp) {
         OnConnectionInitialized(
             resp.success(),
-            resp.success() ? resp->using_shmem_provided_by_producer() : false);
+            resp.success() ? resp->using_shmem_provided_by_producer() : false,
+            resp.success() ? resp->direct_smb_patching_supported() : false);
       });
   protos::gen::InitializeConnectionRequest req;
   req.set_producer_name(name_);
@@ -137,17 +165,16 @@ void ProducerIPCClientImpl::OnConnect() {
 
   int shm_fd = -1;
   if (shared_memory_) {
-    shm_fd = shared_memory_->fd();
     req.set_producer_provided_shmem(true);
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+    auto key = static_cast<SharedMemoryWindows*>(shared_memory_.get())->key();
+    req.set_shm_key_windows(key);
+#else
+    shm_fd = static_cast<PosixSharedMemory*>(shared_memory_.get())->fd();
+#endif
   }
 
-#if PERFETTO_DCHECK_IS_ON()
-  req.set_build_flags(
-      protos::gen::InitializeConnectionRequest::BUILD_FLAGS_DCHECKS_ON);
-#else
-  req.set_build_flags(
-      protos::gen::InitializeConnectionRequest::BUILD_FLAGS_DCHECKS_OFF);
-#endif
+  req.set_sdk_version(base::GetVersionString());
   producer_port_.InitializeConnection(req, std::move(on_init), shm_fd);
 
   // Create the back channel to receive commands from the Service.
@@ -171,19 +198,21 @@ void ProducerIPCClientImpl::OnDisconnect() {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Tracing service connection failure");
   connected_ = false;
-  producer_->OnDisconnect();
   data_sources_setup_.clear();
+  producer_->OnDisconnect();  // Note: may delete |this|.
 }
 
 void ProducerIPCClientImpl::OnConnectionInitialized(
     bool connection_succeeded,
-    bool using_shmem_provided_by_producer) {
+    bool using_shmem_provided_by_producer,
+    bool direct_smb_patching_supported) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   // If connection_succeeded == false, the OnDisconnect() call will follow next
   // and there we'll notify the |producer_|. TODO: add a test for this.
   if (!connection_succeeded)
     return;
   is_shmem_provided_by_producer_ = using_shmem_provided_by_producer;
+  direct_smb_patching_supported_ = direct_smb_patching_supported;
   producer_->OnConnect();
 
   // Bail out if the service failed to adopt our producer-allocated SMB.
@@ -230,20 +259,32 @@ void ProducerIPCClientImpl::OnServiceRequest(
   }
 
   if (cmd.has_setup_tracing()) {
+    std::unique_ptr<SharedMemory> ipc_shared_memory;
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+    const std::string& shm_key = cmd.setup_tracing().shm_key_windows();
+    if (!shm_key.empty())
+      ipc_shared_memory = SharedMemoryWindows::Attach(shm_key);
+#else
     base::ScopedFile shmem_fd = ipc_channel_->TakeReceivedFD();
     if (shmem_fd) {
+      // TODO(primiano): handle mmap failure in case of OOM.
+      ipc_shared_memory =
+          PosixSharedMemory::AttachToFd(std::move(shmem_fd),
+                                        /*require_seals_if_supported=*/false);
+    }
+#endif
+    if (ipc_shared_memory) {
       // This is the nominal case used in most configurations, where the service
       // provides the SMB.
       PERFETTO_CHECK(!is_shmem_provided_by_producer_ && !shared_memory_);
-      // TODO(primiano): handle mmap failure in case of OOM.
-      shared_memory_ =
-          PosixSharedMemory::AttachToFd(std::move(shmem_fd),
-                                        /*require_seals_if_supported=*/false);
+      shared_memory_ = std::move(ipc_shared_memory);
       shared_buffer_page_size_kb_ =
           cmd.setup_tracing().shared_buffer_page_size_kb();
       shared_memory_arbiter_ = SharedMemoryArbiter::CreateInstance(
           shared_memory_.get(), shared_buffer_page_size_kb_ * 1024, this,
           task_runner_);
+      if (direct_smb_patching_supported_)
+        shared_memory_arbiter_->SetDirectSMBPatchingSupportedByService();
     } else {
       // Producer-provided SMB (used by Chrome for startup tracing).
       PERFETTO_CHECK(is_shmem_provided_by_producer_ && shared_memory_ &&
@@ -298,6 +339,24 @@ void ProducerIPCClientImpl::RegisterDataSource(
           PERFETTO_DLOG("RegisterDataSource() failed: connection reset");
       });
   producer_port_.RegisterDataSource(req, std::move(async_response));
+}
+
+void ProducerIPCClientImpl::UpdateDataSource(
+    const DataSourceDescriptor& descriptor) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  if (!connected_) {
+    PERFETTO_DLOG(
+        "Cannot UpdateDataSource(), not connected to tracing service");
+  }
+  protos::gen::UpdateDataSourceRequest req;
+  *req.mutable_data_source_descriptor() = descriptor;
+  ipc::Deferred<protos::gen::UpdateDataSourceResponse> async_response;
+  async_response.Bind(
+      [](ipc::AsyncResult<protos::gen::UpdateDataSourceResponse> response) {
+        if (!response)
+          PERFETTO_DLOG("UpdateDataSource() failed: connection reset");
+      });
+  producer_port_.UpdateDataSource(req, std::move(async_response));
 }
 
 void ProducerIPCClientImpl::UnregisterDataSource(const std::string& name) {

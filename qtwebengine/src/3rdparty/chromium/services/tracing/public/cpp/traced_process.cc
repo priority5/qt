@@ -8,7 +8,7 @@
 
 #include "build/build_config.h"
 
-#if !defined(OS_NACL) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS)
 #include "services/tracing/public/cpp/traced_process_impl.h"
 #endif
 
@@ -16,7 +16,7 @@ namespace tracing {
 
 // static
 void TracedProcess::ResetTracedProcessReceiver() {
-#if !defined(OS_NACL) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS)
   tracing::TracedProcessImpl::GetInstance()->ResetTracedProcessReceiver();
 #endif
 }
@@ -24,9 +24,19 @@ void TracedProcess::ResetTracedProcessReceiver() {
 // static
 void TracedProcess::OnTracedProcessRequest(
     mojo::PendingReceiver<mojom::TracedProcess> receiver) {
-#if !defined(OS_NACL) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS)
   tracing::TracedProcessImpl::GetInstance()->OnTracedProcessRequest(
       std::move(receiver));
+#endif
+}
+
+// static
+void TracedProcess::EnableSystemTracingService(
+    mojo::PendingRemote<mojom::SystemTracingService> remote) {
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_NACL) && \
+    !BUILDFLAG(IS_IOS)
+  tracing::TracedProcessImpl::GetInstance()->EnableSystemTracingService(
+      std::move(remote));
 #endif
 }
 

@@ -15,9 +15,13 @@ class WebTestTtsPlatform : public content::TtsPlatform {
  public:
   static WebTestTtsPlatform* GetInstance();
 
+  WebTestTtsPlatform(const WebTestTtsPlatform&) = delete;
+  WebTestTtsPlatform& operator=(const WebTestTtsPlatform&) = delete;
+
   // content::TtsControllerDelegate overrides.
-  bool PlatformImplAvailable() override;
-  bool LoadBuiltInTtsEngine(content::BrowserContext* browser_context) override;
+  bool PlatformImplSupported() override;
+  bool PlatformImplInitialized() override;
+  void LoadBuiltInTtsEngine(content::BrowserContext* browser_context) override;
   void Speak(int utterance_id,
              const std::string& utterance,
              const std::string& lang,
@@ -35,14 +39,18 @@ class WebTestTtsPlatform : public content::TtsPlatform {
   std::string GetError() override;
   void ClearError() override;
   void SetError(const std::string& error) override;
+  void Shutdown() override;
+  bool PreferEngineDelegateVoices() override;
+  void GetVoicesForBrowserContext(
+      content::BrowserContext* browser_context,
+      const GURL& source_url,
+      std::vector<content::VoiceData>* out_voices) override;
 
  private:
   WebTestTtsPlatform();
   virtual ~WebTestTtsPlatform();
 
   friend struct base::DefaultSingletonTraits<WebTestTtsPlatform>;
-
-  DISALLOW_COPY_AND_ASSIGN(WebTestTtsPlatform);
 };
 
 #endif  // CONTENT_WEB_TEST_BROWSER_WEB_TEST_TTS_PLATFORM_H_

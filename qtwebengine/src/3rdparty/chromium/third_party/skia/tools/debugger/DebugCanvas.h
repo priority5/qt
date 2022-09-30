@@ -8,24 +8,42 @@
 #ifndef SKDEBUGCANVAS_H_
 #define SKDEBUGCANVAS_H_
 
+#include "include/core/SkBlendMode.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkCanvasVirtualEnforcer.h"
-#include "include/core/SkPath.h"
-#include "include/core/SkString.h"
-#include "include/core/SkVertices.h"
-#include "include/pathops/SkPathOps.h"
-#include "include/private/SkTArray.h"
-#include "tools/UrlDataManager.h"
-#include "tools/debugger/DebugLayerManager.h"
-#include "tools/debugger/DrawCommand.h"
+#include "include/core/SkClipOp.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkM44.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkTypes.h"
+#include "include/private/SkTDArray.h"
 
 #include <map>
 #include <vector>
 
-class GrAuditTrail;
-class SkNWayCanvas;
-class SkPicture;
 class DebugLayerManager;
+class DrawCommand;
+class GrAuditTrail;
+class SkData;
+class SkDrawable;
+class SkImage;
+class SkJSONWriter;
+class SkMatrix;
+class SkPaint;
+class SkPath;
+class SkPicture;
+class SkRRect;
+class SkRegion;
+class SkShader;
+class SkTextBlob;
+class SkVertices;
+class UrlDataManager;
+struct SkDrawShadowRec;
+struct SkPoint;
+struct SkRSXform;
 
 class DebugCanvas : public SkCanvasVirtualEnforcer<SkCanvas> {
 public:
@@ -89,7 +107,7 @@ public:
     /**
         Returns the most recently calculated transformation matrix
      */
-    const SkMatrix& getCurrentMatrix() { return fMatrix; }
+    const SkM44& getCurrentMatrix() { return fMatrix; }
 
     /**
         Returns the most recently calculated clip
@@ -142,8 +160,7 @@ protected:
     void              willRestore() override;
 
     void didConcat44(const SkM44&) override;
-    void didConcat(const SkMatrix&) override;
-    void didSetMatrix(const SkMatrix&) override;
+    void didSetM44(const SkM44&) override;
     void didScale(SkScalar, SkScalar) override;
     void didTranslate(SkScalar, SkScalar) override;
 
@@ -170,35 +187,24 @@ protected:
     void onDrawVerticesObject(const SkVertices*, SkBlendMode, const SkPaint&) override;
     void onDrawPath(const SkPath&, const SkPaint&) override;
     void onDrawRegion(const SkRegion&, const SkPaint&) override;
-    void onDrawImage(const SkImage*, SkScalar left, SkScalar top, const SkPaint*) override;
-    void onDrawImageLattice(const SkImage* image,
-                            const Lattice& lattice,
-                            const SkRect&  dst,
-                            const SkPaint* paint) override;
-    void onDrawImageRect(const SkImage*,
-                         const SkRect* src,
-                         const SkRect& dst,
-                         const SkPaint*,
-                         SrcRectConstraint) override;
-    void onDrawImageNine(const SkImage*,
-                         const SkIRect& center,
-                         const SkRect&  dst,
-                         const SkPaint*) override;
-    void onDrawAtlas(const SkImage*,
-                     const SkRSXform[],
-                     const SkRect[],
-                     const SkColor[],
-                     int,
-                     SkBlendMode,
-                     const SkRect*,
-                     const SkPaint*) override;
+
+    void onDrawImage2(const SkImage*, SkScalar, SkScalar, const SkSamplingOptions&,
+                      const SkPaint*) override;
+    void onDrawImageRect2(const SkImage*, const SkRect&, const SkRect&, const SkSamplingOptions&,
+                          const SkPaint*, SrcRectConstraint) override;
+    void onDrawImageLattice2(const SkImage*, const Lattice&, const SkRect&, SkFilterMode,
+                             const SkPaint*) override;
+    void onDrawAtlas2(const SkImage*, const SkRSXform[], const SkRect[], const SkColor[], int,
+                     SkBlendMode, const SkSamplingOptions&, const SkRect*, const SkPaint*) override;
+
     void onClipRect(const SkRect&, SkClipOp, ClipEdgeStyle) override;
     void onClipRRect(const SkRRect&, SkClipOp, ClipEdgeStyle) override;
     void onClipPath(const SkPath&, SkClipOp, ClipEdgeStyle) override;
     void onClipShader(sk_sp<SkShader>, SkClipOp) override;
     void onClipRegion(const SkRegion& region, SkClipOp) override;
-    void onDrawShadowRec(const SkPath&, const SkDrawShadowRec&) override;
+    void onResetClip() override;
 
+    void onDrawShadowRec(const SkPath&, const SkDrawShadowRec&) override;
     void onDrawDrawable(SkDrawable*, const SkMatrix*) override;
     void onDrawPicture(const SkPicture*, const SkMatrix*, const SkPaint*) override;
 
@@ -207,16 +213,17 @@ protected:
                           QuadAAFlags,
                           const SkColor4f&,
                           SkBlendMode) override;
-    void onDrawEdgeAAImageSet(const ImageSetEntry[],
-                              int count,
-                              const SkPoint[],
-                              const SkMatrix[],
-                              const SkPaint*,
-                              SrcRectConstraint) override;
+    void onDrawEdgeAAImageSet2(const ImageSetEntry[],
+                               int count,
+                               const SkPoint[],
+                               const SkMatrix[],
+                               const SkSamplingOptions&,
+                               const SkPaint*,
+                               SrcRectConstraint) override;
 
 private:
     SkTDArray<DrawCommand*> fCommandVector;
-    SkMatrix                fMatrix;
+    SkM44                   fMatrix;
     SkIRect                 fClip;
 
     bool    fOverdrawViz = false;
@@ -243,10 +250,11 @@ private:
      */
     void addDrawCommand(DrawCommand* command);
 
+#if SK_GPU_V1
     GrAuditTrail* getAuditTrail(SkCanvas*);
-
     void drawAndCollectOps(SkCanvas*);
-    void cleanupAuditTrail(SkCanvas*);
+    void cleanupAuditTrail(GrAuditTrail*);
+#endif
 
     using INHERITED = SkCanvasVirtualEnforcer<SkCanvas>;
 };

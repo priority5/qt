@@ -31,7 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_COLOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_COLOR_H_
 
-#include "third_party/blink/public/common/css/color_scheme.h"
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
@@ -61,9 +61,16 @@ class CORE_EXPORT StyleColor {
   bool IsCurrentColor() const {
     return color_keyword_ == CSSValueID::kCurrentcolor;
   }
+  bool IsSystemColorIncludingDeprecated() const {
+    return IsSystemColorIncludingDeprecated(color_keyword_);
+  }
   bool IsSystemColor() const { return IsSystemColor(color_keyword_); }
   Color GetColor() const {
-    DCHECK(IsNumeric());
+    // TODO(1081945): System colors will fail the IsNumeric check, as they store
+    // a keyword, but they also have a stored color that may need to be accessed
+    // directly. For example in FilterEffectBuilder::BuildFilterEffect for
+    // shadow colors.
+    DCHECK(IsNumeric() || IsSystemColorIncludingDeprecated());
     return color_;
   }
   CSSValueID GetColorKeyword() const {
@@ -71,20 +78,29 @@ class CORE_EXPORT StyleColor {
     return color_keyword_;
   }
 
-  Color Resolve(Color current_color, ColorScheme color_scheme) const;
+  // TODO(1081945):  Once CSSSystemColorComputeToSelf is enabled, we can remove
+  // |is_forced_color|.
+  Color Resolve(Color current_color,
+                mojom::blink::ColorScheme color_scheme,
+                bool is_forced_color = false) const;
 
   // Resolve and override the resolved color's alpha channel as specified by
   // |alpha|.
+  // TODO(1081945):  Once CSSSystemColorComputeToSelf is enabled, we can remove
+  // |is_forced_color|.
   Color ResolveWithAlpha(Color current_color,
-                         ColorScheme color_scheme,
-                         int alpha) const;
+                         mojom::blink::ColorScheme color_scheme,
+                         int alpha,
+                         bool is_forced_color = false) const;
 
   bool IsNumeric() const {
     return EffectiveColorKeyword() == CSSValueID::kInvalid;
   }
 
-  static Color ColorFromKeyword(CSSValueID, ColorScheme color_scheme);
+  static Color ColorFromKeyword(CSSValueID,
+                                mojom::blink::ColorScheme color_scheme);
   static bool IsColorKeyword(CSSValueID);
+  static bool IsSystemColorIncludingDeprecated(CSSValueID);
   static bool IsSystemColor(CSSValueID);
 
   inline bool operator==(const StyleColor& other) const {
@@ -102,7 +118,8 @@ class CORE_EXPORT StyleColor {
     // At least one of color_keyword_ and color_ should retain its default
     // value.
     return EffectiveColorKeyword() == CSSValueID::kInvalid ||
-           color_ == Color() || IsSystemColor(EffectiveColorKeyword());
+           color_ == Color() ||
+           IsSystemColorIncludingDeprecated(EffectiveColorKeyword());
   }
 
   Color color_;

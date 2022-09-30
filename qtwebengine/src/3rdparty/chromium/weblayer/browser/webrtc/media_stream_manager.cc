@@ -4,6 +4,8 @@
 
 #include "weblayer/browser/webrtc/media_stream_manager.h"
 
+#include <utility>
+
 #include "base/supports_user_data.h"
 #include "components/webrtc/media_stream_devices_controller.h"
 #include "content/public/browser/media_stream_request.h"
@@ -56,19 +58,30 @@ class MediaStreamManager::StreamUi : public content::MediaStreamUI {
   }
 
   // content::MediaStreamUi:
-  gfx::NativeViewId OnStarted(base::OnceClosure stop,
-                              SourceCallback source) override {
+  gfx::NativeViewId OnStarted(
+      base::RepeatingClosure stop,
+      SourceCallback source,
+      const std::string& label,
+      std::vector<content::DesktopMediaID> screen_capture_ids,
+      StateChangeCallback state_change) override {
     stop_ = std::move(stop);
     if (manager_)
       manager_->RegisterStream(this);
     return 0;
   }
+  void OnDeviceStopped(const std::string& label,
+                       const content::DesktopMediaID& media_id) override {}
 
   bool streaming_audio() const { return streaming_audio_; }
 
   bool streaming_video() const { return streaming_video_; }
 
-  void Stop() { std::move(stop_).Run(); }
+  void Stop() {
+    // The `stop_` callback does async processing. This means Stop() may be
+    // called multiple times.
+    if (stop_)
+      std::move(stop_).Run();
+  }
 
  private:
   base::WeakPtr<MediaStreamManager> manager_;
@@ -104,8 +117,7 @@ void MediaStreamManager::RequestMediaAccessPermission(
   webrtc::MediaStreamDevicesController::RequestPermissions(
       request, nullptr,
       base::BindOnce(&MediaStreamManager::OnMediaAccessPermissionResult,
-                     weak_factory_.GetWeakPtr(),
-                     base::Passed(std::move(callback))));
+                     weak_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 void MediaStreamManager::OnClientReadyToStream(JNIEnv* env,
@@ -135,7 +147,7 @@ void MediaStreamManager::OnMediaAccessPermissionResult(
     content::MediaResponseCallback callback,
     const blink::MediaStreamDevices& devices,
     blink::mojom::MediaStreamRequestResult result,
-    bool blocked_by_feature_policy,
+    bool blocked_by_permissions_policy,
     ContentSetting audio_setting,
     ContentSetting video_setting) {
   if (result != blink::mojom::MediaStreamRequestResult::OK) {

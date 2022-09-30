@@ -30,16 +30,18 @@ class MockUseCounter : public GarbageCollected<MockUseCounter>,
   }
 
   MOCK_METHOD1(CountUse, void(mojom::WebFeature));
+  MOCK_METHOD1(CountDeprecation, void(mojom::WebFeature));
 };
 
 class MockConsoleLogger : public GarbageCollected<MockConsoleLogger>,
                           public ConsoleLogger {
  public:
-  MOCK_METHOD4(AddConsoleMessageImpl,
+  MOCK_METHOD5(AddConsoleMessageImpl,
                void(mojom::ConsoleMessageSource,
                     mojom::ConsoleMessageLevel,
                     const String&,
-                    bool));
+                    bool,
+                    absl::optional<mojom::ConsoleMessageCategory>));
 };
 
 }  // namespace
@@ -108,7 +110,7 @@ TEST_F(AllowedByNosniffTest, AllowedOrNot) {
 
     EXPECT_CALL(*use_counter, CountUse(_)).Times(::testing::AnyNumber());
     if (!testcase.allowed)
-      EXPECT_CALL(*logger, AddConsoleMessageImpl(_, _, _, _));
+      EXPECT_CALL(*logger, AddConsoleMessageImpl(_, _, _, _, _));
     EXPECT_EQ(testcase.allowed, AllowedByNosniff::MimeTypeAsScript(
                                     *use_counter, logger, response,
                                     MimeTypeCheck::kLaxForElement));
@@ -116,7 +118,7 @@ TEST_F(AllowedByNosniffTest, AllowedOrNot) {
 
     EXPECT_CALL(*use_counter, CountUse(_)).Times(::testing::AnyNumber());
     if (!testcase.allowed)
-      EXPECT_CALL(*logger, AddConsoleMessageImpl(_, _, _, _));
+      EXPECT_CALL(*logger, AddConsoleMessageImpl(_, _, _, _, _));
     EXPECT_EQ(testcase.allowed,
               AllowedByNosniff::MimeTypeAsScript(*use_counter, logger, response,
                                                  MimeTypeCheck::kLaxForWorker));
@@ -124,7 +126,7 @@ TEST_F(AllowedByNosniffTest, AllowedOrNot) {
 
     EXPECT_CALL(*use_counter, CountUse(_)).Times(::testing::AnyNumber());
     if (!testcase.strict_allowed)
-      EXPECT_CALL(*logger, AddConsoleMessageImpl(_, _, _, _));
+      EXPECT_CALL(*logger, AddConsoleMessageImpl(_, _, _, _, _));
     EXPECT_EQ(testcase.strict_allowed,
               AllowedByNosniff::MimeTypeAsScript(*use_counter, logger, response,
                                                  MimeTypeCheck::kStrict));
@@ -152,6 +154,16 @@ TEST_F(AllowedByNosniffTest, Counters) {
       {bla, blubb, "text/plain", kOpaque, WebFeature::kCrossOriginTextPlain},
       {bla, bla, "text/plain", kBasic, WebFeature::kSameOriginTextScript},
       {bla, bla, "text/plain", kBasic, WebFeature::kSameOriginTextPlain},
+      {bla, bla, "text/json", kBasic, WebFeature::kSameOriginTextScript},
+
+      // JSON
+      {bla, bla, "text/json", kBasic, WebFeature::kSameOriginJsonTypeForScript},
+      {bla, bla, "application/json", kBasic,
+       WebFeature::kSameOriginJsonTypeForScript},
+      {bla, blubb, "text/json", kOpaque,
+       WebFeature::kCrossOriginJsonTypeForScript},
+      {bla, blubb, "application/json", kOpaque,
+       WebFeature::kCrossOriginJsonTypeForScript},
 
       // Test mime type and subtype handling.
       {bla, bla, "text/xml", kBasic, WebFeature::kSameOriginTextScript},
@@ -166,6 +178,12 @@ TEST_F(AllowedByNosniffTest, Counters) {
       {blubb, blubb, "application/xml", kCors,
        WebFeature::kCrossOriginApplicationXml},
       {bla, bla, "text/html", kBasic, WebFeature::kSameOriginTextHtml},
+
+      // Unknown
+      {bla, bla, "not/script", kBasic,
+       WebFeature::kSameOriginStrictNosniffWouldBlock},
+      {bla, blubb, "not/script", kOpaque,
+       WebFeature::kCrossOriginStrictNosniffWouldBlock},
   };
 
   for (auto& testcase : data) {
@@ -242,7 +260,7 @@ TEST_F(AllowedByNosniffTest, AllTheSchemes) {
     auto* use_counter = MockUseCounter::Create();
     Persistent<MockConsoleLogger> logger =
         MakeGarbageCollected<MockConsoleLogger>();
-    EXPECT_CALL(*logger, AddConsoleMessageImpl(_, _, _, _))
+    EXPECT_CALL(*logger, AddConsoleMessageImpl(_, _, _, _, _))
         .Times(::testing::AnyNumber());
     SCOPED_TRACE(testing::Message() << "\n  url: " << testcase.url
                                     << "\n  allowed: " << testcase.allowed);

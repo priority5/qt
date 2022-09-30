@@ -9,7 +9,7 @@
 
 #include "base/run_loop.h"
 #include "base/task/task_traits.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "components/performance_manager/graph/page_node_impl.h"
 #include "components/performance_manager/performance_manager_impl.h"
 #include "components/performance_manager/performance_manager_tab_helper.h"
@@ -22,18 +22,19 @@ namespace performance_manager {
 class WebContentsProxyTest : public PerformanceManagerTestHarness {
  public:
   WebContentsProxyTest() {}
+
+  WebContentsProxyTest(const WebContentsProxyTest&) = delete;
+  WebContentsProxyTest& operator=(const WebContentsProxyTest&) = delete;
+
   ~WebContentsProxyTest() override {}
 
   void GetContentsViaProxy(bool delete_before_deref);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebContentsProxyTest);
 };
 
 TEST_F(WebContentsProxyTest, EndToEnd) {
   std::unique_ptr<content::WebContents> contents = CreateTestWebContents();
   auto* helper = PerformanceManagerTabHelper::FromWebContents(contents.get());
-  auto* page_node = helper->page_node();
+  auto* page_node = helper->primary_page_node();
   content::WebContents* proxy_contents = nullptr;
 
   auto deref_proxy = base::BindLambdaForTesting(

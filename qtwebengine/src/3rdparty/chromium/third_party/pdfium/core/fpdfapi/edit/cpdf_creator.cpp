@@ -24,7 +24,10 @@
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxcrt/fx_random.h"
 #include "core/fxcrt/fx_safe_types.h"
-#include "third_party/base/stl_util.h"
+#include "core/fxcrt/span_util.h"
+#include "core/fxcrt/stl_util.h"
+#include "third_party/base/check.h"
+#include "third_party/base/containers/contains.h"
 
 namespace {
 
@@ -37,28 +40,21 @@ class CFX_FileBufferArchive final : public IFX_ArchiveStream {
   ~CFX_FileBufferArchive() override;
 
   bool WriteBlock(const void* pBuf, size_t size) override;
-  bool WriteByte(uint8_t byte) override;
-  bool WriteDWord(uint32_t i) override;
-  bool WriteString(ByteStringView str) override;
-
   FX_FILESIZE CurrentOffset() const override { return offset_; }
 
  private:
   bool Flush();
 
-  FX_FILESIZE offset_;
-  size_t current_length_;
+  FX_FILESIZE offset_ = 0;
+  size_t current_length_ = 0;
   std::vector<uint8_t, FxAllocAllocator<uint8_t>> buffer_;
   RetainPtr<IFX_RetainableWriteStream> backing_file_;
 };
 
 CFX_FileBufferArchive::CFX_FileBufferArchive(
     const RetainPtr<IFX_RetainableWriteStream>& file)
-    : offset_(0),
-      current_length_(0),
-      buffer_(kArchiveBufferSize),
-      backing_file_(file) {
-  ASSERT(file);
+    : buffer_(kArchiveBufferSize), backing_file_(file) {
+  DCHECK(file);
 }
 
 CFX_FileBufferArchive::~CFX_FileBufferArchive() {
@@ -76,14 +72,15 @@ bool CFX_FileBufferArchive::Flush() {
 }
 
 bool CFX_FileBufferArchive::WriteBlock(const void* pBuf, size_t size) {
-  ASSERT(pBuf);
-  ASSERT(size > 0);
+  DCHECK(pBuf);
+  DCHECK(size > 0);
 
   const uint8_t* buffer = reinterpret_cast<const uint8_t*>(pBuf);
   size_t temp_size = size;
   while (temp_size) {
     size_t buf_size = std::min(kArchiveBufferSize - current_length_, temp_size);
-    memcpy(buffer_.data() + current_length_, buffer, buf_size);
+    fxcrt::spancpy(pdfium::make_span(buffer_).subspan(current_length_),
+                   pdfium::make_span(buffer, buf_size));
 
     current_length_ += buf_size;
     if (current_length_ == kArchiveBufferSize && !Flush())
@@ -100,20 +97,6 @@ bool CFX_FileBufferArchive::WriteBlock(const void* pBuf, size_t size) {
 
   offset_ = safe_offset.ValueOrDie();
   return true;
-}
-
-bool CFX_FileBufferArchive::WriteByte(uint8_t byte) {
-  return WriteBlock(&byte, 1);
-}
-
-bool CFX_FileBufferArchive::WriteDWord(uint32_t i) {
-  char buf[32];
-  FXSYS_itoa(i, buf, 10);
-  return WriteBlock(buf, strlen(buf));
-}
-
-bool CFX_FileBufferArchive::WriteString(ByteStringView str) {
-  return WriteBlock(str.raw_str(), str.GetLength());
 }
 
 ByteString GenerateFileID(uint32_t dwSeed1, uint32_t dwSeed2) {
@@ -227,7 +210,7 @@ void CPDF_Creator::InitNewObjNumOffsets() {
 }
 
 CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage1() {
-  ASSERT(m_iStage > Stage::kInvalid || m_iStage < Stage::kInitWriteObjs20);
+  DCHECK(m_iStage > Stage::kInvalid || m_iStage < Stage::kInitWriteObjs20);
   if (m_iStage == Stage::kInit0) {
     if (!m_pParser || (m_bSecurityChanged && m_IsOriginal))
       m_IsIncremental = false;
@@ -264,10 +247,10 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage1() {
       FX_FILESIZE src_size = m_SavedOffset;
       m_pParser->GetSyntax()->SetPos(0);
       while (src_size) {
-        const FX_FILESIZE block_size = std::min(kBufferSize, src_size);
-        if (!m_pParser->GetSyntax()->ReadBlock(buffer.data(), block_size)) {
+        const uint32_t block_size =
+            static_cast<uint32_t>(std::min(kBufferSize, src_size));
+        if (!m_pParser->GetSyntax()->ReadBlock(buffer.data(), block_size))
           return Stage::kInvalid;
-        }
         if (!m_Archive->WriteBlock(buffer.data(), block_size))
           return Stage::kInvalid;
 
@@ -289,7 +272,7 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage1() {
 }
 
 CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage2() {
-  ASSERT(m_iStage >= Stage::kInitWriteObjs20 ||
+  DCHECK(m_iStage >= Stage::kInitWriteObjs20 ||
          m_iStage < Stage::kInitWriteXRefs80);
   if (m_iStage == Stage::kInitWriteObjs20) {
     if (!m_IsIncremental && m_pParser) {
@@ -332,7 +315,7 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage2() {
 }
 
 CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage3() {
-  ASSERT(m_iStage >= Stage::kInitWriteXRefs80 ||
+  DCHECK(m_iStage >= Stage::kInitWriteXRefs80 ||
          m_iStage < Stage::kWriteTrailerAndFinish90);
 
   uint32_t dwLastObjNum = m_dwLastObjNum;
@@ -395,7 +378,7 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage3() {
   }
   if (m_iStage == Stage::kWriteXrefsIncremental82) {
     ByteString str;
-    uint32_t iCount = pdfium::CollectionSize<uint32_t>(m_NewObjNumArray);
+    uint32_t iCount = fxcrt::CollectionSize<uint32_t>(m_NewObjNumArray);
     uint32_t i = m_CurObjNum;
     while (i < iCount) {
       size_t j = i;
@@ -430,7 +413,7 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage3() {
 }
 
 CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage4() {
-  ASSERT(m_iStage >= Stage::kWriteTrailerAndFinish90);
+  DCHECK(m_iStage >= Stage::kWriteTrailerAndFinish90);
 
   bool bXRefStream = m_IsIncremental && m_pParser->IsXRefStream();
   if (!bXRefStream) {
@@ -496,13 +479,7 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage4() {
   if (m_IsIncremental) {
     FX_FILESIZE prev = m_pParser->GetLastXRefOffset();
     if (prev) {
-      if (!m_Archive->WriteString("/Prev "))
-        return Stage::kInvalid;
-
-      char offset_buf[20];
-      memset(offset_buf, 0, sizeof(offset_buf));
-      FXSYS_i64toa(prev, offset_buf, 10);
-      if (!m_Archive->WriteBlock(offset_buf, strlen(offset_buf)))
+      if (!m_Archive->WriteString("/Prev ") || !m_Archive->WriteFilesize(prev))
         return Stage::kInvalid;
     }
   }
@@ -539,8 +516,8 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage4() {
           return Stage::kInvalid;
       }
     } else {
-      size_t count = m_NewObjNumArray.size();
-      size_t i = 0;
+      int count = fxcrt::CollectionSize<int>(m_NewObjNumArray);
+      int i = 0;
       for (i = 0; i < count; i++) {
         if (!m_Archive->WriteDWord(m_NewObjNumArray[i]) ||
             !m_Archive->WriteString(" 1 ")) {
@@ -561,13 +538,8 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage4() {
       return Stage::kInvalid;
   }
 
-  if (!m_Archive->WriteString("\r\nstartxref\r\n"))
-    return Stage::kInvalid;
-
-  char offset_buf[20];
-  memset(offset_buf, 0, sizeof(offset_buf));
-  FXSYS_i64toa(m_XrefStart, offset_buf, 10);
-  if (!m_Archive->WriteBlock(offset_buf, strlen(offset_buf)) ||
+  if (!m_Archive->WriteString("\r\nstartxref\r\n") ||
+      !m_Archive->WriteFilesize(m_XrefStart) ||
       !m_Archive->WriteString("\r\n%%EOF\r\n")) {
     return Stage::kInvalid;
   }
@@ -590,7 +562,7 @@ bool CPDF_Creator::Create(uint32_t flags) {
 }
 
 void CPDF_Creator::InitID() {
-  ASSERT(!m_pIDArray);
+  DCHECK(!m_pIDArray);
 
   m_pIDArray = pdfium::MakeRetain<CPDF_Array>();
   const CPDF_Array* pOldIDArray = m_pParser ? m_pParser->GetIDArray() : nullptr;
@@ -617,7 +589,7 @@ void CPDF_Creator::InitID() {
 
   m_pIDArray->Append(m_pIDArray->GetObjectAt(0)->Clone());
   if (m_pEncryptDict) {
-    ASSERT(m_pParser);
+    DCHECK(m_pParser);
     int revision = m_pEncryptDict->GetIntegerFor("R");
     if ((revision == 2 || revision == 3) &&
         m_pEncryptDict->GetStringFor("Filter") == "Standard") {

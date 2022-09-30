@@ -5,6 +5,7 @@
  * found in the LICENSE file.
  */
 
+#include "include/private/SkTPin.h"
 #include "modules/skottie/src/Adapter.h"
 #include "modules/skottie/src/SkottieJson.h"
 #include "modules/skottie/src/SkottiePriv.h"
@@ -12,8 +13,7 @@
 #include "modules/skottie/src/layers/shapelayer/ShapeLayer.h"
 #include "modules/sksg/include/SkSGGeometryEffect.h"
 
-namespace skottie {
-namespace internal {
+namespace skottie::internal {
 
 namespace  {
 
@@ -65,4 +65,4 @@ std::vector<sk_sp<sksg::GeometryNode>> ShapeBuilder::AttachOffsetGeometryEffect(
     return offsetted;
 }
 
-}} // namespace skottie::internal
+} // namespace skottie::internal

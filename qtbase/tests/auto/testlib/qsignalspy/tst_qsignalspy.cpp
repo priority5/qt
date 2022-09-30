@@ -1,33 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QSignalSpy>
+#include <QTimer>
 
 
 #include <qdatetime.h>
@@ -57,6 +34,7 @@ private slots:
     void spyFunctionPointerWithBasicArgs();
     void spyFunctionPointerWithPointers();
     void spyFunctionPointerWithQtClasses();
+    void spyFunctionPointerWithCustomClass();
     void spyFunctionPointerWithBasicQtClasses();
     void spyFunctionPointerWithQtTypedefs();
 
@@ -71,6 +49,8 @@ private slots:
     void spyOnMetaMethod_invalid();
     void spyOnMetaMethod_invalid_data();
 };
+
+struct CustomType {};
 
 class QtTestObject: public QObject
 {
@@ -152,6 +132,8 @@ void tst_QSignalSpy::spyWithPointers()
     QCOMPARE(*static_cast<int * const *>(args.at(1).constData()), &i2);
 }
 
+struct CustomType2;
+
 class QtTestObject2: public QObject
 {
     Q_OBJECT
@@ -163,6 +145,8 @@ signals:
     void sig3(QObject *o);
     void sig4(QChar c);
     void sig5(const QVariant &v);
+    void sig6(CustomType );
+    void sig7(CustomType2 *);
 };
 
 void tst_QSignalSpy::spyWithBasicQtClasses()
@@ -381,6 +365,23 @@ void tst_QSignalSpy::spyFunctionPointerWithQtClasses()
     QSignalSpy spy3(&obj, &QtTestObject2::sig4);
     emit obj.sig4(QChar('A'));
     QCOMPARE(qvariant_cast<QChar>(spy3.value(0).value(0)), QChar('A'));
+}
+
+void tst_QSignalSpy::spyFunctionPointerWithCustomClass()
+{
+    QtTestObject2 obj;
+    {
+        QSignalSpy spy(&obj, &QtTestObject2::sig6);
+        emit obj.sig6({});
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).count(), 1);
+        QCOMPARE(spy.at(0).at(0).typeName(), "CustomType");
+    }
+
+    {
+        QTest::ignoreMessage(QtMsgType::QtWarningMsg, "QSignalSpy: Unable to handle parameter '' of type 'CustomType2*' of method 'sig7', use qRegisterMetaType to register it.");
+        QSignalSpy spy(&obj, &QtTestObject2::sig7);
+    }
 }
 
 void tst_QSignalSpy::spyFunctionPointerWithQtTypedefs()

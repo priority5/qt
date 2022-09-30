@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/os_settings_sections.h"
 
+#include "ash/components/phonehub/phone_hub_manager.h"
 #include "build/branding_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/settings/chromeos/about_section.h"
@@ -15,6 +16,7 @@
 #include "chrome/browser/ui/webui/settings/chromeos/device_section.h"
 #include "chrome/browser/ui/webui/settings/chromeos/files_section.h"
 #include "chrome/browser/ui/webui/settings/chromeos/internet_section.h"
+#include "chrome/browser/ui/webui/settings/chromeos/kerberos_section.h"
 #include "chrome/browser/ui/webui/settings/chromeos/languages_section.h"
 #include "chrome/browser/ui/webui/settings/chromeos/main_section.h"
 #include "chrome/browser/ui/webui/settings/chromeos/multidevice_section.h"
@@ -24,7 +26,6 @@
 #include "chrome/browser/ui/webui/settings/chromeos/privacy_section.h"
 #include "chrome/browser/ui/webui/settings/chromeos/reset_section.h"
 #include "chrome/browser/ui/webui/settings/chromeos/search_section.h"
-#include "chromeos/components/phonehub/phone_hub_manager.h"
 
 namespace chromeos {
 namespace settings {
@@ -40,7 +41,9 @@ OsSettingsSections::OsSettingsSections(
     ArcAppListPrefs* arc_app_list_prefs,
     signin::IdentityManager* identity_manager,
     android_sms::AndroidSmsService* android_sms_service,
-    CupsPrintersManager* printers_manager) {
+    CupsPrintersManager* printers_manager,
+    apps::AppServiceProxy* app_service_proxy,
+    ash::eche_app::EcheAppManager* eche_app_manager) {
   // Special case: Main section does not have an associated enum value.
   sections_.push_back(
       std::make_unique<MainSection>(profile, search_tag_registry));
@@ -50,20 +53,20 @@ OsSettingsSections::OsSettingsSections(
   sections_map_[mojom::Section::kNetwork] = internet_section.get();
   sections_.push_back(std::move(internet_section));
 
-  auto bluetooth_section =
-      std::make_unique<BluetoothSection>(profile, search_tag_registry);
+  auto bluetooth_section = std::make_unique<BluetoothSection>(
+      profile, search_tag_registry, profile->GetPrefs());
   sections_map_[mojom::Section::kBluetooth] = bluetooth_section.get();
   sections_.push_back(std::move(bluetooth_section));
 
   auto multidevice_section = std::make_unique<MultiDeviceSection>(
       profile, search_tag_registry, multidevice_setup_client, phone_hub_manager,
-      android_sms_service, profile->GetPrefs());
+      android_sms_service, profile->GetPrefs(), eche_app_manager);
   sections_map_[mojom::Section::kMultiDevice] = multidevice_section.get();
   sections_.push_back(std::move(multidevice_section));
 
   auto people_section = std::make_unique<PeopleSection>(
       profile, search_tag_registry, sync_service, supervised_user_service,
-      kerberos_credentials_manager, identity_manager, profile->GetPrefs());
+      identity_manager, profile->GetPrefs());
   sections_map_[mojom::Section::kPeople] = people_section.get();
   sections_.push_back(std::move(people_section));
 
@@ -84,7 +87,8 @@ OsSettingsSections::OsSettingsSections(
   sections_.push_back(std::move(search_section));
 
   auto apps_section = std::make_unique<AppsSection>(
-      profile, search_tag_registry, profile->GetPrefs(), arc_app_list_prefs);
+      profile, search_tag_registry, profile->GetPrefs(), arc_app_list_prefs,
+      app_service_proxy);
   sections_map_[mojom::Section::kApps] = apps_section.get();
   sections_.push_back(std::move(apps_section));
 
@@ -98,8 +102,8 @@ OsSettingsSections::OsSettingsSections(
   sections_map_[mojom::Section::kDateAndTime] = date_time_section.get();
   sections_.push_back(std::move(date_time_section));
 
-  auto privacy_section =
-      std::make_unique<PrivacySection>(profile, search_tag_registry);
+  auto privacy_section = std::make_unique<PrivacySection>(
+      profile, search_tag_registry, profile->GetPrefs());
   sections_map_[mojom::Section::kPrivacyAndSecurity] = privacy_section.get();
   sections_.push_back(std::move(privacy_section));
 
@@ -137,6 +141,11 @@ OsSettingsSections::OsSettingsSections(
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
   sections_map_[mojom::Section::kAboutChromeOs] = about_section.get();
   sections_.push_back(std::move(about_section));
+
+  auto kerberos_section = std::make_unique<KerberosSection>(
+      profile, search_tag_registry, kerberos_credentials_manager);
+  sections_map_[mojom::Section::kKerberos] = kerberos_section.get();
+  sections_.push_back(std::move(kerberos_section));
 }
 
 OsSettingsSections::OsSettingsSections() = default;
