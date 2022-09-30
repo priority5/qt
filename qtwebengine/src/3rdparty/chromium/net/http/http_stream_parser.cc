@@ -5,11 +5,13 @@
 #include "net/http/http_stream_parser.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -50,32 +52,14 @@ std::string GetResponseHeaderLines(const HttpResponseHeaders& headers) {
   return cr_separated_headers;
 }
 
-// Return true if |headers| contain multiple |field_name| fields with different
-// values.
-bool HeadersContainMultipleCopiesOfField(const HttpResponseHeaders& headers,
-                                         const std::string& field_name) {
-  size_t it = 0;
-  std::string field_value;
-  if (!headers.EnumerateHeader(&it, field_name, &field_value))
-    return false;
-  // There's at least one |field_name| header.  Check if there are any more
-  // such headers, and if so, return true if they have different values.
-  std::string field_value2;
-  while (headers.EnumerateHeader(&it, field_name, &field_value2)) {
-    if (field_value != field_value2)
-      return true;
-  }
-  return false;
-}
-
 base::Value NetLogSendRequestBodyParams(uint64_t length,
                                         bool is_chunked,
                                         bool did_merge) {
-  base::DictionaryValue dict;
-  dict.SetInteger("length", static_cast<int>(length));
-  dict.SetBoolean("is_chunked", is_chunked);
-  dict.SetBoolean("did_merge", did_merge);
-  return std::move(dict);
+  base::Value dict(base::Value::Type::DICTIONARY);
+  dict.SetIntKey("length", static_cast<int>(length));
+  dict.SetBoolKey("is_chunked", is_chunked);
+  dict.SetBoolKey("did_merge", did_merge);
+  return dict;
 }
 
 void NetLogSendRequestBody(const NetLogWithSource& net_log,
@@ -185,7 +169,7 @@ class HttpStreamParser::SeekableIOBuffer : public IOBuffer {
     data_ = real_data_;
   }
 
-  char* real_data_;
+  raw_ptr<char> real_data_;
   const int capacity_;
   int size_;
   int used_;
@@ -870,15 +854,19 @@ int HttpStreamParser::HandleReadHeaderResult(int result) {
 
   // Record our best estimate of the 'response time' as the time when we read
   // the first bytes of the response headers.
-  if (read_buf_->offset() == 0)
+  if (read_buf_->offset() == 0) {
     response_->response_time = base::Time::Now();
+    // Also keep the time as base::TimeTicks for `first_response_start_time_`
+    // and `non_informational_response_start_time_`.
+    current_response_start_time_ = base::TimeTicks::Now();
+  }
 
-  // For |response_start_time_|, use the time that we received the first byte of
-  // *any* response- including 1XX, as per the resource timing spec for
+  // For |first_response_start_time_|, use the time that we received the first
+  // byte of *any* response- including 1XX, as per the resource timing spec for
   // responseStart (see note at
   // https://www.w3.org/TR/resource-timing-2/#dom-performanceresourcetiming-responsestart).
-  if (response_start_time_.is_null())
-    response_start_time_ = base::TimeTicks::Now();
+  if (first_response_start_time_.is_null())
+    first_response_start_time_ = current_response_start_time_;
 
   read_buf_->set_offset(read_buf_->offset() + result);
   DCHECK_LE(read_buf_->offset(), read_buf_->capacity());
@@ -926,7 +914,7 @@ int HttpStreamParser::HandleReadHeaderResult(int result) {
         // (https://crbug.com/1093693).
         if (response_->headers->response_code() == 103 &&
             first_early_hints_time_.is_null()) {
-          first_early_hints_time_ = response_start_time_;
+          first_early_hints_time_ = current_response_start_time_;
         }
         // Now waiting for the second set of headers to be read.
       } else {
@@ -936,6 +924,13 @@ int HttpStreamParser::HandleReadHeaderResult(int result) {
         io_state_ = STATE_DONE;
       }
       return OK;
+    }
+
+    // Record the response start time if this response is not informational
+    // (non-1xx).
+    if (response_->headers->response_code() / 100 != 1) {
+      DCHECK(non_informational_response_start_time_.is_null());
+      non_informational_response_start_time_ = current_response_start_time_;
     }
 
     // Only set keep-alive based on final set of headers.
@@ -1001,15 +996,23 @@ int HttpStreamParser::ParseResponseHeaders(int end_offset) {
         base::StringPiece(read_buf_->StartOfBuffer(), end_offset));
     if (!headers)
       return net::ERR_INVALID_HTTP_RESPONSE;
+    has_seen_status_line_ = true;
   } else {
     // Enough data was read -- there is no status line, so this is HTTP/0.9, or
     // the server is broken / doesn't speak HTTP.
 
-    // If the port is not the default for the scheme, assume it's not a real
-    // HTTP/0.9 response, and fail the request.
+    if (has_seen_status_line_) {
+      // If we saw a status line previously, the server can speak HTTP/1.x so it
+      // is not reasonable to interpret the response as an HTTP/0.9 response.
+      return ERR_INVALID_HTTP_RESPONSE;
+    }
+
     base::StringPiece scheme = request_->url.scheme_piece();
     if (url::DefaultPortForScheme(scheme.data(), scheme.length()) !=
         request_->url.EffectiveIntPort()) {
+      // If the port is not the default for the scheme, assume it's not a real
+      // HTTP/0.9 response, and fail the request.
+
       // Allow Shoutcast responses over HTTP, as it's somewhat common and relies
       // on HTTP/0.9 on weird ports to work.
       // See
@@ -1028,15 +1031,17 @@ int HttpStreamParser::ParseResponseHeaders(int end_offset) {
   // chunked-encoded.  If they exist, and have distinct values, it's a potential
   // response smuggling attack.
   if (!headers->IsChunkEncoded()) {
-    if (HeadersContainMultipleCopiesOfField(*headers, "Content-Length"))
+    if (HttpUtil::HeadersContainMultipleCopiesOfField(*headers,
+                                                      "Content-Length"))
       return ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_LENGTH;
   }
 
   // Check for multiple Content-Disposition or Location headers.  If they exist,
   // it's also a potential response smuggling attack.
-  if (HeadersContainMultipleCopiesOfField(*headers, "Content-Disposition"))
+  if (HttpUtil::HeadersContainMultipleCopiesOfField(*headers,
+                                                    "Content-Disposition"))
     return ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION;
-  if (HeadersContainMultipleCopiesOfField(*headers, "Location"))
+  if (HttpUtil::HeadersContainMultipleCopiesOfField(*headers, "Location"))
     return ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION;
 
   response_->headers = headers;
@@ -1095,7 +1100,7 @@ void HttpStreamParser::CalculateResponseBodySize() {
   if (response_body_length_ == -1) {
     // "Transfer-Encoding: chunked" trumps "Content-Length: N"
     if (response_->headers->IsChunkEncoded()) {
-      chunked_decoder_.reset(new HttpChunkedDecoder());
+      chunked_decoder_ = std::make_unique<HttpChunkedDecoder>();
     } else {
       response_body_length_ = response_->headers->GetContentLength();
       // If response_body_length_ is still -1, then we have to wait

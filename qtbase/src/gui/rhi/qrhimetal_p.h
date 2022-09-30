@@ -1,38 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
-**
-** This file is part of the Qt Gui module
-**
-** $QT_BEGIN_LICENSE:LGPL3$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see http://www.qt.io/terms-conditions. For further
-** information use the contact form at http://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPLv3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or later as published by the Free
-** Software Foundation and appearing in the file LICENSE.GPL included in
-** the packaging of this file. Please review the following information to
-** ensure the GNU General Public License version 2.0 requirements will be
-** met: http://www.gnu.org/licenses/gpl-2.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QRHIMETAL_H
 #define QRHIMETAL_H
@@ -50,7 +17,10 @@
 
 #include <private/qrhi_p.h>
 
-// no Metal includes here, the user code may be plain C++
+Q_FORWARD_DECLARE_OBJC_CLASS(MTLDevice);
+Q_FORWARD_DECLARE_OBJC_CLASS(MTLCommandQueue);
+Q_FORWARD_DECLARE_OBJC_CLASS(MTLCommandBuffer);
+Q_FORWARD_DECLARE_OBJC_CLASS(MTLRenderCommandEncoder);
 
 QT_BEGIN_NAMESPACE
 
@@ -60,14 +30,14 @@ struct Q_GUI_EXPORT QRhiMetalInitParams : public QRhiInitParams
 
 struct Q_GUI_EXPORT QRhiMetalNativeHandles : public QRhiNativeHandles
 {
-    void *dev = nullptr; // id<MTLDevice>
-    void *cmdQueue = nullptr; // id<MTLCommandQueue>
+    MTLDevice *dev = nullptr;
+    MTLCommandQueue *cmdQueue = nullptr;
 };
 
 struct Q_GUI_EXPORT QRhiMetalCommandBufferNativeHandles : public QRhiNativeHandles
 {
-    void *commandBuffer = nullptr; // id<MTLCommandBuffer>
-    void *encoder = nullptr; // id<MTLRenderCommandEncoder>
+    MTLCommandBuffer *commandBuffer = nullptr;
+    MTLRenderCommandEncoder *encoder = nullptr;
 };
 
 QT_END_NAMESPACE

@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "base/location.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/time/time.h"
 #include "net/base/network_isolation_key.h"
 #include "net/reporting/reporting_endpoint.h"
@@ -35,8 +35,8 @@ ReportingData GetReportingData() {
   const ReportingEndpoint kEndpoint(kGroupKey,
                                     {GURL("https://endpoint.test/reports")});
   const CachedReportingEndpointGroup kGroup(
-      kGroupKey, OriginSubdomains::DEFAULT,
-      base::Time::Now() + base::TimeDelta::FromDays(1), base::Time::Now());
+      kGroupKey, OriginSubdomains::DEFAULT, base::Time::Now() + base::Days(1),
+      base::Time::Now());
   return {kEndpoint, kGroup};
 }
 

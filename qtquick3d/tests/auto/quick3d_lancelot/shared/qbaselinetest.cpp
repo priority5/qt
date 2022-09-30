@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qbaselinetest.h"
 #include "baselineprotocol.h"
@@ -47,6 +22,7 @@ static bool connected = false;
 static bool triedConnecting = false;
 static bool dryRunMode = false;
 static enum { UploadMissing, UploadAll, UploadNone } baselinePolicy = UploadMissing;
+static bool abortIfUnstable = true;
 
 static QByteArray curFunction;
 static ImageItemList itemList;
@@ -90,6 +66,8 @@ void handleCmdLineArgs(int *argcp, char ***argvp)
             customInfo.setAdHocRun(true);
         } else if (arg == "-setbaselines") {
             baselinePolicy = UploadAll;
+        } else if (arg == "-keeprunning") {
+            abortIfUnstable = false;
         } else if (arg == "-nosetbaselines") {
             baselinePolicy = UploadNone;
         } else if (arg == "-compareto") {
@@ -124,6 +102,7 @@ void handleCmdLineArgs(int *argcp, char ***argvp)
         out << " -fuzzlevel <int>    : Specify the percentage of fuzziness in comparison. Overrides server default. 0 means exact match.\n";
         out << " -auto               : Inform server that this run is done by a daemon, CI system or similar.\n";
         out << " -adhoc (default)    : The inverse of -auto; this run is done by human, e.g. for testing.\n";
+        out << " -keeprunning        : Run all tests even if the system is unstable \n";
         out << " -setbaselines       : Store ALL rendered images as new baselines. Forces replacement of previous baselines.\n";
         out << " -nosetbaselines     : Do not store rendered images as new baselines when previous baselines are missing.\n";
         out << " -compareto KEY=VAL  : Force comparison to baselines from a different client,\n";
@@ -133,6 +112,10 @@ void handleCmdLineArgs(int *argcp, char ***argvp)
     }
 }
 
+bool shouldAbortIfUnstable()
+{
+    return abortIfUnstable;
+}
 
 void addClientProperty(const QString& key, const QString& value)
 {
@@ -187,7 +170,8 @@ bool connect(QByteArray *msg, bool *error)
     // Merge the platform info set by the program with the protocols default info
     PlatformInfo clientInfo = customInfo;
     PlatformInfo defaultInfo = PlatformInfo::localHostInfo();
-    for (QString key : defaultInfo.keys()) {
+    const auto &defaultInfoKeys = defaultInfo.keys();
+    for (const QString &key : defaultInfoKeys) {
         if (!clientInfo.contains(key))
             clientInfo.insert(key, defaultInfo.value(key));
     }
@@ -319,8 +303,7 @@ bool compareItem(const ImageItem &baseline, const QImage &img, QByteArray *msg, 
     bool fuzzyMatch = false;
     bool res = proto.submitMismatch(item, &srvMsg, &fuzzyMatch);
     if (res && fuzzyMatch) {
-        *error = true;          // To force a QSKIP/debug output; somewhat kludgy
-        *msg += srvMsg;
+        qInfo() << "Baseline server reports:" << srvMsg;
         return true;            // The server decides: a fuzzy match means no mismatch
     }
     *msg += "Mismatch. See report:\n   " + srvMsg;

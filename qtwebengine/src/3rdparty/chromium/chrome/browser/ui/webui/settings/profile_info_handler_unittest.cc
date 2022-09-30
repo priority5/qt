@@ -7,7 +7,9 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -22,8 +24,8 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "url/gurl.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "components/user_manager/scoped_user_manager.h"
 #endif
 
@@ -31,7 +33,7 @@ namespace settings {
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 constexpr char fake_id[] = "fake_id";
 constexpr char fake_email[] = "fake_id@gmail.com";
 #endif
@@ -55,9 +57,8 @@ class ProfileInfoHandlerTest : public testing::Test {
   void SetUp() override {
     ASSERT_TRUE(profile_manager_.SetUp());
 
-#if defined(OS_CHROMEOS)
-    chromeos::FakeChromeUserManager* fake_user_manager =
-        new chromeos::FakeChromeUserManager;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    auto* fake_user_manager = new ash::FakeChromeUserManager;
     user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
         base::WrapUnique(fake_user_manager));
     profile_ = profile_manager_.CreateTestingProfile(fake_email);
@@ -79,7 +80,7 @@ class ProfileInfoHandlerTest : public testing::Test {
     ASSERT_TRUE(response->GetString("name", &name));
     ASSERT_TRUE(response->GetString("iconUrl", &icon_url));
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     EXPECT_EQ(fake_id, name);
     EXPECT_FALSE(icon_url.empty());
 #else
@@ -105,31 +106,29 @@ class ProfileInfoHandlerTest : public testing::Test {
   TestingProfileManager profile_manager_;
   content::TestWebUI web_ui_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<user_manager::ScopedUserManager> user_manager_enabler_;
 #endif
 
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
   std::unique_ptr<TestProfileInfoHandler> handler_;
 };
 
 TEST_F(ProfileInfoHandlerTest, GetProfileInfo) {
-  base::ListValue list_args;
-  list_args.AppendString("get-profile-info-callback-id");
-  handler()->HandleGetProfileInfo(&list_args);
+  base::Value list_args(base::Value::Type::LIST);
+  list_args.Append("get-profile-info-callback-id");
+  handler()->HandleGetProfileInfo(list_args.GetList());
 
   EXPECT_EQ(1U, web_ui()->call_data().size());
 
   const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
   EXPECT_EQ("cr.webUIResponse", data.function_name());
 
-  std::string callback_id;
-  ASSERT_TRUE(data.arg1()->GetAsString(&callback_id));
-  EXPECT_EQ("get-profile-info-callback-id", callback_id);
+  ASSERT_TRUE(data.arg1()->is_string());
+  EXPECT_EQ("get-profile-info-callback-id", data.arg1()->GetString());
 
-  bool success = false;
-  ASSERT_TRUE(data.arg2()->GetAsBoolean(&success));
-  EXPECT_TRUE(success);
+  ASSERT_TRUE(data.arg2()->is_bool());
+  EXPECT_TRUE(data.arg2()->GetBool());
 
   VerifyProfileInfo(data.arg3());
 }
@@ -144,9 +143,9 @@ TEST_F(ProfileInfoHandlerTest, PushProfileInfo) {
   const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
   EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
 
-  std::string event_id;
-  ASSERT_TRUE(data.arg1()->GetAsString(&event_id));
-  EXPECT_EQ(ProfileInfoHandler::kProfileInfoChangedEventName, event_id);
+  ASSERT_TRUE(data.arg1()->is_string());
+  EXPECT_EQ(ProfileInfoHandler::kProfileInfoChangedEventName,
+            data.arg1()->GetString());
 
   VerifyProfileInfo(data.arg2());
 }

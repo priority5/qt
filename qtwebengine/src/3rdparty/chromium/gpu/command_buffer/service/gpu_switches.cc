@@ -4,8 +4,6 @@
 
 #include "gpu/command_buffer/service/gpu_switches.h"
 
-#include "base/macros.h"
-
 namespace switches {
 
 // Always return success when compiling a shader. Linking will still fail.
@@ -65,10 +63,6 @@ const char kEnableThreadedTextureMailboxes[] =
 // compilation info logs.
 const char kGLShaderIntermOutput[] = "gl-shader-interm-output";
 
-// Emulate ESSL lowp and mediump float precisions by mutating the shaders to
-// round intermediate values in ANGLE.
-const char kEmulateShaderPrecision[] = "emulate-shader-precision";
-
 // Enable Vulkan support and select Vulkan implementation, must also have
 // ENABLE_VULKAN defined. This only initializes Vulkan, the flag
 // --enable-features=Vulkan must also be used to select Vulkan for compositing
@@ -77,16 +71,8 @@ const char kUseVulkan[] = "use-vulkan";
 const char kVulkanImplementationNameNative[] = "native";
 const char kVulkanImplementationNameSwiftshader[] = "swiftshader";
 
-// Forces to use protected memory for vulkan compositing.
-const char kEnforceVulkanProtectedMemory[] = "enforce-vulkan-protected-memory";
-
 // Disables VK_KHR_surface extension. Instead of using swapchain, bitblt will be
 // used for present render result on screen.
 const char kDisableVulkanSurface[] = "disable-vulkan-surface";
-
-// Disables falling back to GL based hardware rendering if initializing Vulkan
-// fails. This is to allow tests to catch regressions in Vulkan.
-const char kDisableVulkanFallbackToGLForTesting[] =
-    "disable-vulkan-fallback-to-gl-for-testing";
 
 }  // namespace switches

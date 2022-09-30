@@ -6,6 +6,7 @@
 
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_shadow_root_init.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -96,16 +97,6 @@ TEST_F(WebElementTest, ShadowRoot) {
   InsertHTML("<input id=testElement>");
   EXPECT_TRUE(TestElement().ShadowRoot().IsNull())
       << "ShadowRoot() should not return a UA ShadowRoot.";
-
-  {
-    InsertHTML("<div id=testElement></div>");
-    EXPECT_TRUE(TestElement().ShadowRoot().IsNull())
-        << "No ShadowRoot initially.";
-    auto* element = GetDocument().getElementById("testElement");
-    element->CreateV0ShadowRootForTesting();
-    EXPECT_FALSE(TestElement().ShadowRoot().IsNull())
-        << "Should return V0 ShadowRoot.";
-  }
 
   {
     InsertHTML("<span id=testElement></span>");

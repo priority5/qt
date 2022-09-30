@@ -180,7 +180,7 @@ void RenderLineOfText(const std::string& line, int top, VideoFrame* frame) {
       case '+':
         DivergePixels(gfx::Rect(1, 1, 1, 1), p_ul, stride);
         DivergePixels(gfx::Rect(1, 3, 1, 1), p_ul, stride);
-        FALLTHROUGH;
+        [[fallthrough]];
       case '-':
         DivergePixels(gfx::Rect(0, 2, 3, 1), p_ul, stride);
         break;
@@ -265,7 +265,7 @@ scoped_refptr<VideoFrame> MaybeRenderPerformanceMetricsOverlay(
       memcpy(dst, src, bytes_per_row);
     }
   }
-  frame->metadata()->MergeMetadataFrom(source->metadata());
+  frame->metadata().MergeMetadataFrom(source->metadata());
   // Important: After all consumers are done with the frame, copy-back the
   // changed/new metadata to the source frame, as it contains feedback signals
   // that need to propagate back up the video stack. The destruction callback
@@ -273,26 +273,26 @@ scoped_refptr<VideoFrame> MaybeRenderPerformanceMetricsOverlay(
   // the source frame has the right metadata before its destruction observers
   // are invoked.
   frame->AddDestructionObserver(base::BindOnce(
-      [](const VideoFrameMetadata* sent_frame_metadata,
+      [](const VideoFrameMetadata& sent_frame_metadata,
          scoped_refptr<VideoFrame> source_frame) {
-        source_frame->set_metadata(*sent_frame_metadata);
+        source_frame->set_metadata(sent_frame_metadata);
       },
       frame->metadata(), std::move(source)));
 
   // Line 3: Frame duration, resolution, and timestamp.
   int frame_duration_ms = 0;
   int frame_duration_ms_frac = 0;
-  if (frame->metadata()->frame_duration.has_value()) {
+  if (frame->metadata().frame_duration.has_value()) {
     const int decimilliseconds = base::saturated_cast<int>(
-        frame->metadata()->frame_duration->InMicroseconds() / 100.0 + 0.5);
+        frame->metadata().frame_duration->InMicroseconds() / 100.0 + 0.5);
     frame_duration_ms = decimilliseconds / 10;
     frame_duration_ms_frac = decimilliseconds % 10;
   }
   base::TimeDelta rem = frame->timestamp();
   const int minutes = rem.InMinutes();
-  rem -= base::TimeDelta::FromMinutes(minutes);
+  rem -= base::Minutes(minutes);
   const int seconds = static_cast<int>(rem.InSeconds());
-  rem -= base::TimeDelta::FromSeconds(seconds);
+  rem -= base::Seconds(seconds);
   const int hundredth_seconds = static_cast<int>(rem.InMilliseconds() / 10);
   RenderLineOfText(
       base::StringPrintf("%d.%01d %dx%d %d:%02d.%02d", frame_duration_ms,
@@ -309,11 +309,11 @@ scoped_refptr<VideoFrame> MaybeRenderPerformanceMetricsOverlay(
   // Line 2: Capture duration, target playout delay, low-latency mode, and
   // target bitrate.
   int capture_duration_ms = 0;
-  if (frame->metadata()->capture_begin_time &&
-      frame->metadata()->capture_end_time) {
+  if (frame->metadata().capture_begin_time &&
+      frame->metadata().capture_end_time) {
     capture_duration_ms =
-        base::saturated_cast<int>((*frame->metadata()->capture_end_time -
-                                   *frame->metadata()->capture_begin_time)
+        base::saturated_cast<int>((*frame->metadata().capture_end_time -
+                                   *frame->metadata().capture_begin_time)
                                       .InMillisecondsF() +
                                   0.5);
   }

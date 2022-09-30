@@ -4,7 +4,7 @@
 
 #include "components/signin/core/browser/cookie_reminter.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "components/signin/public/identity_manager/accounts_cookie_mutator.h"
 
 namespace {
@@ -50,7 +50,6 @@ void CookieReminter::OnRefreshTokenUpdatedForAccount(
     // Cookies are going to be reminted for all accounts.
     accounts_requiring_cookie_remint_.clear();
     identity_manager_->GetAccountsCookieMutator()->LogOutAllAccounts(
-        gaia::GaiaSource::kChromeOS,
-        signin::AccountsCookieMutator::LogOutFromCookieCompletedCallback());
+        gaia::GaiaSource::kChromeOS, base::DoNothing());
   }
 }

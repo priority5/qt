@@ -50,6 +50,7 @@ void WriteCounter(unsigned char* payload, uint32_t counter) {
 
 FakeEncoder::FakeEncoder(Clock* clock)
     : clock_(clock),
+      num_initializations_(0),
       callback_(nullptr),
       max_target_bitrate_kbps_(-1),
       pending_keyframe_(true),
@@ -81,6 +82,7 @@ int32_t FakeEncoder::InitEncode(const VideoCodec* config,
                                 const Settings& settings) {
   MutexLock lock(&mutex_);
   config_ = *config;
+  ++num_initializations_;
   current_rate_settings_.bitrate.SetBitrate(0, 0, config_.startBitrate * 1000);
   current_rate_settings_.framerate_fps = config_.maxFramerate;
   pending_keyframe_ = true;
@@ -95,7 +97,6 @@ int32_t FakeEncoder::Encode(const VideoFrame& input_image,
   SpatialLayer simulcast_streams[kMaxSimulcastStreams];
   EncodedImageCallback* callback;
   RateControlParameters rates;
-  VideoCodecMode mode;
   bool keyframe;
   uint32_t counter;
   absl::optional<int> qp;
@@ -108,7 +109,6 @@ int32_t FakeEncoder::Encode(const VideoFrame& input_image,
     }
     callback = callback_;
     rates = current_rate_settings_;
-    mode = config_.mode;
     if (rates.framerate_fps <= 0.0) {
       rates.framerate_fps = max_framerate;
     }
@@ -276,12 +276,33 @@ const char* FakeEncoder::kImplementationName = "fake_encoder";
 VideoEncoder::EncoderInfo FakeEncoder::GetEncoderInfo() const {
   EncoderInfo info;
   info.implementation_name = kImplementationName;
+  MutexLock lock(&mutex_);
+  for (int sid = 0; sid < config_.numberOfSimulcastStreams; ++sid) {
+    int number_of_temporal_layers =
+        config_.simulcastStream[sid].numberOfTemporalLayers;
+    info.fps_allocation[sid].clear();
+    for (int tid = 0; tid < number_of_temporal_layers; ++tid) {
+      // {1/4, 1/2, 1} allocation for num layers = 3.
+      info.fps_allocation[sid].push_back(255 /
+                                         (number_of_temporal_layers - tid));
+    }
+  }
   return info;
 }
 
 int FakeEncoder::GetConfiguredInputFramerate() const {
   MutexLock lock(&mutex_);
   return static_cast<int>(current_rate_settings_.framerate_fps + 0.5);
+}
+
+int FakeEncoder::GetNumInitializations() const {
+  MutexLock lock(&mutex_);
+  return num_initializations_;
+}
+
+const VideoCodec& FakeEncoder::config() const {
+  MutexLock lock(&mutex_);
+  return config_;
 }
 
 FakeH264Encoder::FakeH264Encoder(Clock* clock)

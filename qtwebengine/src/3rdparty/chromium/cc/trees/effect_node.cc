@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "cc/trees/effect_node.h"
+#include "base/notreached.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/layers/layer.h"
 #include "cc/trees/property_tree.h"
@@ -10,8 +11,8 @@
 namespace cc {
 
 EffectNode::EffectNode()
-    : id(EffectTree::kInvalidNodeId),
-      parent_id(EffectTree::kInvalidNodeId),
+    : id(kInvalidPropertyNodeId),
+      parent_id(kInvalidPropertyNodeId),
       stable_id(INVALID_STABLE_ID),
       opacity(1.f),
       screen_space_opacity(1.f),
@@ -42,7 +43,9 @@ EffectNode::EffectNode()
       clip_id(0),
       target_id(1),
       closest_ancestor_with_cached_render_surface_id(-1),
-      closest_ancestor_with_copy_request_id(-1) {}
+      closest_ancestor_with_copy_request_id(-1),
+      closest_ancestor_being_captured_id(-1),
+      closest_ancestor_with_shared_element_id(-1) {}
 
 EffectNode::EffectNode(const EffectNode& other) = default;
 
@@ -54,13 +57,15 @@ bool EffectNode::operator==(const EffectNode& other) const {
          stable_id == other.stable_id && opacity == other.opacity &&
          screen_space_opacity == other.screen_space_opacity &&
          backdrop_filter_quality == other.backdrop_filter_quality &&
+         subtree_capture_id == other.subtree_capture_id &&
+         subtree_size == other.subtree_size &&
          cache_render_surface == other.cache_render_surface &&
          has_copy_request == other.has_copy_request &&
          filters == other.filters &&
          backdrop_filters == other.backdrop_filters &&
          backdrop_filter_bounds == other.backdrop_filter_bounds &&
          backdrop_mask_element_id == other.backdrop_mask_element_id &&
-         rounded_corner_bounds == other.rounded_corner_bounds &&
+         mask_filter_info == other.mask_filter_info &&
          is_fast_rounded_corner == other.is_fast_rounded_corner &&
          node_or_ancestor_has_filters == other.node_or_ancestor_has_filters &&
          affected_by_backdrop_filter == other.affected_by_backdrop_filter &&
@@ -94,7 +99,11 @@ bool EffectNode::operator==(const EffectNode& other) const {
          closest_ancestor_with_cached_render_surface_id ==
              other.closest_ancestor_with_cached_render_surface_id &&
          closest_ancestor_with_copy_request_id ==
-             other.closest_ancestor_with_copy_request_id;
+             other.closest_ancestor_with_copy_request_id &&
+         closest_ancestor_being_captured_id ==
+             other.closest_ancestor_being_captured_id &&
+         closest_ancestor_with_shared_element_id ==
+             other.closest_ancestor_with_shared_element_id;
 }
 #endif  // DCHECK_IS_ON()
 
@@ -126,6 +135,8 @@ const char* RenderSurfaceReasonToString(RenderSurfaceReason reason) {
       return "backdrop filter animation";
     case RenderSurfaceReason::kRoundedCorner:
       return "rounded corner";
+    case RenderSurfaceReason::kGradientMask:
+      return "gradient mask";
     case RenderSurfaceReason::kClipPath:
       return "clip path";
     case RenderSurfaceReason::kClipAxisAlignment:
@@ -138,6 +149,12 @@ const char* RenderSurfaceReasonToString(RenderSurfaceReason reason) {
       return "cache";
     case RenderSurfaceReason::kCopyRequest:
       return "copy request";
+    case RenderSurfaceReason::kMirrored:
+      return "mirrored";
+    case RenderSurfaceReason::kSubtreeIsBeingCaptured:
+      return "subtree being captured";
+    case RenderSurfaceReason::kDocumentTransitionParticipant:
+      return "document transition participant";
     case RenderSurfaceReason::kTest:
       return "test";
     default:
@@ -158,22 +175,35 @@ void EffectNode::AsValueInto(base::trace_event::TracedValue* value) const {
   if (!backdrop_filters.IsEmpty())
     value->SetString("backdrop_filters", backdrop_filters.ToString());
   value->SetDouble("backdrop_filter_quality", backdrop_filter_quality);
-  value->SetBoolean("is_fast_rounded_corner", is_fast_rounded_corner);
   value->SetBoolean("node_or_ancestor_has_filters",
                     node_or_ancestor_has_filters);
-  if (!rounded_corner_bounds.IsEmpty()) {
-    MathUtil::AddToTracedValue("rounded_corner_bounds", rounded_corner_bounds,
+  if (!mask_filter_info.IsEmpty()) {
+    MathUtil::AddToTracedValue("mask_filter_bounds", mask_filter_info.bounds(),
                                value);
+    if (mask_filter_info.HasRoundedCorners()) {
+      MathUtil::AddCornerRadiiToTracedValue(
+          "mask_filter_rounded_corner_raii",
+          mask_filter_info.rounded_corner_bounds(), value);
+      value->SetBoolean("mask_filter_is_fast_rounded_corner",
+                        is_fast_rounded_corner);
+    }
+    if (mask_filter_info.HasGradientMask()) {
+      MathUtil::AddToTracedValue("mask_filter_gradient_mask",
+                                 mask_filter_info.gradient_mask(), value);
+    }
   }
   value->SetString("blend_mode", SkBlendMode_Name(blend_mode));
+  value->SetString("subtree_capture_id", subtree_capture_id.ToString());
+  value->SetString("subtree_size", subtree_size.ToString());
   value->SetBoolean("cache_render_surface", cache_render_surface);
   value->SetBoolean("has_copy_request", has_copy_request);
-  value->SetBoolean("double_sided", double_sided);
   value->SetBoolean("hidden_by_backface_visibility",
                     hidden_by_backface_visibility);
+  value->SetBoolean("double_sided", double_sided);
   value->SetBoolean("trilinear_filtering", trilinear_filtering);
   value->SetBoolean("is_drawn", is_drawn);
   value->SetBoolean("only_draws_visible_content", only_draws_visible_content);
+  value->SetBoolean("subtree_hidden", subtree_hidden);
   value->SetBoolean("has_potential_filter_animation",
                     has_potential_filter_animation);
   value->SetBoolean("has_potential_backdrop_filter_animation",
@@ -183,6 +213,7 @@ void EffectNode::AsValueInto(base::trace_event::TracedValue* value) const {
   value->SetBoolean("has_masking_child", has_masking_child);
   value->SetBoolean("effect_changed", effect_changed);
   value->SetBoolean("subtree_has_copy_request", subtree_has_copy_request);
+  value->SetBoolean("affected_by_backdrop_filter", affected_by_backdrop_filter);
   value->SetString("render_surface_reason",
                    RenderSurfaceReasonToString(render_surface_reason));
   value->SetInteger("transform_id", transform_id);
@@ -192,7 +223,8 @@ void EffectNode::AsValueInto(base::trace_event::TracedValue* value) const {
                     closest_ancestor_with_cached_render_surface_id);
   value->SetInteger("closest_ancestor_with_copy_request_id",
                     closest_ancestor_with_copy_request_id);
-  value->SetBoolean("affected_by_backdrop_filter", affected_by_backdrop_filter);
+  value->SetInteger("closest_ancestor_being_captured_id",
+                    closest_ancestor_being_captured_id);
 }
 
 }  // namespace cc

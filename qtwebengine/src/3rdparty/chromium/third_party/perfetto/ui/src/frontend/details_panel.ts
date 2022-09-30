@@ -13,27 +13,40 @@
 // limitations under the License.
 
 import * as m from 'mithril';
+import {QueryResponse} from 'src/common/queries';
 
+import {Actions} from '../common/actions';
+import {isEmptyData} from '../common/aggregation_data';
 import {LogExists, LogExistsKey} from '../common/logs';
+import {DEFAULT_PIVOT_TABLE_ID} from '../common/pivot_table_common';
 
 import {AggregationPanel} from './aggregation_panel';
 import {ChromeSliceDetailsPanel} from './chrome_slice_panel';
 import {CounterDetailsPanel} from './counter_panel';
 import {CpuProfileDetailsPanel} from './cpu_profile_panel';
 import {DragGestureHandler} from './drag_gesture_handler';
-import {FlowEventsPanel} from './flow_events_panel';
+import {FlamegraphDetailsPanel} from './flamegraph_panel';
+import {
+  FlowEventsAreaSelectedPanel,
+  FlowEventsPanel
+} from './flow_events_panel';
 import {globals} from './globals';
-import {HeapProfileDetailsPanel} from './heap_profile_panel';
 import {LogPanel} from './logs_panel';
+import {showModal} from './modal';
 import {NotesEditorPanel} from './notes_panel';
 import {AnyAttrsVnode, PanelContainer} from './panel_container';
-import {SliceDetailsPanel} from './slice_panel';
+import {PivotTable} from './pivot_table';
+import {ColumnDisplay, ColumnPicker} from './pivot_table_editor';
+import {PivotTableHelper} from './pivot_table_helper';
+import {PivotTableRedux} from './pivot_table_redux';
+import {QueryTable} from './query_table';
+import {SliceDetailsPanel} from './slice_details_panel';
 import {ThreadStatePanel} from './thread_state_panel';
 
 const UP_ICON = 'keyboard_arrow_up';
 const DOWN_ICON = 'keyboard_arrow_down';
 const DRAG_HANDLE_HEIGHT_PX = 28;
-const DEFAULT_DETAILS_HEIGHT_PX = 230 + DRAG_HANDLE_HEIGHT_PX;
+const DEFAULT_DETAILS_HEIGHT_PX = 280 + DRAG_HANDLE_HEIGHT_PX;
 
 function getFullScreenHeight() {
   const panelContainer =
@@ -50,10 +63,48 @@ function hasLogs(): boolean {
   return data && data.exists;
 }
 
+function showPivotTableEditorModal(helper?: PivotTableHelper) {
+  if (helper !== undefined && helper.editPivotTableModalOpen) {
+    let content;
+    if (helper.availableColumns.length === 0 ||
+        helper.availableAggregations.length === 0) {
+      content =
+          m('.pivot-table-editor-container',
+            helper.availableColumns.length === 0 ?
+                m('div', 'No columns available.') :
+                null,
+            helper.availableAggregations.length === 0 ?
+                m('div', 'No aggregations available.') :
+                null);
+    } else {
+      const attrs = {helper};
+      content =
+          m('.pivot-table-editor-container',
+            m(ColumnPicker, attrs),
+            m(ColumnDisplay, attrs));
+    }
+
+    showModal({
+      title: 'Edit Pivot Table',
+      content,
+      buttons: [],
+    }).finally(() => {
+      helper.toggleEditPivotTableModal();
+      globals.rafScheduler.scheduleFullRedraw();
+    });
+  }
+}
+
+interface Tab {
+  key: string;
+  name: string;
+}
+
 interface DragHandleAttrs {
   height: number;
   resize: (height: number) => void;
-  tabs: string[];
+  tabs: Tab[];
+  currentTabKey?: string;
 }
 
 class DragHandle implements m.ClassComponent<DragHandleAttrs> {
@@ -65,12 +116,6 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
   private isFullscreen = false;
   // We can't get real fullscreen height until the pan_and_zoom_handler exists.
   private fullscreenHeight = DEFAULT_DETAILS_HEIGHT_PX;
-  private tabNames = new Map<string, string>([
-    ['current_selection', 'Current Selection'],
-    ['bound_flows', 'Flow Events'],
-    ['android_logs', 'Android Logs'],
-  ]);
-
 
   oncreate({dom, attrs}: m.CVnodeDOM<DragHandleAttrs>) {
     this.resize = attrs.resize;
@@ -109,24 +154,18 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
   view({attrs}: m.CVnode<DragHandleAttrs>) {
     const icon = this.isClosed ? UP_ICON : DOWN_ICON;
     const title = this.isClosed ? 'Show panel' : 'Hide panel';
-    const renderTab = (key: string) => {
-      if (globals.frontendLocalState.currentTab === key ||
-          globals.frontendLocalState.currentTab === undefined &&
-              attrs.tabs[0] === key) {
-        return m(
-            '.tab[active]',
-            this.tabNames.get(key) === undefined ? key :
-                                                   this.tabNames.get(key));
+    const renderTab = (tab: Tab) => {
+      if (attrs.currentTabKey === tab.key) {
+        return m('.tab[active]', tab.name);
       }
       return m(
           '.tab',
           {
             onclick: () => {
-              globals.frontendLocalState.currentTab = key;
-              globals.rafScheduler.scheduleFullRedraw();
+              globals.dispatch(Actions.setCurrentTab({tab: tab.key}));
             }
           },
-          this.tabNames.get(key) === undefined ? key : this.tabNames.get(key));
+          tab.name);
     };
     return m(
         '.handle',
@@ -149,6 +188,9 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
               onclick: () => {
                 if (this.height === DRAG_HANDLE_HEIGHT_PX) {
                   this.isClosed = false;
+                  if (this.previousHeight === 0) {
+                    this.previousHeight = DEFAULT_DETAILS_HEIGHT_PX;
+                  }
                   this.resize(this.previousHeight);
                 } else {
                   this.isFullscreen = false;
@@ -165,89 +207,182 @@ class DragHandle implements m.ClassComponent<DragHandleAttrs> {
 }
 
 export class DetailsPanel implements m.ClassComponent {
-  private detailsHeight = DRAG_HANDLE_HEIGHT_PX;
-  // Used to set details panel to default height on selection.
-  private showDetailsPanel = true;
+  private detailsHeight = DEFAULT_DETAILS_HEIGHT_PX;
 
   view() {
-    const detailsPanels: Map<string, AnyAttrsVnode> = new Map();
+    interface DetailsPanel {
+      key: string;
+      name: string;
+      vnode: AnyAttrsVnode;
+    }
+
+    const detailsPanels: DetailsPanel[] = [];
     const curSelection = globals.state.currentSelection;
     if (curSelection) {
       switch (curSelection.kind) {
         case 'NOTE':
-          detailsPanels.set('current_selection', m(NotesEditorPanel, {
-                              key: 'notes',
-                              id: curSelection.id,
-                            }));
+          detailsPanels.push({
+            key: 'current_selection',
+            name: 'Current Selection',
+            vnode: m(NotesEditorPanel, {
+              key: 'notes',
+              id: curSelection.id,
+            })
+          });
           break;
         case 'AREA':
           if (curSelection.noteId !== undefined) {
-            detailsPanels.set('current_selection', m(NotesEditorPanel, {
-                                key: 'area_notes',
-                                id: curSelection.noteId,
-                              }));
+            detailsPanels.push({
+              key: 'current_selection',
+              name: 'Current Selection',
+              vnode: m(NotesEditorPanel, {
+                key: 'area_notes',
+                id: curSelection.noteId,
+              })
+            });
+          }
+          if (globals.flamegraphDetails.isInAreaSelection) {
+            detailsPanels.push({
+              key: 'flamegraph_selection',
+              name: 'Flamegraph Selection',
+              vnode: m(FlamegraphDetailsPanel, {key: 'flamegraph'})
+            });
           }
           break;
         case 'SLICE':
-          detailsPanels.set('current_selection', m(SliceDetailsPanel, {
-                              key: 'slice',
-                            }));
+          detailsPanels.push({
+            key: 'current_selection',
+            name: 'Current Selection',
+            vnode: m(SliceDetailsPanel, {
+              key: 'slice',
+            })
+          });
           break;
         case 'COUNTER':
-          detailsPanels.set('current_selection', m(CounterDetailsPanel, {
-                              key: 'counter',
-                            }));
+          detailsPanels.push({
+            key: 'current_selection',
+            name: 'Current Selection',
+            vnode: m(CounterDetailsPanel, {
+              key: 'counter',
+            })
+          });
           break;
+        case 'PERF_SAMPLES':
         case 'HEAP_PROFILE':
-          detailsPanels.set(
-              'current_selection',
-              m(HeapProfileDetailsPanel, {key: 'heap_profile'}));
+          detailsPanels.push({
+            key: 'current_selection',
+            name: 'Current Selection',
+            vnode: m(FlamegraphDetailsPanel, {key: 'flamegraph'})
+          });
           break;
         case 'CPU_PROFILE_SAMPLE':
-          detailsPanels.set('current_selection', m(CpuProfileDetailsPanel, {
-                              key: 'cpu_profile_sample',
-                            }));
+          detailsPanels.push({
+            key: 'current_selection',
+            name: 'Current Selection',
+            vnode: m(CpuProfileDetailsPanel, {
+              key: 'cpu_profile_sample',
+            })
+          });
           break;
         case 'CHROME_SLICE':
-          detailsPanels.set(
-              'current_selection',
-              m(ChromeSliceDetailsPanel, {key: 'chrome_slice'}));
+          detailsPanels.push({
+            key: 'current_selection',
+            name: 'Current Selection',
+            vnode: m(ChromeSliceDetailsPanel, {key: 'chrome_slice'})
+          });
           break;
         case 'THREAD_STATE':
-          detailsPanels.set(
-              'current_selection', m(ThreadStatePanel, {key: 'thread_state'}));
+          detailsPanels.push({
+            key: 'current_selection',
+            name: 'Current Selection',
+            vnode: m(ThreadStatePanel, {key: 'thread_state'})
+          });
           break;
         default:
           break;
       }
     }
     if (hasLogs()) {
-      detailsPanels.set('android_logs', m(LogPanel, {key: 'logs_panel'}));
+      detailsPanels.push({
+        key: 'android_logs',
+        name: 'Android Logs',
+        vnode: m(LogPanel, {key: 'logs_panel'})
+      });
     }
 
-    if (globals.boundFlows.length > 0) {
-      detailsPanels.set(
-          'bound_flows', m(FlowEventsPanel, {key: 'flow_events'}));
+    if (globals.queryResults.has('command')) {
+      const count =
+          (globals.queryResults.get('command') as QueryResponse).rows.length;
+      detailsPanels.push({
+        key: 'query_result',
+        name: `Query Result (${count})`,
+        vnode: m(QueryTable, {key: 'query', queryId: 'command'})
+      });
+    }
+
+    if (globals.state.pivotTableRedux.selectionArea !== null) {
+      detailsPanels.push({
+        key: 'pivot_table_redux',
+        name: 'Pivot Table',
+        vnode: m(PivotTableRedux, {
+          key: 'pivot_table_redux',
+          selectionArea: globals.state.pivotTableRedux.selectionArea
+        })
+      });
+    }
+
+    for (const pivotTableId of Object.keys(globals.state.pivotTable)) {
+      const pivotTable = globals.state.pivotTable[pivotTableId];
+      const helper = globals.pivotTableHelper.get(pivotTableId);
+      if (pivotTableId !== DEFAULT_PIVOT_TABLE_ID ||
+          globals.frontendLocalState.showPivotTable) {
+        if (helper !== undefined) {
+          helper.setSelectedPivotsAndAggregations(
+              pivotTable.selectedPivots, pivotTable.selectedAggregations);
+        }
+        detailsPanels.push({
+          key: pivotTableId,
+          name: pivotTable.name,
+          vnode: m(PivotTable, {key: pivotTableId, pivotTableId, helper})
+        });
+      }
+      showPivotTableEditorModal(helper);
+    }
+
+    if (globals.connectedFlows.length > 0) {
+      detailsPanels.push({
+        key: 'bound_flows',
+        name: 'Flow Events',
+        vnode: m(FlowEventsPanel, {key: 'flow_events'})
+      });
     }
 
     for (const [key, value] of globals.aggregateDataStore.entries()) {
-      if (value.columns.length > 0 && value.columns[0].data.length > 0) {
-        detailsPanels.set(
-            value.tabName, m(AggregationPanel, {kind: key, key, data: value}));
+      if (!isEmptyData(value)) {
+        detailsPanels.push({
+          key: value.tabName,
+          name: value.tabName,
+          vnode: m(AggregationPanel, {kind: key, key, data: value})
+        });
       }
     }
 
-    const wasShowing = this.showDetailsPanel;
-    this.showDetailsPanel = detailsPanels.size > 0;
-    // The first time the details panel appears, it should be default height.
-    if (!wasShowing && this.showDetailsPanel) {
-      this.detailsHeight = DEFAULT_DETAILS_HEIGHT_PX;
+    // Add this after all aggregation panels, to make it appear after 'Slices'
+    if (globals.selectedFlows.length > 0) {
+      detailsPanels.push({
+        key: 'selected_flows',
+        name: 'Flow Events',
+        vnode: m(FlowEventsAreaSelectedPanel, {key: 'flow_events_area'})
+      });
     }
 
-    const panel = globals.frontendLocalState.currentTab &&
-            detailsPanels.has(globals.frontendLocalState.currentTab) ?
-        detailsPanels.get(globals.frontendLocalState.currentTab) :
-        detailsPanels.values().next().value;
+    let currentTabDetails =
+        detailsPanels.find(tab => tab.key === globals.state.currentTab);
+    if (currentTabDetails === undefined && detailsPanels.length > 0) {
+      currentTabDetails = detailsPanels[0];
+    }
+
+    const panel = currentTabDetails?.vnode;
     const panels = panel ? [panel] : [];
 
     return m(
@@ -255,7 +390,7 @@ export class DetailsPanel implements m.ClassComponent {
         {
           style: {
             height: `${this.detailsHeight}px`,
-            display: this.showDetailsPanel ? null : 'none'
+            display: detailsPanels.length > 0 ? null : 'none'
           }
         },
         m(DragHandle, {
@@ -263,9 +398,12 @@ export class DetailsPanel implements m.ClassComponent {
             this.detailsHeight = Math.max(height, DRAG_HANDLE_HEIGHT_PX);
           },
           height: this.detailsHeight,
-          tabs: [...detailsPanels.keys()],
+          tabs: detailsPanels.map(tab => {
+            return {key: tab.key, name: tab.name};
+          }),
+          currentTabKey: currentTabDetails?.key
         }),
-        m('.details-panel-container',
+        m('.details-panel-container.x-scrollable',
           m(PanelContainer, {doesScroll: true, panels, kind: 'DETAILS'})));
   }
 }

@@ -33,16 +33,20 @@ class ExperimentalCounterDurGenerator
   Table::Schema CreateSchema() override;
   std::string TableName() override;
   uint32_t EstimateRowCount() override;
-  util::Status ValidateConstraints(const QueryConstraints&) override;
-  std::unique_ptr<Table> ComputeTable(const std::vector<Constraint>&,
-                                      const std::vector<Order>&) override;
+  base::Status ValidateConstraints(const QueryConstraints&) override;
+  base::Status ComputeTable(const std::vector<Constraint>& cs,
+                            const std::vector<Order>& ob,
+                            const BitVector& cols_used,
+                            std::unique_ptr<Table>& table_return) override;
 
   // public + static for testing
   static NullableVector<int64_t> ComputeDurColumn(const Table& table);
+  static NullableVector<double> ComputeDeltaColumn(const Table& table);
 
  private:
   const tables::CounterTable* counter_table_ = nullptr;
   std::unique_ptr<NullableVector<int64_t>> dur_column_;
+  std::unique_ptr<NullableVector<double>> delta_column_;
 };
 
 }  // namespace trace_processor

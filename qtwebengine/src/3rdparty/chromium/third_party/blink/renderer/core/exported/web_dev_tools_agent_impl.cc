@@ -35,7 +35,6 @@
 #include <utility>
 
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_scoped_page_pauser.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_settings.h"
@@ -50,14 +49,13 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
+#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/inspector/dev_tools_emulator.h"
 #include "third_party/blink/renderer/core/inspector/devtools_agent.h"
 #include "third_party/blink/renderer/core/inspector/devtools_session.h"
 #include "third_party/blink/renderer/core/inspector/inspected_frames.h"
 #include "third_party/blink/renderer/core/inspector/inspector_animation_agent.h"
-#include "third_party/blink/renderer/core/inspector/inspector_application_cache_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_audits_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_css_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_dom_agent.h"
@@ -73,6 +71,7 @@
 #include "third_party/blink/renderer/core/inspector/inspector_overlay_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_page_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_performance_agent.h"
+#include "third_party/blink/renderer/core/inspector/inspector_performance_timeline_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_resource_container.h"
 #include "third_party/blink/renderer/core/inspector/inspector_resource_content_loader.h"
 #include "third_party/blink/renderer/core/inspector/inspector_task_runner.h"
@@ -159,7 +158,7 @@ class ClientMessageLoopAdapter : public MainThreadDebugger::ClientMessageLoop {
     agent->FlushProtocolNotifications();
 
     // 1. Disable input events.
-    WebFrameWidgetBase::SetIgnoreInputEvents(true);
+    WebFrameWidgetImpl::SetIgnoreInputEvents(true);
     for (auto* const view : WebViewImpl::AllInstances())
       view->GetChromeClient().NotifyPopupOpeningObservers();
 
@@ -192,7 +191,7 @@ class ClientMessageLoopAdapter : public MainThreadDebugger::ClientMessageLoop {
     // code, but it is moved here to support browser-side navigation.
     message_loop_->QuitNow();
     page_pauser_.reset();
-    WebFrameWidgetBase::SetIgnoreInputEvents(false);
+    WebFrameWidgetImpl::SetIgnoreInputEvents(false);
   }
 
   bool running_for_debug_break_;
@@ -255,9 +254,6 @@ void WebDevToolsAgentImpl::AttachSession(DevToolsSession* session,
 
   session->Append(MakeGarbageCollected<InspectorMemoryAgent>(inspected_frames));
 
-  session->Append(
-      MakeGarbageCollected<InspectorApplicationCacheAgent>(inspected_frames));
-
   auto* page_agent = MakeGarbageCollected<InspectorPageAgent>(
       inspected_frames, this, resource_content_loader_.Get(),
       session->V8Session());
@@ -278,15 +274,20 @@ void WebDevToolsAgentImpl::AttachSession(DevToolsSession* session,
 
   session->Append(MakeGarbageCollected<InspectorAuditsAgent>(
       network_agent,
-      &inspected_frames->Root()->GetPage()->GetInspectorIssueStorage()));
+      &inspected_frames->Root()->GetPage()->GetInspectorIssueStorage(),
+      inspected_frames));
 
-  session->Append(MakeGarbageCollected<InspectorMediaAgent>(inspected_frames));
+  session->Append(MakeGarbageCollected<InspectorMediaAgent>(
+      inspected_frames, /*worker_global_scope=*/nullptr));
 
   // TODO(dgozman): we should actually pass the view instead of frame, but
   // during remote->local transition we cannot access mainFrameImpl() yet, so
   // we have to store the frame which will become the main frame later.
   session->Append(MakeGarbageCollected<InspectorEmulationAgent>(
       web_local_frame_impl_.Get()));
+
+  session->Append(MakeGarbageCollected<InspectorPerformanceTimelineAgent>(
+      inspected_frames));
 
   // Call session init callbacks registered from higher layers.
   CoreInitializer::GetInstance().InitInspectorAgentSession(
@@ -387,7 +388,7 @@ void WebDevToolsAgentImpl::InspectElement(
                             WebInputEvent::kNoModifiers,
                             base::TimeTicks::Now());
   dummy_event.SetPositionInWidget(point);
-  IntPoint transformed_point = FlooredIntPoint(
+  gfx::Point transformed_point = gfx::ToFlooredPoint(
       TransformWebMouseEvent(web_local_frame_impl_->GetFrameView(), dummy_event)
           .PositionInRootFrame());
   HitTestLocation location(
@@ -470,7 +471,6 @@ void WebDevToolsAgentImpl::UpdateOverlaysPrePaint() {
 }
 
 void WebDevToolsAgentImpl::PaintOverlays(GraphicsContext& context) {
-  DCHECK(RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
   for (auto& it : overlay_agents_)
     it.value->PaintOverlay(context);
 }
@@ -478,6 +478,11 @@ void WebDevToolsAgentImpl::PaintOverlays(GraphicsContext& context) {
 void WebDevToolsAgentImpl::DispatchBufferedTouchEvents() {
   for (auto& it : overlay_agents_)
     it.value->DispatchBufferedTouchEvents();
+}
+
+void WebDevToolsAgentImpl::SetPageIsScrolling(bool is_scrolling) {
+  for (auto& it : overlay_agents_)
+    it.value->SetPageIsScrolling(is_scrolling);
 }
 
 WebInputEventResult WebDevToolsAgentImpl::HandleInputEvent(

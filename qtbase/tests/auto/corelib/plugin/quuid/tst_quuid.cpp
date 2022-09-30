@@ -1,33 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
+#if QT_CONFIG(process)
+#include <QProcess>
+#endif
 
 #include <qcoreapplication.h>
 #include <quuid.h>
@@ -192,6 +170,11 @@ void tst_QUuid::fromString()
     const auto longerInputL1 = inputL1 + '5'; // the '5' makes the premature end check incorrectly succeed
     const auto inputL1S = QLatin1String(longerInputL1.data(), inputL1.size());
     QCOMPARE(expected, QUuid::fromString(inputL1S));
+
+    // for QUtf8StringView, too:
+    const auto longerInputU8 = inputU8 + '5'; // the '5' makes the premature end check incorrectly succeed
+    const auto inputU8S = QUtf8StringView(longerInputU8.data(), inputU8.size());
+    QCOMPARE(expected, QUuid::fromString(inputU8S));
 }
 
 void tst_QUuid::toByteArray()
@@ -302,8 +285,8 @@ void tst_QUuid::notEqual()
 void tst_QUuid::cpp11() {
 #ifdef Q_COMPILER_UNIFORM_INIT
     // "{fc69b59e-cc34-4436-a43c-ee95d128b8c5}" cf, initTestCase
-    Q_DECL_CONSTEXPR QUuid u1{0xfc69b59e, 0xcc34, 0x4436, 0xa4, 0x3c, 0xee, 0x95, 0xd1, 0x28, 0xb8, 0xc5};
-    Q_DECL_CONSTEXPR QUuid u2 = {0xfc69b59e, 0xcc34, 0x4436, 0xa4, 0x3c, 0xee, 0x95, 0xd1, 0x28, 0xb8, 0xc5};
+    constexpr QUuid u1{0xfc69b59e, 0xcc34, 0x4436, 0xa4, 0x3c, 0xee, 0x95, 0xd1, 0x28, 0xb8, 0xc5};
+    constexpr QUuid u2 = {0xfc69b59e, 0xcc34, 0x4436, 0xa4, 0x3c, 0xee, 0x95, 0xd1, 0x28, 0xb8, 0xc5};
     Q_UNUSED(u1);
     Q_UNUSED(u2);
 #else
@@ -358,7 +341,7 @@ void tst_QUuid::variants()
     QVERIFY( uuidA.variant() == QUuid::DCE );
     QVERIFY( uuidB.variant() == QUuid::DCE );
 
-    QUuid NCS = "{3a2f883c-4000-000d-0000-00fb40000000}";
+    QUuid NCS("{3a2f883c-4000-000d-0000-00fb40000000}");
     QVERIFY( NCS.variant() == QUuid::NCS );
 }
 
@@ -368,10 +351,10 @@ void tst_QUuid::versions()
     QVERIFY( uuidA.version() == QUuid::Random );
     QVERIFY( uuidB.version() == QUuid::Random );
 
-    QUuid DCE_time= "{406c45a0-3b7e-11d0-80a3-0000c08810a7}";
+    QUuid DCE_time("{406c45a0-3b7e-11d0-80a3-0000c08810a7}");
     QVERIFY( DCE_time.version() == QUuid::Time );
 
-    QUuid NCS = "{3a2f883c-4000-000d-0000-00fb40000000}";
+    QUuid NCS("{3a2f883c-4000-000d-0000-00fb40000000}");
     QVERIFY( NCS.version() == QUuid::VerUnknown );
 }
 
@@ -380,7 +363,7 @@ class UuidThread : public QThread
 public:
     QUuid uuid;
 
-    void run()
+    void run() override
     {
         uuid = QUuid::createUuid();
     }
@@ -388,7 +371,7 @@ public:
 
 void tst_QUuid::threadUniqueness()
 {
-    QVector<UuidThread *> threads(qMax(2, QThread::idealThreadCount()));
+    QList<UuidThread *> threads(qMax(2, QThread::idealThreadCount()));
     for (int i = 0; i < threads.count(); ++i)
         threads[i] = new UuidThread;
     for (int i = 0; i < threads.count(); ++i)
@@ -441,7 +424,7 @@ void tst_QUuid::processUniqueness()
 
 void tst_QUuid::hash()
 {
-    uint h = qHash(uuidA);
+    size_t h = qHash(uuidA);
     QCOMPARE(qHash(uuidA), h);
     QCOMPARE(qHash(QUuid(uuidA.toString())), h);
 }
@@ -451,7 +434,7 @@ void tst_QUuid::qvariant()
     QUuid uuid = QUuid::createUuid();
     QVariant v = QVariant::fromValue(uuid);
     QVERIFY(!v.isNull());
-    QCOMPARE(v.type(), QVariant::Uuid);
+    QCOMPARE(v.metaType(), QMetaType(QMetaType::QUuid));
 
     QUuid uuid2 = v.value<QUuid>();
     QVERIFY(!uuid2.isNull());
@@ -478,14 +461,14 @@ void tst_QUuid::qvariant_conversion()
 
     // try reverse conversion QString -> QUuid
     QVariant sv = QVariant::fromValue(uuid.toString());
-    QCOMPARE(sv.type(), QVariant::String);
+    QCOMPARE(sv.metaType(), QMetaType(QMetaType::QString));
     QVERIFY(sv.canConvert<QUuid>());
     QCOMPARE(sv.value<QUuid>(), uuid);
 
     // QString -> QUuid
     {
         QVariant sv = QVariant::fromValue(uuid.toByteArray());
-        QCOMPARE(sv.type(), QVariant::ByteArray);
+        QCOMPARE(sv.metaType(), QMetaType(QMetaType::QByteArray));
         QVERIFY(sv.canConvert<QUuid>());
         QCOMPARE(sv.value<QUuid>(), uuid);
     }

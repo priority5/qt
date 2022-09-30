@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_PUBLIC_RUNTIME_MANAGER_IMPL_H_
 #define COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_PUBLIC_RUNTIME_MANAGER_IMPL_H_
 
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "components/autofill_assistant/browser/public/runtime_manager.h"
 #include "components/autofill_assistant/browser/public/runtime_observer.h"
@@ -23,19 +24,19 @@ class RuntimeManagerImpl
   static RuntimeManagerImpl* GetForWebContents(content::WebContents* contents);
 
   ~RuntimeManagerImpl() override;
+  RuntimeManagerImpl(const RuntimeManagerImpl&) = delete;
+  RuntimeManagerImpl& operator=(const RuntimeManagerImpl&) = delete;
 
   // From RuntimeManager:
   void AddObserver(RuntimeObserver* observer) override;
   void RemoveObserver(RuntimeObserver* observer) override;
   UIState GetState() const override;
-
-  virtual void SetUIState(UIState state);
+  void SetUIState(UIState state) override;
+  base::WeakPtr<RuntimeManager> GetWeakPtr() override;
 
  private:
   friend class content::WebContentsUserData<RuntimeManagerImpl>;
-  friend class MockRuntimeManager;
 
-  RuntimeManagerImpl();
   explicit RuntimeManagerImpl(content::WebContents* web_contents);
 
   // Holds the state of Autofill Assistant.
@@ -43,6 +44,7 @@ class RuntimeManagerImpl
 
   // Observers of Autofill Assistant's state.
   base::ObserverList<RuntimeObserver> observers_;
+  base::WeakPtrFactory<RuntimeManagerImpl> weak_ptr_factory_{this};
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };

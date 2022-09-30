@@ -6,20 +6,15 @@
  * @fileoverview This is a data model representin
  */
 
-// The include directives are put into Javascript-style comments to prevent
-// parsing errors in non-flattened mode. The flattener still sees them.
-// Note that this makes the flattener to comment out the first line of the
-// included file but that's all right since any javascript file should start
-// with a copyright comment anyway.
-
-// <include src="../../assert.js">
+// #import {assert} from '../../assert.m.js';
+// #import {NativeEventTarget as EventTarget} from '../event_target.m.js'
 
 cr.define('cr.ui', function() {
   /**
    * A data model that wraps a simple array and supports sorting by storing
    * initial indexes of elements for each position in sorted array.
    */
-  class ArrayDataModel extends cr.EventTarget {
+  /* #export */ class ArrayDataModel extends cr.EventTarget {
     /**
      * @param {!Array} array The underlying array.
      */
@@ -123,7 +118,7 @@ cr.define('cr.ui', function() {
      * Returns an array of elements in a selected range.
      * @param {number=} opt_from The starting index of the selected range.
      * @param {number=} opt_to The ending index of selected range.
-     * @return {Array} An array of elements in the selected range.
+     * @return {!Array} An array of elements in the selected range.
      */
     slice(opt_from, opt_to) {
       const arr = this.array_;
@@ -457,5 +452,7 @@ cr.define('cr.ui', function() {
     }
   }
 
+  // #cr_define_end
+  console.warn('crbug/1173575, non-JS module files deprecated.');
   return {ArrayDataModel: ArrayDataModel};
 });

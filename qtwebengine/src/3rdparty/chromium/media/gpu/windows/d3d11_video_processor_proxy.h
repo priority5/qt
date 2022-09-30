@@ -9,23 +9,24 @@
 #include <wrl/client.h>
 #include <cstdint>
 
-#include "media/base/status.h"
+#include "base/memory/ref_counted.h"
 #include "media/gpu/media_gpu_export.h"
 #include "media/gpu/windows/d3d11_com_defs.h"
+#include "media/gpu/windows/d3d11_status.h"
 #include "ui/gfx/color_space.h"
-#include "ui/gl/hdr_metadata.h"
+#include "ui/gfx/hdr_metadata.h"
 
 namespace media {
 
 // Wrap ID3D11VideoProcessor to provide nicer methods for initialization,
 // color space modification, and output/input view creation.
-class MEDIA_GPU_EXPORT VideoProcessorProxy {
+class MEDIA_GPU_EXPORT VideoProcessorProxy
+    : public base::RefCounted<VideoProcessorProxy> {
  public:
   VideoProcessorProxy(ComD3D11VideoDevice video_device,
                       ComD3D11DeviceContext d3d11_device_context);
-  virtual ~VideoProcessorProxy();
 
-  virtual Status Init(uint32_t width, uint32_t height);
+  virtual D3D11Status Init(uint32_t width, uint32_t height);
 
   // TODO(tmathmeyer) implement color space modification.
 
@@ -57,12 +58,19 @@ class MEDIA_GPU_EXPORT VideoProcessorProxy {
                                     UINT stream_count,
                                     D3D11_VIDEO_PROCESSOR_STREAM* streams);
 
+  bool supports_tone_mapping() const { return supports_tone_mapping_; }
+
+ protected:
+  virtual ~VideoProcessorProxy();
+  friend class base::RefCounted<VideoProcessorProxy>;
+
  private:
   ComD3D11VideoDevice video_device_;
   ComD3D11VideoProcessorEnumerator processor_enumerator_;
   ComD3D11VideoProcessor video_processor_;
   ComD3D11DeviceContext device_context_;
   ComD3D11VideoContext video_context_;
+  bool supports_tone_mapping_ = false;
 };
 
 }  // namespace media

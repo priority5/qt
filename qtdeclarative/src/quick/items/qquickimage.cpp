@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickimage_p.h"
 #include "qquickimage_p_p.h"
@@ -115,19 +79,33 @@ QQuickImagePrivate::QQuickImagePrivate()
 
     \clearfloat
 
-    \section1 OpenGL Texture Files
+    \section1 Compressed Texture Files
 
-    When the default OpenGL \l{Qt Quick Scene Graph}{scene graph} backend is in
-    use, images can also be supplied in compressed texture files. The content
-    must be a simple RGB(A) format 2D texture. Supported compression schemes
-    are only limited by the underlying OpenGL driver and GPU. The following
-    container file formats are supported:
+    When supported by the implementation of the underlying graphics API at run
+    time, images can also be supplied in compressed texture files. The content
+    must be a simple RGB(A) format 2D texture. Supported compression schemes are
+    only limited by the underlying driver and GPU. The following container file
+    formats are supported:
 
     \list
     \li \c PKM (since Qt 5.10)
     \li \c KTX (since Qt 5.11)
     \li \c ASTC (since Qt 5.13)
     \endlist
+
+    \note The intended vertical orientation of an image in a texture file is not generally well
+    defined. Different texture compression tools have different defaults and options of when to
+    perform vertical flipping of the input image. If an image from a texture file appears upside
+    down, flipping may need to be toggled in the asset conditioning process. Alternatively, the
+    Image element itself can be flipped by either applying a suitable transformation via the
+    transform property or, more conveniently, by setting the mirrorVertically property:
+    \badcode
+    transform: [ Translate { y: -myImage.height }, Scale { yScale: -1 } ]
+    \endcode
+    or
+    \badcode
+    mirrorVertically: true
+    \endcode
 
     \note Semi-transparent original images require alpha pre-multiplication
     prior to texture compression in order to be correctly displayed in Qt
@@ -144,10 +122,10 @@ QQuickImagePrivate::QQuickImagePrivate()
     file can be found by appending any of the supported image file extensions
     to the \l source URL, then that file will be loaded.
 
-    If the OpenGL \l{Qt Quick Scene Graph}{scene graph} backend is in use, the
-    file search the attempts the OpenGL texture file extensions first. If the
-    search is unsuccessful, it attempts to search with the file extensions for
-    the \l{QImageReader::supportedImageFormats()}{conventional image file
+    The file search attempts to look for compressed texture container file
+    extensions first. If the search is unsuccessful, it attempts to search with
+    the file extensions for the
+    \l{QImageReader::supportedImageFormats()}{conventional image file
     types}. For example:
 
     \snippet qml/image-ext.qml ext
@@ -534,7 +512,7 @@ qreal QQuickImage::paintedHeight() const
 
     The URL may be absolute, or relative to the URL of the component.
 
-    \sa QQuickImageProvider {OpenGL Texture Files} {Automatic Detection of File Extension}
+    \sa QQuickImageProvider, {Compressed Texture Files}, {Automatic Detection of File Extension}
 */
 
 /*!
@@ -567,6 +545,17 @@ qreal QQuickImage::paintedHeight() const
     (effectively displaying a mirrored image).
 
     The default value is false.
+*/
+
+/*!
+    \qmlproperty bool QtQuick::Image::mirrorVertically
+
+    This property holds whether the image should be vertically inverted
+    (effectively displaying a mirrored image).
+
+    The default value is false.
+
+    \since 6.2
 */
 
 /*!
@@ -630,9 +619,9 @@ void QQuickImage::updatePaintedGeometry()
     emit paintedGeometryChanged();
 }
 
-void QQuickImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
+void QQuickImage::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
-    QQuickImageBase::geometryChanged(newGeometry, oldGeometry);
+    QQuickImageBase::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size())
         updatePaintedGeometry();
 }
@@ -829,7 +818,7 @@ QSGNode *QQuickImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     node->setTargetRect(targetRect);
     node->setInnerTargetRect(targetRect);
     node->setSubSourceRect(nsrect);
-    node->setMirror(d->mirror);
+    node->setMirror(d->mirrorHorizontally, d->mirrorVertically);
     node->setAntialiasing(d->antialiasing);
     node->update();
 
@@ -919,6 +908,8 @@ void QQuickImage::setMipmap(bool use)
     emit mipmapChanged(d->mipmap);
 
     d->pixmapChanged = true;
+    if (isComponentComplete())
+        load();
     update();
 }
 
@@ -945,3 +936,7 @@ void QQuickImage::setMipmap(bool use)
 */
 
 QT_END_NAMESPACE
+
+#include "moc_qquickimage_p_p.cpp"
+
+#include "moc_qquickimage_p.cpp"

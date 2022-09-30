@@ -32,7 +32,8 @@ RetainPtr<CFX_DIBitmap> DrawPatternBitmap(
     const CPDF_RenderOptions::Options& draw_options) {
   auto pBitmap = pdfium::MakeRetain<CFX_DIBitmap>();
   if (!pBitmap->Create(width, height,
-                       pPattern->colored() ? FXDIB_Argb : FXDIB_8bppMask)) {
+                       pPattern->colored() ? FXDIB_Format::kArgb
+                                           : FXDIB_Format::k8bppMask)) {
     return nullptr;
   }
   CFX_DefaultRenderDevice bitmap_device;
@@ -54,8 +55,8 @@ RetainPtr<CFX_DIBitmap> DrawPatternBitmap(
   options.GetOptions().bForceHalftone = true;
 
   CPDF_RenderContext context(pDoc, nullptr, pCache);
-  context.AppendLayer(pPatternForm, &mtPattern2Bitmap);
-  context.Render(&bitmap_device, &options, nullptr);
+  context.AppendLayer(pPatternForm, mtPattern2Bitmap);
+  context.Render(&bitmap_device, nullptr, &options, nullptr);
 #if defined(_SKIA_SUPPORT_PATHS_)
   bitmap_device.Flush(true);
   pBitmap->UnPreMultiply();
@@ -189,7 +190,7 @@ RetainPtr<CFX_DIBitmap> CPDF_RenderTiling::Draw(
   int clip_width = clip_box.right - clip_box.left;
   int clip_height = clip_box.bottom - clip_box.top;
   auto pScreen = pdfium::MakeRetain<CFX_DIBitmap>();
-  if (!pScreen->Create(clip_width, clip_height, FXDIB_Argb))
+  if (!pScreen->Create(clip_width, clip_height, FXDIB_Format::kArgb))
     return nullptr;
 
   pScreen->Clear(0);
@@ -224,7 +225,7 @@ RetainPtr<CFX_DIBitmap> CPDF_RenderTiling::Draw(
           continue;
         }
         uint32_t* dest_buf = reinterpret_cast<uint32_t*>(
-            pScreen->GetBuffer() + pScreen->GetPitch() * start_y + start_x * 4);
+            pScreen->GetWritableScanline(start_y).subspan(start_x * 4).data());
         if (pPattern->colored()) {
           const auto* src_buf32 = reinterpret_cast<const uint32_t*>(src_buf);
           *dest_buf = *src_buf32;

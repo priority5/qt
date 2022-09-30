@@ -1,43 +1,21 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2016 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2016 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
-#define QT_DEPRECATED
-#define QT_DISABLE_DEPRECATED_BEFORE 0
 #include <qurl.h>
-#include <QtTest/QtTest>
 #include <QtCore/QDebug>
+
+#include <QTest>
+#include <QDirIterator>
 
 #include <qcoreapplication.h>
 
 #include <qfileinfo.h>
-#include <qtextcodec.h>
 #include <qmap.h>
+
+#include <QtTest/private/qemulationdetector_p.h>
+
+using namespace Qt::StringLiterals;
 
 Q_DECLARE_METATYPE(QUrl::FormattingOptions)
 
@@ -48,8 +26,6 @@ class tst_QUrl : public QObject
 private slots:
     void initTestCase();
     void cleanupTestCase();
-    void effectiveTLDs_data();
-    void effectiveTLDs();
     void getSetCheck();
     void constructing();
     void hashInPath();
@@ -1330,12 +1306,15 @@ void tst_QUrl::fromLocalFile_data()
                 << QString(suffix);
 #ifdef Q_OS_WIN32
         // debackslashification only happens on Windows
+        QString suffixWithBackslashes(suffix);
+        suffixWithBackslashes.replace('/', '\\');
+
         QTest::addRow("windows-backslash-unc-%s", pathDescription)
-                << QString(QString("//somehost") + suffix).replace('/', '\\')
+                << QString(QString("\\\\somehost") + suffixWithBackslashes)
                 << QString("file://somehost") + suffix
                 << QString(suffix);
         QTest::addRow("windows-backslash-extlen-%s", pathDescription)
-                << QString(QString("//?") + suffix).replace('/', '\\')
+                << QString(QString("\\\\?") + suffixWithBackslashes)
                 << QString("file:////%3F") + suffix
                 << QString("//?") + suffix;
 #endif
@@ -2082,8 +2061,9 @@ void tst_QUrl::hasQuery()
 
 void tst_QUrl::nameprep()
 {
-    QUrl url(QString::fromUtf8("http://www.fu""\xc3""\x9f""ball.de/"));
-    QCOMPARE(url.toString(), QString::fromLatin1("http://www.fussball.de/"));
+    // U+FB01 LATIN SMALL LIGATURE FI
+    QUrl url(u"http://www.\uFB01le.de/"_s);
+    QCOMPARE(url.toString(), QStringLiteral(u"http://www.file.de/"));
 }
 
 void tst_QUrl::isValid()
@@ -2146,14 +2126,15 @@ void tst_QUrl::isValid()
     }
 
     {
-        QUrl url = QUrl::fromEncoded("foo://%f0%9f%93%99.example.la/g");
+        // U+1F100 DIGIT ZERO FULL STOP
+        QUrl url = QUrl::fromEncoded("foo://%f0%9f%84%80.example.la/g");
         QVERIFY(!url.isValid());
         QVERIFY(url.toString().isEmpty());
         QCOMPARE(url.path(), QString("/g"));
-        url.setHost("%f0%9f%93%99.example.la/");
+        url.setHost("%f0%9f%84%80.example.la/");
         QVERIFY(!url.isValid());
         QVERIFY(url.toString().isEmpty());
-        url.setHost("\xf0\x9f\x93\x99.example.la/");
+        url.setHost("\xf0\x9f\x84\x80.example.la/");
         QVERIFY(!url.isValid());
         QVERIFY(url.toString().isEmpty());
         QVERIFY2(url.errorString().contains("Invalid hostname"),
@@ -3240,12 +3221,10 @@ void tst_QUrl::fromUserInputWithCwd_data()
         QTest::newRow(QByteArray(fileName) + "-in-dot") << fileName << QStringLiteral(".") << url << url;
     }
 
-#ifndef Q_OS_WINRT // WinRT cannot cd outside current / sandbox
     QDir parent(base);
     QVERIFY(parent.cdUp());
     QUrl parentUrl = QUrl::fromLocalFile(parent.path());
     QTest::newRow("dotdot") << ".." << base << parentUrl << parentUrl;
-#endif
 
     QTest::newRow("nonexisting") << "nonexisting" << base << QUrl("http://nonexisting") << QUrl::fromLocalFile(base + "/nonexisting");
     QTest::newRow("short-url") << "example.org" << base << QUrl("http://example.org") << QUrl::fromLocalFile(base + "/example.org");
@@ -3453,61 +3432,6 @@ void tst_QUrl::acceptEmptyAuthoritySegments()
 
     QCOMPARE(QUrl(file_uni_bar).toString(), file_triple_bar);
     QCOMPARE(QUrl(file_uni_bar, QUrl::StrictMode).toString(), file_triple_bar);
-}
-
-void tst_QUrl::effectiveTLDs_data()
-{
-    // See also: tst_QNetworkCookieJar::setCookiesFromUrl().
-    // in tests/auto/network/access/qnetworkcookiejar/tst_qnetworkcookiejar.cpp
-    QTest::addColumn<QUrl>("domain");
-    QTest::addColumn<QString>("TLD");
-    // TODO: autogenerate test-cases from:
-    // https://raw.githubusercontent.com/publicsuffix/list/master/tests/test_psl.txt
-    // checkPublicSuffix(domain, tail) appears in the list if
-    // either tail is null and domain is public or
-    // tail is the "registrable" part of domain; i.e. its minimal non-public tail.
-
-    QTest::newRow("yes0") << QUrl::fromEncoded("http://test.co.uk") << ".co.uk";
-    QTest::newRow("yes1") << QUrl::fromEncoded("http://test.com") << ".com";
-    QTest::newRow("yes2") << QUrl::fromEncoded("http://www.test.de") << ".de";
-    QTest::newRow("yes3") << QUrl::fromEncoded("http://test.ulm.museum") << ".ulm.museum";
-    QTest::newRow("yes4") << QUrl::fromEncoded("http://www.com.krodsherad.no") << ".krodsherad.no";
-    QTest::newRow("yes5") << QUrl::fromEncoded("http://www.co.uk.1.bg") << ".1.bg";
-    QTest::newRow("yes6") << QUrl::fromEncoded("http://www.com.com.cn") << ".com.cn";
-    QTest::newRow("yes7") << QUrl::fromEncoded("http://www.test.org.ws") << ".org.ws";
-    QTest::newRow("yes9") << QUrl::fromEncoded("http://www.com.co.uk.wallonie.museum") << ".wallonie.museum";
-    QTest::newRow("yes10") << QUrl::fromEncoded("http://www.com.evje-og-hornnes.no") << ".evje-og-hornnes.no";
-    QTest::newRow("yes11") << QUrl::fromEncoded("http://www.bla.kamijima.ehime.jp") << ".kamijima.ehime.jp";
-    QTest::newRow("yes12") << QUrl::fromEncoded("http://www.bla.kakuda.miyagi.jp") << ".kakuda.miyagi.jp";
-    QTest::newRow("yes13") << QUrl::fromEncoded("http://mypage.betainabox.com") << ".betainabox.com";
-    QTest::newRow("yes14") << QUrl::fromEncoded("http://mypage.rhcloud.com") << ".rhcloud.com";
-    QTest::newRow("yes15") << QUrl::fromEncoded("http://mypage.int.az") << ".int.az";
-    QTest::newRow("yes16") << QUrl::fromEncoded("http://anything.pagespeedmobilizer.com") << ".pagespeedmobilizer.com";
-    QTest::newRow("yes17") << QUrl::fromEncoded("http://anything.eu-central-1.compute.amazonaws.com") << ".eu-central-1.compute.amazonaws.com";
-    QTest::newRow("yes18") << QUrl::fromEncoded("http://anything.ltd.hk") << ".ltd.hk";
-    QTest::newRow("trentino.it")
-        << QUrl::fromEncoded("http://any.thing.trentino.it") << ".trentino.it";
-    QTest::newRow("net.ni") << QUrl::fromEncoded("http://test.net.ni") << ".net.ni";
-    QTest::newRow("dyn.cosidns.de")
-        << QUrl::fromEncoded("http://test.dyn.cosidns.de") << ".dyn.cosidns.de";
-    QTest::newRow("freeddns.org")
-        << QUrl::fromEncoded("http://test.freeddns.org") << ".freeddns.org";
-    QTest::newRow("app.os.stg.fedoraproject.org")
-        << QUrl::fromEncoded("http://test.app.os.stg.fedoraproject.org")
-        << ".app.os.stg.fedoraproject.org";
-    QTest::newRow("development.run") << QUrl::fromEncoded("http://test.development.run") << ".development.run";
-    QTest::newRow("crafting.xyz") << QUrl::fromEncoded("http://test.crafting.xyz") << ".crafting.xyz";
-    QTest::newRow("nym.ie") << QUrl::fromEncoded("http://shamus.nym.ie") << ".nym.ie";
-    QTest::newRow("vapor.cloud") << QUrl::fromEncoded("http://test.vapor.cloud") << ".vapor.cloud";
-    QTest::newRow("official.academy") << QUrl::fromEncoded("http://acredited.official.academy") << ".official.academy";
-}
-
-void tst_QUrl::effectiveTLDs()
-{
-    QFETCH(QUrl, domain);
-    QFETCH(QString, TLD);
-    QCOMPARE(domain.topLevelDomain(QUrl::PrettyDecoded), TLD);
-    QCOMPARE(domain.topLevelDomain(QUrl::FullyDecoded), TLD);
 }
 
 void tst_QUrl::lowercasesScheme()
@@ -4148,7 +4072,7 @@ public:
         for (int i = 0 ; i < m_urls.size(); ++i)
             m_urls[i] = QUrl::fromEncoded("http://www.kde.org", QUrl::StrictMode);
     }
-    QVector<QUrl> m_urls;
+    QList<QUrl> m_urls;
 };
 
 static const UrlStorage * s_urlStorage = nullptr;
@@ -4188,11 +4112,13 @@ void tst_QUrl::testThreadingHelper()
 
 void tst_QUrl::testThreading()
 {
+    if (QTestPrivate::isRunningArmOnX86())
+        QSKIP("This test fails in QEMU and looks like because of a data race, QTBUG-93176");
     s_urlStorage = new UrlStorage;
     QThreadPool::globalInstance()->setMaxThreadCount(100);
     QFutureSynchronizer<void> sync;
     for (int i = 0; i < 100; ++i)
-        sync.addFuture(QtConcurrent::run(this, &tst_QUrl::testThreadingHelper));
+        sync.addFuture(QtConcurrent::run(&tst_QUrl::testThreadingHelper, this));
     sync.waitForFinished();
     delete s_urlStorage;
 }

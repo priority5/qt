@@ -9,17 +9,17 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/callback_forward.h"
 #include "base/check_op.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
+#include "net/log/net_log_with_source.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
 #include "services/cert_verifier/public/mojom/cert_verifier_service_factory.mojom.h"
@@ -63,8 +63,8 @@ TEST(CertVerifierServiceFactoryTest, GetNewCertVerifier) {
       cv_service_factory_remote.BindNewPipeAndPassReceiver());
 
   mojo::Remote<mojom::CertVerifierService> cv_service_remote;
-  network::mojom::CertVerifierCreationParamsPtr cv_creation_params =
-      network::mojom::CertVerifierCreationParams::New();
+  mojom::CertVerifierCreationParamsPtr cv_creation_params =
+      mojom::CertVerifierCreationParams::New();
 
   cv_service_factory_remote->GetNewCertVerifier(
       cv_service_remote.BindNewPipeAndPassReceiver(),
@@ -76,10 +76,14 @@ TEST(CertVerifierServiceFactoryTest, GetNewCertVerifier) {
   mojo::Receiver<mojom::CertVerifierRequest> dummy_cv_service_req_receiver(
       &dummy_cv_service_req);
 
+  auto net_log(net::NetLogWithSource::Make(
+      net::NetLog::Get(), net::NetLogSourceType::CERT_VERIFIER_JOB));
   cv_service_remote->Verify(
       net::CertVerifier::RequestParams(test_cert, "www.example.com", 0,
                                        /*ocsp_response=*/std::string(),
                                        /*sct_list=*/std::string()),
+      static_cast<uint32_t>(net_log.source().type), net_log.source().id,
+      net_log.source().start_time,
       dummy_cv_service_req_receiver.BindNewPipeAndPassRemote());
 
   request_completed_run_loop.Run();

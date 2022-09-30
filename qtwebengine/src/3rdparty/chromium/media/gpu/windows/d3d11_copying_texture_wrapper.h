@@ -8,10 +8,11 @@
 #include <memory>
 #include <vector>
 
-#include "base/optional.h"
 #include "media/gpu/media_gpu_export.h"
 #include "media/gpu/windows/d3d11_picture_buffer.h"
+#include "media/gpu/windows/d3d11_status.h"
 #include "media/gpu/windows/d3d11_video_processor_proxy.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -26,34 +27,36 @@ class MEDIA_GPU_EXPORT CopyingTexture2DWrapper : public Texture2DWrapper {
   // be given to the swap chain directly, or video processed later).
   CopyingTexture2DWrapper(const gfx::Size& size,
                           std::unique_ptr<Texture2DWrapper> output_wrapper,
-                          std::unique_ptr<VideoProcessorProxy> processor,
+                          scoped_refptr<VideoProcessorProxy> processor,
                           ComD3D11Texture2D output_texture,
-                          base::Optional<gfx::ColorSpace> output_color_space);
+                          absl::optional<gfx::ColorSpace> output_color_space);
   ~CopyingTexture2DWrapper() override;
 
-  Status ProcessTexture(const gfx::ColorSpace& input_color_space,
-                        MailboxHolderArray* mailbox_dest,
-                        gfx::ColorSpace* output_color_space) override;
+  D3D11Status AcquireKeyedMutexIfNeeded() override;
 
-  Status Init(scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
-              GetCommandBufferHelperCB get_helper_cb,
-              ComD3D11Texture2D texture,
-              size_t array_slice) override;
+  D3D11Status ProcessTexture(const gfx::ColorSpace& input_color_space,
+                             MailboxHolderArray* mailbox_dest,
+                             gfx::ColorSpace* output_color_space) override;
 
-  void SetStreamHDRMetadata(const gl::HDRMetadata& stream_metadata) override;
+  D3D11Status Init(scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
+                   GetCommandBufferHelperCB get_helper_cb,
+                   ComD3D11Texture2D texture,
+                   size_t array_slice) override;
+
+  void SetStreamHDRMetadata(const gfx::HDRMetadata& stream_metadata) override;
   void SetDisplayHDRMetadata(
       const DXGI_HDR_METADATA_HDR10& dxgi_display_metadata) override;
 
  private:
   gfx::Size size_;
-  std::unique_ptr<VideoProcessorProxy> video_processor_;
+  scoped_refptr<VideoProcessorProxy> video_processor_;
   std::unique_ptr<Texture2DWrapper> output_texture_wrapper_;
   ComD3D11Texture2D output_texture_;
   // If set, then this is the desired output color space for the copy.
-  base::Optional<gfx::ColorSpace> output_color_space_;
+  absl::optional<gfx::ColorSpace> output_color_space_;
 
   // If set, this is the color space that we last saw in ProcessTexture.
-  base::Optional<gfx::ColorSpace> previous_input_color_space_;
+  absl::optional<gfx::ColorSpace> previous_input_color_space_;
 
   ComD3D11Texture2D texture_;
   size_t array_slice_ = 0;

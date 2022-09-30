@@ -79,6 +79,9 @@ std::unique_ptr<PublicKey> P256PublicKey::ExtractFromCOSEKey(
     base::span<const uint8_t> cbor_bytes,
     const cbor::Value::MapValue& map) {
   struct COSEKey {
+    // All the fields below are not a raw_ptr<,,,>, because ELEMENT() treats the
+    // raw_ptr<T> as a void*, skipping AddRef() call and causing a ref-counting
+    // mismatch.
     const int64_t* kty;
     const int64_t* crv;
     const std::vector<uint8_t>* x;
@@ -161,8 +164,8 @@ std::unique_ptr<PublicKey> P256PublicKey::ParseX962Uncompressed(
   map.emplace(static_cast<int>(CoseKeyKey::kAlg), algorithm);
   map.emplace(static_cast<int>(CoseKeyKey::kEllipticCurve),
               static_cast<int64_t>(CoseCurves::kP256));
-  map.emplace(static_cast<int>(CoseKeyKey::kEllipticX), cbor::Value(x));
-  map.emplace(static_cast<int>(CoseKeyKey::kEllipticY), cbor::Value(y));
+  map.emplace(static_cast<int>(CoseKeyKey::kEllipticX), x);
+  map.emplace(static_cast<int>(CoseKeyKey::kEllipticY), y);
 
   const std::vector<uint8_t> cbor_bytes(
       std::move(cbor::Writer::Write(cbor::Value(std::move(map))).value()));

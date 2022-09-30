@@ -8,6 +8,7 @@
 #include "ui/accessibility/ax_export.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_tree_id.h"
+#include "ui/accessibility/ax_tree_observer.h"
 
 namespace ui {
 
@@ -19,12 +20,18 @@ class AX_EXPORT AXTreeManager {
   // Returns the AXNode with the given |node_id| from the tree that has the
   // given |tree_id|. This allows for callers to access nodes outside of their
   // own tree. Returns nullptr if |tree_id| or |node_id| is not found.
+  // TODO(kschmi): Remove |tree_id| parameter, as it's unnecessary.
   virtual AXNode* GetNodeFromTree(const AXTreeID tree_id,
-                                  const AXNode::AXID node_id) const = 0;
+                                  const AXNodeID node_id) const = 0;
 
   // Returns the AXNode in the current tree that has the given |node_id|.
   // Returns nullptr if |node_id| is not found.
-  virtual AXNode* GetNodeFromTree(const AXNode::AXID node_id) const = 0;
+  virtual AXNode* GetNodeFromTree(const AXNodeID node_id) const = 0;
+
+  // Use `AddObserver` and `RemoveObserver` when you want to be notified when
+  // changes happen to an `XTree`
+  virtual void AddObserver(AXTreeObserver* observer) {}
+  virtual void RemoveObserver(AXTreeObserver* observer) {}
 
   // Returns the tree id of the tree managed by this AXTreeManager.
   virtual AXTreeID GetTreeID() const = 0;
@@ -40,6 +47,15 @@ class AX_EXPORT AXTreeManager {
   // hosts the current tree. Returns nullptr if this tree doesn't have a parent
   // tree.
   virtual AXNode* GetParentNodeFromParentTreeAsAXNode() const = 0;
+
+  // Called when the tree manager is about to be removed from the tree map,
+  // `AXTreeManagerMap`.
+  virtual void WillBeRemovedFromMap() {}
+
+  // For debugging.
+  // TODO(benjamin.beaudry) Instead of this, implement GetTreeData() on all
+  // AXTreeManager subclasses, and have callers use GetTreeData().ToString();
+  virtual std::string ToString() const = 0;
 };
 
 }  // namespace ui

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QQUICKSHAPEGENERICRENDERER_P_H
 #define QQUICKSHAPEGENERICRENDERER_P_H
@@ -88,7 +52,7 @@ public:
     { }
     ~QQuickShapeGenericRenderer();
 
-    void beginSync(int totalCount) override;
+    void beginSync(int totalCount, bool *countChanged) override;
     void setPath(int index, const QQuickPath *path) override;
     void setStrokeColor(int index, const QColor &color) override;
     void setStrokeWidth(int index, qreal w) override;
@@ -243,27 +207,7 @@ public:
     static QSGMaterial *createConicalGradient(QQuickWindow *window, QQuickShapeGenericStrokeFillNode *node);
 };
 
-#if QT_CONFIG(opengl)
-
- class QQuickShapeLinearGradientShader : public QSGMaterialShader
-{
-public:
-    QQuickShapeLinearGradientShader();
-
-    void initialize() override;
-    void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect) override;
-    char const *const *attributeNames() const override;
-
-private:
-    int m_opacityLoc = -1;
-    int m_matrixLoc = -1;
-    int m_gradStartLoc = -1;
-    int m_gradEndLoc = -1;
-};
-
-#endif // QT_CONFIG(opengl)
-
-class QQuickShapeLinearGradientRhiShader : public QSGMaterialRhiShader
+class QQuickShapeLinearGradientRhiShader : public QSGMaterialShader
 {
 public:
     QQuickShapeLinearGradientRhiShader();
@@ -289,12 +233,12 @@ public:
         // the vertex data. The shader will rely on the fact that
         // vertexCoord.xy is the Shape-space coordinate and so no modifications
         // are welcome.
-        setFlag(Blending | RequiresFullMatrix | SupportsRhiShader);
+        setFlag(Blending | RequiresFullMatrix);
     }
 
     QSGMaterialType *type() const override;
     int compare(const QSGMaterial *other) const override;
-    QSGMaterialShader *createShader() const override;
+    QSGMaterialShader *createShader(QSGRendererInterface::RenderMode renderMode) const override;
 
     QQuickShapeGenericStrokeFillNode *node() const { return m_node; }
 
@@ -302,29 +246,7 @@ private:
     QQuickShapeGenericStrokeFillNode *m_node;
 };
 
-#if QT_CONFIG(opengl)
-
-class QQuickShapeRadialGradientShader : public QSGMaterialShader
-{
-public:
-    QQuickShapeRadialGradientShader();
-
-    void initialize() override;
-    void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect) override;
-    char const *const *attributeNames() const override;
-
-private:
-    int m_opacityLoc = -1;
-    int m_matrixLoc = -1;
-    int m_translationPointLoc = -1;
-    int m_focalToCenterLoc = -1;
-    int m_centerRadiusLoc = -1;
-    int m_focalRadiusLoc = -1;
-};
-
-#endif // QT_CONFIG(opengl)
-
-class QQuickShapeRadialGradientRhiShader : public QSGMaterialRhiShader
+class QQuickShapeRadialGradientRhiShader : public QSGMaterialShader
 {
 public:
     QQuickShapeRadialGradientRhiShader();
@@ -347,12 +269,12 @@ public:
     QQuickShapeRadialGradientMaterial(QQuickShapeGenericStrokeFillNode *node)
         : m_node(node)
     {
-        setFlag(Blending | RequiresFullMatrix | SupportsRhiShader);
+        setFlag(Blending | RequiresFullMatrix);
     }
 
     QSGMaterialType *type() const override;
     int compare(const QSGMaterial *other) const override;
-    QSGMaterialShader *createShader() const override;
+    QSGMaterialShader *createShader(QSGRendererInterface::RenderMode renderMode) const override;
 
     QQuickShapeGenericStrokeFillNode *node() const { return m_node; }
 
@@ -360,27 +282,7 @@ private:
     QQuickShapeGenericStrokeFillNode *m_node;
 };
 
-#if QT_CONFIG(opengl)
-
-class QQuickShapeConicalGradientShader : public QSGMaterialShader
-{
-public:
-    QQuickShapeConicalGradientShader();
-
-    void initialize() override;
-    void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect) override;
-    char const *const *attributeNames() const override;
-
-private:
-    int m_opacityLoc = -1;
-    int m_matrixLoc = -1;
-    int m_angleLoc = -1;
-    int m_translationPointLoc = -1;
-};
-
-#endif // QT_CONFIG(opengl)
-
-class QQuickShapeConicalGradientRhiShader : public QSGMaterialRhiShader
+class QQuickShapeConicalGradientRhiShader : public QSGMaterialShader
 {
 public:
     QQuickShapeConicalGradientRhiShader();
@@ -401,12 +303,12 @@ public:
     QQuickShapeConicalGradientMaterial(QQuickShapeGenericStrokeFillNode *node)
         : m_node(node)
     {
-        setFlag(Blending | RequiresFullMatrix | SupportsRhiShader);
+        setFlag(Blending | RequiresFullMatrix);
     }
 
     QSGMaterialType *type() const override;
     int compare(const QSGMaterial *other) const override;
-    QSGMaterialShader *createShader() const override;
+    QSGMaterialShader *createShader(QSGRendererInterface::RenderMode renderMode) const override;
 
     QQuickShapeGenericStrokeFillNode *node() const { return m_node; }
 

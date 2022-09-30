@@ -5,7 +5,7 @@
 #ifndef UI_TOUCH_SELECTION_TOUCH_SELECTION_CONTROLLER_H_
 #define UI_TOUCH_SELECTION_TOUCH_SELECTION_CONTROLLER_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -34,7 +34,8 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionControllerClient {
   virtual void SelectBetweenCoordinates(const gfx::PointF& base,
                                         const gfx::PointF& extent) = 0;
   virtual void OnSelectionEvent(SelectionEventType event) = 0;
-  virtual void OnDragUpdate(const gfx::PointF& position) = 0;
+  virtual void OnDragUpdate(const TouchSelectionDraggable::Type type,
+                            const gfx::PointF& position) = 0;
   virtual std::unique_ptr<TouchHandleDrawable> CreateDrawable() = 0;
   virtual void DidScroll() = 0;
   virtual void ShowTouchSelectionContextMenu(const gfx::Point& location) {}
@@ -75,6 +76,10 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
 
   TouchSelectionController(TouchSelectionControllerClient* client,
                            const Config& config);
+
+  TouchSelectionController(const TouchSelectionController&) = delete;
+  TouchSelectionController& operator=(const TouchSelectionController&) = delete;
+
   ~TouchSelectionController() override;
 
   // To be called when the selection bounds have changed.
@@ -139,6 +144,11 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
   const gfx::PointF& GetStartPosition() const;
   const gfx::PointF& GetEndPosition() const;
 
+  // To be called when swipe-to-move-cursor motion begins.
+  void OnSwipeToMoveCursorBegin();
+  // To be called when swipe-to-move-cursor motion ends.
+  void OnSwipeToMoveCursorEnd();
+
   const gfx::SelectionBound& start() const { return start_; }
   const gfx::SelectionBound& end() const { return end_; }
 
@@ -199,7 +209,7 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
 
   void LogSelectionEnd();
 
-  TouchSelectionControllerClient* const client_;
+  const raw_ptr<TouchSelectionControllerClient> client_;
   const Config config_;
 
   InputEventType response_pending_input_event_;
@@ -241,8 +251,6 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
   bool consume_touch_sequence_;
 
   bool show_touch_handles_;
-
-  DISALLOW_COPY_AND_ASSIGN(TouchSelectionController);
 };
 
 }  // namespace ui

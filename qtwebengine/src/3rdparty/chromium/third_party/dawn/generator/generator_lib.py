@@ -156,7 +156,8 @@ _FileOutput = namedtuple('FileOutput', ['name', 'content'])
 
 def _do_renders(renders, template_dir):
     loader = _PreprocessingLoader(template_dir)
-    env = jinja2.Environment(loader=loader,
+    env = jinja2.Environment(extensions=['jinja2.ext.do'],
+                             loader=loader,
                              lstrip_blocks=True,
                              trim_blocks=True,
                              line_comment_prefix='//*')
@@ -201,6 +202,10 @@ def _compute_python_dependencies(root_dir=None):
 
     paths = set()
     for path in module_paths:
+        # Builtin/namespaced modules may return None for the file path.
+        if not path:
+            continue
+
         path = os.path.abspath(path)
 
         if not path.startswith(root_dir):

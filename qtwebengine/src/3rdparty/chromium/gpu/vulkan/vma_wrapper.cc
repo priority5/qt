@@ -15,6 +15,7 @@ namespace vma {
 VkResult CreateAllocator(VkPhysicalDevice physical_device,
                          VkDevice device,
                          VkInstance instance,
+                         const VkDeviceSize* heap_size_limit,
                          VmaAllocator* pAllocator) {
   auto* function_pointers = gpu::GetVulkanFunctionPointers();
   VmaVulkanFunctions functions = {
@@ -43,19 +44,20 @@ VkResult CreateAllocator(VkPhysicalDevice physical_device,
   };
 
   static_assert(kVulkanRequiredApiVersion >= VK_API_VERSION_1_1, "");
-  VmaAllocatorCreateInfo allocator_info;
-  allocator_info.flags = VMA_ALLOCATOR_CREATE_EXTERNALLY_SYNCHRONIZED_BIT;
-  allocator_info.physicalDevice = physical_device;
-  allocator_info.device = device;
+  VmaAllocatorCreateInfo allocator_info{};
+      allocator_info.flags = VMA_ALLOCATOR_CREATE_EXTERNALLY_SYNCHRONIZED_BIT;
+      allocator_info.physicalDevice = physical_device;
+      allocator_info.device = device;
       // 4MB was picked for the size here by looking at memory usage of Android
       // apps and runs of DM. It seems to be a good compromise of not wasting
       // unused allocated space and not making too many small allocations. The
       // AMD allocator will start making blocks at 1/8 the max size and builds
       // up block size as needed before capping at the max set here.
-  allocator_info.preferredLargeHeapBlockSize = 4 * 1024 * 1024;
-  allocator_info.pVulkanFunctions = &functions;
-  allocator_info.instance = instance;
-  allocator_info.vulkanApiVersion = kVulkanRequiredApiVersion;
+      allocator_info.preferredLargeHeapBlockSize = 4 * 1024 * 1024;
+      allocator_info.pHeapSizeLimit = heap_size_limit;
+      allocator_info.pVulkanFunctions = &functions;
+      allocator_info.instance = instance;
+      allocator_info.vulkanApiVersion = kVulkanRequiredApiVersion;
 
   return vmaCreateAllocator(&allocator_info, pAllocator);
 }
@@ -88,9 +90,9 @@ VkResult CreateBuffer(VmaAllocator allocator,
                       VkMemoryPropertyFlags preferred_flags,
                       VkBuffer* buffer,
                       VmaAllocation* allocation) {
-  VmaAllocationCreateInfo allocation_create_info;
-  allocation_create_info.requiredFlags = required_flags;
-  allocation_create_info.preferredFlags = preferred_flags;
+  VmaAllocationCreateInfo allocation_create_info{};
+      allocation_create_info.requiredFlags = required_flags;
+      allocation_create_info.preferredFlags = preferred_flags;
 
   return vmaCreateBuffer(allocator, buffer_create_info, &allocation_create_info,
                          buffer, allocation, nullptr);
@@ -150,6 +152,20 @@ void GetPhysicalDeviceProperties(
 
 void CalculateStats(VmaAllocator allocator, VmaStats* stats) {
   vmaCalculateStats(allocator, stats);
+}
+
+uint64_t GetTotalAllocatedMemory(VmaAllocator allocator) {
+  VmaBudget budget[VK_MAX_MEMORY_HEAPS];
+  vmaGetBudget(allocator, budget);
+  const VkPhysicalDeviceMemoryProperties* pPhysicalDeviceMemoryProperties;
+  vmaGetMemoryProperties(allocator, &pPhysicalDeviceMemoryProperties);
+  uint64_t total_allocated_memory = 0;
+  for (uint32_t i = 0; i < pPhysicalDeviceMemoryProperties->memoryHeapCount;
+       ++i) {
+    total_allocated_memory +=
+        std::max(budget[i].blockBytes, budget[i].allocationBytes);
+  }
+  return total_allocated_memory;
 }
 
 }  // namespace vma

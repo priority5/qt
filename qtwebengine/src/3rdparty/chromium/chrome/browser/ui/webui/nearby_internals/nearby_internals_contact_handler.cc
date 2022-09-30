@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/nearby_internals/nearby_internals_contact_handler.h"
 
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/json/json_writer.h"
@@ -32,6 +33,8 @@ const char kContactMessageTimeKey[] = "time";
 const char kContactMessageContactsChangedKey[] = "contactsChanged";
 const char kContactMessageAllowedIdsKey[] = "allowedIds";
 const char kContactMessageContactRecordKey[] = "contactRecords";
+const char kContactMessageNumUnreachableContactsKey[] =
+    "numUnreachableContacts";
 
 // Converts Contact to a raw dictionary value used as a JSON argument to
 // JavaScript functions.
@@ -39,16 +42,17 @@ const char kContactMessageContactRecordKey[] = "contactRecords";
 // dictionaries corresponding to each contact-manager observer functions. This
 // will require changes at the javascript layer as well.
 base::Value ContactMessageToDictionary(
-    base::Optional<bool> did_contacts_change_since_last_upload,
-    const base::Optional<std::set<std::string>>& allowed_contact_ids,
-    const base::Optional<std::vector<nearbyshare::proto::ContactRecord>>&
-        contacts) {
-  base::Value dictionary(base::Value::Type::DICTIONARY);
+    absl::optional<bool> did_contacts_change_since_last_upload,
+    const absl::optional<std::set<std::string>>& allowed_contact_ids,
+    const absl::optional<std::vector<nearbyshare::proto::ContactRecord>>&
+        contacts,
+    absl::optional<uint32_t> num_unreachable_contacts_filtered_out) {
+  base::Value::Dict dictionary;
 
-  dictionary.SetKey(kContactMessageTimeKey, GetJavascriptTimestamp());
+  dictionary.Set(kContactMessageTimeKey, GetJavascriptTimestamp());
   if (did_contacts_change_since_last_upload.has_value()) {
-    dictionary.SetBoolKey(kContactMessageContactsChangedKey,
-                          *did_contacts_change_since_last_upload);
+    dictionary.Set(kContactMessageContactsChangedKey,
+                   *did_contacts_change_since_last_upload);
   }
   if (allowed_contact_ids) {
     base::Value::ListStorage allowed_ids_list;
@@ -56,9 +60,8 @@ base::Value ContactMessageToDictionary(
     for (const auto& contact_id : *allowed_contact_ids) {
       allowed_ids_list.push_back(base::Value(contact_id));
     }
-    dictionary.SetStringKey(
-        kContactMessageAllowedIdsKey,
-        FormatAsJSON(base::Value(std::move(allowed_ids_list))));
+    dictionary.Set(kContactMessageAllowedIdsKey,
+                   FormatAsJSON(base::Value(std::move(allowed_ids_list))));
   }
   if (contacts) {
     base::Value::ListStorage contact_list;
@@ -67,10 +70,14 @@ base::Value ContactMessageToDictionary(
       contact_list.push_back(
           base::Value(ContactRecordToReadableDictionary(contact)));
 
-    dictionary.SetStringKey(kContactMessageContactRecordKey,
-                            FormatAsJSON(base::Value(std::move(contact_list))));
+    dictionary.Set(kContactMessageContactRecordKey,
+                   FormatAsJSON(base::Value(std::move(contact_list))));
   }
-  return dictionary;
+  if (num_unreachable_contacts_filtered_out.has_value()) {
+    dictionary.Set(kContactMessageNumUnreachableContactsKey,
+                   int(*num_unreachable_contacts_filtered_out));
+  }
+  return base::Value(std::move(dictionary));
 }
 
 }  // namespace
@@ -97,23 +104,23 @@ void NearbyInternalsContactHandler::OnJavascriptAllowed() {
   NearbySharingService* service_ =
       NearbySharingServiceFactory::GetForBrowserContext(context_);
   if (service_) {
-    observer_.Add(service_->GetContactManager());
+    observation_.Observe(service_->GetContactManager());
   } else {
     NS_LOG(ERROR) << "No NearbyShareService instance to call.";
   }
 }
 
 void NearbyInternalsContactHandler::OnJavascriptDisallowed() {
-  observer_.RemoveAll();
+  observation_.Reset();
 }
 
 void NearbyInternalsContactHandler::InitializeContents(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
 }
 
 void NearbyInternalsContactHandler::HandleDownloadContacts(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   NearbySharingService* service_ =
       NearbySharingServiceFactory::GetForBrowserContext(context_);
   if (service_) {
@@ -125,18 +132,22 @@ void NearbyInternalsContactHandler::HandleDownloadContacts(
 
 void NearbyInternalsContactHandler::OnContactsDownloaded(
     const std::set<std::string>& allowed_contact_ids,
-    const std::vector<nearbyshare::proto::ContactRecord>& contacts) {
+    const std::vector<nearbyshare::proto::ContactRecord>& contacts,
+    uint32_t num_unreachable_contacts_filtered_out) {
   FireWebUIListener("contacts-updated",
                     ContactMessageToDictionary(
-                        /*did_contacts_change_since_last_upload=*/base::nullopt,
-                        allowed_contact_ids, contacts));
+                        /*did_contacts_change_since_last_upload=*/absl::nullopt,
+                        allowed_contact_ids, contacts,
+                        num_unreachable_contacts_filtered_out));
 }
 
 void NearbyInternalsContactHandler::OnContactsUploaded(
     bool did_contacts_change_since_last_upload) {
   FireWebUIListener(
       "contacts-updated",
-      ContactMessageToDictionary(did_contacts_change_since_last_upload,
-                                 /*allowed_contact_ids=*/base::nullopt,
-                                 /*contacts=*/base::nullopt));
+      ContactMessageToDictionary(
+          did_contacts_change_since_last_upload,
+          /*allowed_contact_ids=*/absl::nullopt,
+          /*contacts=*/absl::nullopt,
+          /*num_unreachable_contacts_filtered_out=*/absl::nullopt));
 }

@@ -7,24 +7,27 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/feature_list.h"
 #include "build/build_config.h"
 #include "components/vector_icons/vector_icons.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/base/default_style.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
+#include "ui/compositor/layer.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/geometry/vector2d.h"
-#include "ui/gfx/skia_util.h"
-#include "ui/native_theme/native_theme.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/strings/grit/ui_strings.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/bubble/footnote_container_view.h"
 #include "ui/views/controls/button/image_button.h"
@@ -36,7 +39,6 @@
 #include "ui/views/paint_info.h"
 #include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/view_class_properties.h"
-#include "ui/views/views_features.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/window/client_view.h"
@@ -76,36 +78,46 @@ constexpr int kProgressIndicatorHeight = 4;
 
 }  // namespace
 
-// static
-const char BubbleFrameView::kViewClassName[] = "BubbleFrameView";
-
 BubbleFrameView::BubbleFrameView(const gfx::Insets& title_margins,
                                  const gfx::Insets& content_margins)
     : title_margins_(title_margins),
       content_margins_(content_margins),
       footnote_margins_(content_margins_),
       title_icon_(new views::ImageView()),
-      default_title_(CreateDefaultTitleLabel(base::string16()).release()) {
-  AddChildView(title_icon_);
+      default_title_(CreateDefaultTitleLabel(std::u16string()).release()) {
+  AddChildView(title_icon_.get());
 
   default_title_->SetVisible(false);
-  AddChildView(default_title_);
+  AddChildView(default_title_.get());
 
-  auto close = CreateCloseButton(this);
+  auto close = CreateCloseButton(base::BindRepeating(
+      [](BubbleFrameView* view, const ui::Event& event) {
+        if (view->input_protector_.IsPossiblyUnintendedInteraction(event))
+          return;
+        view->GetWidget()->CloseWithReason(
+            Widget::ClosedReason::kCloseButtonClicked);
+      },
+      this));
   close->SetVisible(false);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Windows will automatically create a tooltip for the close button based on
   // the HTCLOSE result from NonClientHitTest().
-  close->SetTooltipText(base::string16());
+  close->SetTooltipText(std::u16string());
   // Specify accessible name instead for screen readers.
   close->SetAccessibleName(l10n_util::GetStringUTF16(IDS_APP_CLOSE));
 #endif
   close_ = AddChildView(std::move(close));
 
-  auto minimize = CreateMinimizeButton(this);
+  auto minimize = CreateMinimizeButton(base::BindRepeating(
+      [](BubbleFrameView* view, const ui::Event& event) {
+        if (view->input_protector_.IsPossiblyUnintendedInteraction(event))
+          return;
+        view->GetWidget()->Minimize();
+      },
+      this));
   minimize->SetVisible(false);
-#if defined(OS_WIN)
-  minimize->SetTooltipText(base::string16());
+#if BUILDFLAG(IS_WIN)
+  minimize->SetTooltipText(std::u16string());
   minimize->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_APP_ACCNAME_MINIMIZE));
 #endif
@@ -115,6 +127,7 @@ BubbleFrameView::BubbleFrameView(const gfx::Insets& title_margins,
       kProgressIndicatorHeight, /*allow_round_corner=*/false);
   progress_indicator->SetBackgroundColor(SK_ColorTRANSPARENT);
   progress_indicator->SetVisible(false);
+  progress_indicator->GetViewAccessibility().OverrideIsIgnored(true);
   progress_indicator_ = AddChildView(std::move(progress_indicator));
 }
 
@@ -122,7 +135,7 @@ BubbleFrameView::~BubbleFrameView() = default;
 
 // static
 std::unique_ptr<Label> BubbleFrameView::CreateDefaultTitleLabel(
-    const base::string16& title_text) {
+    const std::u16string& title_text) {
   auto title = std::make_unique<Label>(title_text, style::CONTEXT_DIALOG_TITLE);
   title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   title->SetCollapseWhenHidden(true);
@@ -132,12 +145,11 @@ std::unique_ptr<Label> BubbleFrameView::CreateDefaultTitleLabel(
 
 // static
 std::unique_ptr<Button> BubbleFrameView::CreateCloseButton(
-    ButtonListener* listener) {
+    Button::PressedCallback callback) {
   auto close_button = CreateVectorImageButtonWithNativeTheme(
-      listener, vector_icons::kCloseRoundedIcon);
+      std::move(callback), vector_icons::kCloseRoundedIcon);
   close_button->SetTooltipText(l10n_util::GetStringUTF16(IDS_APP_CLOSE));
   close_button->SizeToPreferredSize();
-  close_button->SetFocusForPlatform();
 
   InstallCircleHighlightPathGenerator(close_button.get());
 
@@ -146,13 +158,12 @@ std::unique_ptr<Button> BubbleFrameView::CreateCloseButton(
 
 // static
 std::unique_ptr<Button> BubbleFrameView::CreateMinimizeButton(
-    ButtonListener* listener) {
+    Button::PressedCallback callback) {
   auto minimize_button = CreateVectorImageButtonWithNativeTheme(
-      listener, kWindowControlMinimizeIcon);
+      std::move(callback), kWindowControlMinimizeIcon);
   minimize_button->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_APP_ACCNAME_MINIMIZE));
   minimize_button->SizeToPreferredSize();
-  minimize_button->SetFocusForPlatform();
 
   InstallCircleHighlightPathGenerator(minimize_button.get());
 
@@ -187,12 +198,9 @@ bool BubbleFrameView::GetClientMask(const gfx::Size& size, SkPath* path) const {
 
   // BubbleFrameView only returns a SkPath for the purpose of clipping the
   // client view's corners so that it fits within the borders of its rounded
-  // frame. With MD rounded coners if a client view is painted to a layer the
-  // rounding is handled by the |SetRoundedCornerRadius()| layer API, so we
-  // return false here.
-  if (base::FeatureList::IsEnabled(
-          features::kEnableMDRoundedCornersOnDialogs) &&
-      GetWidget()->client_view()->layer()) {
+  // frame. If a client view is painted to a layer the rounding is handled by
+  // the |SetRoundedCornerRadius()| layer API, so we return false here.
+  if (GetWidget()->client_view()->layer()) {
     return false;
   }
 
@@ -226,7 +234,7 @@ int BubbleFrameView::NonClientHitTest(const gfx::Point& point) {
   // dialog and allow events to pass through the shadows.
   gfx::RRectF round_contents_bounds(gfx::RectF(GetContentsBounds()),
                                     bubble_border_->corner_radius());
-  if (bubble_border_->shadow() != BubbleBorder::NO_ASSETS)
+  if (bubble_border_->shadow() != BubbleBorder::NO_SHADOW)
     round_contents_bounds.Outset(BubbleBorder::kBorderThicknessDip);
   gfx::RectF rectf_point(point.x(), point.y(), 1, 1);
   if (!round_contents_bounds.Contains(rectf_point))
@@ -244,21 +252,20 @@ int BubbleFrameView::NonClientHitTest(const gfx::Point& point) {
 
 void BubbleFrameView::GetWindowMask(const gfx::Size& size,
                                     SkPath* window_mask) {
-  if (bubble_border_->shadow() != BubbleBorder::SMALL_SHADOW &&
-      bubble_border_->shadow() != BubbleBorder::NO_SHADOW_OPAQUE_BORDER &&
-      bubble_border_->shadow() != BubbleBorder::NO_ASSETS)
+  if (bubble_border_->shadow() != BubbleBorder::STANDARD_SHADOW &&
+      bubble_border_->shadow() != BubbleBorder::NO_SHADOW)
     return;
 
   // We don't return a mask for windows with arrows unless they use
-  // BubbleBorder::NO_ASSETS.
-  if (bubble_border_->shadow() != BubbleBorder::NO_ASSETS &&
+  // BubbleBorder::NO_SHADOW.
+  if (bubble_border_->shadow() != BubbleBorder::NO_SHADOW &&
       bubble_border_->arrow() != BubbleBorder::NONE &&
       bubble_border_->arrow() != BubbleBorder::FLOAT)
     return;
 
   // Use a window mask roughly matching the border in the image assets.
   const int kBorderStrokeSize =
-      bubble_border_->shadow() == BubbleBorder::NO_ASSETS ? 0 : 1;
+      bubble_border_->shadow() == BubbleBorder::NO_SHADOW ? 0 : 1;
   const SkScalar kCornerRadius = SkIntToScalar(bubble_border_->corner_radius());
   const gfx::Insets border_insets = bubble_border_->GetInsets();
   SkRect rect = {
@@ -268,8 +275,7 @@ void BubbleFrameView::GetWindowMask(const gfx::Size& size,
       SkIntToScalar(size.height() - border_insets.bottom() +
                     kBorderStrokeSize)};
 
-  if (bubble_border_->shadow() == BubbleBorder::NO_SHADOW_OPAQUE_BORDER ||
-      bubble_border_->shadow() == BubbleBorder::NO_ASSETS) {
+  if (bubble_border_->shadow() == BubbleBorder::NO_SHADOW) {
     window_mask->addRoundRect(rect, kCornerRadius, kCornerRadius);
   } else {
     static const int kBottomBorderShadowSize = 2;
@@ -284,9 +290,12 @@ void BubbleFrameView::ResetWindowControls() {
 }
 
 void BubbleFrameView::UpdateWindowIcon() {
+  DCHECK(GetWidget());
   gfx::ImageSkia image;
-  if (GetWidget()->widget_delegate()->ShouldShowWindowIcon())
-    image = GetWidget()->widget_delegate()->GetWindowIcon();
+  if (GetWidget()->widget_delegate()->ShouldShowWindowIcon()) {
+    image = GetWidget()->widget_delegate()->GetWindowIcon().Rasterize(
+        GetColorProvider());
+  }
   title_icon_->SetImage(&image);
 }
 
@@ -302,6 +311,13 @@ void BubbleFrameView::UpdateWindowTitle() {
 
 void BubbleFrameView::SizeConstraintsChanged() {}
 
+void BubbleFrameView::InsertClientView(ClientView* client_view) {
+  // Place the client view before any footnote view for focus order.
+  footnote_container_
+      ? AddChildViewAt(client_view, GetIndexOf(footnote_container_))
+      : AddChildView(client_view);
+}
+
 void BubbleFrameView::SetTitleView(std::unique_ptr<View> title_view) {
   DCHECK(title_view);
   delete default_title_;
@@ -312,14 +328,18 @@ void BubbleFrameView::SetTitleView(std::unique_ptr<View> title_view) {
   AddChildViewAt(title_view.release(), GetIndexOf(title_icon_) + 1);
 }
 
-void BubbleFrameView::SetProgress(base::Optional<double> progress) {
-  progress_indicator_->SetVisible(progress.has_value());
+void BubbleFrameView::SetProgress(absl::optional<double> progress) {
+  bool visible = progress.has_value();
+  progress_indicator_->SetVisible(visible);
+  progress_indicator_->GetViewAccessibility().OverrideIsIgnored(!visible);
   if (progress)
     progress_indicator_->SetValue(progress.value());
 }
 
-const char* BubbleFrameView::GetClassName() const {
-  return kViewClassName;
+absl::optional<double> BubbleFrameView::GetProgress() const {
+  if (progress_indicator_->GetVisible())
+    return progress_indicator_->GetValue();
+  return absl::nullopt;
 }
 
 gfx::Size BubbleFrameView::CalculatePreferredSize() const {
@@ -337,14 +357,14 @@ gfx::Size BubbleFrameView::GetMinimumSize() const {
 }
 
 gfx::Size BubbleFrameView::GetMaximumSize() const {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On Windows, this causes problems, so do not set a maximum size (it doesn't
   // take the drop shadow area into account, resulting in a too-small window;
   // see http://crbug.com/506206). This isn't necessary on Windows anyway, since
   // the OS doesn't give the user controls to resize a bubble.
   return gfx::Size();
 #else
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_MAC)
   // Allow BubbleFrameView dialogs to be resizable on Mac.
   if (GetWidget()->widget_delegate()->CanResize()) {
     gfx::Size client_size = GetWidget()->client_view()->GetMaximumSize();
@@ -352,7 +372,7 @@ gfx::Size BubbleFrameView::GetMaximumSize() const {
       return client_size;
     return GetWindowBoundsForClientBounds(gfx::Rect(client_size)).size();
   }
-#endif  // OS_APPLE
+#endif  // BUILDFLAG(IS_MAC)
   // Non-dialog bubbles should be non-resizable, so its max size is its
   // preferred size.
   return GetPreferredSize();
@@ -379,12 +399,24 @@ void BubbleFrameView::Layout() {
   if (header_height > 0) {
     header_view_->SetBounds(contents_bounds.x(), contents_bounds.y(),
                             contents_bounds.width(), header_height);
-    bounds.Inset(0, header_height, 0, 0);
+    bounds.Inset(gfx::Insets::TLBR(header_height, 0, 0, 0));
     header_bottom = header_view_->bounds().bottom();
   }
 
-  if (bounds.IsEmpty())
+  // Only account for footnote_container_'s height if it's visible, because
+  // content_margins_ adds extra padding even if all child views are invisible.
+  if (footnote_container_ && footnote_container_->GetVisible()) {
+    const int width = contents_bounds.width();
+    const int height = footnote_container_->GetHeightForWidth(width);
+    footnote_container_->SetBounds(
+        contents_bounds.x(), contents_bounds.bottom() - height, width, height);
+  }
+
+  NonClientFrameView::Layout();
+
+  if (bounds.IsEmpty()) {
     return;
+  }
 
   // The buttons are positioned somewhat closer to the edge of the bubble.
   const int close_margin =
@@ -415,9 +447,8 @@ void BubbleFrameView::Layout() {
   // TODO(tapted): Layout() should skip more surrounding code when !HasTitle().
   // Currently DCHECKs fail since title_insets is 0 when there is no title.
   if (DCHECK_IS_ON() && HasTitle()) {
-    gfx::Insets title_insets = GetTitleLabelInsetsFromFrame();
-    if (border())
-      title_insets += border()->GetInsets();
+    const gfx::Insets title_insets =
+        GetTitleLabelInsetsFromFrame() + GetInsets();
     DCHECK_EQ(title_insets.left(), title_label_x);
     DCHECK_EQ(title_insets.right(), width() - title_label_right);
   }
@@ -434,15 +465,6 @@ void BubbleFrameView::Layout() {
 
   title_icon_->SetBounds(bounds.x(), bounds.y(), title_icon_pref_size.width(),
                          title_height);
-
-  // Only account for footnote_container_'s height if it's visible, because
-  // content_margins_ adds extra padding even if all child views are invisible.
-  if (footnote_container_ && footnote_container_->GetVisible()) {
-    const int width = contents_bounds.width();
-    const int height = footnote_container_->GetHeightForWidth(width);
-    footnote_container_->SetBounds(
-        contents_bounds.x(), contents_bounds.bottom() - height, width, height);
-  }
 }
 
 void BubbleFrameView::OnThemeChanged() {
@@ -452,8 +474,8 @@ void BubbleFrameView::OnThemeChanged() {
   UpdateWindowIcon();
 
   if (bubble_border_ && bubble_border_->use_theme_background_color()) {
-    bubble_border_->set_background_color(GetNativeTheme()->GetSystemColor(
-        ui::NativeTheme::kColorId_DialogBackground));
+    bubble_border_->set_background_color(
+        GetColorProvider()->GetColor(ui::kColorDialogBackground));
     UpdateClientViewBackground();
     SchedulePaint();
   }
@@ -461,10 +483,8 @@ void BubbleFrameView::OnThemeChanged() {
 
 void BubbleFrameView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
-  if (details.is_add && details.child == this) {
-    OnThemeChanged();
+  if (details.is_add && details.child == this)
     UpdateClientLayerCornerRadius();
-  }
 
   // We need to update the client view's corner radius whenever the header or
   // footer are added/removed from the bubble frame so that the client view
@@ -504,17 +524,6 @@ void BubbleFrameView::PaintChildren(const PaintInfo& paint_info) {
   OnPaintBorder(recorder.canvas());
 }
 
-void BubbleFrameView::ButtonPressed(Button* sender, const ui::Event& event) {
-  if (input_protector_.IsPossiblyUnintendedInteraction(event))
-    return;
-
-  if (sender == close_) {
-    GetWidget()->CloseWithReason(Widget::ClosedReason::kCloseButtonClicked);
-  } else if (sender == minimize_) {
-    GetWidget()->Minimize();
-  }
-}
-
 void BubbleFrameView::SetBubbleBorder(std::unique_ptr<BubbleBorder> border) {
   bubble_border_ = border.get();
 
@@ -525,6 +534,14 @@ void BubbleFrameView::SetBubbleBorder(std::unique_ptr<BubbleBorder> border) {
 
   // Update the background, which relies on the border.
   SetBackground(std::make_unique<views::BubbleBackground>(bubble_border_));
+}
+void BubbleFrameView::SetContentMargins(const gfx::Insets& content_margins) {
+  content_margins_ = content_margins;
+  OnPropertyChanged(&content_margins_, kPropertyEffectsPreferredSizeChanged);
+}
+
+gfx::Insets BubbleFrameView::GetContentMargins() const {
+  return content_margins_;
 }
 
 void BubbleFrameView::SetHeaderView(std::unique_ptr<View> view) {
@@ -544,13 +561,9 @@ void BubbleFrameView::SetFootnoteView(std::unique_ptr<View> view) {
   delete footnote_container_;
   footnote_container_ = nullptr;
   if (view) {
-    // Insert the footnote container before |close_| so that the footnote is
-    // inserted before caption buttons in the focus cycle.
     int radius = bubble_border_ ? bubble_border_->corner_radius() : 0;
-    footnote_container_ =
-        AddChildViewAt(std::make_unique<FootnoteContainerView>(
-                           footnote_margins_, std::move(view), radius),
-                       GetIndexOf(close_));
+    footnote_container_ = AddChildView(std::make_unique<FootnoteContainerView>(
+        footnote_margins_, std::move(view), radius));
   }
   InvalidateLayout();
 }
@@ -563,13 +576,51 @@ View* BubbleFrameView::GetFootnoteView() const {
   return footnote_container_->children()[0];
 }
 
+void BubbleFrameView::SetFootnoteMargins(const gfx::Insets& footnote_margins) {
+  footnote_margins_ = footnote_margins;
+  OnPropertyChanged(&footnote_margins_, kPropertyEffectsLayout);
+}
+
+gfx::Insets BubbleFrameView::GetFootnoteMargins() const {
+  return footnote_margins_;
+}
+
+void BubbleFrameView::SetPreferredArrowAdjustment(
+    BubbleFrameView::PreferredArrowAdjustment adjustment) {
+  preferred_arrow_adjustment_ = adjustment;
+  // Changing |preferred_arrow_adjustment| will affect window bounds. Therefore
+  // this effect is handled during window resizing.
+  OnPropertyChanged(&preferred_arrow_adjustment_, kPropertyEffectsNone);
+}
+
+BubbleFrameView::PreferredArrowAdjustment
+BubbleFrameView::GetPreferredArrowAdjustment() const {
+  return preferred_arrow_adjustment_;
+}
+
 void BubbleFrameView::SetCornerRadius(int radius) {
   bubble_border_->SetCornerRadius(radius);
   UpdateClientLayerCornerRadius();
 }
 
+int BubbleFrameView::GetCornerRadius() const {
+  return bubble_border_ ? bubble_border_->corner_radius() : 0;
+}
+
 void BubbleFrameView::SetArrow(BubbleBorder::Arrow arrow) {
   bubble_border_->set_arrow(arrow);
+}
+
+BubbleBorder::Arrow BubbleFrameView::GetArrow() const {
+  return bubble_border_->arrow();
+}
+
+void BubbleFrameView::SetDisplayVisibleArrow(bool display_visible_arrow) {
+  bubble_border_->set_visible_arrow(display_visible_arrow);
+}
+
+bool BubbleFrameView::GetDisplayVisibleArrow() const {
+  return bubble_border_->visible_arrow();
 }
 
 void BubbleFrameView::SetBackgroundColor(SkColor color) {
@@ -583,8 +634,6 @@ SkColor BubbleFrameView::GetBackgroundColor() const {
 }
 
 void BubbleFrameView::UpdateClientViewBackground() {
-  if (!base::FeatureList::IsEnabled(features::kEnableMDRoundedCornersOnDialogs))
-    return;
   DCHECK(GetWidget());
   DCHECK(GetWidget()->client_view());
 
@@ -838,7 +887,7 @@ gfx::Insets BubbleFrameView::GetTitleLabelInsetsFromFrame() const {
   }
 
   if (!HasTitle())
-    return gfx::Insets(header_height, 0, 0, insets_right);
+    return gfx::Insets::TLBR(header_height, 0, 0, insets_right);
 
   insets_right = std::max(insets_right, title_margins_.right());
   const gfx::Size title_icon_pref_size = title_icon_->GetPreferredSize();
@@ -846,8 +895,8 @@ gfx::Insets BubbleFrameView::GetTitleLabelInsetsFromFrame() const {
       title_icon_pref_size.width() > 0 ? title_margins_.left() : 0;
   const int insets_left =
       title_margins_.left() + title_icon_pref_size.width() + title_icon_padding;
-  return gfx::Insets(header_height + title_margins_.top(), insets_left,
-                     title_margins_.bottom(), insets_right);
+  return gfx::Insets::TLBR(header_height + title_margins_.top(), insets_left,
+                           title_margins_.bottom(), insets_right);
 }
 
 gfx::Insets BubbleFrameView::GetClientInsetsForFrameWidth(
@@ -864,7 +913,7 @@ gfx::Insets BubbleFrameView::GetClientInsetsForFrameWidth(
 
   if (!HasTitle()) {
     return content_margins_ +
-           gfx::Insets(std::max(header_height, close_height), 0, 0, 0);
+           gfx::Insets::TLBR(std::max(header_height, close_height), 0, 0, 0);
   }
 
   const int icon_height = title_icon_->GetPreferredSize().height();
@@ -873,8 +922,8 @@ gfx::Insets BubbleFrameView::GetClientInsetsForFrameWidth(
   const int title_height =
       std::max(icon_height, label_height) + title_margins_.height();
   return content_margins_ +
-         gfx::Insets(std::max(title_height + header_height, close_height), 0, 0,
-                     0);
+         gfx::Insets::TLBR(std::max(title_height + header_height, close_height),
+                           0, 0, 0);
 }
 
 int BubbleFrameView::GetHeaderHeightForFrameWidth(int frame_width) const {
@@ -884,12 +933,25 @@ int BubbleFrameView::GetHeaderHeightForFrameWidth(int frame_width) const {
 }
 
 void BubbleFrameView::UpdateClientLayerCornerRadius() {
-  if (GetWidget() && GetWidget()->client_view()->layer() &&
-      base::FeatureList::IsEnabled(
-          features::kEnableMDRoundedCornersOnDialogs)) {
+  // If the ClientView is painted to a layer we need to apply the appropriate
+  // corner radius so that the ClientView and all its child layers are masked
+  // appropriately to fit within the BubbleFrameView.
+  if (GetWidget() && GetWidget()->client_view()->layer()) {
     GetWidget()->client_view()->layer()->SetRoundedCornerRadius(
         GetClientCornerRadii());
   }
 }
+
+BEGIN_METADATA(BubbleFrameView, NonClientFrameView)
+ADD_PROPERTY_METADATA(absl::optional<double>, Progress)
+ADD_PROPERTY_METADATA(gfx::Insets, ContentMargins)
+ADD_PROPERTY_METADATA(gfx::Insets, FootnoteMargins)
+ADD_PROPERTY_METADATA(BubbleFrameView::PreferredArrowAdjustment,
+                      PreferredArrowAdjustment)
+ADD_PROPERTY_METADATA(int, CornerRadius)
+ADD_PROPERTY_METADATA(BubbleBorder::Arrow, Arrow)
+ADD_PROPERTY_METADATA(bool, DisplayVisibleArrow)
+ADD_PROPERTY_METADATA(SkColor, BackgroundColor, ui::metadata::SkColorConverter)
+END_METADATA
 
 }  // namespace views

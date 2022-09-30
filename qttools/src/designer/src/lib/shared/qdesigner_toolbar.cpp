@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qdesigner_toolbar_p.h"
 #include "qdesigner_command_p.h"
@@ -41,14 +16,15 @@
 #include <QtDesigner/qextensionmanager.h>
 #include <QtDesigner/abstractwidgetfactory.h>
 
-#include <QtWidgets/qaction.h>
 #include <QtWidgets/qapplication.h>
 #include <QtWidgets/qtoolbutton.h>
 #include <QtWidgets/qtoolbar.h>
 #include <QtWidgets/qmenu.h>
+
+#include <QtGui/qaction.h>
 #include <QtGui/qevent.h>
 #include <QtGui/qdrag.h>
-#include <QtWidgets/qapplication.h>
+
 #include <QtCore/qdebug.h>
 
 Q_DECLARE_METATYPE(QAction*)
@@ -194,7 +170,7 @@ void ToolBarEventFilter::slotRemoveSelectedAction()
     const ActionList actions = m_toolBar->actions();
     const int pos = actions.indexOf(a);
     QAction *action_before = nullptr;
-    if (pos != -1 && actions.count() > pos + 1)
+    if (pos != -1 && actions.size() > pos + 1)
         action_before = actions.at(pos + 1);
 
     RemoveActionFromCommand *cmd = new RemoveActionFromCommand(fw);
@@ -262,7 +238,7 @@ void ToolBarEventFilter::hideDragIndicator()
 
 bool ToolBarEventFilter::handleMousePressEvent(QMouseEvent *event)
 {
-    if (event->button() != Qt::LeftButton || withinHandleArea(m_toolBar, event->pos()))
+    if (event->button() != Qt::LeftButton || withinHandleArea(m_toolBar, event->position().toPoint()))
         return false;
 
     if (QDesignerFormWindowInterface *fw = formWindow()) {
@@ -275,14 +251,14 @@ bool ToolBarEventFilter::handleMousePressEvent(QMouseEvent *event)
         }
         core->propertyEditor()->setObject(m_toolBar);
     }
-    m_startPosition = m_toolBar->mapFromGlobal(event->globalPos());
+    m_startPosition = m_toolBar->mapFromGlobal(event->globalPosition().toPoint());
     event->accept();
     return true;
 }
 
 bool ToolBarEventFilter::handleMouseReleaseEvent(QMouseEvent *event)
 {
-    if (event->button() != Qt::LeftButton || m_startPosition.isNull() || withinHandleArea(m_toolBar, event->pos()))
+    if (event->button() != Qt::LeftButton || m_startPosition.isNull() || withinHandleArea(m_toolBar, event->position().toPoint()))
         return false;
 
     // Accept the event, otherwise, form window selection will trigger
@@ -293,10 +269,10 @@ bool ToolBarEventFilter::handleMouseReleaseEvent(QMouseEvent *event)
 
 bool ToolBarEventFilter::handleMouseMoveEvent(QMouseEvent *event)
 {
-    if (m_startPosition.isNull() || withinHandleArea(m_toolBar, event->pos()))
+    if (m_startPosition.isNull() || withinHandleArea(m_toolBar, event->position().toPoint()))
         return false;
 
-    const QPoint pos = m_toolBar->mapFromGlobal(event->globalPos());
+    const QPoint pos = m_toolBar->mapFromGlobal(event->globalPosition().toPoint());
     if ((pos - m_startPosition).manhattanLength() > qApp->startDragDistance()) {
         startDrag(m_startPosition, event->modifiers());
         m_startPosition = QPoint();
@@ -326,7 +302,7 @@ bool ToolBarEventFilter::handleDragEnterMoveEvent(QDragMoveEvent *event)
     }
 
     d->accept(event);
-    adjustDragIndicator(event->pos());
+    adjustDragIndicator(event->position().toPoint());
     return true;
 }
 
@@ -359,7 +335,7 @@ bool ToolBarEventFilter::handleDropEvent(QDropEvent *event)
 
     // Try to find action to 'insert before'. Click on action or in free area, else ignore.
     QAction *beforeAction = nullptr;
-    const QPoint pos = event->pos();
+    const QPoint pos = event->position().toPoint();
     const int index = actionIndexAt(m_toolBar, pos, m_toolBar->orientation());
     if (index != -1) {
         beforeAction = actions.at(index);

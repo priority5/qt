@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qlayout_widget_p.h"
 #include "qdesigner_utils_p.h"
@@ -199,7 +174,7 @@ static bool removeEmptyCellsOnGrid(GridLikeLayout *grid, const QRect &area)
 {
     // check if there are any items in the way. Should be only spacers
     // Unique out items that span rows/columns.
-    QVector<int> indexesToBeRemoved;
+    QList<int> indexesToBeRemoved;
     indexesToBeRemoved.reserve(grid->count());
     const int rightColumn = area.x() + area.width();
     const int bottomRow = area.y() + area.height();
@@ -460,12 +435,12 @@ QRect LayoutHelper::itemInfo(QLayout *lt, const QWidget *widget) const
         void simplify(const QDesignerFormEditorInterface *, QWidget *, const QRect &) override {}
 
         // Helper for restoring layout states
-        using LayoutItemVector = QVector<QLayoutItem *>;
+        using LayoutItemVector = QList<QLayoutItem *>;
         static LayoutItemVector disassembleLayout(QLayout *lt);
         static QLayoutItem *findItemOfWidget(const LayoutItemVector &lv, QWidget *w);
 
     private:
-        using BoxLayoutState = QVector<QWidget *>;
+        using BoxLayoutState = QList<QWidget *>;
 
         static BoxLayoutState state(const QBoxLayout*lt);
 
@@ -604,7 +579,7 @@ QRect LayoutHelper::itemInfo(QLayout *lt, const QWidget *widget) const
         };
         // Horiontal, Vertical pair of state
         typedef QPair<DimensionCellState, DimensionCellState> CellState;
-        using CellStates = QVector<CellState>;
+        using CellStates = QList<CellState>;
 
         // Figure out states of a cell and return as a flat vector of
         // [column1, column2,...] (address as  row * columnCount + col)
@@ -772,8 +747,8 @@ QRect LayoutHelper::itemInfo(QLayout *lt, const QWidget *widget) const
     bool GridLayoutState::simplify(const QRect &r, bool testOnly)
     {
         // figure out free rows/columns.
-        QVector<bool> occupiedRows(rowCount, false);
-        QVector<bool> occupiedColumns(colCount, false);
+        QList<bool> occupiedRows(rowCount, false);
+        QList<bool> occupiedColumns(colCount, false);
         // Mark everything outside restriction rectangle as occupied
         const int restrictionLeftColumn = r.x();
         const int restrictionRightColumn = restrictionLeftColumn + r.width();
@@ -1010,7 +985,7 @@ QRect LayoutHelper::itemInfo(QLayout *lt, const QWidget *widget) const
     class FormLayoutHelper : public  LayoutHelper {
     public:
         typedef QPair<QWidget *, QWidget *> WidgetPair;
-        using FormLayoutState = QVector<WidgetPair>;
+        using FormLayoutState = QList<WidgetPair>;
 
         FormLayoutHelper() = default;
 
@@ -1175,7 +1150,7 @@ QRect LayoutHelper::itemInfo(QLayout *lt, const QWidget *widget) const
     void FormLayoutHelper::simplify(const QDesignerFormEditorInterface *core, QWidget *widgetWithManagedLayout, const QRect &restrictionArea)
     {
         using LayoutItemPair = QPair<QLayoutItem*, QLayoutItem*>;
-        using LayoutItemPairs = QVector<LayoutItemPair>;
+        using LayoutItemPairs = QList<LayoutItemPair>;
 
         QFormLayout *formLayout = qobject_cast<QFormLayout *>(LayoutInfo::managedLayout(core, widgetWithManagedLayout));
         Q_ASSERT(formLayout);

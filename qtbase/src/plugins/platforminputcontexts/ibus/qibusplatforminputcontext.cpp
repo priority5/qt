@@ -1,67 +1,34 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 #include "qibusplatforminputcontext.h"
 
-#include <QtDebug>
+#include <QDebug>
 #include <QTextCharFormat>
 #include <QGuiApplication>
+#include <QWindow>
+#include <QEvent>
+#include <QFile>
+#include <QStandardPaths>
 #include <QDBusVariant>
-#include <qwindow.h>
-#include <qevent.h>
-
-#include <qpa/qplatformcursor.h>
-#include <qpa/qplatformscreen.h>
-#include <qpa/qwindowsysteminterface_p.h>
-
-#include <QtGui/private/qguiapplication_p.h>
-
-#include <QtXkbCommonSupport/private/qxkbcommon_p.h>
+#include <QDBusPendingReply>
+#include <QDBusReply>
+#include <QDBusServiceWatcher>
 
 #include "qibusproxy.h"
 #include "qibusproxyportal.h"
 #include "qibusinputcontextproxy.h"
 #include "qibustypes.h"
 
+#include <qpa/qplatformcursor.h>
+#include <qpa/qplatformscreen.h>
+#include <qpa/qwindowsysteminterface_p.h>
+
+#include <private/qguiapplication_p.h>
+#include <private/qxkbcommon_p.h>
+
 #include <sys/types.h>
 #include <signal.h>
 
-#include <QtDBus>
 
 #ifndef IBUS_RELEASE_MASK
 #define IBUS_RELEASE_MASK (1 << 30)
@@ -72,6 +39,8 @@
 #endif
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 enum { debug = 0 };
 
@@ -177,8 +146,6 @@ void QIBusPlatformInputContext::invokeAction(QInputMethod::Action a, int)
 
 void QIBusPlatformInputContext::reset()
 {
-    QPlatformInputContext::reset();
-
     if (!d->busConnected)
         return;
 
@@ -189,8 +156,6 @@ void QIBusPlatformInputContext::reset()
 
 void QIBusPlatformInputContext::commit()
 {
-    QPlatformInputContext::commit();
-
     if (!d->busConnected)
         return;
 
@@ -239,7 +204,6 @@ void QIBusPlatformInputContext::update(Qt::InputMethodQueries q)
 
         d->context->SetSurroundingText(dbusText, cursorPosition, anchorPosition);
     }
-    QPlatformInputContext::update(q);
 }
 
 void QIBusPlatformInputContext::cursorRectChanged()
@@ -248,7 +212,7 @@ void QIBusPlatformInputContext::cursorRectChanged()
         return;
 
     QRect r = qApp->inputMethod()->cursorRectangle().toRect();
-    if(!r.isValid())
+    if (!r.isValid())
         return;
 
     QWindow *inputWindow = qApp->focusWindow();
@@ -539,7 +503,7 @@ void QIBusPlatformInputContext::socketChanged(const QString &str)
     if (d->bus && d->bus->isValid())
         disconnect(d->bus);
     if (d->connection)
-        d->connection->disconnectFromBus(QLatin1String("QIBusProxy"));
+        d->connection->disconnectFromBus("QIBusProxy"_L1);
 
     m_timer.start(100);
 }
@@ -607,7 +571,7 @@ void QIBusPlatformInputContext::connectToContextSignals()
 
 static inline bool checkRunningUnderFlatpak()
 {
-    return !QStandardPaths::locate(QStandardPaths::RuntimeLocation, QLatin1String("flatpak-info")).isEmpty();
+    return !QStandardPaths::locate(QStandardPaths::RuntimeLocation, "flatpak-info"_L1).isEmpty();
 }
 
 static bool shouldConnectIbusPortal()
@@ -658,25 +622,25 @@ void QIBusPlatformInputContextPrivate::createBusProxy()
     const char* ibusService = usePortal ? "org.freedesktop.portal.IBus" : "org.freedesktop.IBus";
     QDBusReply<QDBusObjectPath> ic;
     if (usePortal) {
-        portalBus = new QIBusProxyPortal(QLatin1String(ibusService),
-                                         QLatin1String("/org/freedesktop/IBus"),
+        portalBus = new QIBusProxyPortal(QLatin1StringView(ibusService),
+                                         "/org/freedesktop/IBus"_L1,
                                          *connection);
         if (!portalBus->isValid()) {
             qWarning("QIBusPlatformInputContext: invalid portal bus.");
             return;
         }
 
-        ic = portalBus->CreateInputContext(QLatin1String("QIBusInputContext"));
+        ic = portalBus->CreateInputContext("QIBusInputContext"_L1);
     } else {
-        bus = new QIBusProxy(QLatin1String(ibusService),
-                             QLatin1String("/org/freedesktop/IBus"),
+        bus = new QIBusProxy(QLatin1StringView(ibusService),
+                             "/org/freedesktop/IBus"_L1,
                              *connection);
         if (!bus->isValid()) {
             qWarning("QIBusPlatformInputContext: invalid bus.");
             return;
         }
 
-        ic = bus->CreateInputContext(QLatin1String("QIBusInputContext"));
+        ic = bus->CreateInputContext("QIBusInputContext"_L1);
     }
 
     serviceWatcher.removeWatchedService(ibusService);
@@ -688,7 +652,7 @@ void QIBusPlatformInputContextPrivate::createBusProxy()
         return;
     }
 
-    context = new QIBusInputContextProxy(QLatin1String(ibusService), ic.value().path(), *connection);
+    context = new QIBusInputContextProxy(QLatin1StringView(ibusService), ic.value().path(), *connection);
 
     if (!context->isValid()) {
         qWarning("QIBusPlatformInputContext: invalid input context.");
@@ -745,15 +709,15 @@ QString QIBusPlatformInputContextPrivate::getSocketPath()
         qDebug() << "host=" << host << "displayNumber" << displayNumber;
 
     return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) +
-               QLatin1String("/ibus/bus/") +
-               QLatin1String(QDBusConnection::localMachineId()) +
-               QLatin1Char('-') + QString::fromLocal8Bit(host) + QLatin1Char('-') + QString::fromLocal8Bit(displayNumber);
+               "/ibus/bus/"_L1 +
+               QLatin1StringView(QDBusConnection::localMachineId()) +
+               u'-' + QString::fromLocal8Bit(host) + u'-' + QString::fromLocal8Bit(displayNumber);
 }
 
 QDBusConnection *QIBusPlatformInputContextPrivate::createConnection()
 {
     if (usePortal)
-        return new QDBusConnection(QDBusConnection::connectToBus(QDBusConnection::SessionBus, QLatin1String("QIBusProxy")));
+        return new QDBusConnection(QDBusConnection::connectToBus(QDBusConnection::SessionBus, "QIBusProxy"_L1));
     QFile file(getSocketPath());
 
     if (!file.open(QFile::ReadOnly))
@@ -778,7 +742,9 @@ QDBusConnection *QIBusPlatformInputContextPrivate::createConnection()
     if (address.isEmpty() || pid < 0 || kill(pid, 0) != 0)
         return 0;
 
-    return new QDBusConnection(QDBusConnection::connectToBus(QString::fromLatin1(address), QLatin1String("QIBusProxy")));
+    return new QDBusConnection(QDBusConnection::connectToBus(QString::fromLatin1(address), "QIBusProxy"_L1));
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qibusplatforminputcontext.cpp"

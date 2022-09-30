@@ -110,13 +110,11 @@ namespace SkOpts {
     void Init_sse42();
     void Init_avx();
     void Init_hsw();
-#if !defined(TOOLKIT_QT)
     void Init_skx();
-#endif
+    void Init_erms();
     void Init_crc32();
 
     static void init() {
-#if !defined(SK_BUILD_NO_OPTS)
     #if defined(SK_CPU_X86)
         #if SK_CPU_SSE_LEVEL < SK_CPU_SSE_LEVEL_SSSE3
             if (SkCpu::Supports(SkCpu::SSSE3)) { Init_ssse3(); }
@@ -131,17 +129,16 @@ namespace SkOpts {
             if (SkCpu::Supports(SkCpu::HSW)) { Init_hsw();   }
         #endif
 
-#if !defined(TOOLKIT_QT)
         #if SK_CPU_SSE_LEVEL < SK_CPU_SSE_LEVEL_SKX
             if (SkCpu::Supports(SkCpu::SKX)) { Init_skx(); }
         #endif
-#endif
+
+        if (SkCpu::Supports(SkCpu::ERMS)) { Init_erms(); }
 
     #elif defined(SK_CPU_ARM64)
         if (SkCpu::Supports(SkCpu::CRC32)) { Init_crc32(); }
 
     #endif
-#endif
     }
 
     void Init() {

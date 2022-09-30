@@ -10,8 +10,13 @@
 #include <vector>
 
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/values.h"
+#include "ui/gfx/gpu_extra_info.h"
 #include "ui/gfx/native_widget_types.h"
+
+namespace base {
+class TimeDelta;
+}  // namespace base
 
 namespace display {
 class Display;
@@ -40,6 +45,10 @@ namespace ui {
 class COMPONENT_EXPORT(OZONE_BASE) PlatformScreen {
  public:
   PlatformScreen();
+
+  PlatformScreen(const PlatformScreen&) = delete;
+  PlatformScreen& operator=(const PlatformScreen&) = delete;
+
   virtual ~PlatformScreen();
 
   // Provide a |display:;Display| for each physical display available to Chrome.
@@ -59,6 +68,9 @@ class COMPONENT_EXPORT(OZONE_BASE) PlatformScreen {
   // TODO(rjkroege): Verify these semantics.
   virtual gfx::Point GetCursorScreenPoint() const = 0;
 
+  virtual bool IsAcceleratedWidgetUnderCursor(
+      gfx::AcceleratedWidget widget) const;
+
   virtual gfx::AcceleratedWidget GetAcceleratedWidgetAtScreenPoint(
       const gfx::Point& point) const = 0;
 
@@ -77,8 +89,17 @@ class COMPONENT_EXPORT(OZONE_BASE) PlatformScreen {
   virtual display::Display GetDisplayMatching(
       const gfx::Rect& match_rect) const = 0;
 
-  // Suspends the platform-specific screensaver, if applicable.
-  virtual void SetScreenSaverSuspended(bool suspend);
+  // Suspends or un-suspends the platform-specific screensaver, and returns
+  // whether the operation was successful. Can be called more than once with the
+  // same value for |suspend|, but those states should not stack: the first
+  // alternating value should toggle the state of the suspend.
+  virtual bool SetScreenSaverSuspended(bool suspend);
+
+  // Returns whether the screensaver is currently running.
+  virtual bool IsScreenSaverActive() const;
+
+  // Calculates idle time.
+  virtual base::TimeDelta CalculateIdleTime() const;
 
   // Adds/Removes display observers.
   virtual void AddObserver(display::DisplayObserver* observer) = 0;
@@ -88,8 +109,18 @@ class COMPONENT_EXPORT(OZONE_BASE) PlatformScreen {
   // empty string is returned.
   virtual std::string GetCurrentWorkspace();
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(PlatformScreen);
+  // Returns human readable description of the window manager, desktop, and
+  // other system properties related to the compositing.
+  virtual std::vector<base::Value> GetGpuExtraInfo(
+      const gfx::GpuExtraInfo& gpu_extra_info);
+
+  // Sets device scale factor received from external sources such as toolkits.
+  // Currently only used by Linux.
+  virtual void SetDeviceScaleFactor(float scale);
+
+ protected:
+  void StorePlatformNameIntoListOfValues(std::vector<base::Value>& values,
+                                         const std::string& platform_name);
 };
 
 }  // namespace ui

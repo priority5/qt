@@ -29,13 +29,14 @@ bool RenderFrameMetadata::operator==(const RenderFrameMetadata& other) const {
          is_scroll_offset_at_top == other.is_scroll_offset_at_top &&
          selection == other.selection &&
          is_mobile_optimized == other.is_mobile_optimized &&
+         delegated_ink_metadata == other.delegated_ink_metadata &&
          device_scale_factor == other.device_scale_factor &&
          viewport_size_in_pixels == other.viewport_size_in_pixels &&
          page_scale_factor == other.page_scale_factor &&
          external_page_scale_factor == other.external_page_scale_factor &&
          top_controls_height == other.top_controls_height &&
          top_controls_shown_ratio == other.top_controls_shown_ratio &&
-#if defined(OS_ANDROID) || defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_ANDROID) || defined(TOOLKIT_QT)
          bottom_controls_height == other.bottom_controls_height &&
          bottom_controls_shown_ratio == other.bottom_controls_shown_ratio &&
          top_controls_min_height_offset ==

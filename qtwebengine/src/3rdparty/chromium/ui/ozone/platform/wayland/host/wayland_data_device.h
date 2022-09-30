@@ -58,6 +58,7 @@ class WaylandDataDevice : public WaylandDataDeviceBase {
   // Starts a wayland drag and drop session, controlled by |delegate|.
   void StartDrag(const WaylandDataSource& data_source,
                  const WaylandWindow& origin_window,
+                 uint32_t serial,
                  wl_surface* icon_surface,
                  DragDelegate* delegate);
 
@@ -74,12 +75,18 @@ class WaylandDataDevice : public WaylandDataDeviceBase {
   // Returns the underlying wl_data_device singleton object.
   wl_data_device* data_device() const { return data_device_.get(); }
 
-  void SetSelectionSource(WaylandDataSource* source);
+  // wl_data_device::set_selection makes the corresponding wl_data_source the
+  // target of future wl_data_device::data_offer events. In non-Wayland terms,
+  // this is equivalent to "writing" to the clipboard, although the actual
+  // transfer of data happens asynchronously, on-demand-only.
+  void SetSelectionSource(WaylandDataSource* source, uint32_t serial);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(WaylandDataDragControllerTest, StartDrag);
+  FRIEND_TEST_ALL_PREFIXES(WaylandDataDragControllerTest, ReceiveDrag);
 
   void ReadDragDataFromFD(base::ScopedFD fd, RequestDataCallback callback);
+  void ResetDragDelegateIfNeeded();
 
   // wl_data_device_listener callbacks
   static void OnOffer(void* data,

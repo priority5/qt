@@ -22,16 +22,16 @@ void CFWL_PictureBox::Update() {
   m_ClientRect = GetClientRect();
 }
 
-void CFWL_PictureBox::DrawWidget(CXFA_Graphics* pGraphics,
+void CFWL_PictureBox::DrawWidget(CFGAS_GEGraphics* pGraphics,
                                  const CFX_Matrix& matrix) {
   if (!pGraphics)
     return;
 
   if (HasBorder())
-    DrawBorder(pGraphics, CFWL_Part::Border, matrix);
+    DrawBorder(pGraphics, CFWL_ThemePart::Part::kBorder, matrix);
 }
 
-void CFWL_PictureBox::OnDrawWidget(CXFA_Graphics* pGraphics,
+void CFWL_PictureBox::OnDrawWidget(CFGAS_GEGraphics* pGraphics,
                                    const CFX_Matrix& matrix) {
   DrawWidget(pGraphics, matrix);
 }

@@ -8,8 +8,9 @@
 #ifndef SKSL_EXTERNALFUNCTIONCALL
 #define SKSL_EXTERNALFUNCTIONCALL
 
-#include "src/sksl/SkSLExternalValue.h"
+#include "include/private/SkTArray.h"
 #include "src/sksl/ir/SkSLExpression.h"
+#include "src/sksl/ir/SkSLExternalFunction.h"
 #include "src/sksl/ir/SkSLFunctionDeclaration.h"
 
 namespace SkSL {
@@ -17,25 +18,25 @@ namespace SkSL {
 /**
  * An external function invocation.
  */
-struct ExternalFunctionCall : public Expression {
-    static constexpr Kind kExpressionKind = Kind::kExternalFunctionCall;
+class ExternalFunctionCall final : public Expression {
+public:
+    inline static constexpr Kind kExpressionKind = Kind::kExternalFunctionCall;
 
-    ExternalFunctionCall(int offset, const Type* type, const ExternalValue* function,
-                         std::vector<std::unique_ptr<Expression>> arguments)
-    : INHERITED(offset, kExpressionKind, ExternalValueData{type, function}) {
-        fExpressionChildren = std::move(arguments);
+    ExternalFunctionCall(Position pos, const ExternalFunction* function, ExpressionArray arguments)
+        : INHERITED(pos, kExpressionKind, &function->type())
+        , fFunction(*function)
+        , fArguments(std::move(arguments)) {}
+
+    ExpressionArray& arguments() {
+        return fArguments;
     }
 
-    std::vector<std::unique_ptr<Expression>>& arguments() {
-        return fExpressionChildren;
+    const ExpressionArray& arguments() const {
+        return fArguments;
     }
 
-    const std::vector<std::unique_ptr<Expression>>& arguments() const {
-        return fExpressionChildren;
-    }
-
-    const ExternalValue* function() const {
-        return this->externalValueData().fValue;
+    const ExternalFunction& function() const {
+        return fFunction;
     }
 
     bool hasProperty(Property property) const override {
@@ -51,19 +52,13 @@ struct ExternalFunctionCall : public Expression {
     }
 
     std::unique_ptr<Expression> clone() const override {
-        std::vector<std::unique_ptr<Expression>> cloned;
-        for (const auto& arg : this->arguments()) {
-            cloned.push_back(arg->clone());
-        }
-        return std::unique_ptr<Expression>(new ExternalFunctionCall(fOffset,
-                                                                    &this->type(),
-                                                                    this->function(),
-                                                                    std::move(cloned)));
+        return std::make_unique<ExternalFunctionCall>(fPosition, &this->function(),
+                                                      this->arguments().clone());
     }
 
-    String description() const override {
-        String result = String(this->function()->fName) + "(";
-        String separator;
+    std::string description() const override {
+        std::string result = std::string(this->function().name()) + "(";
+        std::string separator;
         for (const std::unique_ptr<Expression>& arg : this->arguments()) {
             result += separator;
             result += arg->description();
@@ -72,6 +67,10 @@ struct ExternalFunctionCall : public Expression {
         result += ")";
         return result;
     }
+
+private:
+    const ExternalFunction& fFunction;
+    ExpressionArray fArguments;
 
     using INHERITED = Expression;
 };

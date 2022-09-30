@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
 
@@ -43,7 +19,7 @@ every statement in the qdocconf file.
 
    project                 = QtGui
    description             = Qt GUI Reference Documentation
-   url                     = http://doc.qt.io/qt-5
+   url                     = http://doc.qt.io/qt
    version                 = $QT_VERSION
 
    examplesinstallpath     = gui
@@ -56,17 +32,13 @@ every statement in the qdocconf file.
    qhp.QtGui.indexTitle          = Qt GUI
    qhp.QtGui.indexRoot           =
 
-   qhp.QtGui.filterAttributes    = qtgui $QT_VERSION qtrefdoc
-   qhp.QtGui.customFilters.Qt.name = Qtgui $QT_VERSION
-   qhp.QtGui.customFilters.Qt.filterAttributes = qtgui $QT_VERSION
-
    qhp.QtGui.subprojects         = classes
    qhp.QtGui.subprojects.classes.title = C++ Classes
    qhp.QtGui.subprojects.classes.indexTitle = Qt GUI C++ Classes
-   qhp.QtGui.subprojects.classes.selectors = class fake:headerfile
+   qhp.QtGui.subprojects.classes.selectors = class headerfile
    qhp.QtGui.subprojects.classes.sortPages = true
 
-   tagfile                 = ../../../doc/qtgui/qtgui.tags
+   tagfile                 = qtgui.tags
 
    depends += \
        qtcore \
@@ -90,7 +62,7 @@ every statement in the qdocconf file.
 
    imagedirs   += images \
                   ../../../examples/gui/doc/images \
-                  ../../../doc/src/images \
+                  ../../../doc/src/images
 \endcode
 
 \title Qtgui.qdocconf with notes
@@ -137,24 +109,23 @@ to content listed in the index.
 \note QDoc omits this value when the -installdir argument
 is specified when running QDoc.
 
-\target examplesinstallpath
-
 \badcode
    examplesinstallpath     = gui
 \endcode
 
-This \c examplesinstallpath variable indicates that the examples will be
+The \c examplesinstallpath variable indicates that the examples will be
 installed in the \e gui directory under the parent examples directory
 (for Qt, this is $QT_INSTALL_EXAMPLES).
 
 \note The examplepath variable has to match the example directory specified in
       \c exampledirs.
 
-\note It is possible to override the \c exampleinstallpath for a specific
+\note It is possible to override \c examplesinstallpath for a specific
       \l {example-command}{\\example} using the \l {meta-command}{\\meta}
       command.
 
-\b {See also}: \l {exampledirs} and \l {meta-command}{\\meta}.
+\b {See also}: \l {examplesinstallpath}, \l {exampledirs}, and
+\l {meta-command}{\\meta}.
 
 \badcode
    qhp.projects    = QtGui
@@ -197,20 +168,6 @@ This is the title of the page that has the contents.
 
 Specifies the title of the root (namespace) page to generate the documentation for.
 Typically defined as an empty string.
-
-\badcode
-   qhp.QtGui.filterAttributes    = qtgui $QT_VERSION qtrefdoc
-   qhp.QtGui.customFilters.Qt.name = QtGui $QT_VERSION
-   qhp.QtGui.customFilters.Qt.filterAttributes = qtgui $QT_VERSION
-\endcode
-
-The documentation set (one per QDoc project) can have any number of filter
-attributes assigned to it. A filter attribute is an ordinary string which
-can be freely chosen. Additionally, custom filters that reference above
-attributes can be defined. Qt Assistant will display the name of the custom
-filter in its \gui{Filtered by} drop-down list. Only the documentation sets
-that have their filter attributes match the attributes of the selected
-custom filter will be shown.
 
 \badcode
    qhp.QtGui.subprojects         = classes

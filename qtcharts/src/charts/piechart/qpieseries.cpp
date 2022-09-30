@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Charts module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QtCharts/QPieSeries>
 #include <private/qpieseries_p.h>
@@ -40,7 +14,7 @@
 
 #include <QtCharts/QPieLegendMarker>
 
-QT_CHARTS_BEGIN_NAMESPACE
+QT_BEGIN_NAMESPACE
 
 /*!
     \class QPieSeries
@@ -307,7 +281,7 @@ QT_CHARTS_BEGIN_NAMESPACE
 */
 
 /*!
-    \fn void QPieSeries::added(QList<QPieSlice*> slices)
+    \fn void QPieSeries::added(const QList<QPieSlice*> &slices)
 
     This signal is emitted when the slices specified by \a slices are added to the series.
 
@@ -321,7 +295,7 @@ QT_CHARTS_BEGIN_NAMESPACE
 */
 
 /*!
-    \fn void QPieSeries::removed(QList<QPieSlice*> slices)
+    \fn void QPieSeries::removed(const QList<QPieSlice*> &slices)
     This signal is emitted when the slices specified by \a slices are removed from the series.
     \sa remove()
 */
@@ -488,14 +462,14 @@ bool QPieSeries::append(QPieSlice *slice)
 
     Returns \c true if appending succeeds.
 */
-bool QPieSeries::append(QList<QPieSlice *> slices)
+bool QPieSeries::append(const QList<QPieSlice *> &slices)
 {
     Q_D(QPieSeries);
 
     if (slices.count() == 0)
         return false;
 
-    foreach (QPieSlice *s, slices) {
+    for (auto *s : slices) {
         if (!s || d->m_slices.contains(s))
             return false;
         if (s->series()) // already added to some series
@@ -504,7 +478,7 @@ bool QPieSeries::append(QList<QPieSlice *> slices)
             return false;
     }
 
-    foreach (QPieSlice *s, slices) {
+    for (auto *s : slices) {
         s->setParent(this);
         QPieSlicePrivate::fromSlice(s)->m_series = this;
         d->m_slices << s;
@@ -512,7 +486,7 @@ bool QPieSeries::append(QList<QPieSlice *> slices)
 
     d->updateDerivativeData();
 
-    foreach(QPieSlice * s, slices) {
+    for (auto *s : slices) {
         connect(s, SIGNAL(valueChanged()), d, SLOT(sliceValueChanged()));
         connect(s, SIGNAL(clicked()), d, SLOT(sliceClicked()));
         connect(s, SIGNAL(hovered(bool)), d, SLOT(sliceHovered(bool)));
@@ -544,7 +518,7 @@ QPieSeries &QPieSeries::operator << (QPieSlice *slice)
     Returns null if \a value is \c NaN, \c Inf, or \c -Inf and adds nothing to the
     series.
 */
-QPieSlice *QPieSeries::append(QString label, qreal value)
+QPieSlice *QPieSeries::append(const QString &label, qreal value)
 {
     if (isValidValue(value)) {
         QPieSlice *slice = new QPieSlice(label, value);
@@ -896,7 +870,7 @@ void QPieSeriesPrivate::updateDerivativeData()
     // update slice attributes
     qreal sliceAngle = m_pieStartAngle;
     qreal pieSpan = m_pieEndAngle - m_pieStartAngle;
-    QVector<QPieSlice *> changed;
+    QList<QPieSlice *> changed;
     foreach (QPieSlice *s, m_slices) {
         QPieSlicePrivate *d = QPieSlicePrivate::fromSlice(s);
         d->setPercentage(s->value() / m_sum);
@@ -993,10 +967,10 @@ void QPieSeriesPrivate::initializeGraphics(QGraphicsItem* parent)
     QAbstractSeriesPrivate::initializeGraphics(parent);
 }
 
-void QPieSeriesPrivate::initializeAnimations(QtCharts::QChart::AnimationOptions options,
+void QPieSeriesPrivate::initializeAnimations(QChart::AnimationOptions options,
                                              int duration, QEasingCurve &curve)
 {
-    PieChartItem *item = static_cast<PieChartItem *>(m_item.data());
+    PieChartItem *item = static_cast<PieChartItem *>(m_item.get());
     Q_ASSERT(item);
     if (item->animation())
         item->animation()->stopAndDestroyLater();
@@ -1067,7 +1041,7 @@ void QPieSeriesPrivate::initializeTheme(int index, ChartTheme* theme, bool force
     }
 }
 
-QT_CHARTS_END_NAMESPACE
+QT_END_NAMESPACE
 
 #include "moc_qpieseries.cpp"
 #include "moc_qpieseries_p.cpp"

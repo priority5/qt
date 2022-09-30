@@ -28,7 +28,7 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/svg/animation/smil_animation_effect_parameters.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -52,7 +52,7 @@ const struct {
     {3, CAST_UNIT(kUserUnits)},
 };
 static_assert(static_cast<size_t>(SVGLength::Initial::kNumValues) ==
-                  base::size(g_initial_lengths_table),
+                  std::size(g_initial_lengths_table),
               "the enumeration is synchronized with the value table");
 static_assert(static_cast<size_t>(SVGLength::Initial::kNumValues) <=
                   1u << SVGLength::kInitialValueBits,
@@ -63,7 +63,7 @@ static_assert(static_cast<size_t>(SVGLength::Initial::kNumValues) <=
 const CSSPrimitiveValue& CreateInitialCSSValue(
     SVGLength::Initial initial_value) {
   size_t initial_value_index = static_cast<size_t>(initial_value);
-  DCHECK_LT(initial_value_index, base::size(g_initial_lengths_table));
+  DCHECK_LT(initial_value_index, std::size(g_initial_lengths_table));
   const auto& entry = g_initial_lengths_table[initial_value_index];
   return *CSSNumericLiteralValue::Create(
       entry.value, static_cast<CSSPrimitiveValue::UnitType>(entry.unit));
@@ -87,7 +87,7 @@ SVGLength::SVGLength(const CSSPrimitiveValue& value, SVGLengthMode mode)
 
 void SVGLength::Trace(Visitor* visitor) const {
   visitor->Trace(value_);
-  SVGPropertyBase::Trace(visitor);
+  SVGListablePropertyBase::Trace(visitor);
 }
 
 SVGLength* SVGLength::Clone() const {
@@ -177,15 +177,6 @@ float SVGLength::ValueAsPercentage() const {
   }
 
   return value_->GetFloatValue();
-}
-
-float SVGLength::ValueAsPercentage100() const {
-  // LengthTypePercentage is represented with 100% = 100.0. Good for accuracy
-  // but could eventually be changed.
-  if (value_->IsPercentage())
-    return value_->GetFloatValue();
-
-  return value_->GetFloatValue() * 100;
 }
 
 float SVGLength::ScaleByPercentage(float input) const {

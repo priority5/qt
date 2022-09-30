@@ -10,10 +10,12 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/metrics/field_trial_params.h"
+#include "base/numerics/clamped_math.h"
+#include "base/numerics/ostream_operators.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -85,6 +87,9 @@ namespace disk_cache {
 
 const int kDefaultCacheSize = 80 * 1024 * 1024;
 
+const base::Feature kChangeDiskCacheSizeExperiment{
+    "ChangeDiskCacheSize", base::FEATURE_DISABLED_BY_DEFAULT};
+
 void DeleteCache(const base::FilePath& path, bool remove_folder) {
   if (remove_folder) {
     if (!base::DeletePathRecursively(path))
@@ -123,10 +128,10 @@ bool DelayedCacheCleanup(const base::FilePath& full_path) {
 
   base::FilePath path = current_path.DirName();
   base::FilePath name = current_path.BaseName();
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // We created this file so it should only contain ASCII.
   std::string name_str = base::WideToASCII(name.value());
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   std::string name_str = name.value();
 #endif
 
@@ -152,10 +157,47 @@ bool DelayedCacheCleanup(const base::FilePath& full_path) {
 // Returns the preferred maximum number of bytes for the cache given the
 // number of available bytes.
 int PreferredCacheSize(int64_t available, net::CacheType type) {
-  if (available < 0)
-    return kDefaultCacheSize;
+  // Percent of cache size to use, relative to the default size. "100" means to
+  // use 100% of the default size.
+  int percent_relative_size = 100;
 
-  int64_t preferred_cache_size = PreferredCacheSizeInternal(available);
+  if (base::FeatureList::IsEnabled(
+          disk_cache::kChangeDiskCacheSizeExperiment) &&
+      type == net::DISK_CACHE) {
+    percent_relative_size = base::GetFieldTrialParamByFeatureAsInt(
+        disk_cache::kChangeDiskCacheSizeExperiment, "percent_relative_size",
+        100 /* default value */);
+  }
+
+  // Cap scaling, as a safety check, to avoid overflow.
+  if (percent_relative_size > 400)
+    percent_relative_size = 400;
+  else if (percent_relative_size < 100)
+    percent_relative_size = 100;
+
+  base::ClampedNumeric<int64_t> scaled_default_disk_cache_size =
+      (base::ClampedNumeric<int64_t>(disk_cache::kDefaultCacheSize) *
+       percent_relative_size) /
+      100;
+
+  base::ClampedNumeric<int64_t> preferred_cache_size =
+      scaled_default_disk_cache_size;
+
+  // If available disk space is known, use it to compute a better value for
+  // preferred_cache_size.
+  if (available >= 0) {
+    preferred_cache_size = PreferredCacheSizeInternal(available);
+
+    // If the preferred cache size is less than 20% of the available space,
+    // scale for the field trial, capping the scaled value at 20% of the
+    // available space.
+    if (preferred_cache_size < available / 5) {
+      const base::ClampedNumeric<int64_t> clamped_available(available);
+      preferred_cache_size =
+          std::min((preferred_cache_size * percent_relative_size) / 100,
+                   clamped_available / 5);
+    }
+  }
 
   // Limit cache size to somewhat less than kint32max to avoid potential
   // integer overflows in cache backend implementations.
@@ -164,11 +206,14 @@ int PreferredCacheSize(int64_t available, net::CacheType type) {
   // from the blockfile backend with the following explanation:
   // "Let's not use more than the default size while we tune-up the performance
   // of bigger caches. "
-  int64_t size_limit = static_cast<int64_t>(kDefaultCacheSize) * 4;
+  base::ClampedNumeric<int64_t> size_limit = scaled_default_disk_cache_size * 4;
   // Native code entries can be large, so we would like a larger cache.
   // Make the size limit 50% larger in that case.
   if (type == net::GENERATED_NATIVE_CODE_CACHE) {
     size_limit = (size_limit / 2) * 3;
+  } else if (type == net::GENERATED_WEBUI_BYTE_CODE_CACHE) {
+    size_limit = std::min(
+        size_limit, base::ClampedNumeric<int64_t>(kMaxWebUICodeCacheSize));
   }
 
   DCHECK_LT(size_limit, std::numeric_limits<int32_t>::max());

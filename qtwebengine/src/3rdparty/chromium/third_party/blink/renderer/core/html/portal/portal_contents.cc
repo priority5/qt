@@ -5,10 +5,13 @@
 #include "third_party/blink/renderer/core/html/portal/portal_contents.h"
 
 #include "base/compiler_specific.h"
+#include "base/rand_util.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_id_helper.h"
 #include "third_party/blink/public/mojom/loader/referrer.mojom-blink.h"
 #include "third_party/blink/public/mojom/portal/portal.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/dom/increment_load_event_delay_count.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/frame/remote_frame.h"
 #include "third_party/blink/renderer/core/html/portal/document_portals.h"
@@ -20,7 +23,8 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/messaging/blink_transferable_message.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 namespace blink {
 
@@ -58,11 +62,15 @@ void PortalContents::Activate(BlinkTransferableMessage data,
   document_portals.SetActivatingPortalContents(this);
   activation_delegate_ = delegate;
 
+  uint64_t trace_id = base::trace_event::GetNextGlobalTraceId();
+  TRACE_EVENT_WITH_FLOW0("navigation", "PortalContents::Activate",
+                         TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+
   // Request activation from the browser process.
   // This object (and thus the Mojo connection it owns) remains alive while the
   // renderer awaits the response.
   remote_portal_->Activate(
-      std::move(data), base::TimeTicks::Now(),
+      std::move(data), base::TimeTicks::Now(), trace_id,
       WTF::Bind(&PortalContents::OnActivateResponse, WrapPersistent(this)));
 
   // Dissociate from the element. The element is expected to do the same.
@@ -81,7 +89,7 @@ void PortalContents::OnActivateResponse(
     case mojom::blink::PortalActivateResult::kPredecessorWasAdopted:
       if (auto* page = GetDocument().GetPage())
         page->SetInsidePortal(true);
-      FALLTHROUGH;
+      [[fallthrough]];
     case mojom::blink::PortalActivateResult::kPredecessorWillUnload:
       activation_delegate_->ActivationDidSucceed();
       should_destroy_contents = true;
@@ -167,7 +175,7 @@ void PortalContents::Destroy() {
     portal_element_->PortalContentsWillBeDestroyed(this);
     portal_element_ = nullptr;
   }
-  portal_token_ = base::nullopt;
+  portal_token_ = absl::nullopt;
   remote_portal_.reset();
   portal_client_receiver_.reset();
   DocumentPortals::From(GetDocument()).DeregisterPortalContents(this);

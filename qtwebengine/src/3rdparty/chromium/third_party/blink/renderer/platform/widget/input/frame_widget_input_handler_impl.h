@@ -40,10 +40,16 @@ class WidgetBase;
 class PLATFORM_EXPORT FrameWidgetInputHandlerImpl
     : public mojom::blink::FrameWidgetInputHandler {
  public:
+  // The `widget` and `frame_widget_input_handler` should be invalidated
+  // at the same time.
   FrameWidgetInputHandlerImpl(
       base::WeakPtr<WidgetBase> widget,
-      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
+      base::WeakPtr<mojom::blink::FrameWidgetInputHandler>
+          frame_widget_input_handler,
       scoped_refptr<MainThreadEventQueue> input_event_queue);
+  FrameWidgetInputHandlerImpl(const FrameWidgetInputHandlerImpl&) = delete;
+  FrameWidgetInputHandlerImpl& operator=(const FrameWidgetInputHandlerImpl&) =
+      delete;
   ~FrameWidgetInputHandlerImpl() override;
 
   void AddImeTextSpansToExistingText(
@@ -76,9 +82,12 @@ class PLATFORM_EXPORT FrameWidgetInputHandlerImpl
   void SelectAll() override;
   void CollapseSelection() override;
   void SelectRange(const gfx::Point& base, const gfx::Point& extent) override;
-#if defined(OS_ANDROID)
-  void SelectWordAroundCaret(SelectWordAroundCaretCallback callback) override;
-#endif  // defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
+  void SelectAroundCaret(mojom::blink::SelectionGranularity granularity,
+                         bool should_show_handle,
+                         bool should_show_context_menu,
+                         SelectAroundCaretCallback callback) override;
+#endif  // BUILDFLAG(IS_ANDROID)
   void AdjustSelectionByCharacterOffset(
       int32_t start,
       int32_t end,
@@ -112,17 +121,20 @@ class PLATFORM_EXPORT FrameWidgetInputHandlerImpl
   };
 
   void RunOnMainThread(base::OnceClosure closure);
-  static void ExecuteCommandOnMainThread(base::WeakPtr<WidgetBase> widget,
-                                         const char* command,
-                                         UpdateState state);
+  static void ExecuteCommandOnMainThread(
+      base::WeakPtr<WidgetBase> widget,
+      base::WeakPtr<mojom::blink::FrameWidgetInputHandler> handler,
+      const char* command,
+      UpdateState state);
 
-  // |widget_| should only be accessed on the main thread.
+  bool ThreadedCompositingEnabled() { return input_event_queue_ != nullptr; }
+
+  // These should only be accessed on the main thread.
   base::WeakPtr<WidgetBase> widget_;
+  base::WeakPtr<mojom::blink::FrameWidgetInputHandler>
+      main_thread_frame_widget_input_handler_;
 
   scoped_refptr<MainThreadEventQueue> input_event_queue_;
-  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameWidgetInputHandlerImpl);
 };
 
 }  // namespace blink

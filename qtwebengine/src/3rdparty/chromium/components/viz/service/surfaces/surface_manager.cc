@@ -11,11 +11,13 @@
 #include <utility>
 
 #include "base/containers/adapters.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/containers/queue.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/observer_list.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
+#include "base/trace_event/trace_event.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/surface_info.h"
 #include "components/viz/service/surfaces/surface.h"
@@ -30,15 +32,13 @@
 namespace viz {
 namespace {
 
-const char kUmaAliveSurfaces[] = "Compositing.SurfaceManager.AliveSurfaces";
-
-constexpr base::TimeDelta kExpireInterval = base::TimeDelta::FromSeconds(10);
+constexpr base::TimeDelta kExpireInterval = base::Seconds(10);
 
 }  // namespace
 
 SurfaceManager::SurfaceManager(
     SurfaceManagerDelegate* delegate,
-    base::Optional<uint32_t> activation_deadline_in_frames)
+    absl::optional<uint32_t> activation_deadline_in_frames)
     : delegate_(delegate),
       activation_deadline_in_frames_(activation_deadline_in_frames),
       root_surface_id_(FrameSinkId(0u, 0u),
@@ -86,7 +86,7 @@ std::string SurfaceManager::SurfaceReferencesToString() {
 #endif
 
 void SurfaceManager::SetActivationDeadlineInFramesForTesting(
-    base::Optional<uint32_t> activation_deadline_in_frames) {
+    absl::optional<uint32_t> activation_deadline_in_frames) {
   activation_deadline_in_frames_ = activation_deadline_in_frames;
 }
 
@@ -185,11 +185,6 @@ void SurfaceManager::GarbageCollectSurfaces() {
   }
 
   SurfaceIdSet reachable_surfaces = GetLiveSurfaces();
-
-  // Log the number of reachable surfaces after a garbage collection.
-  UMA_HISTOGRAM_CUSTOM_COUNTS(kUmaAliveSurfaces, reachable_surfaces.size(), 1,
-                              200, 50);
-
   std::vector<SurfaceId> surfaces_to_delete;
 
   // Delete all destroyed and unreachable surfaces.
@@ -457,10 +452,15 @@ void SurfaceManager::FirstSurfaceActivation(const SurfaceInfo& surface_info) {
 
 void SurfaceManager::SurfaceActivated(Surface* surface) {
   // Trigger a display frame if necessary.
-  const CompositorFrame& frame = surface->GetActiveFrame();
-  if (!SurfaceModified(surface->surface_id(), frame.metadata.begin_frame_ack)) {
+  const CompositorFrameMetadata& metadata = surface->GetActiveFrameMetadata();
+  if (!SurfaceModified(surface->surface_id(), metadata.begin_frame_ack)) {
     TRACE_EVENT_INSTANT0("viz", "Damage not visible.",
                          TRACE_EVENT_SCOPE_THREAD);
+    surface->SendAckToClient();
+  } else if (HasBlockedEmbedder(surface->surface_id().frame_sink_id())) {
+    // If the Surface is a part of a blocked embedding group, Ack even if it is
+    // modified. This will allow frame production to continue for this client
+    // leading to the group being unblocked.
     surface->SendAckToClient();
   }
 

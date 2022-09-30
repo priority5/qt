@@ -13,10 +13,10 @@ NGMathSpaceLayoutAlgorithm::NGMathSpaceLayoutAlgorithm(
     const NGLayoutAlgorithmParams& params)
     : NGLayoutAlgorithm(params) {
   DCHECK(params.fragment_geometry.scrollbar.IsEmpty());
-  container_builder_.SetIsNewFormattingContext(true);
+  DCHECK(params.space.IsNewFormattingContext());
 }
 
-scoped_refptr<const NGLayoutResult> NGMathSpaceLayoutAlgorithm::Layout() {
+const NGLayoutResult* NGMathSpaceLayoutAlgorithm::Layout() {
   DCHECK(!BreakToken());
 
   LayoutUnit intrinsic_block_size = BorderScrollbarPadding().BlockSum();
@@ -34,15 +34,14 @@ scoped_refptr<const NGLayoutResult> NGMathSpaceLayoutAlgorithm::Layout() {
 }
 
 MinMaxSizesResult NGMathSpaceLayoutAlgorithm::ComputeMinMaxSizes(
-    const MinMaxSizesInput&) const {
+    const MinMaxSizesFloatInput&) {
   if (auto result = CalculateMinMaxSizesIgnoringChildren(
           Node(), BorderScrollbarPadding()))
     return *result;
 
   MinMaxSizes sizes;
   sizes += BorderScrollbarPadding().InlineSum();
-
-  return {sizes, /* depends_on_percentage_block_size */ false};
+  return MinMaxSizesResult(sizes, /* depends_on_block_constraints */ false);
 }
 
 }  // namespace blink

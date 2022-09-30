@@ -1,5 +1,5 @@
 //
-// Copyright 2020 The ANGLE Project Authors. All rights reserved.
+// Copyright (c) 2020 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -13,7 +13,7 @@
 
 namespace rx
 {
-QueryMtl::QueryMtl(gl::QueryType type) : QueryImpl(type) {}
+QueryMtl::QueryMtl(gl::QueryType type) : QueryImpl(type), mTransformFeedbackPrimitivesDrawn(0) {}
 
 QueryMtl::~QueryMtl() {}
 
@@ -49,6 +49,9 @@ angle::Result QueryMtl::begin(const gl::Context *context)
 
             ANGLE_TRY(contextMtl->onOcclusionQueryBegin(context, this));
             break;
+        case gl::QueryType::TransformFeedbackPrimitivesWritten:
+            mTransformFeedbackPrimitivesDrawn = 0;
+            break;
         default:
             UNIMPLEMENTED();
             break;
@@ -64,6 +67,9 @@ angle::Result QueryMtl::end(const gl::Context *context)
         case gl::QueryType::AnySamples:
         case gl::QueryType::AnySamplesConservative:
             contextMtl->onOcclusionQueryEnd(context, this);
+            break;
+        case gl::QueryType::TransformFeedbackPrimitivesWritten:
+            onTransformFeedbackEnd(context);
             break;
         default:
             UNIMPLEMENTED();
@@ -90,7 +96,7 @@ angle::Result QueryMtl::waitAndGetResult(const gl::Context *context, T *params)
             ASSERT(mVisibilityResultBuffer);
             if (mVisibilityResultBuffer->hasPendingWorks(contextMtl))
             {
-                contextMtl->flushCommandBufer();
+                contextMtl->flushCommandBuffer(mtl::NoWait);
             }
             // map() will wait for the pending GPU works to finish
             const uint8_t *visibilityResultBytes = mVisibilityResultBuffer->mapReadOnly(contextMtl);
@@ -101,6 +107,9 @@ angle::Result QueryMtl::waitAndGetResult(const gl::Context *context, T *params)
             *params = queryResult ? GL_TRUE : GL_FALSE;
         }
         break;
+        case gl::QueryType::TransformFeedbackPrimitivesWritten:
+            *params = static_cast<T>(mTransformFeedbackPrimitivesDrawn);
+            break;
         default:
             UNIMPLEMENTED();
             break;
@@ -120,10 +129,13 @@ angle::Result QueryMtl::isResultAvailable(const gl::Context *context, bool *avai
             ASSERT(mVisibilityResultBuffer);
             if (mVisibilityResultBuffer->hasPendingWorks(contextMtl))
             {
-                contextMtl->flushCommandBufer();
+                contextMtl->flushCommandBuffer(mtl::NoWait);
             }
 
             *available = !mVisibilityResultBuffer->isBeingUsedByGPU(contextMtl);
+            break;
+        case gl::QueryType::TransformFeedbackPrimitivesWritten:
+            *available = true;
             break;
         default:
             UNIMPLEMENTED();
@@ -159,6 +171,15 @@ void QueryMtl::resetVisibilityResult(ContextMtl *contextMtl)
     blitEncoder->fillBuffer(mVisibilityResultBuffer, NSMakeRange(0, mtl::kOcclusionQueryResultSize),
                             0);
     mVisibilityResultBuffer->syncContent(contextMtl, blitEncoder);
+}
+
+void QueryMtl::onTransformFeedbackEnd(const gl::Context *context)
+{
+    gl::TransformFeedback *transformFeedback = context->getState().getCurrentTransformFeedback();
+    if (transformFeedback)
+    {
+        mTransformFeedbackPrimitivesDrawn += transformFeedback->getPrimitivesDrawn();
+    }
 }
 
 }

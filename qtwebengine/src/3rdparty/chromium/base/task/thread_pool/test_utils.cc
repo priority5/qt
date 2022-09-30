@@ -7,10 +7,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/task/thread_pool/pooled_parallel_task_runner.h"
 #include "base/task/thread_pool/pooled_sequenced_task_runner.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/threading/scoped_blocking_call_internal.h"
 #include "base/threading/thread_restrictions.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -31,18 +32,19 @@ class MockJobTaskRunner : public TaskRunner {
       : traits_(traits),
         pooled_task_runner_delegate_(pooled_task_runner_delegate) {}
 
+  MockJobTaskRunner(const MockJobTaskRunner&) = delete;
+  MockJobTaskRunner& operator=(const MockJobTaskRunner&) = delete;
+
   // TaskRunner:
   bool PostDelayedTask(const Location& from_here,
                        OnceClosure closure,
                        TimeDelta delay) override;
 
  private:
-  ~MockJobTaskRunner() override;
+  ~MockJobTaskRunner() override = default;
 
   const TaskTraits traits_;
-  PooledTaskRunnerDelegate* const pooled_task_runner_delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockJobTaskRunner);
+  const raw_ptr<PooledTaskRunnerDelegate> pooled_task_runner_delegate_;
 };
 
 bool MockJobTaskRunner::PostDelayedTask(const Location& from_here,
@@ -50,8 +52,10 @@ bool MockJobTaskRunner::PostDelayedTask(const Location& from_here,
                                         TimeDelta delay) {
   DCHECK_EQ(delay, TimeDelta());  // Jobs doesn't support delayed tasks.
 
-  if (!PooledTaskRunnerDelegate::Exists())
+  if (!PooledTaskRunnerDelegate::MatchesCurrentDelegate(
+          pooled_task_runner_delegate_)) {
     return false;
+  }
 
   auto job_task = base::MakeRefCounted<MockJobTask>(std::move(closure));
   scoped_refptr<JobTaskSource> task_source = job_task->GetJobTaskSource(
@@ -59,8 +63,6 @@ bool MockJobTaskRunner::PostDelayedTask(const Location& from_here,
   return pooled_task_runner_delegate_->EnqueueJobTaskSource(
       std::move(task_source));
 }
-
-MockJobTaskRunner::~MockJobTaskRunner() = default;
 
 scoped_refptr<TaskRunner> CreateJobTaskRunner(
     const TaskTraits& traits,
@@ -203,9 +205,8 @@ void MockPooledTaskRunnerDelegate::PostTaskWithSequenceNow(
   }
 }
 
-bool MockPooledTaskRunnerDelegate::ShouldYield(
-    const TaskSource* task_source) const {
-  return thread_group_->ShouldYield(task_source->GetSortKey());
+bool MockPooledTaskRunnerDelegate::ShouldYield(const TaskSource* task_source) {
+  return thread_group_->ShouldYield(task_source->GetSortKey(false));
 }
 
 bool MockPooledTaskRunnerDelegate::EnqueueJobTaskSource(
@@ -236,6 +237,12 @@ void MockPooledTaskRunnerDelegate::UpdatePriority(
   auto transaction = task_source->BeginTransaction();
   transaction.UpdatePriority(priority);
   thread_group_->UpdateSortKey(std::move(transaction));
+}
+
+void MockPooledTaskRunnerDelegate::UpdateJobPriority(
+    scoped_refptr<TaskSource> task_source,
+    TaskPriority priority) {
+  UpdatePriority(std::move(task_source), priority);
 }
 
 void MockPooledTaskRunnerDelegate::SetThreadGroup(ThreadGroup* thread_group) {

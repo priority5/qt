@@ -11,17 +11,14 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_fragment_items_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_logical_line_item.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_test.h"
 
 using testing::ElementsAre;
 
 namespace blink {
 
-class NGFragmentItemsBuilderTest : public NGLayoutTest,
-                                   ScopedLayoutNGFragmentItemForTest {
- public:
-  NGFragmentItemsBuilderTest() : ScopedLayoutNGFragmentItemForTest(true) {}
-};
+class NGFragmentItemsBuilderTest : public NGLayoutTest {};
 
 TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
   SetBodyInnerHTML(R"HTML(
@@ -43,7 +40,8 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
       cursor.Current()->LineBoxFragment();
 
   NGInlineNode inline_node(container);
-  NGLogicalLineItems line_items_pool;
+  NGLogicalLineItems* line_items_pool =
+      MakeGarbageCollected<NGLogicalLineItems>();
   {
     // First test emulates what |NGBlockLayoutAlgorithm| does, which loops
     // following calls for each line:
@@ -52,7 +50,7 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
     // 3. |AddLine|.
     NGFragmentItemsBuilder items_builder(
         inline_node, {WritingMode::kHorizontalTb, TextDirection::kLtr});
-    items_builder.AddLogicalLineItemsPool(&line_items_pool);
+    items_builder.AddLogicalLineItemsPool(line_items_pool);
     NGLogicalLineItems* line_items1 = items_builder.AcquireLogicalLineItems();
     items_builder.AssociateLogicalLineItems(line_items1, *line_fragment1);
     items_builder.AddLine(*line_fragment1, LogicalOffset());
@@ -61,7 +59,7 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
     items_builder.AddLine(*line_fragment2, LogicalOffset());
 
     // In this case, we should reuse one |NGLogicalLineItems| instance.
-    EXPECT_EQ(line_items1, &line_items_pool);
+    EXPECT_EQ(line_items1, line_items_pool);
     EXPECT_EQ(line_items1, line_items2);
 
     const auto& items = items_builder.Items(PhysicalSize());
@@ -75,7 +73,7 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
     // box.
     NGFragmentItemsBuilder items_builder(
         inline_node, {WritingMode::kHorizontalTb, TextDirection::kLtr});
-    items_builder.AddLogicalLineItemsPool(&line_items_pool);
+    items_builder.AddLogicalLineItemsPool(line_items_pool);
     NGLogicalLineItems* line_items1 = items_builder.AcquireLogicalLineItems();
     items_builder.AssociateLogicalLineItems(line_items1, *line_fragment1);
     NGLogicalLineItems* line_items2 = items_builder.AcquireLogicalLineItems();
@@ -83,7 +81,7 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
 
     // Because |AcquireLogicalLineItems| without |AddLine|, new instances should
     // be allocated for line 2.
-    EXPECT_EQ(line_items1, &line_items_pool);
+    EXPECT_EQ(line_items1, line_items_pool);
     EXPECT_NE(line_items1, line_items2);
 
     items_builder.AddLine(*line_fragment1, LogicalOffset());
@@ -98,7 +96,7 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
     // to the container box in the reverse order.
     NGFragmentItemsBuilder items_builder(
         inline_node, {WritingMode::kHorizontalTb, TextDirection::kLtr});
-    items_builder.AddLogicalLineItemsPool(&line_items_pool);
+    items_builder.AddLogicalLineItemsPool(line_items_pool);
     NGLogicalLineItems* line_items1 = items_builder.AcquireLogicalLineItems();
     items_builder.AssociateLogicalLineItems(line_items1, *line_fragment1);
     NGLogicalLineItems* line_items2 = items_builder.AcquireLogicalLineItems();
@@ -106,7 +104,7 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
 
     // Because |AcquireLogicalLineItems| without |AddLine|, new instances should
     // be allocated for line 2.
-    EXPECT_EQ(line_items1, &line_items_pool);
+    EXPECT_EQ(line_items1, line_items_pool);
     EXPECT_NE(line_items1, line_items2);
 
     // Add lines in the reverse order.
@@ -121,7 +119,7 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
     // Custom layout may not add all line boxes.
     NGFragmentItemsBuilder items_builder(
         inline_node, {WritingMode::kHorizontalTb, TextDirection::kLtr});
-    items_builder.AddLogicalLineItemsPool(&line_items_pool);
+    items_builder.AddLogicalLineItemsPool(line_items_pool);
     NGLogicalLineItems* line_items1 = items_builder.AcquireLogicalLineItems();
     items_builder.AssociateLogicalLineItems(line_items1, *line_fragment1);
     NGLogicalLineItems* line_items2 = items_builder.AcquireLogicalLineItems();
@@ -129,7 +127,7 @@ TEST_F(NGFragmentItemsBuilderTest, MultipleLogicalLineItems) {
 
     // Because |AcquireLogicalLineItems| without |AddLine|, new instances should
     // be allocated for line 2.
-    EXPECT_EQ(line_items1, &line_items_pool);
+    EXPECT_EQ(line_items1, line_items_pool);
     EXPECT_NE(line_items1, line_items2);
 
     // Add line2, but not line1.

@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -30,6 +29,17 @@
 namespace network_hints {
 namespace {
 
+// Preconnects can be received from the renderer before commit messages, so
+// need to use the key from the pending navigation, and not the committed
+// navigation, unlike other consumers. This does mean on navigating away from a
+// site, preconnect is more likely to incorrectly use the NetworkIsolationKey of
+// the previous commit.
+net::NetworkIsolationKey GetPendingNetworkIsolationKey(
+    content::RenderFrameHost* render_frame_host) {
+  return render_frame_host->GetPendingIsolationInfoForSubresources()
+      .network_isolation_key();
+}
+
 const int kDefaultPort = 80;
 
 // This class contains a std::unique_ptr of itself, it is passed in through
@@ -44,6 +54,9 @@ class DnsLookupRequest : public network::ResolveHostClientBase {
         render_frame_id_(render_frame_id),
         hostname_(hostname) {}
 
+  DnsLookupRequest(const DnsLookupRequest&) = delete;
+  DnsLookupRequest& operator=(const DnsLookupRequest&) = delete;
+
   // Return underlying network resolver status.
   // net::OK ==> Host was found synchronously.
   // net:ERR_IO_PENDING ==> Network will callback later with result.
@@ -55,7 +68,7 @@ class DnsLookupRequest : public network::ResolveHostClientBase {
         content::RenderFrameHost::FromID(render_process_id_, render_frame_id_);
     if (!render_frame_host) {
       OnComplete(net::ERR_NAME_NOT_RESOLVED,
-                 net::ResolveErrorInfo(net::ERR_FAILED), base::nullopt);
+                 net::ResolveErrorInfo(net::ERR_FAILED), absl::nullopt);
       return;
     }
 
@@ -73,13 +86,13 @@ class DnsLookupRequest : public network::ResolveHostClientBase {
         ->GetStoragePartition()
         ->GetNetworkContext()
         ->ResolveHost(host_port_pair,
-                      render_frame_host->GetNetworkIsolationKey(),
+                      GetPendingNetworkIsolationKey(render_frame_host),
                       std::move(resolve_host_parameters),
                       receiver_.BindNewPipeAndPassRemote());
     receiver_.set_disconnect_handler(
         base::BindOnce(&DnsLookupRequest::OnComplete, base::Unretained(this),
                        net::ERR_NAME_NOT_RESOLVED,
-                       net::ResolveErrorInfo(net::ERR_FAILED), base::nullopt));
+                       net::ResolveErrorInfo(net::ERR_FAILED), absl::nullopt));
   }
 
  private:
@@ -87,7 +100,7 @@ class DnsLookupRequest : public network::ResolveHostClientBase {
   void OnComplete(
       int result,
       const net::ResolveErrorInfo& resolve_error_info,
-      const base::Optional<net::AddressList>& resolved_addresses) override {
+      const absl::optional<net::AddressList>& resolved_addresses) override {
     VLOG(2) << __FUNCTION__ << ": " << hostname_
             << ", result=" << resolve_error_info.error;
     request_.reset();
@@ -98,8 +111,6 @@ class DnsLookupRequest : public network::ResolveHostClientBase {
   const int render_frame_id_;
   const std::string hostname_;
   std::unique_ptr<DnsLookupRequest> request_;
-
-  DISALLOW_COPY_AND_ASSIGN(DnsLookupRequest);
 };
 
 }  // namespace

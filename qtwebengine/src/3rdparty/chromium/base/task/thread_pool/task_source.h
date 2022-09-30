@@ -8,13 +8,11 @@
 #include <stddef.h>
 
 #include "base/base_export.h"
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/containers/intrusive_heap.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/sequence_token.h"
 #include "base/task/common/checked_lock.h"
-#include "base/task/common/intrusive_heap.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool/task.h"
 #include "base/task/thread_pool/task_source_sort_key.h"
@@ -101,6 +99,8 @@ class BASE_EXPORT TaskSource : public RefCountedThreadSafe<TaskSource> {
   class BASE_EXPORT Transaction {
    public:
     Transaction(Transaction&& other);
+    Transaction(const Transaction&) = delete;
+    Transaction& operator=(const Transaction&) = delete;
     ~Transaction();
 
     operator bool() const { return !!task_source_; }
@@ -120,8 +120,6 @@ class BASE_EXPORT TaskSource : public RefCountedThreadSafe<TaskSource> {
     friend class TaskSource;
 
     TaskSource* task_source_;
-
-    DISALLOW_COPY_AND_ASSIGN(Transaction);
   };
 
   // |traits| is metadata that applies to all Tasks in the TaskSource.
@@ -132,10 +130,12 @@ class BASE_EXPORT TaskSource : public RefCountedThreadSafe<TaskSource> {
   TaskSource(const TaskTraits& traits,
              TaskRunner* task_runner,
              TaskSourceExecutionMode execution_mode);
+  TaskSource(const TaskSource&) = delete;
+  TaskSource& operator=(const TaskSource&) = delete;
 
   // Begins a Transaction. This method cannot be called on a thread which has an
   // active TaskSource::Transaction.
-  Transaction BeginTransaction() WARN_UNUSED_RESULT;
+  [[nodiscard]] Transaction BeginTransaction();
 
   virtual ExecutionEnvironment GetExecutionEnvironment() = 0;
 
@@ -145,7 +145,7 @@ class BASE_EXPORT TaskSource : public RefCountedThreadSafe<TaskSource> {
   virtual size_t GetRemainingConcurrency() const = 0;
 
   // Returns a TaskSourceSortKey representing the priority of the TaskSource.
-  virtual TaskSourceSortKey GetSortKey() const = 0;
+  virtual TaskSourceSortKey GetSortKey(bool disable_fair_scheduling) const = 0;
 
   // Support for IntrusiveHeap.
   void SetHeapHandle(const HeapHandle& handle);
@@ -216,11 +216,9 @@ class BASE_EXPORT TaskSource : public RefCountedThreadSafe<TaskSource> {
   // derived class is responsible for calling AddRef() when a TaskSource from
   // which no Task is executing becomes non-empty and Release() when
   // it becomes empty again (e.g. when DidProcessTask() returns false).
-  TaskRunner* task_runner_;
+  raw_ptr<TaskRunner> task_runner_;
 
   TaskSourceExecutionMode execution_mode_;
-
-  DISALLOW_COPY_AND_ASSIGN(TaskSource);
 };
 
 // Wrapper around TaskSource to signify the intent to queue and run it.
@@ -234,6 +232,8 @@ class BASE_EXPORT RegisteredTaskSource {
   RegisteredTaskSource();
   RegisteredTaskSource(std::nullptr_t);
   RegisteredTaskSource(RegisteredTaskSource&& other) noexcept;
+  RegisteredTaskSource(const RegisteredTaskSource&) = delete;
+  RegisteredTaskSource& operator=(const RegisteredTaskSource&) = delete;
   ~RegisteredTaskSource();
 
   RegisteredTaskSource& operator=(RegisteredTaskSource&& other);
@@ -261,8 +261,7 @@ class BASE_EXPORT RegisteredTaskSource {
   // only after WillRunTask() returned RunStatus::kAllowed*. |transaction| is
   // optional and should only be provided if this operation is already part of
   // a transaction.
-  Task TakeTask(TaskSource::Transaction* transaction = nullptr)
-      WARN_UNUSED_RESULT;
+  [[nodiscard]] Task TakeTask(TaskSource::Transaction* transaction = nullptr);
 
   // Must be called after WillRunTask() or once the task was run if TakeTask()
   // was called. This resets this RegisteredTaskSource to its initial state so
@@ -274,7 +273,7 @@ class BASE_EXPORT RegisteredTaskSource {
   // Returns a task that clears this TaskSource to make it empty. |transaction|
   // is optional and should only be provided if this operation is already part
   // of a transaction.
-  Task Clear(TaskSource::Transaction* transaction = nullptr) WARN_UNUSED_RESULT;
+  [[nodiscard]] Task Clear(TaskSource::Transaction* transaction = nullptr);
 
  private:
   friend class TaskTracker;
@@ -293,8 +292,6 @@ class BASE_EXPORT RegisteredTaskSource {
 
   scoped_refptr<TaskSource> task_source_;
   TaskTracker* task_tracker_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(RegisteredTaskSource);
 };
 
 // A pair of Transaction and RegisteredTaskSource. Useful to carry a
@@ -307,6 +304,10 @@ struct BASE_EXPORT TransactionWithRegisteredTaskSource {
 
   TransactionWithRegisteredTaskSource(
       TransactionWithRegisteredTaskSource&& other) = default;
+  TransactionWithRegisteredTaskSource(
+      const TransactionWithRegisteredTaskSource&) = delete;
+  TransactionWithRegisteredTaskSource& operator=(
+      const TransactionWithRegisteredTaskSource&) = delete;
   ~TransactionWithRegisteredTaskSource() = default;
 
   static TransactionWithRegisteredTaskSource FromTaskSource(
@@ -314,8 +315,6 @@ struct BASE_EXPORT TransactionWithRegisteredTaskSource {
 
   RegisteredTaskSource task_source;
   TaskSource::Transaction transaction;
-
-  DISALLOW_COPY_AND_ASSIGN(TransactionWithRegisteredTaskSource);
 };
 
 }  // namespace internal

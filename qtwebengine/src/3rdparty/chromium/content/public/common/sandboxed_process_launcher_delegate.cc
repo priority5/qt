@@ -9,7 +9,7 @@
 
 namespace content {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 bool SandboxedProcessLauncherDelegate::DisableDefaultPolicy() {
   return false;
 }
@@ -30,7 +30,15 @@ void SandboxedProcessLauncherDelegate::PostSpawnTarget(
 bool SandboxedProcessLauncherDelegate::ShouldLaunchElevated() {
   return false;
 }
-#endif  // defined(OS_WIN)
+
+bool SandboxedProcessLauncherDelegate::ShouldUnsandboxedRunInJob() {
+  return false;
+}
+
+bool SandboxedProcessLauncherDelegate::CetCompatible() {
+  return true;
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
 ZygoteHandle SandboxedProcessLauncherDelegate::GetZygote() {
@@ -40,24 +48,22 @@ ZygoteHandle SandboxedProcessLauncherDelegate::GetZygote() {
 }
 #endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 base::EnvironmentMap SandboxedProcessLauncherDelegate::GetEnvironment() {
   return base::EnvironmentMap();
 }
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 
 bool SandboxedProcessLauncherDelegate::DisclaimResponsibility() {
   return false;
 }
 
-#if defined(ARCH_CPU_ARM64)
-bool SandboxedProcessLauncherDelegate::LaunchX86_64() {
+bool SandboxedProcessLauncherDelegate::EnableCpuSecurityMitigations() {
   return false;
 }
-#endif  // ARCH_CPU_ARM64
 
-#endif  // OS_MAC
+#endif  // BUILDFLAG(IS_MAC)
 
 }  // namespace content

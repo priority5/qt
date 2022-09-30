@@ -117,7 +117,10 @@ void ParagraphBuilderImpl::addPlaceholder(const PlaceholderStyle& placeholderSty
 }
 
 void ParagraphBuilderImpl::addPlaceholder(const PlaceholderStyle& placeholderStyle, bool lastOne) {
-    this->endRunIfNeeded();
+    if (!fUtf8.isEmpty() && !lastOne) {
+        // We keep the very last text style
+        this->endRunIfNeeded();
+    }
 
     BlockRange stylesBefore(fPlaceholders.empty() ? 0 : fPlaceholders.back().fBlocksBefore.end + 1,
                             fStyledBlocks.size());
@@ -126,7 +129,7 @@ void ParagraphBuilderImpl::addPlaceholder(const PlaceholderStyle& placeholderSty
     auto start = fUtf8.size();
     auto topStyle = fTextStyles.top();
     if (!lastOne) {
-        pushStyle(TextStyle(topStyle, true));
+        pushStyle(topStyle.cloneForPlaceholder());
         addText(std::u16string(1ull, 0xFFFC));
         pop();
     }
@@ -155,7 +158,17 @@ std::unique_ptr<Paragraph> ParagraphBuilderImpl::Build() {
     // Add one fake placeholder with the rest of the text
     addPlaceholder(PlaceholderStyle(), true);
     return std::make_unique<ParagraphImpl>(
-            fUtf8, fParagraphStyle, fStyledBlocks, fPlaceholders, fFontCollection, std::move(fUnicode));
+            fUtf8, fParagraphStyle, fStyledBlocks, fPlaceholders, fFontCollection, fUnicode);
+}
+
+void ParagraphBuilderImpl::Reset() {
+    std::stack<TextStyle> text_styles;
+    fTextStyles.swap(text_styles);
+    fUtf8.reset();
+    fStyledBlocks.reset();
+    fPlaceholders.reset();
+
+    this->setParagraphStyle(fParagraphStyle);
 }
 
 }  // namespace textlayout

@@ -21,9 +21,13 @@ constexpr int kLaps = 5000;
 constexpr int kWarmupLaps = 5;
 constexpr char kMetricCallsPerSecondRunsPerS[] = "calls_per_second";
 
-class AXPositionPerfTest : public testing::Test, public TestAXTreeManager {
+class AXPositionPerfTest : public ::testing::Test, public TestAXTreeManager {
  public:
   AXPositionPerfTest() = default;
+
+  AXPositionPerfTest(const AXPositionPerfTest&) = delete;
+  AXPositionPerfTest& operator=(const AXPositionPerfTest&) = delete;
+
   ~AXPositionPerfTest() override = default;
 
  protected:
@@ -34,9 +38,6 @@ class AXPositionPerfTest : public testing::Test, public TestAXTreeManager {
     reporter.RegisterImportantMetric(kMetricCallsPerSecondRunsPerS, "runs/s");
     return reporter;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AXPositionPerfTest);
 };
 
 void AXPositionPerfTest::SetUp() {
@@ -68,7 +69,7 @@ void AXPositionPerfTest::SetUp() {
   constexpr int kStaticTextNodesStartIndex =
       kGroupNodesStartIndex + kNumberOfGroups;
 
-  AXNode::AXID current_id = 0;
+  AXNodeID current_id = 0;
   std::vector<AXNodeData> nodes;
   nodes.resize(1 + kNumberOfGroups + kNumberOfStaticTextNodes);
 

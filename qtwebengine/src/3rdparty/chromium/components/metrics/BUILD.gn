@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
+import("//build/config/features.gni")
 import("//build/config/jumbo.gni")
 import("//testing/test.gni")
 
@@ -9,7 +11,7 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
-static_library("demographic_metrics_provider") {
+jumbo_static_library("demographic_metrics_provider") {
   sources = [
     "demographic_metrics_provider.cc",
     "demographic_metrics_provider.h",
@@ -65,12 +67,16 @@ jumbo_static_library("metrics") {
     "field_trials_provider.h",
     "file_metrics_provider.cc",
     "file_metrics_provider.h",
+    "form_factor_metrics_provider.cc",
+    "form_factor_metrics_provider.h",
     "histogram_encoder.cc",
     "histogram_encoder.h",
     "log_decoder.cc",
     "log_decoder.h",
     "log_store.h",
     "machine_id_provider.h",
+    "metrics_data_validation.cc",
+    "metrics_data_validation.h",
     "metrics_log.cc",
     "metrics_log.h",
     "metrics_log_manager.cc",
@@ -108,6 +114,8 @@ jumbo_static_library("metrics") {
     "persistent_system_profile.h",
     "reporting_service.cc",
     "reporting_service.h",
+    "sampling_metrics_provider.cc",
+    "sampling_metrics_provider.h",
     "stability_metrics_helper.cc",
     "stability_metrics_helper.h",
     "stability_metrics_provider.cc",
@@ -138,14 +146,21 @@ jumbo_static_library("metrics") {
     "//build:chromeos_buildflags",
     "//components/prefs",
     "//components/variations",
+    "//components/variations/field_trial_config",
+    "//components/variations/service:constants",
     "//components/version_info:version_info",
     "//crypto",
     "//extensions/buildflags",
+    "//third_party/icu",
+    "//ui/base",
     "//url",
   ]
 
-  if (is_chromeos) {
-    deps += [ ":serialization" ]
+  if (is_chromeos_ash) {
+    deps += [
+      ":serialization",
+      "//components/metrics/structured:neutrino_logging",
+    ]
   }
 
   if (is_android) {
@@ -153,12 +168,17 @@ jumbo_static_library("metrics") {
   }
 
   if (is_ios) {
-    sources += [ "drive_metrics_provider_ios.mm" ]
+    sources += [
+      "clean_exit_beacon_ios.mm",
+      "drive_metrics_provider_ios.mm",
+    ]
   }
 
   if (is_linux || is_chromeos) {
     sources += [
       "drive_metrics_provider_linux.cc",
+      "psi_memory_parser.h",
+      "psi_memory_parser_linux.cc",
       "system_memory_stats_recorder_linux.cc",
     ]
   }
@@ -190,6 +210,10 @@ jumbo_static_library("metrics") {
   if (is_fuchsia) {
     sources += [ "drive_metrics_provider_fuchsia.cc" ]
   }
+
+  if (use_qt) {
+    deps -= [ "//components/variations/field_trial_config" ]
+  }
 }
 
 if (is_android) {
@@ -201,10 +225,20 @@ if (is_android) {
         "//components/metrics/android/java_templates/MetricsSwitches.java.tmpl"
   }
 
+  java_cpp_enum("java_enum_srcjar") {
+    # External code should depend on ":metrics_java" instead.
+    visibility = [ ":*" ]
+    sources = [ "stability_metrics_helper.h" ]
+  }
+
   android_library("metrics_java") {
     # Right now, this only includes the Java switches. But if we need more Java
     # files, they should be added here as necessary.
-    srcjar_deps = [ ":java_switches_srcjar" ]
+    srcjar_deps = [
+      ":java_enum_srcjar",
+      ":java_switches_srcjar",
+    ]
+    deps = [ "//third_party/androidx:androidx_annotation_annotation_java" ]
   }
 }
 
@@ -229,6 +263,9 @@ static_library("component_metrics") {
 if (!is_ios) {
   static_library("content") {
     sources = [
+      # ChromeOS accessibility metrics provider is in chromeos_metrics_provider.
+      "content/accessibility_metrics_provider.cc",
+      "content/accessibility_metrics_provider.h",
       "content/content_stability_metrics_provider.cc",
       "content/content_stability_metrics_provider.h",
       "content/extensions_helper.h",
@@ -279,11 +316,13 @@ jumbo_static_library("net") {
 
   deps = [
     "//base",
+    "//build:chromeos_buildflags",
     "//components/encrypted_messages:encrypted_message_proto",
     "//components/encrypted_messages:encrypted_messages",
     "//components/variations",
     "//net",
-    "//services/network/public/cpp:cpp",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
     "//third_party/metrics_proto",
     "//third_party/zlib/google:compression_utils",
     "//url",
@@ -398,26 +437,6 @@ jumbo_static_library("test_support") {
   deps = [ "//base" ]
 }
 
-static_library("demographics_test_support") {
-  testonly = true
-  sources = [
-    "test/demographic_metrics_test_utils.cc",
-    "test/demographic_metrics_test_utils.h",
-  ]
-
-  deps = [
-    ":metrics",
-    "//base",
-    "//components/network_time",
-    "//components/prefs",
-    "//components/sync",
-    "//components/sync/base",
-    "//components/sync/test/fake_server",
-    "//third_party/metrics_proto",
-    "//third_party/zlib/google:compression_utils",
-  ]
-}
-
 if (is_linux || is_chromeos) {
   static_library("serialization") {
     sources = [
@@ -438,12 +457,12 @@ source_set("unit_tests") {
     "call_stack_profile_metadata_unittest.cc",
     "call_stack_profile_metrics_provider_unittest.cc",
     "child_call_stack_profile_collector_unittest.cc",
+    "clean_exit_beacon_unittest.cc",
     "cloned_install_detector_unittest.cc",
     "component_metrics_provider_unittest.cc",
     "daily_event_unittest.cc",
     "data_use_tracker_unittest.cc",
     "date_changed_helper_unittest.cc",
-    "demographic_metrics_provider_unittest.cc",
     "drive_metrics_provider_unittest.cc",
     "entropy_state_provider_unittest.cc",
     "entropy_state_unittest.cc",
@@ -451,9 +470,11 @@ source_set("unit_tests") {
     "expired_histograms_checker_unittest.cc",
     "field_trials_provider_unittest.cc",
     "file_metrics_provider_unittest.cc",
+    "form_factor_metrics_provider_unittest.cc",
     "histogram_encoder_unittest.cc",
     "library_support/histogram_manager_unittest.cc",
     "log_decoder_unittest.cc",
+    "metrics_data_validation_unittest.cc",
     "metrics_log_manager_unittest.cc",
     "metrics_log_store_unittest.cc",
     "metrics_log_unittest.cc",
@@ -475,27 +496,36 @@ source_set("unit_tests") {
   deps = [
     ":call_stack_profile_builder",
     ":component_metrics",
-    ":demographic_metrics_provider",
     ":library_support",
     ":metrics",
     ":net",
     ":single_sample_metrics",
     ":test_support",
     ":ui",
+    "//base",
+    "//base:base_stack_sampling_profiler_test_util",
     "//base/test:test_support",
     "//build:chromeos_buildflags",
     "//components/component_updater:test_support",
     "//components/encrypted_messages:encrypted_message_proto",
+    "//components/network_time:network_time_test_support",
     "//components/prefs:test_support",
     "//components/sync/base",
     "//components/sync/driver:test_support",
     "//components/variations",
+    "//components/variations:test_support",
+    "//components/variations/service:constants",
+
+    # TODO(crbug.com/1241702): Clean up version_info when the Variations Safe
+    # Mode experiment is over.
+    "//components/version_info",
     "//extensions/buildflags",
     "//mojo/public/cpp/bindings",
     "//net:test_support",
     "//services/network:test_support",
     "//services/network/public/cpp:cpp",
     "//services/service_manager/public/cpp",
+    "//testing/gmock",
     "//testing/gtest",
     "//third_party/metrics_proto",
     "//third_party/zlib/google:compression_utils",
@@ -512,11 +542,14 @@ source_set("unit_tests") {
   }
 
   if (is_linux || is_chromeos) {
-    sources += [ "serialization/serialization_utils_unittest.cc" ]
+    sources += [
+      "psi_memory_parser_linux_unittest.cc",
+      "serialization/serialization_utils_unittest.cc",
+    ]
     deps += [ ":serialization" ]
   }
 
-  if (is_chromeos) {
+  if (is_chromeos_ash) {
     deps += [
       "//chromeos/dbus:test_support",
       "//chromeos/network:test_support",
@@ -546,6 +579,7 @@ test("metrics_unittests") {
   sources = [ "//components/test/run_all_unittests.cc" ]
   deps = [
     ":unit_tests",
+    "//components/metrics/demographics:unit_tests",
     "//components/test:test_support",
   ]
 }

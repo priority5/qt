@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Charts module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 #include "mainwidget.h"
 #include "customslice.h"
 #include "pentool.h"
@@ -41,7 +15,7 @@
 #include <QtCharts/QChartView>
 #include <QtCharts/QPieSeries>
 
-QT_CHARTS_USE_NAMESPACE
+QT_USE_NAMESPACE
 
 MainWidget::MainWidget(QWidget *parent)
     : QWidget(parent),
@@ -81,7 +55,7 @@ MainWidget::MainWidget(QWidget *parent)
 
     m_legendCheckBox = new QCheckBox();
 
-    QScrollArea *settingsScrollBar = new QScrollArea();
+    settingsScrollBar = new QScrollArea();
     QWidget *settingsContentWidget = new QWidget();
 
     QFormLayout *chartSettingsLayout = new QFormLayout(settingsContentWidget);
@@ -92,7 +66,7 @@ MainWidget::MainWidget(QWidget *parent)
     QGroupBox *chartSettings = new QGroupBox("Chart");
     chartSettings->setLayout(chartSettingsLayout);
 
-    connect(m_themeComboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+    connect(m_themeComboBox, &QComboBox::currentIndexChanged,
             this, &MainWidget::updateChartSettings);
     connect(m_aaCheckBox, &QCheckBox::toggled, this, &MainWidget::updateChartSettings);
     connect(m_animationsCheckBox, &QCheckBox::toggled, this, &MainWidget::updateChartSettings);
@@ -212,6 +186,7 @@ MainWidget::MainWidget(QWidget *parent)
     sliceSettingsLayout->addRow("Explode distance", m_sliceExplodedFactor);
     QGroupBox *sliceSettings = new QGroupBox("Selected slice");
     sliceSettings->setLayout(sliceSettingsLayout);
+    sliceSettings->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
     connect(m_sliceName, &QLineEdit::textChanged, this, &MainWidget::updateSliceSettings);
     connect(m_sliceValue,
@@ -226,15 +201,12 @@ MainWidget::MainWidget(QWidget *parent)
     connect(m_labelBrushTool, &BrushTool::changed, this, &MainWidget::updateSliceSettings);
     connect(m_sliceLabelVisible, &QCheckBox::toggled, this, &MainWidget::updateSliceSettings);
     connect(m_sliceLabelVisible, &QCheckBox::toggled, this, &MainWidget::updateSliceSettings);
-    connect(m_sliceLabelArmFactor,
-            static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+    connect(m_sliceLabelArmFactor, &QDoubleSpinBox::valueChanged,
             this, &MainWidget::updateSliceSettings);
     connect(m_sliceExploded, &QCheckBox::toggled, this, &MainWidget::updateSliceSettings);
-    connect(m_sliceExplodedFactor,
-            static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+    connect(m_sliceExplodedFactor, &QDoubleSpinBox::valueChanged,
             this, &MainWidget::updateSliceSettings);
-    connect(m_labelPosition,
-            static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+    connect(m_labelPosition, &QComboBox::currentIndexChanged,
             this, &MainWidget::updateSliceSettings);
 
     // create chart view
@@ -247,12 +219,16 @@ MainWidget::MainWidget(QWidget *parent)
     settingsLayout->addWidget(sliceSettings);
 
     settingsContentWidget->setLayout(settingsLayout);
-    settingsScrollBar->setWidget(settingsContentWidget);
-    settingsScrollBar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 
-    QGridLayout *baseLayout = new QGridLayout();
+    settingsScrollBar->setWidget(settingsContentWidget);
+    settingsScrollBar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);    
+    settingsScrollBar->setWidgetResizable(true);
+    settingsScrollBar->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+    m_chartView->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Preferred);
+
+    baseLayout = new QGridLayout();
     baseLayout->addWidget(settingsScrollBar, 0, 0);
-    baseLayout->addWidget(m_chartView, 0, 1);
+    baseLayout->addWidget(m_chartView, 1, 0);
     setLayout(baseLayout);
 
     updateSerieSettings();
@@ -395,5 +371,33 @@ void MainWidget::removeSlice()
     m_series->remove(m_slice);
     m_slice = 0;
 }
+
+void MainWidget::resizeEvent(QResizeEvent *e)
+{
+    if (width() == 0 || height() == 0)
+        return;
+
+    const double aspectRatio = double(width()) / double(height());
+
+    if ((aspectRatio < 1.0) && (oldAspectRatio > 1.0)) {
+        baseLayout->removeWidget(m_chartView);
+        baseLayout->removeWidget(settingsScrollBar);
+
+        baseLayout->addWidget(m_chartView, 0, 0);
+        baseLayout->addWidget(settingsScrollBar, 1, 0);
+
+        oldAspectRatio = aspectRatio;
+    }
+    else if ((aspectRatio > 1.0) && (oldAspectRatio < 1.0)) {
+        baseLayout->removeWidget(m_chartView);
+        baseLayout->removeWidget(settingsScrollBar);
+
+        baseLayout->addWidget(m_chartView, 0, 0);
+        baseLayout->addWidget(settingsScrollBar, 0, 1);
+
+        oldAspectRatio = aspectRatio;
+    }
+}
+
 
 #include "moc_mainwidget.cpp"

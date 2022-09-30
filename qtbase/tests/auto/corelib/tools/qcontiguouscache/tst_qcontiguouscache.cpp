@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QObject>
 #include <QTest>
@@ -106,25 +81,25 @@ void tst_QContiguousCache::swap()
 
 void tst_QContiguousCache::append_data()
 {
-    QTest::addColumn<int>("start");
-    QTest::addColumn<int>("count");
-    QTest::addColumn<int>("cacheSize");
+    QTest::addColumn<qsizetype>("start");
+    QTest::addColumn<qsizetype>("count");
+    QTest::addColumn<qsizetype>("cacheSize");
     QTest::addColumn<bool>("invalidIndexes");
 
-    QTest::newRow("0+30[10]") << 0 << 30 << 10 << false;
-    QTest::newRow("300+30[10]") << 300 << 30 << 10 << false;
-    QTest::newRow("MAX-10+30[10]") << INT_MAX-10 << 30 << 10 << true;
+    QTest::newRow("0+30[10]") << qsizetype(0) << qsizetype(30) << qsizetype(10) << false;
+    QTest::newRow("300+30[10]") << qsizetype(300) << qsizetype(30) << qsizetype(10) << false;
+    QTest::newRow("MAX-10+30[10]") << std::numeric_limits<qsizetype>::max()-10 << qsizetype(30) << qsizetype(10) << true;
 }
 
 void tst_QContiguousCache::append()
 {
-    QFETCH(int, start);
-    QFETCH(int, count);
-    QFETCH(int, cacheSize);
+    QFETCH(qsizetype, start);
+    QFETCH(qsizetype, count);
+    QFETCH(qsizetype, cacheSize);
     QFETCH(bool, invalidIndexes);
 
-    int i, j;
-    QContiguousCache<int> c(cacheSize);
+    qsizetype i, j;
+    QContiguousCache<qsizetype> c(cacheSize);
 
     i = 1;
     QCOMPARE(c.available(), cacheSize);
@@ -134,8 +109,8 @@ void tst_QContiguousCache::append()
         c.insert(start, i++);
     while (i < count) {
         c.append(i);
-        QCOMPARE(c.available(), qMax(0, cacheSize - i));
-        QCOMPARE(c.first(), qMax(1, i-cacheSize+1));
+        QCOMPARE(c.available(), qMax(qsizetype(0), cacheSize - i));
+        QCOMPARE(c.first(), qMax(qsizetype(1), i-cacheSize+1));
         QCOMPARE(c.last(), i);
         QCOMPARE(c.count(), qMin(i, cacheSize));
         QCOMPARE(c.isFull(), i >= cacheSize);

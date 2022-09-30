@@ -30,7 +30,7 @@ namespace {
 base::TimeDelta GetBrowserControlsAllowHideDelay() {
   if (base::FeatureList::IsEnabled(kImmediatelyHideBrowserControlsForTest))
     return base::TimeDelta();
-  return base::TimeDelta::FromSeconds(3);
+  return base::Seconds(3);
 }
 
 }  // namespace
@@ -52,7 +52,10 @@ bool BrowserControlsNavigationStateHandler::IsRendererControllingOffsets() {
 void BrowserControlsNavigationStateHandler::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   is_crashed_ = false;
-  if (navigation_handle->IsInMainFrame() &&
+  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
+  // frames. This caller was converted automatically to the primary main frame
+  // to preserve its semantics. Follow up to confirm correctness.
+  if (navigation_handle->IsInPrimaryMainFrame() &&
       !navigation_handle->IsSameDocument()) {
     forced_show_during_load_timer_.Stop();
     SetForceShowDuringLoad(true);
@@ -61,7 +64,10 @@ void BrowserControlsNavigationStateHandler::DidStartNavigation(
 
 void BrowserControlsNavigationStateHandler::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsInMainFrame()) {
+  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
+  // frames. This caller was converted automatically to the primary main frame
+  // to preserve its semantics. Follow up to confirm correctness.
+  if (navigation_handle->IsInPrimaryMainFrame()) {
     if (!navigation_handle->HasCommitted()) {
       // There will be no DidFinishLoad or DidFailLoad, so hide the topview
       ScheduleStopDelayedForceShow();
@@ -88,7 +94,7 @@ void BrowserControlsNavigationStateHandler::DidFailLoad(
       render_frame_host->GetMainFrame() == render_frame_host;
   if (is_main_frame)
     ScheduleStopDelayedForceShow();
-  if (render_frame_host->IsCurrent() &&
+  if (render_frame_host->IsActive() &&
       (render_frame_host == web_contents()->GetMainFrame())) {
     UpdateState();
   }
@@ -98,7 +104,7 @@ void BrowserControlsNavigationStateHandler::DidChangeVisibleSecurityState() {
   UpdateState();
 }
 
-void BrowserControlsNavigationStateHandler::RenderProcessGone(
+void BrowserControlsNavigationStateHandler::PrimaryMainFrameRenderProcessGone(
     base::TerminationStatus status) {
   is_crashed_ = true;
   UpdateState();
@@ -131,7 +137,7 @@ void BrowserControlsNavigationStateHandler::ScheduleStopDelayedForceShow() {
 }
 
 void BrowserControlsNavigationStateHandler::UpdateState() {
-  const content::BrowserControlsState renderer_availability_state =
+  const cc::BrowserControlsState renderer_availability_state =
       CalculateStateForReasonRendererAvailability();
   if (renderer_availability_state != last_renderer_availability_state_) {
     last_renderer_availability_state_ = renderer_availability_state;
@@ -140,8 +146,7 @@ void BrowserControlsNavigationStateHandler::UpdateState() {
         last_renderer_availability_state_);
   }
 
-  const content::BrowserControlsState other_state =
-      CalculateStateForReasonOther();
+  const cc::BrowserControlsState other_state = CalculateStateForReasonOther();
   if (other_state != last_other_state_) {
     last_other_state_ = other_state;
     delegate_->OnBrowserControlsStateStateChanged(
@@ -149,33 +154,33 @@ void BrowserControlsNavigationStateHandler::UpdateState() {
   }
 }
 
-content::BrowserControlsState BrowserControlsNavigationStateHandler::
+cc::BrowserControlsState BrowserControlsNavigationStateHandler::
     CalculateStateForReasonRendererAvailability() {
   if (!IsRendererControllingOffsets() || web_contents()->IsBeingDestroyed() ||
       web_contents()->IsCrashed()) {
-    return content::BROWSER_CONTROLS_STATE_SHOWN;
+    return cc::BrowserControlsState::kShown;
   }
 
-  return content::BROWSER_CONTROLS_STATE_BOTH;
+  return cc::BrowserControlsState::kBoth;
 }
 
-content::BrowserControlsState
+cc::BrowserControlsState
 BrowserControlsNavigationStateHandler::CalculateStateForReasonOther() {
   // TODO(sky): this needs to force SHOWN if a11y enabled, see
   // AccessibilityUtil.isAccessibilityEnabled().
 
   if (force_show_during_load_ || web_contents()->IsFullscreen() ||
       web_contents()->IsFocusedElementEditable()) {
-    return content::BROWSER_CONTROLS_STATE_SHOWN;
+    return cc::BrowserControlsState::kShown;
   }
 
   content::NavigationEntry* entry =
       web_contents()->GetController().GetVisibleEntry();
   if (!entry || entry->GetPageType() != content::PAGE_TYPE_NORMAL)
-    return content::BROWSER_CONTROLS_STATE_SHOWN;
+    return cc::BrowserControlsState::kShown;
 
   if (entry->GetURL().SchemeIs(content::kChromeUIScheme))
-    return content::BROWSER_CONTROLS_STATE_SHOWN;
+    return cc::BrowserControlsState::kShown;
 
   const security_state::SecurityLevel security_level =
       security_state::GetSecurityLevel(
@@ -184,7 +189,7 @@ BrowserControlsNavigationStateHandler::CalculateStateForReasonOther() {
   switch (security_level) {
     case security_state::WARNING:
     case security_state::DANGEROUS:
-      return content::BROWSER_CONTROLS_STATE_SHOWN;
+      return cc::BrowserControlsState::kShown;
 
     case security_state::NONE:
     case security_state::SECURE:
@@ -193,7 +198,7 @@ BrowserControlsNavigationStateHandler::CalculateStateForReasonOther() {
       break;
   }
 
-  return content::BROWSER_CONTROLS_STATE_BOTH;
+  return cc::BrowserControlsState::kBoth;
 }
 
 bool BrowserControlsNavigationStateHandler::IsRendererHungOrCrashed() {

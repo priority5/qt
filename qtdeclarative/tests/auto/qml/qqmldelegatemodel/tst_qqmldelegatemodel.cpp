@@ -1,38 +1,15 @@
-﻿/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QtTest/qtest.h>
+#include <QtCore/QConcatenateTablesProxyModel>
+#include <QtGui/QStandardItemModel>
 #include <QtQml/qqmlcomponent.h>
 #include <QtQmlModels/private/qqmldelegatemodel_p.h>
 #include <QtQuick/qquickview.h>
 #include <QtQuick/qquickitem.h>
-
-#include "../../shared/util.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include <QtTest/QSignalSpy>
 
 class tst_QQmlDelegateModel : public QQmlDataTest
 {
@@ -44,9 +21,11 @@ public:
 private slots:
     void valueWithoutCallingObjectFirst_data();
     void valueWithoutCallingObjectFirst();
-    void filterOnGroup_removeWhenCompleted();
     void qtbug_86017();
+    void filterOnGroup_removeWhenCompleted();
     void contextAccessedByHandler();
+    void redrawUponColumnChange();
+    void nestedDelegates();
 };
 
 class AbstractItemModel : public QAbstractItemModel
@@ -101,6 +80,7 @@ private:
 };
 
 tst_QQmlDelegateModel::tst_QQmlDelegateModel()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
 {
     qmlRegisterType<AbstractItemModel>("Test", 1, 0, "AbstractItemModel");
 }
@@ -139,17 +119,6 @@ void tst_QQmlDelegateModel::valueWithoutCallingObjectFirst()
     QCOMPARE(model->variantValue(index, role), expectedValue);
 }
 
-void tst_QQmlDelegateModel::filterOnGroup_removeWhenCompleted()
-{
-    QQuickView view(testFileUrl("removeFromGroup.qml"));
-    QCOMPARE(view.status(), QQuickView::Ready);
-    view.show();
-    QQuickItem *root = view.rootObject();
-    QVERIFY(root);
-    QQmlDelegateModel *model = root->findChild<QQmlDelegateModel*>();
-    QVERIFY(model);
-    QTest::qWaitFor([=]{ return model->count() == 2; } );
-
 void tst_QQmlDelegateModel::qtbug_86017()
 {
     QQmlEngine engine;
@@ -184,6 +153,58 @@ void tst_QQmlDelegateModel::contextAccessedByHandler()
     QScopedPointer<QObject> root(component.create());
     QVERIFY2(root, qPrintable(component.errorString()));
     QVERIFY(root->property("works").toBool());
+}
+
+void tst_QQmlDelegateModel::redrawUponColumnChange()
+{
+    QStandardItemModel m1;
+    m1.appendRow({
+            new QStandardItem("Banana"),
+            new QStandardItem("Coconut"),
+    });
+
+    QQuickView view(testFileUrl("redrawUponColumnChange.qml"));
+    QCOMPARE(view.status(), QQuickView::Ready);
+    view.show();
+    QQuickItem *root = view.rootObject();
+    root->setProperty("model", QVariant::fromValue<QObject *>(&m1));
+
+    QObject *item = root->property("currentItem").value<QObject *>();
+    QVERIFY(item);
+    QCOMPARE(item->property("text").toString(), "Banana");
+
+    QVERIFY(root);
+    m1.removeColumn(0);
+
+    QCOMPARE(item->property("text").toString(), "Coconut");
+}
+
+void tst_QQmlDelegateModel::nestedDelegates()
+{
+    QQmlEngine engine;
+    QQmlComponent c(&engine, testFileUrl("nestedDelegates.qml"));
+    QVERIFY2(c.isReady(), qPrintable(c.errorString()));
+    QScopedPointer<QObject> o(c.create());
+
+    QQuickItem *item = qobject_cast<QQuickItem *>(o.data());
+    QCOMPARE(item->childItems().length(), 2);
+    for (QQuickItem *child : item->childItems()) {
+        if (child->objectName() != QLatin1String("loader"))
+            continue;
+
+        QCOMPARE(child->childItems().length(), 1);
+        QQuickItem *timeMarks = child->childItems().at(0);
+        const QList<QQuickItem *> children = timeMarks->childItems();
+        QCOMPARE(children.length(), 2);
+
+        // One of them is the repeater, the other one is the rectangle
+        QVERIFY(children.at(0)->objectName() == QLatin1String("zap")
+                 || children.at(1)->objectName() == QLatin1String("zap"));
+        QVERIFY(children.at(0)->objectName().isEmpty() || children.at(1)->objectName().isEmpty());
+
+        return; // loader found
+    }
+    QFAIL("Loader not found");
 }
 
 QTEST_MAIN(tst_QQmlDelegateModel)

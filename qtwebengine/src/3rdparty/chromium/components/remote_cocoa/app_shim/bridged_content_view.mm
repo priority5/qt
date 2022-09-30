@@ -28,12 +28,10 @@
 #include "ui/events/keycodes/dom/dom_code.h"
 #import "ui/events/keycodes/keyboard_code_conversion_mac.h"
 #include "ui/events/platform/platform_event_source.h"
-#include "ui/gfx/canvas_paint_mac.h"
 #include "ui/gfx/decorated_text.h"
 #import "ui/gfx/decorated_text_mac.h"
 #include "ui/gfx/geometry/rect.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
-#import "ui/gfx/path_mac.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 namespace {
@@ -60,12 +58,30 @@ gfx::Point MovePointToWindow(const NSPoint& point,
                     NSHeight(content_rect) - point_in_window.y);
 }
 
-// Returns true if |event| may have triggered dismissal of an IME and would
-// otherwise be ignored by a ui::TextInputClient when inserted.
-bool IsImeTriggerEvent(NSEvent* event) {
+// Some keys are silently consumed by -[NSView interpretKeyEvents:]
+// They should not be processed as accelerators.
+// See comments at |keyDown:| for details.
+bool ShouldIgnoreAcceleratorWithMarkedText(NSEvent* event) {
   ui::KeyboardCode key = ui::KeyboardCodeFromNSEvent(event);
-  return key == ui::VKEY_RETURN || key == ui::VKEY_TAB ||
-         key == ui::VKEY_ESCAPE;
+  switch (key) {
+    // crbug/883952: Kanji IME completes composition and dismisses itself.
+    case ui::VKEY_RETURN:
+    // Kanji IME: select candidate words.
+    // Pinyin IME: change tone.
+    case ui::VKEY_TAB:
+    // Dismiss IME.
+    case ui::VKEY_ESCAPE:
+    // crbug/915924: Pinyin IME selects candidate.
+    case ui::VKEY_LEFT:
+    case ui::VKEY_RIGHT:
+    case ui::VKEY_UP:
+    case ui::VKEY_DOWN:
+    case ui::VKEY_PRIOR:
+    case ui::VKEY_NEXT:
+      return true;
+    default:
+      return false;
+  }
 }
 
 ui::TextEditCommand GetTextEditCommandForMenuAction(SEL action) {
@@ -125,7 +141,7 @@ NSArray* SupportedPasteboardTypes() {
 // editing command from ui_strings.grd and, when not being sent to a
 // TextInputClient, the keyCode that toolkit-views expects internally.
 // For example, moveToLeftEndOfLine: would pass ui::VKEY_HOME in non-RTL locales
-// even though the Home key on Mac defaults to moveToBeginningOfDocument:.
+// even though the Home key on Mac defaults to scrollToBeginningOfDocument:.
 // This approach also allows action messages a user
 // may have remapped in ~/Library/KeyBindings/DefaultKeyBinding.dict to be
 // catered for.
@@ -186,17 +202,6 @@ NSArray* SupportedPasteboardTypes() {
   if ((self = [super initWithFrame:initialFrame])) {
     _bridge = bridge;
 
-    // Apple's documentation says that NSTrackingActiveAlways is incompatible
-    // with NSTrackingCursorUpdate, so use NSTrackingActiveInActiveApp.
-    _cursorTrackingArea.reset([[CrTrackingArea alloc]
-        initWithRect:NSZeroRect
-             options:NSTrackingMouseMoved | NSTrackingCursorUpdate |
-                     NSTrackingActiveInActiveApp | NSTrackingInVisibleRect |
-                     NSTrackingMouseEnteredAndExited
-               owner:self
-            userInfo:nil]);
-    [self addTrackingArea:_cursorTrackingArea.get()];
-
     // Get notified whenever Full Keyboard Access mode is changed.
     [[NSDistributedNotificationCenter defaultCenter]
         addObserver:self
@@ -245,8 +250,11 @@ NSArray* SupportedPasteboardTypes() {
 - (void)clearView {
   _bridge = nullptr;
   [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
-  [_cursorTrackingArea.get() clearOwner];
-  [self removeTrackingArea:_cursorTrackingArea.get()];
+  if (_cursorTrackingArea.get()) {
+    [_cursorTrackingArea.get() clearOwner];
+    [self removeTrackingArea:_cursorTrackingArea.get()];
+    _cursorTrackingArea.reset(nil);
+  }
 }
 
 - (bool)needsUpdateWindows {
@@ -329,7 +337,7 @@ NSArray* SupportedPasteboardTypes() {
 
 - (void)updateTooltipIfRequiredAt:(const gfx::Point&)locationInContent {
   DCHECK(_bridge);
-  base::string16 newTooltipText;
+  std::u16string newTooltipText;
 
   _bridge->host()->GetTooltipTextAt(locationInContent, &newTooltipText);
   if (newTooltipText != _lastTooltipText) {
@@ -342,6 +350,37 @@ NSArray* SupportedPasteboardTypes() {
   if (!_bridge)
     return;
   _bridge->host()->SetKeyboardAccessible([NSApp isFullKeyboardAccessEnabled]);
+}
+
+- (void)updateCursorTrackingArea {
+  if (_cursorTrackingArea.get()) {
+    [_cursorTrackingArea.get() clearOwner];
+    [self removeTrackingArea:_cursorTrackingArea.get()];
+    _cursorTrackingArea.reset(nil);
+  }
+  if (![self window])
+    return;
+
+  NSTrackingAreaOptions options =
+      NSTrackingMouseMoved | NSTrackingCursorUpdate | NSTrackingInVisibleRect |
+      NSTrackingMouseEnteredAndExited;
+  if ([[self window] level] == kCGFloatingWindowLevel) {
+    // Floating windows should know when the mouse enters or leaves, regardless
+    // of the first responder, window, or application status.
+    // https://crbug.com/1214013
+    options |= NSTrackingActiveAlways;
+  } else {
+    // Apple's documentation says that NSTrackingActiveAlways is incompatible
+    // with NSTrackingCursorUpdate, so use NSTrackingActiveInActiveApp for all
+    // other levels. See history from  https://crrev.com/314660
+    options |= NSTrackingActiveInActiveApp | NSTrackingCursorUpdate;
+  }
+
+  _cursorTrackingArea.reset([[CrTrackingArea alloc] initWithRect:NSZeroRect
+                                                         options:options
+                                                           owner:self
+                                                        userInfo:nil]);
+  [self addTrackingArea:_cursorTrackingArea.get()];
 }
 
 // BridgedContentView private implementation.
@@ -443,6 +482,15 @@ NSArray* SupportedPasteboardTypes() {
     text = [text string];
 
   bool isCharacterEvent = _keyDownEvent && [text length] == 1;
+
+  // For some reason, shift-enter (not shift-return) results in the insertion of
+  // a string with a single character, U+0003, END OF TEXT. Continuing on this
+  // route will result in a forged event that loses the shift modifier.
+  // Therefore, early return. When -keyDown: resumes, it will use a ui::KeyEvent
+  // constructor that works. See https://crbug.com/1188713#c4 for the analysis.
+  if (isCharacterEvent && [text characterAtIndex:0] == 0x0003)
+    return;
+
   // Pass "character" events to the View hierarchy. Cases this handles (non-
   // exhaustive)-
   //    - Space key press on controls. Unlike Tab and newline which have
@@ -633,8 +681,10 @@ NSArray* SupportedPasteboardTypes() {
   // When this view is added to a window, AppKit calls setFrameSize before it is
   // added to the window, so the behavior in setFrameSize is not triggered.
   NSWindow* window = [self window];
-  if (window)
+  if (window) {
     [self setFrameSize:NSZeroSize];
+    [self updateCursorTrackingArea];
+  }
 }
 
 - (void)setFrameSize:(NSSize)newSize {
@@ -724,17 +774,29 @@ NSArray* SupportedPasteboardTypes() {
   _keyDownEvent = theEvent;
   _hasUnhandledKeyDownEvent = YES;
   _wantsKeyHandledForInsert = NO;
-  [self interpretKeyEvents:@[ theEvent ]];
+
+  // interpretKeyEvents treats Mac Eisu / Kana keydown as insertion of space
+  // character in omnibox when the current input source is not Japanese.
+  // processInputKeyBindings should be called to switch input sources.
+  if (theEvent.keyCode == kVK_JIS_Eisu || theEvent.keyCode == kVK_JIS_Kana) {
+    if ([NSTextInputContext
+            respondsToSelector:@selector(processInputKeyBindings:)]) {
+      [NSTextInputContext performSelector:@selector(processInputKeyBindings:)
+                               withObject:theEvent];
+    }
+  } else {
+    [self interpretKeyEvents:@[ theEvent ]];
+  }
 
   // When there is marked text, -[NSView interpretKeyEvents:] may handle the
-  // event by dismissing the IME window in a way that neither unmarks text, nor
-  // updates any composition. That is, no signal is given either to the
-  // NSTextInputClient or the NSTextInputContext that the IME changed state.
-  // However, we must ensure this key down is not processed as an accelerator.
-  // TODO(tapted): Investigate removing the IsImeTriggerEvent() check - it's
-  // probably not required, but helps tests that expect some events to always
-  // get processed (i.e. TextfieldTest.TextInputClientTest).
-  if (hadMarkedTextAtKeyDown && IsImeTriggerEvent(theEvent))
+  // event by updating the IME state without updating the composition text.
+  // That is, no signal is given either to the NSTextInputClient or the
+  // NSTextInputContext, leaving |hasUnhandledKeyDownEvent_| to be true.
+  // In such a case, the key down event should not processed as an accelerator.
+  // TODO(kerenzhu): Note it may be valid to always mark the key down event as
+  // handled by IME when there is marked text. For now, only certain keys are
+  // skipped.
+  if (hadMarkedTextAtKeyDown && ShouldIgnoreAcceleratorWithMarkedText(theEvent))
     _hasUnhandledKeyDownEvent = NO;
 
   // Even with marked text, some IMEs may follow with -insertNewLine:;
@@ -911,16 +973,16 @@ NSArray* SupportedPasteboardTypes() {
 
 - (void)moveToBeginningOfLine:(id)sender {
   [self handleAction:ui::TextEditCommand::MOVE_TO_BEGINNING_OF_LINE
-             keyCode:ui::VKEY_HOME
-             domCode:ui::DomCode::HOME
-          eventFlags:0];
+             keyCode:ui::VKEY_LEFT
+             domCode:ui::DomCode::ARROW_LEFT
+          eventFlags:ui::EF_COMMAND_DOWN];
 }
 
 - (void)moveToEndOfLine:(id)sender {
   [self handleAction:ui::TextEditCommand::MOVE_TO_END_OF_LINE
-             keyCode:ui::VKEY_END
-             domCode:ui::DomCode::END
-          eventFlags:0];
+             keyCode:ui::VKEY_RIGHT
+             domCode:ui::DomCode::ARROW_RIGHT
+          eventFlags:ui::EF_COMMAND_DOWN];
 }
 
 - (void)moveToBeginningOfParagraph:(id)sender {
@@ -939,16 +1001,16 @@ NSArray* SupportedPasteboardTypes() {
 
 - (void)moveToEndOfDocument:(id)sender {
   [self handleAction:ui::TextEditCommand::MOVE_TO_END_OF_DOCUMENT
-             keyCode:ui::VKEY_END
-             domCode:ui::DomCode::END
-          eventFlags:ui::EF_CONTROL_DOWN];
+             keyCode:ui::VKEY_DOWN
+             domCode:ui::DomCode::ARROW_DOWN
+          eventFlags:ui::EF_COMMAND_DOWN];
 }
 
 - (void)moveToBeginningOfDocument:(id)sender {
   [self handleAction:ui::TextEditCommand::MOVE_TO_BEGINNING_OF_DOCUMENT
-             keyCode:ui::VKEY_HOME
-             domCode:ui::DomCode::HOME
-          eventFlags:ui::EF_CONTROL_DOWN];
+             keyCode:ui::VKEY_UP
+             domCode:ui::DomCode::ARROW_UP
+          eventFlags:ui::EF_COMMAND_DOWN];
 }
 
 - (void)pageDown:(id)sender {
@@ -1048,7 +1110,7 @@ NSArray* SupportedPasteboardTypes() {
                          MOVE_TO_END_OF_DOCUMENT_AND_MODIFY_SELECTION
              keyCode:ui::VKEY_END
              domCode:ui::DomCode::END
-          eventFlags:ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN];
+          eventFlags:ui::EF_SHIFT_DOWN];
 }
 
 - (void)moveToBeginningOfDocumentAndModifySelection:(id)sender {
@@ -1056,7 +1118,7 @@ NSArray* SupportedPasteboardTypes() {
                          MOVE_TO_BEGINNING_OF_DOCUMENT_AND_MODIFY_SELECTION
              keyCode:ui::VKEY_HOME
              domCode:ui::DomCode::HOME
-          eventFlags:ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN];
+          eventFlags:ui::EF_SHIFT_DOWN];
 }
 
 - (void)pageDownAndModifySelection:(id)sender {
@@ -1149,6 +1211,34 @@ NSArray* SupportedPasteboardTypes() {
 - (void)moveToRightEndOfLineAndModifySelection:(id)sender {
   [self isTextRTL] ? [self moveToBeginningOfLineAndModifySelection:sender]
                    : [self moveToEndOfLineAndModifySelection:sender];
+}
+
+- (void)scrollPageDown:(id)sender {
+  [self handleAction:ui::TextEditCommand::SCROLL_PAGE_DOWN
+             keyCode:ui::VKEY_NEXT
+             domCode:ui::DomCode::PAGE_DOWN
+          eventFlags:ui::EF_NONE];
+}
+
+- (void)scrollPageUp:(id)sender {
+  [self handleAction:ui::TextEditCommand::SCROLL_PAGE_UP
+             keyCode:ui::VKEY_PRIOR
+             domCode:ui::DomCode::PAGE_UP
+          eventFlags:ui::EF_NONE];
+}
+
+- (void)scrollToBeginningOfDocument:(id)sender {
+  [self handleAction:ui::TextEditCommand::SCROLL_TO_BEGINNING_OF_DOCUMENT
+             keyCode:ui::VKEY_HOME
+             domCode:ui::DomCode::HOME
+          eventFlags:ui::EF_NONE];
+}
+
+- (void)scrollToEndOfDocument:(id)sender {
+  [self handleAction:ui::TextEditCommand::SCROLL_TO_END_OF_DOCUMENT
+             keyCode:ui::VKEY_END
+             domCode:ui::DomCode::END
+          eventFlags:ui::EF_NONE];
 }
 
 // Graphical Element transposition
@@ -1262,7 +1352,7 @@ NSArray* SupportedPasteboardTypes() {
          [types containsObject:base::mac::CFToNSCast(kUTTypeUTF8PlainText)]);
 
   bool result = NO;
-  base::string16 text;
+  std::u16string text;
   if (_bridge)
     _bridge->text_input_host()->GetSelectionText(&result, &text);
   if (!result)
@@ -1296,7 +1386,7 @@ NSArray* SupportedPasteboardTypes() {
   // See https://crbug.com/888782.
   if (range.location == NSNotFound)
     range.length = 0;
-  base::string16 substring;
+  std::u16string substring;
   gfx::Range actual_range = gfx::Range::InvalidRange();
   if (_bridge) {
     _bridge->text_input_host()->GetAttributedSubstringForRange(

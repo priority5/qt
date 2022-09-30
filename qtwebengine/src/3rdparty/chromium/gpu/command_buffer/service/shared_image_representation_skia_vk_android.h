@@ -37,6 +37,10 @@ class SharedImageRepresentationSkiaVkAndroid
       std::vector<GrBackendSemaphore>* begin_semaphores,
       std::vector<GrBackendSemaphore>* end_semaphores,
       std::unique_ptr<GrBackendSurfaceMutableState>* end_state) override;
+  sk_sp<SkPromiseImageTexture> BeginWriteAccess(
+      std::vector<GrBackendSemaphore>* begin_semaphores,
+      std::vector<GrBackendSemaphore>* end_semaphores,
+      std::unique_ptr<GrBackendSurfaceMutableState>* end_state) override;
   void EndWriteAccess(sk_sp<SkSurface> surface) override;
   sk_sp<SkPromiseImageTexture> BeginReadAccess(
       std::vector<GrBackendSemaphore>* begin_semaphores,
@@ -63,6 +67,8 @@ class SharedImageRepresentationSkiaVkAndroid
                    std::vector<GrBackendSemaphore>* end_semaphores,
                    base::ScopedFD init_read_fence);
   void EndAccess(bool readonly);
+  std::unique_ptr<GrBackendSurfaceMutableState> GetEndAccessState();
+
   VkDevice vk_device();
   VulkanImplementation* vk_implementation();
   VkPhysicalDevice vk_phy_device();

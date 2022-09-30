@@ -1,4 +1,3 @@
-#!/usr/bin/env lucicfg
 # Copyright 2020 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,6 +7,7 @@
 
 luci.project(
     name = "chromium",
+    config_dir = "luci",
     dev = True,
     buildbucket = "cr-buildbucket-dev.appspot.com",
     logdog = "luci-logdog-dev.appspot.com",
@@ -50,10 +50,18 @@ luci.realm(
             roles = "role/buildbucket.reader",
             groups = "all",
         ),
+        luci.binding(
+            roles = "role/resultdb.invocationCreator",
+            groups = "luci-resultdb-access",
+        ),
         # Other roles are inherited from @root which grants them to group:all.
     ],
 )
 
+luci.builder.defaults.test_presentation.set(resultdb.test_presentation(grouping_keys = ["status", "v.test_suite"]))
+
 exec("//dev/swarming.star")
+
+exec("//recipes.star")
 
 exec("//dev/subprojects/chromium/subproject.star")

@@ -181,10 +181,7 @@ public:
         bounds.setEmpty();
         int lastStart = 0;
         int verbStart = 0;
-        for (auto t : SkPathPriv::Iterate(fPath)) {
-            auto verb = std::get<0>(t);
-            auto pts = std::get<1>(t);
-            auto w = std::get<2>(t);
+        for (auto [verb, pts, w] : SkPathPriv::Iterate(fPath)) {
             if (SkPathVerb::kMove == verb) {
                 if (!bounds.isEmpty()) {
                     containers->emplace_back(bounds, lastStart, verbStart);
@@ -335,9 +332,7 @@ public:
             SkPathBuilder reverse;
             SkPathBuilder* temp = contour.fReverse ? &reverse : &result;
             for (; iter != iterate.end() && verbCount < contour.fVerbEnd; ++iter, ++verbCount) {
-                auto verb = std::get<0>(*iter);
-                auto pts = std::get<1>(*iter);
-                auto w = std::get<2>(*iter);
+                auto [verb, pts, w] = *iter;
                 switch (verb) {
                     case SkPathVerb::kMove:
                         temp->moveTo(pts[0]);

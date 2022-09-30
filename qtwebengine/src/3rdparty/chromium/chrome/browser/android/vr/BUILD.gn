@@ -16,8 +16,6 @@ static_library("vr_android") {
   sources = [
     "android_ui_gesture_target.cc",
     "android_ui_gesture_target.h",
-    "android_vr_utils.cc",
-    "android_vr_utils.h",
     "android_vsync_helper.cc",
     "android_vsync_helper.h",
     "autocomplete_controller.cc",
@@ -63,22 +61,13 @@ static_library("vr_android") {
     "vrcore_install_helper.h",
   ]
 
-  if (enable_arcore) {
-    sources += [
-      "arcore_device/arcore_device_provider.cc",
-      "arcore_device/arcore_device_provider.h",
-      "arcore_device/arcore_install_helper.cc",
-      "arcore_device/arcore_install_helper.h",
-      "arcore_device/arcore_java_utils.cc",
-      "arcore_device/arcore_java_utils.h",
-    ]
-  }
-
   deps = [
     ":ui_factory",
     "//base",
     "//cc",
     "//chrome/android/features/vr:jni_headers",
+    "//chrome/browser:browser_process",
+    "//chrome/browser/profiles:profile",
     "//chrome/browser/ui",
     "//chrome/browser/vr:vr_common",
     "//chrome/common",
@@ -89,13 +78,15 @@ static_library("vr_android") {
     "//components/omnibox/browser",
     "//components/page_info",
     "//components/permissions",
-    "//components/rappor",
     "//components/search_engines:search_engines",
     "//components/webxr:webxr",
+    "//components/webxr/android",
+    "//components/webxr/android:android_utils",
     "//content/public/browser",
     "//content/public/common",
     "//device/vr",
     "//device/vr:vr_base",
+    "//device/vr:vr_util",
     "//device/vr/android:vr_android",
     "//device/vr/buildflags:buildflags",
     "//services/device/public/mojom",
@@ -116,7 +107,7 @@ static_library("vr_android") {
     ]
   }
 
-  public_deps = [ "//device/vr/public/mojom" ]
+  public_deps = [ "//device/vr/public/mojom:isolated_xr_service" ]
 
   libs = [ "android" ]
 
@@ -173,22 +164,9 @@ group("module_factory") {
   }
 }
 
-android_library("ar_java") {
-  deps = [
-    "//base:base_java",
-    "//chrome/android:chrome_java",
-    "//third_party/arcore-android-sdk-client:com_google_ar_core_java",
-  ]
-
-  sources = [ "//chrome/android/java/src/org/chromium/chrome/browser/vr/ArCoreShimImpl.java" ]
-}
-
 if (enable_arcore) {
   generate_jni("ar_jni_headers") {
-    sources = [
-      "//chrome/android/java/src/org/chromium/chrome/browser/vr/ArCoreInstallUtils.java",
-      "//chrome/android/java/src/org/chromium/chrome/browser/vr/ArCoreJavaUtils.java",
-    ]
+    sources = [ "//chrome/android/java/src/org/chromium/chrome/browser/vr/ArCompositorDelegateProviderImpl.java" ]
   }
 }
 
@@ -228,13 +206,14 @@ test("vr_android_unittests") {
     "//components/webxr:webxr",
     "//device/vr:vr_fakes",
     "//device/vr/android/arcore",
-    "//device/vr/public/mojom",
+    "//device/vr/public/mojom:isolated_xr_service",
     "//mojo/core/embedder",
     "//mojo/public/cpp/bindings",
     "//services/network:test_support",
     "//testing/android/native_test:native_test_native_code",
     "//testing/gmock",
     "//testing/gtest",
+    "//third_party/blink/public:blink",
     "//ui/android:ui_java",  # TODO: Remove once http://crbug.com/951419 is
                              # fixed!
   ]

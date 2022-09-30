@@ -11,10 +11,10 @@
 #include <string>
 
 #include "base/allocator/partition_allocator/partition_alloc.h"
-#include "base/bind_helpers.h"
+#include "base/allocator/partition_allocator/partition_root.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/partition_alloc_buildflags.h"
-#include "base/process/process_metrics.h"
+#include "base/memory/page_size.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/gtest_util.h"
 #include "base/test/multiprocess_test.h"
@@ -51,6 +51,15 @@ constexpr size_t kLoopIterations = kSamplingFrequency * 4;
 constexpr int kSuccess = 0;
 constexpr int kFailure = 1;
 
+constexpr base::PartitionOptions kAllocatorOptions = {
+    base::PartitionOptions::AlignedAlloc::kDisallowed,
+    base::PartitionOptions::ThreadCache::kDisabled,
+    base::PartitionOptions::Quarantine::kDisallowed,
+    base::PartitionOptions::Cookie::kAllowed,
+    base::PartitionOptions::BackupRefPtr::kDisabled,
+    base::PartitionOptions::UseConfigurablePool::kNo,
+};
+
 static void HandleOOM(size_t unused_size) {
   LOG(FATAL) << "Out of memory.";
 }
@@ -79,7 +88,7 @@ MULTIPROCESS_TEST_MAIN_WITH_SETUP(
     BasicFunctionality,
     SamplingPartitionAllocShimsTest::multiprocessTestSetup) {
   base::PartitionAllocator allocator;
-  allocator.init();
+  allocator.init(kAllocatorOptions);
   for (size_t i = 0; i < kLoopIterations; i++) {
     void* ptr = allocator.root()->Alloc(1, kFakeType);
     if (GetPartitionAllocGpaForTesting().PointerIsMine(ptr))
@@ -99,7 +108,7 @@ MULTIPROCESS_TEST_MAIN_WITH_SETUP(
     Realloc,
     SamplingPartitionAllocShimsTest::multiprocessTestSetup) {
   base::PartitionAllocator allocator;
-  allocator.init();
+  allocator.init(kAllocatorOptions);
 
   void* alloc = GetPartitionAllocGpaForTesting().Allocate(base::GetPageSize());
   CHECK_NE(alloc, nullptr);
@@ -128,7 +137,7 @@ MULTIPROCESS_TEST_MAIN_WITH_SETUP(
     DifferentTypesDontOverlap,
     SamplingPartitionAllocShimsTest::multiprocessTestSetup) {
   base::PartitionAllocator allocator;
-  allocator.init();
+  allocator.init(kAllocatorOptions);
 
   std::set<void*> type1, type2;
   for (size_t i = 0; i < kLoopIterations * AllocatorState::kMaxSlots; i++) {

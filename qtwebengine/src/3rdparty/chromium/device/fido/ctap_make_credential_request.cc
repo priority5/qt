@@ -10,6 +10,7 @@
 
 #include "base/numerics/safe_conversions.h"
 #include "components/cbor/values.h"
+#include "device/fido/device_response_converter.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_parsing_utils.h"
 
@@ -39,18 +40,18 @@ bool AreMakeCredentialRequestMapKeysCorrect(
 }  // namespace
 
 // static
-base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
+absl::optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
     const cbor::Value::MapValue& request_map,
     const ParseOpts& opts) {
   if (!AreMakeCredentialRequestMapKeysCorrect(request_map))
-    return base::nullopt;
+    return absl::nullopt;
 
   const auto client_data_hash_it = request_map.find(cbor::Value(1));
   if (client_data_hash_it == request_map.end() ||
       !client_data_hash_it->second.is_bytestring() ||
       client_data_hash_it->second.GetBytestring().size() !=
           kClientDataHashLength) {
-    return base::nullopt;
+    return absl::nullopt;
   }
   base::span<const uint8_t, kClientDataHashLength> client_data_hash(
       client_data_hash_it->second.GetBytestring().data(),
@@ -58,30 +59,30 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
 
   const auto rp_entity_it = request_map.find(cbor::Value(2));
   if (rp_entity_it == request_map.end() || !rp_entity_it->second.is_map())
-    return base::nullopt;
+    return absl::nullopt;
 
   auto rp_entity =
       PublicKeyCredentialRpEntity::CreateFromCBORValue(rp_entity_it->second);
   if (!rp_entity)
-    return base::nullopt;
+    return absl::nullopt;
 
   const auto user_entity_it = request_map.find(cbor::Value(3));
   if (user_entity_it == request_map.end() || !user_entity_it->second.is_map())
-    return base::nullopt;
+    return absl::nullopt;
 
   auto user_entity = PublicKeyCredentialUserEntity::CreateFromCBORValue(
       user_entity_it->second);
   if (!user_entity)
-    return base::nullopt;
+    return absl::nullopt;
 
   const auto credential_params_it = request_map.find(cbor::Value(4));
   if (credential_params_it == request_map.end())
-    return base::nullopt;
+    return absl::nullopt;
 
   auto credential_params = PublicKeyCredentialParams::CreateFromCBORValue(
       credential_params_it->second);
   if (!credential_params)
-    return base::nullopt;
+    return absl::nullopt;
 
   CtapMakeCredentialRequest request(
       /*client_data_json=*/std::string(), std::move(*rp_entity),
@@ -91,7 +92,7 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
   const auto exclude_list_it = request_map.find(cbor::Value(5));
   if (exclude_list_it != request_map.end()) {
     if (!exclude_list_it->second.is_array())
-      return base::nullopt;
+      return absl::nullopt;
 
     const auto& credential_descriptors = exclude_list_it->second.GetArray();
     std::vector<PublicKeyCredentialDescriptor> exclude_list;
@@ -100,7 +101,7 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
           PublicKeyCredentialDescriptor::CreateFromCBORValue(
               credential_descriptor);
       if (!excluded_credential)
-        return base::nullopt;
+        return absl::nullopt;
 
       exclude_list.push_back(std::move(*excluded_credential));
     }
@@ -110,25 +111,25 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
   const auto extensions_it = request_map.find(cbor::Value(6));
   if (extensions_it != request_map.end()) {
     if (!extensions_it->second.is_map()) {
-      return base::nullopt;
+      return absl::nullopt;
     }
 
     const cbor::Value::MapValue& extensions = extensions_it->second.GetMap();
 
     if (opts.reject_all_extensions && !extensions.empty()) {
-      return base::nullopt;
+      return absl::nullopt;
     }
 
     for (const auto& extension : extensions) {
       if (!extension.first.is_string()) {
-        return base::nullopt;
+        return absl::nullopt;
       }
 
       const std::string& extension_name = extension.first.GetString();
 
       if (extension_name == kExtensionCredProtect) {
         if (!extension.second.is_unsigned()) {
-          return base::nullopt;
+          return absl::nullopt;
         }
         switch (extension.second.GetUnsigned()) {
           case 1:
@@ -141,26 +142,28 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
             request.cred_protect = device::CredProtect::kUVRequired;
             break;
           default:
-            return base::nullopt;
+            return absl::nullopt;
         }
       } else if (extension_name == kExtensionHmacSecret) {
         if (!extension.second.is_bool()) {
-          return base::nullopt;
+          return absl::nullopt;
         }
         request.hmac_secret = extension.second.GetBool();
-      } else if (extension_name == kExtensionAndroidClientData) {
-        base::Optional<AndroidClientDataExtensionInput>
-            android_client_data_ext =
-                AndroidClientDataExtensionInput::Parse(extension.second);
-        if (!android_client_data_ext) {
-          return base::nullopt;
-        }
-        request.android_client_data_ext = std::move(*android_client_data_ext);
       } else if (extension_name == kExtensionLargeBlobKey) {
         if (!extension.second.is_bool() || !extension.second.GetBool()) {
-          return base::nullopt;
+          return absl::nullopt;
         }
         request.large_blob_key = true;
+      } else if (extension_name == kExtensionCredBlob) {
+        if (!extension.second.is_bytestring()) {
+          return absl::nullopt;
+        }
+        request.cred_blob = extension.second.GetBytestring();
+      } else if (extension_name == kExtensionMinPINLength) {
+        if (!extension.second.is_bool()) {
+          return absl::nullopt;
+        }
+        request.min_pin_length_requested = extension.second.GetBool();
       }
     }
   }
@@ -168,11 +171,11 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
   const auto option_it = request_map.find(cbor::Value(7));
   if (option_it != request_map.end()) {
     if (!option_it->second.is_map())
-      return base::nullopt;
+      return absl::nullopt;
 
     const auto& option_map = option_it->second.GetMap();
     if (!IsMakeCredentialOptionMapFormatCorrect(option_map))
-      return base::nullopt;
+      return absl::nullopt;
 
     const auto resident_key_option =
         option_map.find(cbor::Value(kResidentKeyMapKey));
@@ -193,7 +196,7 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
   const auto pin_auth_it = request_map.find(cbor::Value(8));
   if (pin_auth_it != request_map.end()) {
     if (!pin_auth_it->second.is_bytestring())
-      return base::nullopt;
+      return absl::nullopt;
 
     request.pin_auth = pin_auth_it->second.GetBytestring();
   }
@@ -203,15 +206,20 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
     if (!pin_protocol_it->second.is_unsigned() ||
         pin_protocol_it->second.GetUnsigned() >
             std::numeric_limits<uint8_t>::max()) {
-      return base::nullopt;
+      return absl::nullopt;
     }
-    request.pin_protocol = pin_protocol_it->second.GetUnsigned();
+    absl::optional<PINUVAuthProtocol> pin_protocol =
+        ToPINUVAuthProtocol(pin_protocol_it->second.GetUnsigned());
+    if (!pin_protocol) {
+      return absl::nullopt;
+    }
+    request.pin_protocol = *pin_protocol;
   }
 
   const auto enterprise_attestation_it = request_map.find(cbor::Value(10));
   if (enterprise_attestation_it != request_map.end()) {
     if (!enterprise_attestation_it->second.is_unsigned()) {
-      return base::nullopt;
+      return absl::nullopt;
     }
     switch (enterprise_attestation_it->second.GetUnsigned()) {
       case 1:
@@ -223,7 +231,7 @@ base::Optional<CtapMakeCredentialRequest> CtapMakeCredentialRequest::Parse(
             AttestationConveyancePreference::kEnterpriseApprovedByBrowser;
         break;
       default:
-        return base::nullopt;
+        return absl::nullopt;
     }
   }
 
@@ -256,7 +264,7 @@ CtapMakeCredentialRequest& CtapMakeCredentialRequest::operator=(
 
 CtapMakeCredentialRequest::~CtapMakeCredentialRequest() = default;
 
-std::pair<CtapRequestCommand, base::Optional<cbor::Value>>
+std::pair<CtapRequestCommand, absl::optional<cbor::Value>>
 AsCTAPRequestValuePair(const CtapMakeCredentialRequest& request) {
   cbor::Value::MapValue cbor_map;
   cbor_map[cbor::Value(1)] = cbor::Value(request.client_data_hash);
@@ -283,12 +291,15 @@ AsCTAPRequestValuePair(const CtapMakeCredentialRequest& request) {
 
   if (request.cred_protect) {
     extensions.emplace(kExtensionCredProtect,
-                       cbor::Value(static_cast<int64_t>(*request.cred_protect)));
+                       static_cast<int64_t>(*request.cred_protect));
   }
 
-  if (request.android_client_data_ext) {
-    extensions.emplace(kExtensionAndroidClientData,
-                       AsCBOR(*request.android_client_data_ext));
+  if (request.cred_blob) {
+    extensions.emplace(kExtensionCredBlob, *request.cred_blob);
+  }
+
+  if (request.min_pin_length_requested) {
+    extensions.emplace(kExtensionMinPINLength, true);
   }
 
   if (!extensions.empty()) {
@@ -300,7 +311,8 @@ AsCTAPRequestValuePair(const CtapMakeCredentialRequest& request) {
   }
 
   if (request.pin_protocol) {
-    cbor_map[cbor::Value(9)] = cbor::Value(*request.pin_protocol);
+    cbor_map[cbor::Value(9)] =
+        cbor::Value(static_cast<uint8_t>(*request.pin_protocol));
   }
 
   cbor::Value::MapValue option_map;
@@ -334,5 +346,22 @@ AsCTAPRequestValuePair(const CtapMakeCredentialRequest& request) {
   return std::make_pair(CtapRequestCommand::kAuthenticatorMakeCredential,
                         cbor::Value(std::move(cbor_map)));
 }
+
+MakeCredentialOptions::MakeCredentialOptions() = default;
+MakeCredentialOptions::~MakeCredentialOptions() = default;
+MakeCredentialOptions::MakeCredentialOptions(const MakeCredentialOptions&) =
+    default;
+MakeCredentialOptions::MakeCredentialOptions(
+    const AuthenticatorSelectionCriteria& authenticator_selection_criteria)
+    : authenticator_attachment(
+          authenticator_selection_criteria.authenticator_attachment),
+      resident_key(authenticator_selection_criteria.resident_key),
+      user_verification(
+          authenticator_selection_criteria.user_verification_requirement) {}
+MakeCredentialOptions::MakeCredentialOptions(MakeCredentialOptions&&) = default;
+MakeCredentialOptions& MakeCredentialOptions::operator=(
+    const MakeCredentialOptions&) = default;
+MakeCredentialOptions& MakeCredentialOptions::operator=(
+    MakeCredentialOptions&&) = default;
 
 }  // namespace device

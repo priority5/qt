@@ -13,6 +13,7 @@
 #include <set>
 #include <string>
 
+#include "base/bits.h"
 #include "base/check_op.h"
 #include "base/notreached.h"
 #include "base/scoped_native_library.h"
@@ -20,6 +21,7 @@
 #include "base/win/windows_version.h"
 #include "sandbox/win/src/interception_internal.h"
 #include "sandbox/win/src/interceptors.h"
+#include "sandbox/win/src/internal_types.h"
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/sandbox_rand.h"
 #include "sandbox/win/src/service_resolver.h"
@@ -34,6 +36,13 @@ namespace {
 // Standard allocation granularity and page size for Windows.
 const size_t kAllocGranularity = 65536;
 const size_t kPageSize = 4096;
+
+// Rounds up the size of a given buffer, considering alignment (padding).
+// value is the current size of the buffer, and alignment is specified in
+// bytes.
+inline size_t RoundUpToMultiple(size_t value, size_t alignment) {
+  return ((value + alignment - 1) / alignment) * alignment;
+}
 
 }  // namespace
 
@@ -381,7 +390,7 @@ ResultCode InterceptionManager::PatchNtdll(bool hot_patch_needed) {
   thunk_offset &= kPageSize - 1;
 
   // Make an aligned, padded allocation, and move the pointer to our chunk.
-  size_t thunk_bytes_padded = (thunk_bytes + kPageSize - 1) & ~(kPageSize - 1);
+  size_t thunk_bytes_padded = base::bits::AlignUp(thunk_bytes, kPageSize);
   thunk_base = reinterpret_cast<BYTE*>(
       ::VirtualAllocEx(child, thunk_base, thunk_bytes_padded, MEM_COMMIT,
                        PAGE_EXECUTE_READWRITE));
@@ -442,11 +451,11 @@ ResultCode InterceptionManager::PatchClientFunctions(
 
   std::unique_ptr<ServiceResolverThunk> thunk;
 #if defined(_WIN64)
-  thunk.reset(new ServiceResolverThunk(child_.Process(), relaxed_));
+  thunk = std::make_unique<ServiceResolverThunk>(child_.Process(), relaxed_);
 #else
   base::win::OSInfo* os_info = base::win::OSInfo::GetInstance();
   base::win::Version real_os_version = os_info->Kernel32Version();
-  if (os_info->wow64_status() == base::win::OSInfo::WOW64_ENABLED) {
+  if (os_info->IsWowX86OnAMD64()) {
     if (real_os_version >= base::win::Version::WIN10)
       thunk.reset(new Wow64W10ResolverThunk(child_.Process(), relaxed_));
     else if (real_os_version >= base::win::Version::WIN8)

@@ -4,3 +4,12 @@ osx
 [mouseMovementProperties]
 windows
 macos # Can't move cursor (QTBUG-76312)
+
+[acceptNavigationRequestNavigationType]
+b2qt arm
+
+[comboBoxPopupPositionAfterMove]
+macos
+
+[comboBoxPopupPositionAfterChildMove]
+macos

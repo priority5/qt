@@ -5,9 +5,12 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_BACKING_EGL_IMAGE_H_
 #define GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_BACKING_EGL_IMAGE_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "gpu/command_buffer/service/shared_image_backing.h"
+#include "gpu/command_buffer/service/shared_image_backing_factory_gl_common.h"
+#include "gpu/command_buffer/service/shared_image_backing_gl_common.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gl/gl_bindings.h"
 
@@ -25,7 +28,6 @@ struct Mailbox;
 
 namespace gles2 {
 class NativeImageBuffer;
-class Texture;
 }  // namespace gles2
 
 // Implementation of SharedImageBacking that is used to create EGLImage targets
@@ -44,10 +46,16 @@ class SharedImageBackingEglImage : public ClearTrackingSharedImageBacking {
       SkAlphaType alpha_type,
       uint32_t usage,
       size_t estimated_size,
-      GLuint gl_format,
-      GLuint gl_type,
+      const SharedImageBackingFactoryGLCommon::FormatInfo format_into,
       SharedImageBatchAccessManager* batch_access_manager,
-      const GpuDriverBugWorkarounds& workarounds);
+      const GpuDriverBugWorkarounds& workarounds,
+      const SharedImageBackingGLCommon::UnpackStateAttribs& attribs,
+      bool use_passthrough,
+      base::span<const uint8_t> pixel_data);
+
+  SharedImageBackingEglImage(const SharedImageBackingEglImage&) = delete;
+  SharedImageBackingEglImage& operator=(const SharedImageBackingEglImage&) =
+      delete;
 
   ~SharedImageBackingEglImage() override;
 
@@ -55,15 +63,14 @@ class SharedImageBackingEglImage : public ClearTrackingSharedImageBacking {
   bool ProduceLegacyMailbox(MailboxManager* mailbox_manager) override;
   void MarkForDestruction() override;
 
-  bool BeginWrite();
-  void EndWrite();
-  bool BeginRead(const SharedImageRepresentation* reader);
-  void EndRead(const SharedImageRepresentation* reader);
-
  protected:
   std::unique_ptr<SharedImageRepresentationGLTexture> ProduceGLTexture(
       SharedImageManager* manager,
       MemoryTypeTracker* tracker) override;
+
+  std::unique_ptr<SharedImageRepresentationGLTexturePassthrough>
+  ProduceGLTexturePassthrough(SharedImageManager* manager,
+                              MemoryTypeTracker* tracker) override;
 
   std::unique_ptr<SharedImageRepresentationSkia> ProduceSkia(
       SharedImageManager* manager,
@@ -72,18 +79,31 @@ class SharedImageBackingEglImage : public ClearTrackingSharedImageBacking {
 
  private:
   friend class SharedImageBatchAccessManager;
-  friend class SharedImageRepresentationEglImageGLTexture;
   class TextureHolder;
+  class RepresentationGLShared;
+  class RepresentationGLTexture;
+  class RepresentationGLTexturePassthrough;
+
+  template <class T>
+  std::unique_ptr<T> ProduceGLTextureInternal(SharedImageManager* manager,
+                                              MemoryTypeTracker* tracker);
+
+  bool BeginWrite();
+  void EndWrite();
+  bool BeginRead(const RepresentationGLShared* reader);
+  void EndRead(const RepresentationGLShared* reader);
 
   // Use to create EGLImage texture target from the same EGLImage object.
-  gles2::Texture* GenEGLImageSibling();
+  // Optional |pixel_data| to initialize a texture with before EGLImage object
+  // is created from it.
+  scoped_refptr<TextureHolder> GenEGLImageSibling(
+      base::span<const uint8_t> pixel_data);
 
   void SetEndReadFence(scoped_refptr<gl::SharedGLFenceEGL> shared_egl_fence);
 
-  const GLuint gl_format_;
-  const GLuint gl_type_;
+  const SharedImageBackingFactoryGLCommon::FormatInfo format_info_;
   scoped_refptr<TextureHolder> source_texture_holder_;
-  gl::GLApi* created_on_context_;
+  raw_ptr<gl::GLApi> created_on_context_;
 
   // This class encapsulates the EGLImage object for android.
   scoped_refptr<gles2::NativeImageBuffer> egl_image_buffer_ GUARDED_BY(lock_);
@@ -101,11 +121,12 @@ class SharedImageBackingEglImage : public ClearTrackingSharedImageBacking {
   // signalled.
   base::flat_map<gl::GLApi*, scoped_refptr<gl::SharedGLFenceEGL>> read_fences_
       GUARDED_BY(lock_);
-  base::flat_set<const SharedImageRepresentation*> active_readers_
+  base::flat_set<const RepresentationGLShared*> active_readers_
       GUARDED_BY(lock_);
-  SharedImageBatchAccessManager* batch_access_manager_ = nullptr;
+  raw_ptr<SharedImageBatchAccessManager> batch_access_manager_ = nullptr;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedImageBackingEglImage);
+  const SharedImageBackingGLCommon::UnpackStateAttribs gl_unpack_attribs_;
+  const bool use_passthrough_;
 };
 
 }  // namespace gpu

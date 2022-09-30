@@ -7,14 +7,14 @@
 
 #include <utility>
 
-#include "third_party/blink/public/web/web_swap_result.h"
+#include "base/time/time.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
-
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -48,18 +48,18 @@ class CORE_EXPORT ImageElementTiming final
   base::TimeTicks GetBackgroundImageLoadTime(const StyleFetchedImage*);
 
   // Called when the LayoutObject has been painted. This method might queue a
-  // swap promise to compute and report paint timestamps.
+  // presentation promise to compute and report paint timestamps.
   void NotifyImagePainted(
-      const LayoutObject*,
-      const ImageResourceContent* cached_image,
+      const LayoutObject&,
+      const ImageResourceContent& cached_image,
       const PropertyTreeStateOrAlias& current_paint_chunk_properties,
-      const IntRect& image_border);
+      const gfx::Rect& image_border);
 
   void NotifyBackgroundImagePainted(
-      Node*,
-      const StyleFetchedImage* background_image,
+      Node&,
+      const StyleFetchedImage& background_image,
       const PropertyTreeStateOrAlias& current_paint_chunk_properties,
-      const IntRect& image_border);
+      const gfx::Rect& image_border);
 
   void NotifyImageRemoved(const LayoutObject*,
                           const ImageResourceContent* image);
@@ -70,24 +70,24 @@ class CORE_EXPORT ImageElementTiming final
   friend class ImageElementTimingTest;
 
   void NotifyImagePaintedInternal(
-      Node*,
+      Node&,
       const LayoutObject&,
       const ImageResourceContent& cached_image,
       const PropertyTreeStateOrAlias& current_paint_chunk_properties,
       base::TimeTicks load_time,
-      const IntRect& image_border);
+      const gfx::Rect& image_border);
 
-  // Callback for the swap promise. Reports paint timestamps.
-  void ReportImagePaintSwapTime(WebSwapResult, base::TimeTicks timestamp);
+  // Callback for the presentation promise. Reports paint timestamps.
+  void ReportImagePaintPresentationTime(base::TimeTicks timestamp);
 
   // Class containing information about image element timing.
   class ElementTimingInfo final : public GarbageCollected<ElementTimingInfo> {
    public:
     ElementTimingInfo(const String& url,
-                      const FloatRect& rect,
+                      const gfx::RectF& rect,
                       const base::TimeTicks& response_end,
                       const AtomicString& identifier,
-                      const IntSize& intrinsic_size,
+                      const gfx::Size& intrinsic_size,
                       const AtomicString& id,
                       Element* element)
         : url(url),
@@ -104,16 +104,16 @@ class CORE_EXPORT ImageElementTiming final
     void Trace(Visitor* visitor) const { visitor->Trace(element); }
 
     String url;
-    FloatRect rect;
+    gfx::RectF rect;
     base::TimeTicks response_end;
     AtomicString identifier;
-    IntSize intrinsic_size;
+    gfx::Size intrinsic_size;
     AtomicString id;
     Member<Element> element;
   };
 
   // Vector containing the element timing infos that will be reported during the
-  // next swap promise callback.
+  // next presentation promise callback.
   HeapVector<Member<ElementTimingInfo>> element_timings_;
   struct ImageInfo {
     ImageInfo() {}

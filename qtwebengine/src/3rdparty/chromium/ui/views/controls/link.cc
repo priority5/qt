@@ -11,18 +11,20 @@
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/font_list.h"
-#include "ui/native_theme/native_theme.h"
 #include "ui/views/native_cursor.h"
 #include "ui/views/style/platform_style.h"
 
 namespace views {
 
-Link::Link(const base::string16& title, int text_context, int text_style)
+Link::Link(const std::u16string& title, int text_context, int text_style)
     : Label(title, text_context, text_style) {
   RecalculateFont();
 
@@ -38,17 +40,16 @@ Link::~Link() = default;
 
 SkColor Link::GetColor() const {
   // TODO(tapted): Use style::GetColor().
-  const ui::NativeTheme* theme = GetNativeTheme();
-  DCHECK(theme);
+  const ui::ColorProvider* color_provider = GetColorProvider();
+  DCHECK(color_provider);
   if (!GetEnabled())
-    return theme->GetSystemColor(ui::NativeTheme::kColorId_LinkDisabled);
+    return color_provider->GetColor(ui::kColorLinkForegroundDisabled);
 
   if (requested_enabled_color_.has_value())
     return requested_enabled_color_.value();
 
-  return GetNativeTheme()->GetSystemColor(
-      pressed_ ? ui::NativeTheme::kColorId_LinkPressed
-               : ui::NativeTheme::kColorId_LinkEnabled);
+  return color_provider->GetColor(pressed_ ? ui::kColorLinkForegroundPressed
+                                           : ui::kColorLinkForeground);
 }
 
 void Link::SetForceUnderline(bool force_underline) {
@@ -69,6 +70,14 @@ bool Link::GetCanProcessEventsWithinSubtree() const {
   // Links need to be able to accept events (e.g., clicking) even though
   // in general Labels do not.
   return View::GetCanProcessEventsWithinSubtree();
+}
+
+void Link::OnMouseEntered(const ui::MouseEvent& event) {
+  RecalculateFont();
+}
+
+void Link::OnMouseExited(const ui::MouseEvent& event) {
+  RecalculateFont();
 }
 
 bool Link::OnMousePressed(const ui::MouseEvent& event) {
@@ -140,7 +149,7 @@ void Link::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   Label::GetAccessibleNodeData(node_data);
   // Prevent invisible links from being announced by screen reader.
   node_data->role =
-      GetText().empty() ? ax::mojom::Role::kIgnored : ax::mojom::Role::kLink;
+      GetText().empty() ? ax::mojom::Role::kNone : ax::mojom::Role::kLink;
 }
 
 void Link::OnFocus() {
@@ -162,7 +171,7 @@ void Link::SetFontList(const gfx::FontList& font_list) {
   RecalculateFont();
 }
 
-void Link::SetText(const base::string16& text) {
+void Link::SetText(const std::u16string& text) {
   Label::SetText(text);
   ConfigureFocus();
 }
@@ -174,7 +183,8 @@ void Link::OnThemeChanged() {
 
 void Link::SetEnabledColor(SkColor color) {
   requested_enabled_color_ = color;
-  Label::SetEnabledColor(GetColor());
+  if (GetWidget())
+    Label::SetEnabledColor(GetColor());
 }
 
 bool Link::IsSelectionSupported() const {
@@ -198,9 +208,10 @@ void Link::OnClick(const ui::Event& event) {
 
 void Link::RecalculateFont() {
   const int style = font_list().GetFontStyle();
-  const int intended_style = ((GetEnabled() && HasFocus()) || force_underline_)
-                                 ? (style | gfx::Font::UNDERLINE)
-                                 : (style & ~gfx::Font::UNDERLINE);
+  const int intended_style =
+      ((GetEnabled() && (HasFocus() || IsMouseHovered())) || force_underline_)
+          ? (style | gfx::Font::UNDERLINE)
+          : (style & ~gfx::Font::UNDERLINE);
 
   if (style != intended_style)
     Label::SetFontList(font_list().DeriveWithStyle(intended_style));
@@ -211,7 +222,7 @@ void Link::ConfigureFocus() {
   if (GetText().empty()) {
     SetFocusBehavior(FocusBehavior::NEVER);
   } else {
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_MAC)
     SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
 #else
     SetFocusBehavior(FocusBehavior::ALWAYS);
@@ -220,7 +231,7 @@ void Link::ConfigureFocus() {
 }
 
 BEGIN_METADATA(Link, Label)
-ADD_READONLY_PROPERTY_METADATA(SkColor, Color)
+ADD_READONLY_PROPERTY_METADATA(SkColor, Color, ui::metadata::SkColorConverter)
 END_METADATA
 
 }  // namespace views

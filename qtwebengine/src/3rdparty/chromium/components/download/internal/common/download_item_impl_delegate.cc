@@ -4,7 +4,7 @@
 
 #include "components/download/public/common/download_item_impl_delegate.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "build/build_config.h"
 #include "components/download/public/common/auto_resumption_handler.h"
@@ -37,8 +37,8 @@ void DownloadItemImplDelegate::DetermineDownloadTarget(
   std::move(callback).Run(
       target_path, DownloadItem::TARGET_DISPOSITION_OVERWRITE,
       DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DownloadItem::MixedContentStatus::UNKNOWN, target_path,
-      base::nullopt /*download_schedule*/, DOWNLOAD_INTERRUPT_REASON_NONE);
+      DownloadItem::MixedContentStatus::UNKNOWN, target_path, base::FilePath(),
+      absl::nullopt /*download_schedule*/, DOWNLOAD_INTERRUPT_REASON_NONE);
 }
 
 bool DownloadItemImplDelegate::ShouldCompleteDownload(
@@ -77,7 +77,7 @@ std::string DownloadItemImplDelegate::GetApplicationClientIdForFileScanning()
 
 void DownloadItemImplDelegate::ResumeInterruptedDownload(
     std::unique_ptr<DownloadUrlParameters> params,
-    const GURL& site_url) {}
+    const std::string& serialized_embedder_download_data) {}
 
 void DownloadItemImplDelegate::UpdatePersistence(DownloadItemImpl* download) {}
 
@@ -109,6 +109,12 @@ void DownloadItemImplDelegate::BindWakeLockProvider(
 QuarantineConnectionCallback
 DownloadItemImplDelegate::GetQuarantineConnectionCallback() {
   return base::NullCallback();
+}
+
+std::unique_ptr<DownloadItemRenameHandler>
+DownloadItemImplDelegate::GetRenameHandlerForDownload(
+    DownloadItemImpl* download_item) {
+  return nullptr;
 }
 
 }  // namespace download

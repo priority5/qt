@@ -8,16 +8,19 @@
 #include <dawn_wire/WireClient.h>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
+
 namespace gpu {
 
+class CommandBufferHelper;
 class MappedMemoryManager;
 
 namespace webgpu {
 
 struct MemoryTransferHandle;
 
-class DawnClientMemoryTransferService final
-    : public dawn_wire::client::MemoryTransferService {
+class DawnClientMemoryTransferService
+    : public dawn::wire::client::MemoryTransferService {
  public:
   DawnClientMemoryTransferService(MappedMemoryManager* mapped_memory);
   ~DawnClientMemoryTransferService() override;
@@ -30,8 +33,11 @@ class DawnClientMemoryTransferService final
   // This may fail and return nullptr.
   WriteHandle* CreateWriteHandle(size_t size) override;
 
-  // Free shared memory allocations after the token passes on the GPU process.
-  void FreeHandlesPendingToken(int32_t token);
+  // Free shared memory allocations after the next token passes on the GPU
+  // process.
+  void FreeHandles(CommandBufferHelper* helper);
+
+  void Disconnect();
 
  private:
   class ReadHandleImpl;
@@ -44,10 +50,13 @@ class DawnClientMemoryTransferService final
   // than once per block.
   void MarkHandleFree(void* ptr);
 
-  MappedMemoryManager* mapped_memory_;
+  raw_ptr<MappedMemoryManager> mapped_memory_;
   // Pointers to memory allocated by the MappedMemoryManager to free after
   // the next Flush.
   std::vector<void*> free_blocks_;
+
+  // If disconnected, new handle creation always returns null.
+  bool disconnected_ = false;
 };
 
 }  // namespace webgpu

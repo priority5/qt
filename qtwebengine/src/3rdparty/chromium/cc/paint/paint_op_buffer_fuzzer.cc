@@ -79,7 +79,7 @@ void Raster(scoped_refptr<viz::TestContextProvider> context_provider,
       context_provider->GrContext(), SkBudgeted::kYes, image_info);
   SkCanvas* canvas = surface->getCanvas();
 
-  cc::PlaybackParams params(nullptr, canvas->getTotalMatrix());
+  cc::PlaybackParams params(nullptr, canvas->getLocalToDevice());
   cc::TransferCacheTestHelper transfer_cache_helper;
   std::vector<uint8_t> scratch_buffer;
   cc::PaintOp::DeserializeOptions deserialize_options(
@@ -121,8 +121,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size <= sizeof(size_t))
     return 0;
 
-  static Environment* env = new Environment();
-  ALLOW_UNUSED_LOCAL(env);
+  [[maybe_unused]] static Environment* env = new Environment();
   base::CommandLine::Init(0, nullptr);
 
   // Partition the data to use some bytes for populating the font cache.

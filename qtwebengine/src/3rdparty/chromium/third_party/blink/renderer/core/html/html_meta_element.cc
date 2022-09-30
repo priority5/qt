@@ -22,28 +22,38 @@
 
 #include "third_party/blink/renderer/core/html/html_meta_element.h"
 
-#include "third_party/blink/public/common/css/color_scheme.h"
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
+#include "third_party/blink/renderer/core/html/client_hints_util.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.h"
+#include "third_party/blink/renderer/core/loader/frame_fetch_context.h"
 #include "third_party/blink/renderer/core/loader/http_equiv.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/loader/fetch/client_hints_preferences.h"
+#include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 
 namespace blink {
 
-HTMLMetaElement::HTMLMetaElement(Document& document)
-    : HTMLElement(html_names::kMetaTag, document) {}
+HTMLMetaElement::HTMLMetaElement(Document& document,
+                                 const CreateElementFlags flags)
+    : HTMLElement(html_names::kMetaTag, document),
+      is_being_created_by_parser_with_sync_flag_(
+          flags.IsCreatedByParser() && !flags.IsAsyncCustomElements() &&
+          !document.IsInDocumentWrite()) {}
 
 static bool IsInvalidSeparator(UChar c) {
   return c == ';';
@@ -200,11 +210,12 @@ Length HTMLMetaElement::ParseViewportValueAsLength(Document* document,
   if (value < 0)
     return Length();  // auto
 
+  value = ClampLengthValue(value);
   if (document && document->GetPage()) {
     value = document->GetPage()->GetChromeClient().WindowToViewportScalar(
         document->GetFrame(), value);
   }
-  return Length::Fixed(ClampLengthValue(value));
+  return Length::Fixed(value);
 }
 
 float HTMLMetaElement::ParseViewportValueAsZoom(
@@ -481,11 +492,14 @@ void HTMLMetaElement::NameRemoved(const AtomicString& name_value) {
     return;
   if (EqualIgnoringASCIICase(name_value, "theme-color") &&
       GetDocument().GetFrame()) {
-    GetDocument().GetFrame()->DidChangeThemeColor();
+    GetDocument().GetFrame()->DidChangeThemeColor(
+        /*update_theme_color_cache=*/true);
   } else if (EqualIgnoringASCIICase(name_value, "color-scheme")) {
     GetDocument().ColorSchemeMetaChanged();
   } else if (EqualIgnoringASCIICase(name_value, "battery-savings")) {
     GetDocument().BatterySavingsMetaChanged();
+  } else if (EqualIgnoringASCIICase(name_value, "supports-reduced-motion")) {
+    GetDocument().SupportsReducedMotionMetaChanged();
   }
 }
 
@@ -500,6 +514,8 @@ void HTMLMetaElement::ParseAttribute(
     ProcessHttpEquiv();
   } else if (params.name == html_names::kHttpEquivAttr) {
     ProcessHttpEquiv();
+  } else if (params.name == html_names::kMediaAttr) {
+    ProcessContent();
   } else {
     HTMLElement::ParseAttribute(params);
   }
@@ -560,7 +576,8 @@ void HTMLMetaElement::ProcessContent() {
 
   if (EqualIgnoringASCIICase(name_value, "theme-color") &&
       GetDocument().GetFrame()) {
-    GetDocument().GetFrame()->DidChangeThemeColor();
+    GetDocument().GetFrame()->DidChangeThemeColor(
+        /*update_theme_color_cache=*/true);
     return;
   }
   if (EqualIgnoringASCIICase(name_value, "color-scheme")) {
@@ -569,6 +586,11 @@ void HTMLMetaElement::ProcessContent() {
   }
   if (EqualIgnoringASCIICase(name_value, "battery-savings")) {
     GetDocument().BatterySavingsMetaChanged();
+    return;
+  }
+
+  if (EqualIgnoringASCIICase(name_value, "supports-reduced-motion")) {
+    GetDocument().SupportsReducedMotionMetaChanged();
     return;
   }
 
@@ -588,18 +610,9 @@ void HTMLMetaElement::ProcessContent() {
       UseCounter::Count(&GetDocument(),
                         WebFeature::kHTMLMetaElementReferrerPolicyOutsideHead);
     }
-    bool comma_in_content_value = false;
-    if (content_value.Contains(',')) {
-      comma_in_content_value = true;
-      UseCounter::Count(
-          &GetDocument(),
-          WebFeature::kHTMLMetaElementReferrerPolicyMultipleTokens);
-    }
 
-    GetExecutionContext()->ParseAndSetReferrerPolicy(
-        content_value, true /* support legacy keywords */,
-        /*from_meta_tag_with_list_of_policies=*/
-        comma_in_content_value);
+    GetExecutionContext()->ParseAndSetReferrerPolicy(content_value,
+                                                     kPolicySourceMetaTag);
   } else if (EqualIgnoringASCIICase(name_value, "handheldfriendly") &&
              EqualIgnoringASCIICase(content_value, "true")) {
     ProcessViewportContentAttribute("width=device-width",
@@ -615,6 +628,9 @@ void HTMLMetaElement::ProcessContent() {
       UseCounter::Count(&GetDocument(),
                         WebFeature::kHTMLMetaElementMonetization);
     }
+  } else if (EqualIgnoringASCIICase(name_value, http_names::kAcceptCH)) {
+    ProcessMetaAcceptCH(GetDocument(), content_value, /*is_http_equiv*/ false,
+                        is_being_created_by_parser_with_sync_flag_);
   }
 }
 
@@ -634,7 +650,53 @@ const AtomicString& HTMLMetaElement::HttpEquiv() const {
   return FastGetAttribute(html_names::kHttpEquivAttr);
 }
 
+const AtomicString& HTMLMetaElement::Media() const {
+  return FastGetAttribute(html_names::kMediaAttr);
+}
+
 const AtomicString& HTMLMetaElement::GetName() const {
   return FastGetAttribute(html_names::kNameAttr);
 }
+
+// static
+void HTMLMetaElement::ProcessMetaAcceptCH(Document& document,
+                                          const AtomicString& content,
+                                          bool is_http_equiv,
+                                          bool is_preload_or_sync_parser) {
+  if (is_http_equiv
+          ? !RuntimeEnabledFeatures::ClientHintsMetaHTTPEquivAcceptCHEnabled()
+          : !RuntimeEnabledFeatures::ClientHintsMetaNameAcceptCHEnabled()) {
+    return;
+  }
+
+  LocalFrame* frame = document.GetFrame();
+  if (!frame)
+    return;
+
+  if (!frame->IsMainFrame()) {
+    return;
+  }
+
+  if (!FrameFetchContext::AllowScriptFromSourceWithoutNotifying(
+          document.Url(), frame->GetContentSettingsClient(),
+          frame->GetSettings())) {
+    // Do not allow configuring client hints if JavaScript is disabled.
+    return;
+  }
+
+  UseCounter::Count(
+      document, is_http_equiv ? WebFeature::kClientHintsMetaHTTPEquivAcceptCH
+                              : WebFeature::kClientHintsMetaNameAcceptCH);
+  FrameClientHintsPreferencesContext hints_context(frame);
+  UpdateWindowPermissionsPolicyWithDelegationSupportForClientHints(
+      frame->GetClientHintsPreferences(), document.domWindow(), content,
+      document.Url(), &hints_context, is_http_equiv, is_preload_or_sync_parser);
 }
+
+void HTMLMetaElement::FinishParsingChildren() {
+  // Flag the tag was parsed so if it's re-read we know it was modified.
+  is_being_created_by_parser_with_sync_flag_ = false;
+  HTMLElement::FinishParsingChildren();
+}
+
+}  // namespace blink

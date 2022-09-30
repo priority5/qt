@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TIMING_TASK_ATTRIBUTION_TIMING_H_
 
 #include "third_party/blink/renderer/core/timing/performance_entry.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -28,9 +28,9 @@ class TaskAttributionTiming final : public PerformanceEntry {
 
   TaskAttributionTiming(const AtomicString& type,
                         const AtomicString& container_type,
-                        const String& container_src,
-                        const String& container_id,
-                        const String& container_name);
+                        const AtomicString& container_src,
+                        const AtomicString& container_id,
+                        const AtomicString& container_name);
   ~TaskAttributionTiming() override;
 
  private:

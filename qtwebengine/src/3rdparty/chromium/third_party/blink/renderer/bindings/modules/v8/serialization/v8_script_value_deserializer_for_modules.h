@@ -10,8 +10,11 @@
 
 namespace blink {
 
+class AudioData;
 class CryptoKey;
-class NativeFileSystemHandle;
+class EncodedAudioChunk;
+class EncodedVideoChunk;
+class FileSystemHandle;
 class RTCEncodedAudioFrame;
 class RTCEncodedVideoFrame;
 class VideoFrame;
@@ -46,10 +49,14 @@ class MODULES_EXPORT V8ScriptValueDeserializerForModules final
     return true;
   }
   CryptoKey* ReadCryptoKey();
-  NativeFileSystemHandle* ReadNativeFileSystemHandle(SerializationTag tag);
+  FileSystemHandle* ReadFileSystemHandle(SerializationTag tag);
   RTCEncodedAudioFrame* ReadRTCEncodedAudioFrame();
   RTCEncodedVideoFrame* ReadRTCEncodedVideoFrame();
+  AudioData* ReadAudioData();
   VideoFrame* ReadVideoFrame();
+  EncodedAudioChunk* ReadEncodedAudioChunk();
+  EncodedVideoChunk* ReadEncodedVideoChunk();
+  MediaStreamTrack* ReadMediaStreamTrack();
 };
 
 }  // namespace blink

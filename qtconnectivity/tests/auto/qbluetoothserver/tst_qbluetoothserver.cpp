@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtBluetooth module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QtTest/QtTest>
 
@@ -37,13 +12,7 @@
 
 QT_USE_NAMESPACE
 
-//same uuid as tests/bttestui
-#define TEST_SERVICE_UUID "e8e10f95-1a70-4b27-9ccf-02010264e9c8"
-
 Q_DECLARE_METATYPE(QBluetooth::SecurityFlags)
-
-// Max time to wait for connection
-static const int MaxConnectTime = 60 * 1000;   // 1 minute in ms
 
 class tst_QBluetoothServer : public QObject
 {
@@ -105,7 +74,7 @@ void tst_QBluetoothServer::setHostMode(const QBluetoothAddress &localAdapter,
     }
 
     int connectTime = 5000;  // ms
-    while (hostModeSpy.count() < 1 && connectTime > 0) {
+    while (hostModeSpy.isEmpty() && connectTime > 0) {
         QTest::qWait(500);
         connectTime -= 500;
     }
@@ -175,6 +144,11 @@ void tst_QBluetoothServer::tst_receive()
 {
     QFETCH(QBluetoothLocalDevice::HostMode, hostmode);
 
+#ifdef ANDROID_CI_TEST_ENVIRONMENT
+    if (QNativeInterface::QAndroidApplication::sdkVersion() >= 31)
+        QSKIP("Skipping test on Android 12+, emulator on CI can timeout waiting for user input");
+#endif
+
     QBluetoothLocalDevice localDev;
 #ifdef Q_OS_OSX
     if (localDev.hostMode() == QBluetoothLocalDevice::HostPoweredOff)
@@ -197,15 +171,19 @@ void tst_QBluetoothServer::tst_receive()
         }
     }
     QBluetoothServer server(QBluetoothServiceInfo::RfcommProtocol);
-    QSignalSpy errorSpy(&server, SIGNAL(error(QBluetoothServer::Error)));
+    QSignalSpy errorSpy(&server, SIGNAL(errorOccurred(QBluetoothServer::Error)));
 
     bool result = server.listen(address, 20);  // port == 20
     QTest::qWait(1000);
 
     if (!result) {
+#ifndef Q_OS_ANDROID
+        // Disable address check on Android as an actual device always returns
+        // a valid address, while the emulator doesn't
         QCOMPARE(server.serverAddress(), QBluetoothAddress());
+#endif
         QCOMPARE(server.serverPort(), quint16(0));
-        QVERIFY(errorSpy.count() > 0);
+        QVERIFY(!errorSpy.isEmpty());
         QVERIFY(!server.isListening());
         if (!localDeviceAvailable) {
             QVERIFY(server.error() != QBluetoothServer::NoError);
@@ -219,7 +197,7 @@ void tst_QBluetoothServer::tst_receive()
     QVERIFY(result);
 
 #if !QT_CONFIG(winrt_bt)
-    QVERIFY(QBluetoothLocalDevice::allDevices().count());
+    QVERIFY(!QBluetoothLocalDevice::allDevices().isEmpty());
 #endif
     QCOMPARE(server.error(), QBluetoothServer::NoError);
     QCOMPARE(server.serverAddress(), address);

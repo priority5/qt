@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \example pinball
@@ -200,7 +176,7 @@
     which means that if you have not hit a target yet, the target is blinking,
     indicating that it is currently worth hitting. This blinking
     means that the light state switches between on and off at short intervals,
-    while the target state is continouosly off, because it has not been hit yet.
+    while the target state is continuously off, because it has not been hit yet.
     The author of a pinball table can decide that
     after a target is hit (that is, after the target state switches to on)
     the target's light is continuously turned off or on or the intervals between
@@ -306,7 +282,7 @@
     \c goToHurryOn event occurs and from \c hurryStateOn to \c hurryStateOff
     when the \c goToHurryOff event occurs. When we exit the \c hurryStateOn
     state, we cancel the possibly pending delayed event that was marked with
-    \c hurryId. This is important in case the five secons have not elapsed yet,
+    \c hurryId. This is important in case the five seconds have not elapsed yet,
     but players have collected all the five letters in the hurry state. We then
     collect the jackpot and want the pending timer to finish.
 

@@ -24,7 +24,7 @@ class MockWorkerThreadDelegate : public WorkerThread::Delegate {
   WorkerThread::ThreadLabel GetThreadLabel() const override {
     return WorkerThread::ThreadLabel::DEDICATED;
   }
-  void OnMainEntry(const WorkerThread* worker) override {}
+  void OnMainEntry(WorkerThread* worker) override {}
   RegisteredTaskSource GetWork(WorkerThread* worker) override {
     return nullptr;
   }
@@ -52,7 +52,7 @@ class ThreadPoolWorkerStackTest : public testing::Test {
   }
 
  private:
-  TaskTracker task_tracker_{"Test"};
+  TaskTracker task_tracker_;
 
  protected:
   scoped_refptr<WorkerThread> worker_a_;

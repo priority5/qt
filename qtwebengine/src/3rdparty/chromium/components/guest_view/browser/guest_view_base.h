@@ -8,9 +8,10 @@
 #include <memory>
 
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
+#include "components/guest_view/browser/guest_view_message_handler.h"
 #include "components/guest_view/common/guest_view_constants.h"
 #include "components/zoom/zoom_observer.h"
 #include "content/public/browser/browser_plugin_guest_delegate.h"
@@ -52,15 +53,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
                       public content::WebContentsObserver,
                       public zoom::ZoomObserver {
  public:
-  // Returns a *ViewGuest if this GuestView is of the given view type.
-  template <typename T>
-  T* As() {
-    if (IsViewType(T::Type))
-      return static_cast<T*>(this);
-
-    return nullptr;
-  }
-
   // Cleans up state when this GuestView is being destroyed.
   // Note that this cannot be done in the destructor since a GuestView could
   // potentially be created and destroyed in JavaScript before getting a
@@ -74,6 +66,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
       const content::WebContents* web_contents);
 
   static GuestViewBase* From(int owner_process_id, int instance_id);
+
+  GuestViewBase(const GuestViewBase&) = delete;
+  GuestViewBase& operator=(const GuestViewBase&) = delete;
 
   // Given a |web_contents|, returns the top level owner WebContents. If
   // |web_contents| does not belong to a GuestView, it will be returned
@@ -127,10 +122,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void InitWithWebContents(const base::DictionaryValue& create_params,
                            content::WebContents* guest_web_contents);
 
-  bool IsViewType(const char* const view_type) const {
-    return !strcmp(GetViewType(), view_type);
-  }
-
   // Used to toggle autosize mode for this GuestView, and set both the automatic
   // and normal sizes.
   void SetSize(const SetSizeParams& params);
@@ -138,7 +129,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   bool initialized() const { return initialized_; }
 
   content::WebContents* embedder_web_contents() const {
-    return attached() ? owner_web_contents_ : nullptr;
+    return attached() ? owner_web_contents_.get() : nullptr;
   }
 
   content::WebContents* owner_web_contents() const {
@@ -174,11 +165,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // Returns the user browser context of the embedder.
   content::BrowserContext* browser_context() const { return browser_context_; }
 
-  GuestViewBase* GetOpener() const {
-    return opener_.get();
-  }
-
-  // Returns the URL of the owner WebContents.
+  // Returns the URL of the owner WebContents' SiteInstance.
+  // WARNING: Be careful using this with GuestViews where
+  // `CanBeEmbeddedInsideCrossProcessFrames` is true. This returns the site of
+  // the WebContents, not the embedding frame.
   const GURL& GetOwnerSiteURL() const;
 
   // Returns the host of the owner WebContents. For extensions, this is the
@@ -198,7 +188,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // Saves the attach state of the custom element hosting this GuestView.
   void SetAttachParams(const base::DictionaryValue& params);
-  void SetOpener(GuestViewBase* opener);
 
   // Returns the RenderWidgetHost corresponding to the owner frame.
   virtual content::RenderWidgetHost* GetOwnerRenderWidgetHost();
@@ -210,18 +199,25 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // |embedder_frame| is a frame in the embedder WebContents (owned by a
   // HTMLFrameOwnerElement associated with the GuestView's element in the
   // embedder process) which will be used for attaching.
-  void AttachToOuterWebContentsFrame(content::RenderFrameHost* embedder_frame,
-                                     int32_t element_instance_id,
-                                     bool is_full_page_plugin);
+  void AttachToOuterWebContentsFrame(
+      content::RenderFrameHost* embedder_frame,
+      int32_t element_instance_id,
+      bool is_full_page_plugin,
+      GuestViewMessageHandler::AttachToEmbedderFrameCallback
+          attachment_callback);
 
   // Returns true if the corresponding guest is allowed to be embedded inside an
   // <iframe> which is cross process.
-  virtual bool CanBeEmbeddedInsideCrossProcessFrames();
+  virtual bool CanBeEmbeddedInsideCrossProcessFrames() const;
 
  protected:
   explicit GuestViewBase(content::WebContents* owner_web_contents);
 
   ~GuestViewBase() override;
+
+  GuestViewBase* GetOpener() const { return opener_.get(); }
+
+  void SetOpener(GuestViewBase* opener);
 
   // TODO(ekaramad): If a guest is based on BrowserPlugin and is embedded inside
   // a cross-process frame, we need to notify the destruction of the frame so
@@ -338,8 +334,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   class OpenerLifetimeObserver;
 
   // TODO(533069): Remove since BrowserPlugin has been removed.
-  void DidAttach(int guest_proxy_routing_id);
-  void DidDetach();
+  void DidAttach();
   void WillAttach(content::WebContents* embedder_web_contents,
                   int browser_plugin_instance_id,
                   bool is_full_page_plugin,
@@ -358,11 +353,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
                           bool exited) final;
   void ContentsZoomChange(bool zoom_in) final;
   void LoadingStateChanged(content::WebContents* source,
-                           bool to_different_document) final;
-  content::ColorChooser* OpenColorChooser(
-      content::WebContents* web_contents,
-      SkColor color,
-      const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) final;
+                           bool should_show_loading_ui) final;
   void ResizeDueToAutoResize(content::WebContents* web_contents,
                              const gfx::Size& new_size) final;
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
@@ -416,14 +407,16 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
                   content::RenderFrameHost* outer_contents_frame,
                   int browser_plugin_instance_id,
                   bool is_full_page_plugin,
-                  base::OnceClosure completion_callback);
+                  base::OnceClosure completion_callback,
+                  GuestViewMessageHandler::AttachToEmbedderFrameCallback
+                      attachment_callback);
 
   // This guest tracks the lifetime of the WebContents specified by
   // |owner_web_contents_|. If |owner_web_contents_| is destroyed then this
   // guest will also self-destruct.
-  content::WebContents* owner_web_contents_;
+  raw_ptr<content::WebContents> owner_web_contents_;
   std::string owner_host_;
-  content::BrowserContext* const browser_context_;
+  const raw_ptr<content::BrowserContext> browser_context_;
 
   // |guest_instance_id_| is a profile-wide unique identifier for a guest
   // WebContents.
@@ -464,8 +457,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   std::unique_ptr<base::DictionaryValue> attach_params_;
 
   // This observer ensures that this guest self-destructs if the embedder goes
-  // away. It also tracks when the embedder's fullscreen is toggled or when its
-  // page scale factor changes so the guest can change itself accordingly.
+  // away. It also tracks when the embedder's fullscreen is toggled so the guest
+  // can change itself accordingly.
   std::unique_ptr<OwnerContentsObserver> owner_contents_observer_;
 
   // This observer ensures that if the guest is unattached and its opener goes
@@ -477,7 +470,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   gfx::Size guest_size_;
 
   // A pointer to the guest_host.
-  content::GuestHost* guest_host_;
+  raw_ptr<content::GuestHost> guest_host_;
 
   // Indicates whether autosize mode is enabled or not.
   bool auto_size_enabled_;
@@ -497,8 +490,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.
   base::WeakPtrFactory<GuestViewBase> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(GuestViewBase);
 };
 
 }  // namespace guest_view

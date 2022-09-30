@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QQUICKPOSITIONERS_P_H
 #define QQUICKPOSITIONERS_P_H
@@ -107,13 +71,14 @@ class Q_QUICK_PRIVATE_EXPORT QQuickBasePositioner : public QQuickImplicitSizeIte
     Q_PROPERTY(QQuickTransition *move READ move WRITE setMove NOTIFY moveChanged)
     Q_PROPERTY(QQuickTransition *add READ add WRITE setAdd NOTIFY addChanged)
 
-    Q_PROPERTY(qreal padding READ padding WRITE setPadding RESET resetPadding NOTIFY paddingChanged REVISION 6)
-    Q_PROPERTY(qreal topPadding READ topPadding WRITE setTopPadding RESET resetTopPadding NOTIFY topPaddingChanged REVISION 6)
-    Q_PROPERTY(qreal leftPadding READ leftPadding WRITE setLeftPadding RESET resetLeftPadding NOTIFY leftPaddingChanged REVISION 6)
-    Q_PROPERTY(qreal rightPadding READ rightPadding WRITE setRightPadding RESET resetRightPadding NOTIFY rightPaddingChanged REVISION 6)
-    Q_PROPERTY(qreal bottomPadding READ bottomPadding WRITE setBottomPadding RESET resetBottomPadding NOTIFY bottomPaddingChanged REVISION 6)
+    Q_PROPERTY(qreal padding READ padding WRITE setPadding RESET resetPadding NOTIFY paddingChanged REVISION(2, 6))
+    Q_PROPERTY(qreal topPadding READ topPadding WRITE setTopPadding RESET resetTopPadding NOTIFY topPaddingChanged REVISION(2, 6))
+    Q_PROPERTY(qreal leftPadding READ leftPadding WRITE setLeftPadding RESET resetLeftPadding NOTIFY leftPaddingChanged REVISION(2, 6))
+    Q_PROPERTY(qreal rightPadding READ rightPadding WRITE setRightPadding RESET resetRightPadding NOTIFY rightPaddingChanged REVISION(2, 6))
+    Q_PROPERTY(qreal bottomPadding READ bottomPadding WRITE setBottomPadding RESET resetBottomPadding NOTIFY bottomPaddingChanged REVISION(2, 6))
 
     QML_NAMED_ELEMENT(Positioner)
+    QML_ADDED_IN_VERSION(2, 0)
     QML_UNCREATABLE("Positioner is an abstract type that is only available as an attached property.")
     QML_ATTACHED(QQuickPositionerAttached)
 
@@ -159,7 +124,7 @@ public:
     void setBottomPadding(qreal padding);
     void resetBottomPadding();
 
-    Q_REVISION(9) Q_INVOKABLE void forceLayout();
+    Q_REVISION(2, 9) Q_INVOKABLE void forceLayout();
 
 protected:
     QQuickBasePositioner(QQuickBasePositionerPrivate &dd, PositionerType at, QQuickItem *parent);
@@ -173,12 +138,12 @@ Q_SIGNALS:
     void populateChanged();
     void moveChanged();
     void addChanged();
-    Q_REVISION(6) void paddingChanged();
-    Q_REVISION(6) void topPaddingChanged();
-    Q_REVISION(6) void leftPaddingChanged();
-    Q_REVISION(6) void rightPaddingChanged();
-    Q_REVISION(6) void bottomPaddingChanged();
-    Q_REVISION(9) void positioningComplete();
+    Q_REVISION(2, 6) void paddingChanged();
+    Q_REVISION(2, 6) void topPaddingChanged();
+    Q_REVISION(2, 6) void leftPaddingChanged();
+    Q_REVISION(2, 6) void rightPaddingChanged();
+    Q_REVISION(2, 6) void bottomPaddingChanged();
+    Q_REVISION(2, 9) void positioningComplete();
 
 protected Q_SLOTS:
     void prePositioning();
@@ -232,27 +197,27 @@ private:
     Q_DECLARE_PRIVATE(QQuickBasePositioner)
 };
 
-class Q_AUTOTEST_EXPORT QQuickColumn : public QQuickBasePositioner
+class Q_QUICK_PRIVATE_EXPORT QQuickColumn : public QQuickBasePositioner
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(Column)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickColumn(QQuickItem *parent=nullptr);
 
 protected:
     void doPositioning(QSizeF *contentSize) override;
     void reportConflictingAnchors() override;
-private:
-    Q_DISABLE_COPY(QQuickColumn)
 };
 
 class QQuickRowPrivate;
-class Q_AUTOTEST_EXPORT QQuickRow: public QQuickBasePositioner
+class Q_QUICK_PRIVATE_EXPORT QQuickRow: public QQuickBasePositioner
 {
     Q_OBJECT
     Q_PROPERTY(Qt::LayoutDirection layoutDirection READ layoutDirection WRITE setLayoutDirection NOTIFY layoutDirectionChanged)
     Q_PROPERTY(Qt::LayoutDirection effectiveLayoutDirection READ effectiveLayoutDirection NOTIFY effectiveLayoutDirectionChanged)
     QML_NAMED_ELEMENT(Row)
+    QML_ADDED_IN_VERSION(2, 0)
 
 public:
     QQuickRow(QQuickItem *parent=nullptr);
@@ -269,12 +234,11 @@ protected:
     void doPositioning(QSizeF *contentSize) override;
     void reportConflictingAnchors() override;
 private:
-    Q_DISABLE_COPY(QQuickRow)
     Q_DECLARE_PRIVATE(QQuickRow)
 };
 
 class QQuickGridPrivate;
-class Q_AUTOTEST_EXPORT QQuickGrid : public QQuickBasePositioner
+class Q_QUICK_PRIVATE_EXPORT QQuickGrid : public QQuickBasePositioner
 {
     Q_OBJECT
     Q_PROPERTY(int rows READ rows WRITE setRows NOTIFY rowsChanged)
@@ -284,10 +248,11 @@ class Q_AUTOTEST_EXPORT QQuickGrid : public QQuickBasePositioner
     Q_PROPERTY(Flow flow READ flow WRITE setFlow NOTIFY flowChanged)
     Q_PROPERTY(Qt::LayoutDirection layoutDirection READ layoutDirection WRITE setLayoutDirection NOTIFY layoutDirectionChanged)
     Q_PROPERTY(Qt::LayoutDirection effectiveLayoutDirection READ effectiveLayoutDirection NOTIFY effectiveLayoutDirectionChanged)
-    Q_PROPERTY(HAlignment horizontalItemAlignment READ hItemAlign WRITE setHItemAlign NOTIFY horizontalAlignmentChanged REVISION 1)
-    Q_PROPERTY(HAlignment effectiveHorizontalItemAlignment READ effectiveHAlign NOTIFY effectiveHorizontalAlignmentChanged REVISION 1)
-    Q_PROPERTY(VAlignment verticalItemAlignment READ vItemAlign WRITE setVItemAlign NOTIFY verticalAlignmentChanged REVISION 1)
+    Q_PROPERTY(HAlignment horizontalItemAlignment READ hItemAlign WRITE setHItemAlign NOTIFY horizontalAlignmentChanged REVISION(2, 1))
+    Q_PROPERTY(HAlignment effectiveHorizontalItemAlignment READ effectiveHAlign NOTIFY effectiveHorizontalAlignmentChanged REVISION(2, 1))
+    Q_PROPERTY(VAlignment verticalItemAlignment READ vItemAlign WRITE setVItemAlign NOTIFY verticalAlignmentChanged REVISION(2, 1))
     QML_NAMED_ELEMENT(Grid)
+    QML_ADDED_IN_VERSION(2, 0)
 
 public:
     QQuickGrid(QQuickItem *parent=nullptr);
@@ -339,9 +304,9 @@ Q_SIGNALS:
     void effectiveLayoutDirectionChanged();
     void rowSpacingChanged();
     void columnSpacingChanged();
-    Q_REVISION(1) void horizontalAlignmentChanged(HAlignment alignment);
-    Q_REVISION(1) void effectiveHorizontalAlignmentChanged(HAlignment alignment);
-    Q_REVISION(1) void verticalAlignmentChanged(VAlignment alignment);
+    Q_REVISION(2, 1) void horizontalAlignmentChanged(HAlignment alignment);
+    Q_REVISION(2, 1) void effectiveHorizontalAlignmentChanged(HAlignment alignment);
+    Q_REVISION(2, 1) void verticalAlignmentChanged(VAlignment alignment);
 
 protected:
     void doPositioning(QSizeF *contentSize) override;
@@ -357,18 +322,18 @@ private:
     Flow m_flow;
     HAlignment m_hItemAlign;
     VAlignment m_vItemAlign;
-    Q_DISABLE_COPY(QQuickGrid)
     Q_DECLARE_PRIVATE(QQuickGrid)
 };
 
 class QQuickFlowPrivate;
-class Q_AUTOTEST_EXPORT QQuickFlow: public QQuickBasePositioner
+class Q_QUICK_PRIVATE_EXPORT QQuickFlow: public QQuickBasePositioner
 {
     Q_OBJECT
     Q_PROPERTY(Flow flow READ flow WRITE setFlow NOTIFY flowChanged)
     Q_PROPERTY(Qt::LayoutDirection layoutDirection READ layoutDirection WRITE setLayoutDirection NOTIFY layoutDirectionChanged)
     Q_PROPERTY(Qt::LayoutDirection effectiveLayoutDirection READ effectiveLayoutDirection NOTIFY effectiveLayoutDirectionChanged)
     QML_NAMED_ELEMENT(Flow)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickFlow(QQuickItem *parent=nullptr);
 
@@ -392,7 +357,6 @@ protected:
 protected:
     QQuickFlow(QQuickFlowPrivate &dd, QQuickItem *parent);
 private:
-    Q_DISABLE_COPY(QQuickFlow)
     Q_DECLARE_PRIVATE(QQuickFlow)
 };
 

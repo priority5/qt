@@ -8,7 +8,9 @@
 #include <memory>
 
 #include "base/time/time.h"
+#include "cc/input/actively_scrolling_type.h"
 #include "cc/paint/element_id.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace viz {
 struct BeginFrameArgs;
@@ -63,6 +65,9 @@ class InputDelegateForCompositor {
   // completed.
   virtual void ScrollOffsetAnimationFinished() = 0;
 
+  // Called to inform the input handler when prefers-reduced-motion changes.
+  virtual void SetPrefersReducedMotion(bool prefers_reduced_motion) = 0;
+
   // Returns true if we're currently in a "gesture" (user-initiated) scroll.
   // That is, between a GestureScrollBegin and a GestureScrollEnd. Note, a
   // GestureScrollEnd is deferred if the gesture ended but we're still
@@ -70,18 +75,14 @@ class InputDelegateForCompositor {
   // finger from the touchscreen but we're scroll snapping).
   virtual bool IsCurrentlyScrolling() const = 0;
 
-  // Returns true if there is an active scroll in progress.  "Active" here
-  // means that it's been latched (i.e. we have a CurrentlyScrollingNode()) but
-  // also that some ScrollUpdates have been received and their delta consumed
-  // for scrolling. These can differ significantly e.g. the page allows the
-  // touchstart but preventDefaults all the touchmoves. In that case, we latch
-  // and have a CurrentlyScrollingNode() but will never receive a ScrollUpdate.
-  //
-  // "Precision" means it's a non-animated scroll like a touchscreen or
-  // high-precision touchpad. The latter distinction is important for things
-  // like scheduling decisions which might schedule a wheel and a touch
-  // scrolling differently due to user perception.
-  virtual bool IsActivelyPrecisionScrolling() const = 0;
+  // Indicates the type (Animated or Precise) of an active scroll, if there is
+  // one, in progress. "Active" here means that it's been latched (i.e. we have
+  // a CurrentlyScrollingNode()) but also that some ScrollUpdates have been
+  // received and their delta consumed for scrolling. These can differ
+  // significantly e.g. the page allows the touchstart but preventDefaults all
+  // the touchmoves. In that case, we latch and have a CurrentlyScrollingNode()
+  // but will never receive a ScrollUpdate.
+  virtual ActivelyScrollingType GetActivelyScrollingType() const = 0;
 };
 
 // This is the interface that's exposed by the LayerTreeHostImpl to the input
@@ -110,6 +111,7 @@ class CompositorDelegateForInput {
   virtual void DidScrollContent(ElementId element_id, bool animated) = 0;
   virtual float DeviceScaleFactor() const = 0;
   virtual float PageScaleFactor() const = 0;
+  virtual gfx::Size VisualDeviceViewportSize() const = 0;
   virtual const LayerTreeSettings& GetSettings() const = 0;
 
   // TODO(bokan): Temporary escape hatch for code that hasn't yet been

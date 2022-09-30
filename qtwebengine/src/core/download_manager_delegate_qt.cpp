@@ -1,46 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "download_manager_delegate_qt.h"
 
-#include "base/files/file_util.h"
-#include "base/time/time_to_iso8601.h"
 #include "content/public/browser/download_item_utils.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/save_page_type.h"
@@ -49,9 +11,7 @@
 #include "net/http/http_content_disposition.h"
 
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
-#include <QMap>
 #include <QMimeDatabase>
 #include <QStandardPaths>
 
@@ -68,7 +28,6 @@ DownloadManagerDelegateQt::DownloadManagerDelegateQt(ProfileAdapter *profileAdap
     : m_profileAdapter(profileAdapter)
     , m_currentId(0)
     , m_weakPtrFactory(this)
-    , m_nextDownloadIsUserRequested(false)
 {
     Q_ASSERT(m_profileAdapter);
 }
@@ -84,7 +43,7 @@ void DownloadManagerDelegateQt::GetNextId(content::DownloadIdCallback callback)
 
 download::DownloadItem *DownloadManagerDelegateQt::findDownloadById(quint32 downloadId)
 {
-    content::DownloadManager* dlm = content::BrowserContext::GetDownloadManager(m_profileAdapter->profile());
+    content::DownloadManager *dlm = m_profileAdapter->profile()->GetDownloadManager();
     return dlm->GetDownload(downloadId);
 }
 
@@ -95,7 +54,8 @@ void DownloadManagerDelegateQt::cancelDownload(content::DownloadTargetCallback c
                             download::DownloadDangerType::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT,
                             download::DownloadItem::UNKNOWN,
                             base::FilePath(),
-                            base::nullopt,
+                            base::FilePath(),
+                            absl::nullopt,
                             download::DownloadInterruptReason::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED);
 }
 
@@ -136,7 +96,8 @@ bool DownloadManagerDelegateQt::DetermineDownloadTarget(download::DownloadItem *
                                  download::DownloadDangerType::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
                                  download::DownloadItem::VALIDATED,
                                  item->GetForcedFilePath(),
-                                 base::nullopt,
+                                 item->GetFileNameToReportUser(),
+                                 absl::nullopt,
                                  download::DownloadInterruptReason::DOWNLOAD_INTERRUPT_REASON_NONE);
         return true;
     }
@@ -144,17 +105,6 @@ bool DownloadManagerDelegateQt::DetermineDownloadTarget(download::DownloadItem *
     QString suggestedFilename = toQt(item->GetSuggestedFilename());
     QString mimeTypeString = toQt(item->GetMimeType());
 
-    int downloadType = 0;
-    if (m_nextDownloadIsUserRequested) {
-        downloadType = ProfileAdapterClient::UserRequested;
-        m_nextDownloadIsUserRequested = false;
-    } else {
-        bool isAttachment = net::HttpContentDisposition(item->GetContentDisposition(), std::string()).is_attachment();
-        if (isAttachment)
-            downloadType = ProfileAdapterClient::Attachment;
-        else
-            downloadType = ProfileAdapterClient::DownloadAttribute;
-    }
 
     if (suggestedFilename.isEmpty())
         suggestedFilename = toQt(net::HttpContentDisposition(item->GetContentDisposition(), net::kCharsetLatin1).filename());
@@ -200,7 +150,7 @@ bool DownloadManagerDelegateQt::DetermineDownloadTarget(download::DownloadItem *
             false /* accepted */,
             false /* paused */,
             false /* done */,
-            downloadType,
+            false /* isSavePageDownload */,
             item->GetLastReason(),
             adapterClient,
             suggestedFilename,
@@ -216,8 +166,16 @@ bool DownloadManagerDelegateQt::DetermineDownloadTarget(download::DownloadItem *
         QFileInfo suggestedFile(info.path);
 
         if (info.accepted && !suggestedFile.absoluteDir().mkpath(suggestedFile.absolutePath())) {
+#if defined(Q_OS_WIN)
+            // TODO: Remove this when https://bugreports.qt.io/browse/QTBUG-85997 is fixed.
+            QDir suggestedDir = QDir(suggestedFile.absolutePath());
+            if (!suggestedDir.isRoot() || !suggestedDir.exists()) {
+#endif
             qWarning("Creating download path failed, download cancelled: %s", suggestedFile.absolutePath().toUtf8().data());
             info.accepted = false;
+#if defined(Q_OS_WIN)
+            }
+#endif
         }
 
         if (!info.accepted) {
@@ -231,7 +189,8 @@ bool DownloadManagerDelegateQt::DetermineDownloadTarget(download::DownloadItem *
                                  download::DownloadDangerType::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT,
                                  download::DownloadItem::VALIDATED,
                                  filePathForCallback.AddExtension(toFilePathString("download")),
-                                 base::nullopt,
+                                 base::FilePath(),
+                                 absl::nullopt,
                                  download::DownloadInterruptReason::DOWNLOAD_INTERRUPT_REASON_NONE);
     } else
         cancelDownload(std::move(*callback));
@@ -303,7 +262,7 @@ void DownloadManagerDelegateQt::ChooseSavePath(content::WebContents *web_content
         acceptedByDefault,
         false, /* paused */
         false, /* done */
-        ProfileAdapterClient::SavePage,
+        true, /* isSavePageDownload */
         ProfileAdapterClient::NoReason,
         adapterClient,
         QFileInfo(suggestedFilePath).fileName(),
@@ -320,8 +279,8 @@ void DownloadManagerDelegateQt::ChooseSavePath(content::WebContents *web_content
         return;
 
     std::move(callback).Run(toFilePath(info.path), static_cast<content::SavePageType>(info.savePageFormat),
-                            base::Bind(&DownloadManagerDelegateQt::savePackageDownloadCreated,
-                                       m_weakPtrFactory.GetWeakPtr()));
+                            base::BindOnce(&DownloadManagerDelegateQt::savePackageDownloadCreated,
+                                           m_weakPtrFactory.GetWeakPtr()));
 }
 
 void DownloadManagerDelegateQt::savePackageDownloadCreated(download::DownloadItem *item)

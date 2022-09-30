@@ -25,14 +25,15 @@ class EmbeddingTokenBrowserTest : public ContentBrowserTest {
   EmbeddingTokenBrowserTest() = default;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    scoped_feature_list_.InitAndEnableFeatureWithParameters(
-        features::kBackForwardCache,
-        {
-            // Set a very long TTL before expiration (longer than the test
-            // timeout) so tests that are expecting deletion don't pass when
-            // they shouldn't.
-            {"TimeToLiveInBackForwardCacheInSeconds", "3600"},
-        });
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {{features::kBackForwardCache,
+          // Set a very long TTL before expiration (longer than the test
+          // timeout) so tests that are expecting deletion don't pass when
+          // they shouldn't.
+          {{"TimeToLiveInBackForwardCacheInSeconds", "3600"}}}},
+        // Allow BackForwardCache for all devices regardless of their memory.
+        {features::kBackForwardCacheMemoryControls});
+
     ContentBrowserTest::SetUpCommandLine(command_line);
     IsolateAllSitesForTesting(command_line);
   }
@@ -155,6 +156,10 @@ IN_PROC_BROWSER_TEST_F(EmbeddingTokenBrowserTest,
 
   // Navigate child 0 (b) to another site (cross-process) the token should swap.
   {
+    if (ShouldCreateNewHostForSameSiteSubframe()) {
+      // The RenderFrameHost was been replaced when the frame navigated.
+      target = top_frame_host()->child_at(0)->current_frame_host();
+    }
     RenderFrameDeletedObserver deleted_observer(target);
     NavigateIframeToURL(shell()->web_contents(), "child-0",
                         embedded_test_server()

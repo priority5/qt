@@ -10,7 +10,6 @@
 #include "base/android/jni_android.h"
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/net_export.h"
 #include "net/proxy_resolution/proxy_config_service.h"
@@ -62,6 +61,10 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
       const scoped_refptr<base::SequencedTaskRunner>& main_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& jni_task_runner);
 
+  ProxyConfigServiceAndroid(const ProxyConfigServiceAndroid&) = delete;
+  ProxyConfigServiceAndroid& operator=(const ProxyConfigServiceAndroid&) =
+      delete;
+
   ~ProxyConfigServiceAndroid() override;
 
   // Android provides a local HTTP proxy that does PAC resolution. When this
@@ -103,6 +106,7 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
   std::string SetProxyOverride(
       const std::vector<ProxyOverrideRule>& proxy_rules,
       const std::vector<std::string>& bypass_rules,
+      const bool reverse_bypass,
       base::OnceClosure callback);
   void ClearProxyOverride(base::OnceClosure callback);
 
@@ -126,8 +130,6 @@ class NET_EXPORT ProxyConfigServiceAndroid : public ProxyConfigService {
                               const std::vector<std::string>& exclusion_list);
 
   scoped_refptr<Delegate> delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProxyConfigServiceAndroid);
 };
 
 } // namespace net

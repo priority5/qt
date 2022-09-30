@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "paletteeditor.h"
 
@@ -37,17 +12,6 @@
 #include <QtDesigner/abstractformeditor.h>
 #include <QtDesigner/abstractformwindowmanager.h>
 
-#include <QtCore/qfile.h>
-#include <QtCore/qmetaobject.h>
-#include <QtCore/qsavefile.h>
-#include <QtCore/qxmlstream.h>
-#include <QtGui/qguiapplication.h>
-#include <QtGui/qpainter.h>
-#include <QtGui/qscreen.h>
-#if QT_CONFIG(clipboard)
-#  include <QtGui/qclipboard.h>
-#endif
-#include <QtWidgets/qaction.h>
 #include <QtWidgets/qfiledialog.h>
 #include <QtWidgets/qmessagebox.h>
 #include <QtWidgets/qpushbutton.h>
@@ -55,6 +19,19 @@
 #include <QtWidgets/qlabel.h>
 #include <QtWidgets/qmenu.h>
 #include <QtWidgets/qheaderview.h>
+
+#include <QtGui/qaction.h>
+#if QT_CONFIG(clipboard)
+#  include <QtGui/qclipboard.h>
+#endif
+#include <QtGui/qguiapplication.h>
+#include <QtGui/qpainter.h>
+#include <QtGui/qscreen.h>
+
+#include <QtCore/qfile.h>
+#include <QtCore/qmetaobject.h>
+#include <QtCore/qsavefile.h>
+#include <QtCore/qxmlstream.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -108,7 +85,7 @@ QPalette PaletteEditor::palette() const
 void PaletteEditor::setPalette(const QPalette &palette)
 {
     m_editPalette = palette;
-    const uint mask = palette.resolve();
+    const uint mask = palette.resolveMask();
     for (int i = 0; i < static_cast<int>(QPalette::NColorRoles); ++i) {
         if (!(mask & (1 << i))) {
             m_editPalette.setBrush(QPalette::Active, static_cast<QPalette::ColorRole>(i),
@@ -119,7 +96,7 @@ void PaletteEditor::setPalette(const QPalette &palette)
                         m_parentPalette.brush(QPalette::Disabled, static_cast<QPalette::ColorRole>(i)));
         }
     }
-    m_editPalette.resolve(mask);
+    m_editPalette.setResolveMask(mask);
     updatePreviewPalette();
     updateStyledButton();
     m_paletteUpdated = true;
@@ -227,7 +204,7 @@ QPalette PaletteEditor::getPalette(QDesignerFormEditorInterface *core, QWidget* 
 {
     PaletteEditor dlg(core, parent);
     QPalette parentPalette(parentPal);
-    uint mask = init.resolve();
+    uint mask = init.resolveMask();
     for (int i = 0; i < static_cast<int>(QPalette::NColorRoles); ++i) {
         if (!(mask & (1 << i))) {
             parentPalette.setBrush(QPalette::Active, static_cast<QPalette::ColorRole>(i),
@@ -430,7 +407,7 @@ QVariant PaletteModel::data(const QModelIndex &index, int role) const
         if (role == Qt::DisplayRole)
             return m_roleEntries.at(index.row()).name;
         if (role == Qt::EditRole) {
-            const uint mask = m_palette.resolve();
+            const uint mask = m_palette.resolveMask();
             if (mask & (1 << int(roleAt(index.row()))))
                 return true;
             return false;
@@ -493,7 +470,7 @@ bool PaletteModel::setData(const QModelIndex &index, const QVariant &value, int 
         return true;
     }
     if (index.column() == 0 && role == Qt::EditRole) {
-        uint mask = m_palette.resolve();
+        uint mask = m_palette.resolveMask();
         const bool isMask = qvariant_cast<bool>(value);
         if (isMask)
             mask |= (1 << int(colorRole));
@@ -507,7 +484,7 @@ bool PaletteModel::setData(const QModelIndex &index, const QVariant &value, int 
 
             mask &= ~(1 << int(colorRole));
         }
-        m_palette.resolve(mask);
+        m_palette.setResolveMask(mask);
         emit paletteChanged(m_palette);
         const QModelIndex idxEnd = PaletteModel::index(row, 3);
         emit dataChanged(index, idxEnd);

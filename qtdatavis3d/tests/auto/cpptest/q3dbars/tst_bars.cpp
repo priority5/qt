@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Data Visualization module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <QtTest/QtTest>
 
@@ -35,8 +9,6 @@
 #include <QtDataVisualization/QTouch3DInputHandler>
 
 #include "cpptestutil.h"
-
-using namespace QtDataVisualization;
 
 class tst_bars: public QObject
 {
@@ -59,6 +31,7 @@ private slots:
     void selectSeries();
     void removeSeries();
     void removeMultipleSeries();
+    void hasSeries();
 
     // The following tests are not required for scatter or surface, as they are handled identically
     void addInputHandler();
@@ -123,6 +96,7 @@ void tst_bars::initialProperties()
     QCOMPARE(m_graph->isMultiSeriesUniform(), false);
     QCOMPARE(m_graph->barThickness(), 1.0);
     QCOMPARE(m_graph->barSpacing(), QSizeF(1.0f, 1.0f));
+    QCOMPARE(m_graph->barSeriesMargin(), QSizeF(0.0f, 0.0f));
     QCOMPARE(m_graph->isBarSpacingRelative(), true);
     QCOMPARE(m_graph->seriesList().length(), 0);
     QVERIFY(!m_graph->selectedSeries());
@@ -159,12 +133,14 @@ void tst_bars::initializeProperties()
     m_graph->setMultiSeriesUniform(true);
     m_graph->setBarThickness(0.2f);
     m_graph->setBarSpacing(QSizeF(0.1f, 0.1f));
+    m_graph->setBarSeriesMargin(QSizeF(0.3f, 0.3f));
     m_graph->setBarSpacingRelative(false);
     m_graph->setFloorLevel(1.0f);
 
     QCOMPARE(m_graph->isMultiSeriesUniform(), true);
     QCOMPARE(m_graph->barThickness(), 0.2f);
     QCOMPARE(m_graph->barSpacing(), QSizeF(0.1f, 0.1f));
+    QCOMPARE(m_graph->barSeriesMargin(), QSizeF(0.3f, 0.3f));
     QCOMPARE(m_graph->isBarSpacingRelative(), false);
     QCOMPARE(m_graph->floorLevel(), 1.0f);
 
@@ -297,6 +273,15 @@ void tst_bars::removeMultipleSeries()
     delete series;
     delete series2;
     delete series3;
+}
+
+void tst_bars::hasSeries()
+{
+    QBar3DSeries *series1 = newSeries();
+    m_graph->addSeries(series1);
+    QCOMPARE(m_graph->hasSeries(series1), true);
+    QBar3DSeries *series2 = newSeries();
+    QCOMPARE(m_graph->hasSeries(series2), false);
 }
 
 // The following tests are not required for scatter or surface, as they are handled identically

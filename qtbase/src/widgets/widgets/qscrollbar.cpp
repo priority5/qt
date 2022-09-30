@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWidgets module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qapplication.h"
 #include "qcursor.h"
@@ -44,12 +8,13 @@
 #include "qscrollbar.h"
 #include "qstyle.h"
 #include "qstyleoption.h"
+#include "qstylepainter.h"
 #if QT_CONFIG(menu)
 #include "qmenu.h"
 #endif
 #include <QtCore/qelapsedtimer.h>
 
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
 #include "qaccessible.h"
 #endif
 #include <limits.h>
@@ -175,7 +140,7 @@ QT_BEGIN_NAMESPACE
          \li Up/Down move a vertical scroll bar by one single step.
          \li PageUp moves up one page.
          \li PageDown moves down one page.
-         \li Home moves to the start (mininum).
+         \li Home moves to the start (minimum).
          \li End moves to the end (maximum).
      \endlist
 
@@ -187,7 +152,7 @@ QT_BEGIN_NAMESPACE
     Most GUI styles use the pageStep() value to calculate the size of the
     slider.
 
-    \sa QScrollArea, QSlider, QDial, QSpinBox, {fowler}{GUI Design Handbook: Scroll Bar}, {Sliders Example}
+    \sa QScrollArea, QSlider, QDial, QSpinBox, {Sliders Example}
 */
 
 bool QScrollBarPrivate::updateHoverControl(const QPoint &pos)
@@ -448,8 +413,7 @@ QSize QScrollBar::sizeHint() const
     else
         size = QSize(scrollBarExtent, scrollBarExtent * 2 + scrollBarSliderMin);
 
-    return style()->sizeFromContents(QStyle::CT_ScrollBar, &opt, size, this)
-        .expandedTo(QApplication::globalStrut());
+    return style()->sizeFromContents(QStyle::CT_ScrollBar, &opt, size, this);
  }
 
 /*!\reimp */
@@ -469,7 +433,7 @@ bool QScrollBar::event(QEvent *event)
     case QEvent::HoverLeave:
     case QEvent::HoverMove:
         if (const QHoverEvent *he = static_cast<const QHoverEvent *>(event))
-            d_func()->updateHoverControl(he->pos());
+            d_func()->updateHoverControl(he->position().toPoint());
         break;
     case QEvent::StyleChange:
         d_func()->setTransient(style()->styleHint(QStyle::SH_ScrollBar_Transient, nullptr, this));
@@ -526,7 +490,7 @@ void QScrollBar::wheelEvent(QWheelEvent *event)
 void QScrollBar::paintEvent(QPaintEvent *)
 {
     Q_D(QScrollBar);
-    QPainter p(this);
+    QStylePainter p(this);
     QStyleOptionSlider opt;
     initStyleOption(&opt);
     opt.subControls = QStyle::SC_All;
@@ -537,7 +501,7 @@ void QScrollBar::paintEvent(QPaintEvent *)
     } else {
         opt.activeSubControls = (QStyle::SubControl)d->hoverControl;
     }
-    style()->drawComplexControl(QStyle::CC_ScrollBar, &opt, &p, this);
+    p.drawComplexControl(QStyle::CC_ScrollBar, opt);
 }
 
 /*!
@@ -554,18 +518,19 @@ void QScrollBar::mousePressEvent(QMouseEvent *e)
                                              nullptr, this);
     QStyleOptionSlider opt;
     initStyleOption(&opt);
+    opt.keyboardModifiers = e->modifiers();
 
     if (d->maximum == d->minimum // no range
         || (e->buttons() & (~e->button())) // another button was clicked before
         || !(e->button() == Qt::LeftButton || (midButtonAbsPos && e->button() == Qt::MiddleButton)))
         return;
 
-    d->pressedControl = style()->hitTestComplexControl(QStyle::CC_ScrollBar, &opt, e->pos(), this);
+    d->pressedControl = style()->hitTestComplexControl(QStyle::CC_ScrollBar, &opt, e->position().toPoint(), this);
     d->pointerOutsidePressedControl = false;
 
     QRect sr = style()->subControlRect(QStyle::CC_ScrollBar, &opt,
                                        QStyle::SC_ScrollBarSlider, this);
-    QPoint click = e->pos();
+    QPoint click = e->position().toPoint();
     QPoint pressValue = click - sr.center() + sr.topLeft();
     d->pressValue = d->orientation == Qt::Horizontal ? d->pixelPosToRangeValue(pressValue.x()) :
         d->pixelPosToRangeValue(pressValue.y());
@@ -580,8 +545,8 @@ void QScrollBar::mousePressEvent(QMouseEvent *e)
             || (style()->styleHint(QStyle::SH_ScrollBar_LeftClickAbsolutePosition, &opt, this)
                 && e->button() == Qt::LeftButton))) {
         int sliderLength = HORIZONTAL ? sr.width() : sr.height();
-        setSliderPosition(d->pixelPosToRangeValue((HORIZONTAL ? e->pos().x()
-                                                              : e->pos().y()) - sliderLength / 2));
+        setSliderPosition(d->pixelPosToRangeValue((HORIZONTAL ? e->position().toPoint().x()
+                                                              : e->position().toPoint().y()) - sliderLength / 2));
         d->pressedControl = QStyle::SC_ScrollBarSlider;
         d->clickOffset = sliderLength / 2;
     }
@@ -637,13 +602,13 @@ void QScrollBar::mouseMoveEvent(QMouseEvent *e)
         return;
 
     if (d->pressedControl == QStyle::SC_ScrollBarSlider) {
-        QPoint click = e->pos();
+        QPoint click = e->position().toPoint();
         int newPosition = d->pixelPosToRangeValue((HORIZONTAL ? click.x() : click.y()) -d->clickOffset);
         int m = style()->pixelMetric(QStyle::PM_MaximumDragDistance, &opt, this);
         if (m >= 0) {
             QRect r = rect();
             r.adjust(-m, -m, m, m);
-            if (! r.contains(e->pos()))
+            if (! r.contains(e->position().toPoint()))
                 newPosition = d->snapBackPosition;
         }
         setSliderPosition(newPosition);
@@ -651,7 +616,7 @@ void QScrollBar::mouseMoveEvent(QMouseEvent *e)
 
         if (style()->styleHint(QStyle::SH_ScrollBar_RollBetweenButtons, &opt, this)
                 && d->pressedControl & (QStyle::SC_ScrollBarAddLine | QStyle::SC_ScrollBarSubLine)) {
-            QStyle::SubControl newSc = style()->hitTestComplexControl(QStyle::CC_ScrollBar, &opt, e->pos(), this);
+            QStyle::SubControl newSc = style()->hitTestComplexControl(QStyle::CC_ScrollBar, &opt, e->position().toPoint(), this);
             if (newSc == d->pressedControl && !d->pointerOutsidePressedControl)
                 return; // nothing to do
             if (newSc & (QStyle::SC_ScrollBarAddLine | QStyle::SC_ScrollBarSubLine)) {
@@ -668,7 +633,7 @@ void QScrollBar::mouseMoveEvent(QMouseEvent *e)
         // stop scrolling when the mouse pointer leaves a control
         // similar to push buttons
         QRect pr = style()->subControlRect(QStyle::CC_ScrollBar, &opt, d->pressedControl, this);
-        if (pr.contains(e->pos()) == d->pointerOutsidePressedControl) {
+        if (pr.contains(e->position().toPoint()) == d->pointerOutsidePressedControl) {
             if ((d->pointerOutsidePressedControl = !d->pointerOutsidePressedControl)) {
                 d->pointerOutsidePressedControl = true;
                 setRepeatAction(SliderNoAction);

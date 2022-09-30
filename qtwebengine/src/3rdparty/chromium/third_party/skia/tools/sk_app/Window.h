@@ -16,11 +16,17 @@
 #include "tools/skui/Key.h"
 #include "tools/skui/ModifierKey.h"
 
+#include <functional>
+
 class GrDirectContext;
 class SkCanvas;
 class SkSurface;
 class SkSurfaceProps;
 class SkString;
+
+namespace skgpu::graphite {
+class Context;
+}
 
 namespace sk_app {
 
@@ -38,7 +44,11 @@ public:
     // JSON-formatted UI state for Android. Do nothing by default
     virtual void setUIState(const char*) {}
 
-    // Shedules an invalidation event for window if one is not currently pending.
+    // Interface to the system clipboard. Only implemented on UNIX.
+    virtual const char* getClipboardText() { return nullptr; }
+    virtual void        setClipboardText(const char*) {}
+
+    // Schedules an invalidation event for window if one is not currently pending.
     // Make sure that either onPaint or markInvalReceived is called when the client window consumes
     // the the inval event. They unset fIsContentInvalided which allow future onInval.
     void inval();
@@ -60,6 +70,9 @@ public:
 #endif
 #ifdef SK_METAL
         kMetal_BackendType,
+#ifdef SK_GRAPHITE_ENABLED
+        kGraphiteMetal_BackendType,
+#endif
 #endif
 #ifdef SK_DIRECT3D
         kDirect3D_BackendType,
@@ -123,9 +136,11 @@ public:
     void onUIStateChanged(const SkString& stateName, const SkString& stateValue);
     void onPaint();
     void onResize(int width, int height);
+    void onActivate(bool isActive);
 
     int width() const;
     int height() const;
+    virtual float scaleFactor() const { return 1.0f; }
 
     virtual const DisplayParams& getRequestedDisplayParams() { return fRequestedDisplayParams; }
     virtual void setRequestedDisplayParams(const DisplayParams&, bool allowReattach = true);
@@ -136,12 +151,14 @@ public:
 
     // Returns null if there is not a GPU backend or if the backend is not yet created.
     GrDirectContext* directContext() const;
+    skgpu::graphite::Context* graphiteContext() const;
 
 protected:
     Window();
 
     SkTDArray<Layer*>      fLayers;
     DisplayParams          fRequestedDisplayParams;
+    bool                   fIsActive = true;
 
     std::unique_ptr<WindowContext> fWindowContext;
 

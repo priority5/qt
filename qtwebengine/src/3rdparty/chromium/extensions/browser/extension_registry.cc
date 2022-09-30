@@ -4,6 +4,7 @@
 
 #include "extensions/browser/extension_registry.h"
 
+#include "base/observer_list.h"
 #include "base/strings/string_util.h"
 #include "extensions/browser/extension_registry_factory.h"
 #include "extensions/browser/extension_registry_observer.h"
@@ -105,6 +106,14 @@ void ExtensionRegistry::TriggerOnUninstalled(const Extension* extension,
   DCHECK(!GenerateInstalledExtensionsSet()->Contains(extension->id()));
   for (auto& observer : observers_)
     observer.OnExtensionUninstalled(browser_context_, extension, reason);
+}
+
+void ExtensionRegistry::TriggerOnUninstallationDenied(
+    const Extension* extension) {
+  CHECK(extension);
+  DCHECK(GenerateInstalledExtensionsSet()->Contains(extension->id()));
+  for (auto& observer : observers_)
+    observer.OnExtensionUninstallationDenied(browser_context_, extension);
 }
 
 const Extension* ExtensionRegistry::GetExtensionById(const std::string& id,

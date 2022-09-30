@@ -5,6 +5,8 @@
 #ifndef NET_COOKIES_COOKIE_INCLUSION_STATUS_H_
 #define NET_COOKIES_COOKIE_INCLUSION_STATUS_H_
 
+#include <bitset>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,7 @@ namespace net {
 // exclusion, where cookie inclusion is represented by the absence of any
 // exclusion reasons. Also marks whether a cookie should be warned about, e.g.
 // for deprecation or intervention reasons.
+// TODO(crbug.com/1310444): Improve serialization validation comments.
 class NET_EXPORT CookieInclusionStatus {
  public:
   // Types of reasons why a cookie might be excluded.
@@ -27,29 +30,70 @@ class NET_EXPORT CookieInclusionStatus {
   enum ExclusionReason {
     EXCLUDE_UNKNOWN_ERROR = 0,
 
+    // Statuses applied when accessing a cookie (either sending or setting):
+
+    // Cookie was HttpOnly, but the attempted access was through a non-HTTP API.
     EXCLUDE_HTTP_ONLY = 1,
+    // Cookie was Secure, but the URL was not allowed to access Secure cookies.
     EXCLUDE_SECURE_ONLY = 2,
+    // The cookie's domain attribute did not match the domain of the URL
+    // attempting access.
     EXCLUDE_DOMAIN_MISMATCH = 3,
+    // The cookie's path attribute did not match the path of the URL attempting
+    // access.
     EXCLUDE_NOT_ON_PATH = 4,
+    // The cookie had SameSite=Strict, and the attempted access did not have an
+    // appropriate SameSiteCookieContext.
     EXCLUDE_SAMESITE_STRICT = 5,
+    // The cookie had SameSite=Lax, and the attempted access did not have an
+    // appropriate SameSiteCookieContext.
     EXCLUDE_SAMESITE_LAX = 6,
-
-    // The following two are used for the SameSiteByDefaultCookies experiment,
-    // where if the SameSite attribute is not specified, it will be treated as
-    // SameSite=Lax by default.
+    // The cookie did not specify a SameSite attribute, and therefore was
+    // treated as if it were SameSite=Lax, and the attempted access did not have
+    // an appropriate SameSiteCookieContext.
     EXCLUDE_SAMESITE_UNSPECIFIED_TREATED_AS_LAX = 7,
-    // This is used if SameSite=None is specified, but the cookie is not
-    // Secure.
+    // The cookie specified SameSite=None, but it was not Secure.
     EXCLUDE_SAMESITE_NONE_INSECURE = 8,
+    // Caller did not allow access to the cookie.
     EXCLUDE_USER_PREFERENCES = 9,
+    // The cookie specified SameParty, but was used in a cross-party context.
+    EXCLUDE_SAMEPARTY_CROSS_PARTY_CONTEXT = 10,
 
-    // Statuses specific to setting cookies
-    EXCLUDE_FAILURE_TO_STORE = 10,
-    EXCLUDE_NONCOOKIEABLE_SCHEME = 11,
-    EXCLUDE_OVERWRITE_SECURE = 12,
-    EXCLUDE_OVERWRITE_HTTP_ONLY = 13,
-    EXCLUDE_INVALID_DOMAIN = 14,
-    EXCLUDE_INVALID_PREFIX = 15,
+    // Statuses only applied when creating/setting cookies:
+
+    // Cookie was malformed and could not be stored, due to problem(s) while
+    // parsing.
+    // TODO(crbug.com/1228815): Use more specific reasons for parsing errors.
+    EXCLUDE_FAILURE_TO_STORE = 11,
+    // Attempted to set a cookie from a scheme that does not support cookies.
+    EXCLUDE_NONCOOKIEABLE_SCHEME = 12,
+    // Cookie would have overwritten a Secure cookie, and was not allowed to do
+    // so. (See "Leave Secure Cookies Alone":
+    // https://tools.ietf.org/html/draft-west-leave-secure-cookies-alone-05 )
+    EXCLUDE_OVERWRITE_SECURE = 13,
+    // Cookie would have overwritten an HttpOnly cookie, and was not allowed to
+    // do so.
+    EXCLUDE_OVERWRITE_HTTP_ONLY = 14,
+    // Cookie was set with an invalid Domain attribute.
+    EXCLUDE_INVALID_DOMAIN = 15,
+    // Cookie was set with an invalid __Host- or __Secure- prefix.
+    EXCLUDE_INVALID_PREFIX = 16,
+    // Cookie was set with an invalid SameParty attribute in combination with
+    // other attributes. (SameParty is invalid if Secure is not present, or if
+    // SameSite=Strict is present.)
+    EXCLUDE_INVALID_SAMEPARTY = 17,
+    /// Cookie was set with an invalid Partitioned attribute, which is only
+    // valid if the cookie has a __Host- prefix and does not have the SameParty
+    // attribute.
+    EXCLUDE_INVALID_PARTITIONED = 18,
+    // Cookie exceeded the name/value pair size limit.
+    EXCLUDE_NAME_VALUE_PAIR_EXCEEDS_MAX_SIZE = 19,
+    // Cookie exceeded the attribute size limit. Note that this exclusion value
+    // won't be used by code that parses cookie lines since RFC6265bis
+    // indicates that large attributes should be ignored instead of causing the
+    // whole cookie to be rejected. There will be a corresponding WarningReason
+    // to notify users that an attribute value was ignored in that case.
+    EXCLUDE_ATTRIBUTE_VALUE_EXCEEDS_MAX_SIZE = 20,
 
     // This should be kept last.
     NUM_EXCLUSION_REASONS
@@ -117,23 +161,68 @@ class NET_EXPORT CookieInclusionStatus {
     // Lax to Cross-site downgrade for an effective SameSite=Lax cookie.
     WARN_LAX_CROSS_DOWNGRADE_LAX_SAMESITE = 7,
 
-    // This is applied to a cookie that may be part of a "double cookie" pair
-    // used for compatibility reasons. These pairs consist of one cookie that
-    // has "SameSite=None; Secure" and a duplicate cookie that leaves SameSite
-    // unspecified to maintain compatibility with browsers that do not support
-    // the "SameSite=None" attribute. This warning is applied to both
-    // members of the pair. See cookie_util::IsSameSiteCompatPair().
-    //
-    // If computing this for a cookie access attempt from a non-network context
-    // (i.e. script), this should not be applied if either member of the pair is
-    // HttpOnly, to avoid leaking information about the name and value of
-    // HttpOnly cookies to an untrusted renderer.
-    //
-    // This is only relevant if WARN_SAMESITE_UNSPECIFIED_CROSS_SITE_CONTEXT is
-    // present on the same status or a status for a cookie accessed at the same
-    // time, so it may not be applied at other times (e.g. when the context is
-    // same-site).
-    WARN_SAMESITE_COMPAT_PAIR = 8,
+    // Advisory warning attached when a Secure cookie is accessed from (sent to,
+    // or set by) a non-cryptographic URL. This can happen if the URL is
+    // potentially trustworthy (e.g. a localhost URL, or another URL that
+    // the CookieAccessDelegate is configured to allow).
+    // TODO(chlily): Add metrics for how often and where this occurs.
+    WARN_SECURE_ACCESS_GRANTED_NON_CRYPTOGRAPHIC = 8,
+
+    // The cookie was treated as SameParty. This is different from looking at
+    // whether the cookie has the SameParty attribute, since we may choose to
+    // ignore that attribute for one reason or another. E.g., we ignore the
+    // SameParty attribute if the site is not a member of a nontrivial
+    // First-Party Set.
+    WARN_TREATED_AS_SAMEPARTY = 9,
+
+    // The cookie was excluded solely for SameParty reasons (i.e. it was in
+    // cross-party context), but would have been included by SameSite. (This can
+    // only occur in cross-party, cross-site contexts, for cookies that are
+    // 'SameParty; SameSite=None'.)
+    WARN_SAMEPARTY_EXCLUSION_OVERRULED_SAMESITE = 10,
+
+    // The cookie was included due to SameParty, even though it would have been
+    // excluded by SameSite. (This can only occur in same-party, cross-site
+    // contexts, for cookies that are 'SameParty; SameSite=Lax'.)
+    WARN_SAMEPARTY_INCLUSION_OVERRULED_SAMESITE = 11,
+
+    // This cookie was SameSite=None and was included, but would have been
+    // excluded if it had been SameParty and the SameParty context had been
+    // computed using *either* top & current or the whole ancestor tree.
+    WARN_SAMESITE_NONE_REQUIRED = 12,
+    // This cookie was SameSite=None, was included, would have been included if
+    // it had been SameParty and the SameParty context type had been computed
+    // with only the top frame & resource URL, but would have been excluded if
+    // the SameParty context type had been computed using all ancestor frames.
+    WARN_SAMESITE_NONE_INCLUDED_BY_SAMEPARTY_TOP_RESOURCE = 13,
+    // This cookie was SameSite=None, was included, and would have been included
+    // if it had been SameParty and the SameParty context type had been computed
+    // using all ancestor frames.
+    WARN_SAMESITE_NONE_INCLUDED_BY_SAMEPARTY_ANCESTORS = 14,
+    // This cookie was SameSite=None, was included, and would have been included
+    // if it had been SameSite=Lax.
+    WARN_SAMESITE_NONE_INCLUDED_BY_SAMESITE_LAX = 15,
+    // This cookie was SameSite=None, was included, and would have been included
+    // if it had been SameSite=Strict.
+    WARN_SAMESITE_NONE_INCLUDED_BY_SAMESITE_STRICT = 16,
+
+    // The cookie would have been included prior to the spec change considering
+    // redirects in the SameSite context calculation
+    // (https://github.com/httpwg/http-extensions/pull/1348)
+    // but would have been excluded after the spec change, due to a cross-site
+    // redirect causing the SameSite context calculation to be downgraded.
+    // This is applied if and only if the cookie's inclusion was changed by
+    // considering redirect chains (and is applied regardless of which context
+    // was actually used for the inclusion decision). This is not applied if
+    // the context was downgraded but the cookie would have been
+    // included/excluded in both cases.
+    WARN_CROSS_SITE_REDIRECT_DOWNGRADE_CHANGES_INCLUSION = 17,
+
+    // The cookie exceeded the attribute size limit. RFC6265bis indicates that
+    // large attributes should be ignored instead of causing the whole cookie
+    // to be rejected. This is applied by the code that parses cookie lines and
+    // notifies the user that an attribute value was ignored.
+    WARN_ATTRIBUTE_VALUE_EXCEEDS_MAX_SIZE = 18,
 
     // This should be kept last.
     NUM_WARNING_REASONS
@@ -166,6 +255,11 @@ class NET_EXPORT CookieInclusionStatus {
     // Keep last.
     kMaxValue = LAX_CROSS_LAX_SECURE
   };
+
+  using ExclusionReasonBitset =
+      std::bitset<ExclusionReason::NUM_EXCLUSION_REASONS>;
+  using WarningReasonBitset = std::bitset<WarningReason::NUM_WARNING_REASONS>;
+
   // Makes a status that says include and should not warn.
   CookieInclusionStatus();
 
@@ -173,6 +267,12 @@ class NET_EXPORT CookieInclusionStatus {
   explicit CookieInclusionStatus(ExclusionReason reason);
   // Makes a status that contains the given exclusion reason and warning.
   CookieInclusionStatus(ExclusionReason reason, WarningReason warning);
+  // Makes a status that contains the given warning.
+  explicit CookieInclusionStatus(WarningReason warning);
+
+  // Copyable.
+  CookieInclusionStatus(const CookieInclusionStatus& other);
+  CookieInclusionStatus& operator=(const CookieInclusionStatus& other);
 
   bool operator==(const CookieInclusionStatus& other) const;
   bool operator!=(const CookieInclusionStatus& other) const;
@@ -194,9 +294,12 @@ class NET_EXPORT CookieInclusionStatus {
   // Remove an exclusion reason.
   void RemoveExclusionReason(ExclusionReason reason);
 
+  // Remove multiple exclusion reasons.
+  void RemoveExclusionReasons(const std::vector<ExclusionReason>& reasons);
+
   // If the cookie would have been excluded for reasons other than
-  // SAMESITE_UNSPECIFIED_TREATED_AS_LAX or SAMESITE_NONE_INSECURE, don't bother
-  // warning about it (clear the warning).
+  // SameSite-related reasons, don't bother warning about it (clear the
+  // warning).
   void MaybeClearSameSiteWarning();
 
   // Whether to record the breaking downgrade metrics if the cookie is included
@@ -225,13 +328,13 @@ class NET_EXPORT CookieInclusionStatus {
   void RemoveWarningReason(WarningReason reason);
 
   // Used for serialization/deserialization.
-  uint32_t exclusion_reasons() const { return exclusion_reasons_; }
-  void set_exclusion_reasons(uint32_t exclusion_reasons) {
+  ExclusionReasonBitset exclusion_reasons() const { return exclusion_reasons_; }
+  void set_exclusion_reasons(ExclusionReasonBitset exclusion_reasons) {
     exclusion_reasons_ = exclusion_reasons;
   }
 
-  uint32_t warning_reasons() const { return warning_reasons_; }
-  void set_warning_reasons(uint32_t warning_reasons) {
+  WarningReasonBitset warning_reasons() const { return warning_reasons_; }
+  void set_warning_reasons(WarningReasonBitset warning_reasons) {
     warning_reasons_ = warning_reasons;
   }
 
@@ -240,11 +343,6 @@ class NET_EXPORT CookieInclusionStatus {
 
   // Get exclusion reason(s) and warning in string format.
   std::string GetDebugString() const;
-
-  // Checks that the underlying bit vector representation doesn't contain any
-  // extraneous bits that are not mapped to any enum values. Does not check
-  // for reasons which semantically cannot coexist.
-  bool IsValid() const;
 
   // Checks whether the exclusion reasons are exactly the set of exclusion
   // reasons in the vector. (Ignores warnings.)
@@ -256,22 +354,38 @@ class NET_EXPORT CookieInclusionStatus {
   bool HasExactlyWarningReasonsForTesting(
       std::vector<WarningReason> reasons) const;
 
+  // Validates mojo data, since mojo does not support bitsets.
+  // TODO(crbug.com/1310444): Improve serialization validation comments
+  // and check for mutually exclusive values.
+  static bool ValidateExclusionAndWarningFromWire(uint32_t exclusion_reasons,
+                                                  uint32_t warning_reasons);
+
   // Makes a status that contains the given exclusion reasons and warning.
   static CookieInclusionStatus MakeFromReasonsForTesting(
       std::vector<ExclusionReason> reasons,
       std::vector<WarningReason> warnings = std::vector<WarningReason>());
 
  private:
+  // Returns the `exclusion_reasons_` with the given `reasons` unset.
+  ExclusionReasonBitset ExclusionReasonsWithout(
+      const std::vector<ExclusionReason>& reasons) const;
+
   // A bit vector of the applicable exclusion reasons.
-  uint32_t exclusion_reasons_ = 0u;
+  ExclusionReasonBitset exclusion_reasons_;
 
   // A bit vector of the applicable warning reasons.
-  uint32_t warning_reasons_ = 0u;
+  WarningReasonBitset warning_reasons_;
 };
 
 NET_EXPORT inline std::ostream& operator<<(std::ostream& os,
                                            const CookieInclusionStatus status) {
   return os << status.GetDebugString();
+}
+
+// Provided to allow gtest to create more helpful error messages, instead of
+// printing hex.
+inline void PrintTo(const CookieInclusionStatus& cis, std::ostream* os) {
+  *os << cis;
 }
 
 }  // namespace net

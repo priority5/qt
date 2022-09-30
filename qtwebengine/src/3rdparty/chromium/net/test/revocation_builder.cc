@@ -5,6 +5,7 @@
 #include "net/test/revocation_builder.h"
 
 #include "base/hash/sha1.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "net/cert/asn1_util.h"
 #include "net/cert/x509_util.h"
@@ -115,7 +116,7 @@ std::string PKeyToSPK(const EVP_PKEY* pkey) {
   }
   spk.remove_prefix(1);
 
-  return spk.as_string();
+  return std::string(spk);
 }
 
 // Returns a DER-encoded OCSPResponse with the given |response_status|.
@@ -394,7 +395,7 @@ std::string BuildOCSPResponseWithResponseData(
   // certs field not currently supported.
 
   return EncodeOCSPResponse(OCSPResponse::ResponseStatus::SUCCESSFUL,
-                            BasicOCSPResponseOid(),
+                            der::Input(kBasicOCSPResponseOid),
                             FinishCBB(basic_ocsp_response_cbb.get()));
 }
 
@@ -450,10 +451,10 @@ std::string BuildCrl(const std::string& crl_issuer_subject,
       !CBB_add_asn1_uint64(&tbs_cert_list, 1 /* V2 */) ||
       !CBBAddBytes(&tbs_cert_list, signature_algorithm) ||
       !CBBAddBytes(&tbs_cert_list, crl_issuer_subject) ||
-      !x509_util::CBBAddTime(
-          &tbs_cert_list, base::Time::Now() - base::TimeDelta::FromDays(1)) ||
-      !x509_util::CBBAddTime(
-          &tbs_cert_list, base::Time::Now() + base::TimeDelta::FromDays(6))) {
+      !x509_util::CBBAddTime(&tbs_cert_list,
+                             base::Time::Now() - base::Days(1)) ||
+      !x509_util::CBBAddTime(&tbs_cert_list,
+                             base::Time::Now() + base::Days(6))) {
     ADD_FAILURE();
     return std::string();
   }
@@ -468,9 +469,8 @@ std::string BuildCrl(const std::string& crl_issuer_subject,
       if (!CBB_add_asn1(&revoked_serials_cbb, &revoked_serial_cbb,
                         CBS_ASN1_SEQUENCE) ||
           !CBB_add_asn1_uint64(&revoked_serial_cbb, revoked_serial) ||
-          !x509_util::CBBAddTime(
-              &revoked_serial_cbb,
-              base::Time::Now() - base::TimeDelta::FromDays(1)) ||
+          !x509_util::CBBAddTime(&revoked_serial_cbb,
+                                 base::Time::Now() - base::Days(1)) ||
           !CBB_flush(&revoked_serials_cbb)) {
         ADD_FAILURE();
         return std::string();

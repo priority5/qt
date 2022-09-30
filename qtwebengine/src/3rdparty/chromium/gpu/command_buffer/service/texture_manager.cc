@@ -15,7 +15,7 @@
 #include "base/bits.h"
 #include "base/format_macros.h"
 #include "base/lazy_instance.h"
-#include "base/stl_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
@@ -131,141 +131,141 @@ class FormatTypeValidator {
   FormatTypeValidator() {
     static const FormatType kSupportedFormatTypes[] = {
         // ES2.
-        FormatType{GL_RGB, GL_RGB, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGB, GL_RGB, GL_UNSIGNED_SHORT_5_6_5},
-        FormatType{GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGBA, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4},
-        FormatType{GL_RGBA, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1},
-        FormatType{GL_LUMINANCE_ALPHA, GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE},
-        FormatType{GL_LUMINANCE, GL_LUMINANCE, GL_UNSIGNED_BYTE},
-        FormatType{GL_ALPHA, GL_ALPHA, GL_UNSIGNED_BYTE},
+        {GL_RGB, GL_RGB, GL_UNSIGNED_BYTE},
+        {GL_RGB, GL_RGB, GL_UNSIGNED_SHORT_5_6_5},
+        {GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE},
+        {GL_RGBA, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4},
+        {GL_RGBA, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1},
+        {GL_LUMINANCE_ALPHA, GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE},
+        {GL_LUMINANCE, GL_LUMINANCE, GL_UNSIGNED_BYTE},
+        {GL_ALPHA, GL_ALPHA, GL_UNSIGNED_BYTE},
 
         // ES3.
-        FormatType{GL_R8, GL_RED, GL_UNSIGNED_BYTE},
-        FormatType{GL_R8_SNORM, GL_RED, GL_BYTE},
-        FormatType{GL_R16F, GL_RED, GL_HALF_FLOAT},
-        FormatType{GL_R16F, GL_RED, GL_FLOAT},
-        FormatType{GL_R32F, GL_RED, GL_FLOAT},
-        FormatType{GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE},
-        FormatType{GL_R8I, GL_RED_INTEGER, GL_BYTE},
-        FormatType{GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT},
-        FormatType{GL_R16I, GL_RED_INTEGER, GL_SHORT},
-        FormatType{GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT},
-        FormatType{GL_R32I, GL_RED_INTEGER, GL_INT},
-        FormatType{GL_RG8, GL_RG, GL_UNSIGNED_BYTE},
-        FormatType{GL_RG8_SNORM, GL_RG, GL_BYTE},
-        FormatType{GL_RG16F, GL_RG, GL_HALF_FLOAT},
-        FormatType{GL_RG16F, GL_RG, GL_FLOAT},
-        FormatType{GL_RG32F, GL_RG, GL_FLOAT},
-        FormatType{GL_RG8UI, GL_RG_INTEGER, GL_UNSIGNED_BYTE},
-        FormatType{GL_RG8I, GL_RG_INTEGER, GL_BYTE},
-        FormatType{GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT},
-        FormatType{GL_RG16I, GL_RG_INTEGER, GL_SHORT},
-        FormatType{GL_RG32UI, GL_RG_INTEGER, GL_UNSIGNED_INT},
-        FormatType{GL_RG32I, GL_RG_INTEGER, GL_INT},
-        FormatType{GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE},
-        FormatType{GL_SRGB8, GL_RGB, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGB565, GL_RGB, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGB565, GL_RGB, GL_UNSIGNED_SHORT_5_6_5},
-        FormatType{GL_RGB8_SNORM, GL_RGB, GL_BYTE},
-        FormatType{GL_R11F_G11F_B10F, GL_RGB, GL_UNSIGNED_INT_10F_11F_11F_REV},
-        FormatType{GL_R11F_G11F_B10F, GL_RGB, GL_HALF_FLOAT},
-        FormatType{GL_R11F_G11F_B10F, GL_RGB, GL_FLOAT},
-        FormatType{GL_RGB9_E5, GL_RGB, GL_UNSIGNED_INT_5_9_9_9_REV},
-        FormatType{GL_RGB9_E5, GL_RGB, GL_HALF_FLOAT},
-        FormatType{GL_RGB9_E5, GL_RGB, GL_FLOAT},
-        FormatType{GL_RGB16F, GL_RGB, GL_HALF_FLOAT},
-        FormatType{GL_RGB16F, GL_RGB, GL_FLOAT},
-        FormatType{GL_RGB32F, GL_RGB, GL_FLOAT},
-        FormatType{GL_RGB8UI, GL_RGB_INTEGER, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGB8I, GL_RGB_INTEGER, GL_BYTE},
-        FormatType{GL_RGB16UI, GL_RGB_INTEGER, GL_UNSIGNED_SHORT},
-        FormatType{GL_RGB16I, GL_RGB_INTEGER, GL_SHORT},
-        FormatType{GL_RGB32UI, GL_RGB_INTEGER, GL_UNSIGNED_INT},
-        FormatType{GL_RGB32I, GL_RGB_INTEGER, GL_INT},
-        FormatType{GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE},
-        FormatType{GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGBA8_SNORM, GL_RGBA, GL_BYTE},
-        FormatType{GL_RGB5_A1, GL_RGBA, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGB5_A1, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1},
-        FormatType{GL_RGB5_A1, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV},
-        FormatType{GL_RGBA4, GL_RGBA, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGBA4, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4},
-        FormatType{GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV},
-        FormatType{GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT},
-        FormatType{GL_RGBA16F, GL_RGBA, GL_FLOAT},
-        FormatType{GL_RGBA32F, GL_RGBA, GL_FLOAT},
-        FormatType{GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE},
-        FormatType{GL_RGBA8I, GL_RGBA_INTEGER, GL_BYTE},
-        FormatType{GL_RGB10_A2UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT_2_10_10_10_REV},
-        FormatType{GL_RGBA16UI, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT},
-        FormatType{GL_RGBA16I, GL_RGBA_INTEGER, GL_SHORT},
-        FormatType{GL_RGBA32I, GL_RGBA_INTEGER, GL_INT},
-        FormatType{GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT},
-        FormatType{GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT},
-        FormatType{GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT},
-        FormatType{GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT},
-        FormatType{GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT},
-        FormatType{GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8},
-        FormatType{GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL,
+        {GL_R8, GL_RED, GL_UNSIGNED_BYTE},
+        {GL_R8_SNORM, GL_RED, GL_BYTE},
+        {GL_R16F, GL_RED, GL_HALF_FLOAT},
+        {GL_R16F, GL_RED, GL_FLOAT},
+        {GL_R32F, GL_RED, GL_FLOAT},
+        {GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE},
+        {GL_R8I, GL_RED_INTEGER, GL_BYTE},
+        {GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT},
+        {GL_R16I, GL_RED_INTEGER, GL_SHORT},
+        {GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT},
+        {GL_R32I, GL_RED_INTEGER, GL_INT},
+        {GL_RG8, GL_RG, GL_UNSIGNED_BYTE},
+        {GL_RG8_SNORM, GL_RG, GL_BYTE},
+        {GL_RG16F, GL_RG, GL_HALF_FLOAT},
+        {GL_RG16F, GL_RG, GL_FLOAT},
+        {GL_RG32F, GL_RG, GL_FLOAT},
+        {GL_RG8UI, GL_RG_INTEGER, GL_UNSIGNED_BYTE},
+        {GL_RG8I, GL_RG_INTEGER, GL_BYTE},
+        {GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT},
+        {GL_RG16I, GL_RG_INTEGER, GL_SHORT},
+        {GL_RG32UI, GL_RG_INTEGER, GL_UNSIGNED_INT},
+        {GL_RG32I, GL_RG_INTEGER, GL_INT},
+        {GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE},
+        {GL_SRGB8, GL_RGB, GL_UNSIGNED_BYTE},
+        {GL_RGB565, GL_RGB, GL_UNSIGNED_BYTE},
+        {GL_RGB565, GL_RGB, GL_UNSIGNED_SHORT_5_6_5},
+        {GL_RGB8_SNORM, GL_RGB, GL_BYTE},
+        {GL_R11F_G11F_B10F, GL_RGB, GL_UNSIGNED_INT_10F_11F_11F_REV},
+        {GL_R11F_G11F_B10F, GL_RGB, GL_HALF_FLOAT},
+        {GL_R11F_G11F_B10F, GL_RGB, GL_FLOAT},
+        {GL_RGB9_E5, GL_RGB, GL_UNSIGNED_INT_5_9_9_9_REV},
+        {GL_RGB9_E5, GL_RGB, GL_HALF_FLOAT},
+        {GL_RGB9_E5, GL_RGB, GL_FLOAT},
+        {GL_RGB16F, GL_RGB, GL_HALF_FLOAT},
+        {GL_RGB16F, GL_RGB, GL_FLOAT},
+        {GL_RGB32F, GL_RGB, GL_FLOAT},
+        {GL_RGB8UI, GL_RGB_INTEGER, GL_UNSIGNED_BYTE},
+        {GL_RGB8I, GL_RGB_INTEGER, GL_BYTE},
+        {GL_RGB16UI, GL_RGB_INTEGER, GL_UNSIGNED_SHORT},
+        {GL_RGB16I, GL_RGB_INTEGER, GL_SHORT},
+        {GL_RGB32UI, GL_RGB_INTEGER, GL_UNSIGNED_INT},
+        {GL_RGB32I, GL_RGB_INTEGER, GL_INT},
+        {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE},
+        {GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE},
+        {GL_RGBA8_SNORM, GL_RGBA, GL_BYTE},
+        {GL_RGB5_A1, GL_RGBA, GL_UNSIGNED_BYTE},
+        {GL_RGB5_A1, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1},
+        {GL_RGB5_A1, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV},
+        {GL_RGBA4, GL_RGBA, GL_UNSIGNED_BYTE},
+        {GL_RGBA4, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4},
+        {GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV},
+        {GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT},
+        {GL_RGBA16F, GL_RGBA, GL_FLOAT},
+        {GL_RGBA32F, GL_RGBA, GL_FLOAT},
+        {GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE},
+        {GL_RGBA8I, GL_RGBA_INTEGER, GL_BYTE},
+        {GL_RGB10_A2UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT_2_10_10_10_REV},
+        {GL_RGBA16UI, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT},
+        {GL_RGBA16I, GL_RGBA_INTEGER, GL_SHORT},
+        {GL_RGBA32I, GL_RGBA_INTEGER, GL_INT},
+        {GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT},
+        {GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT},
+        {GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT},
+        {GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT},
+        {GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT},
+        {GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8},
+        {GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL,
          GL_FLOAT_32_UNSIGNED_INT_24_8_REV},
 
         // Exposed by GL_APPLE_texture_format_BGRA8888 for TexStorage*
         // TODO(kainino): this actually exposes it for (Copy)TexImage* as well,
         // which is incorrect. crbug.com/663086
-        FormatType{GL_BGRA8_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
+        {GL_BGRA8_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
 
         // Exposed by GL_APPLE_texture_format_BGRA8888 and
         // GL_EXT_texture_format_BGRA8888
-        FormatType{GL_BGRA_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
+        {GL_BGRA_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
 
         // Exposed by GL_EXT_texture_norm16
-        FormatType{GL_R16_EXT, GL_RED, GL_UNSIGNED_SHORT},
-        FormatType{GL_RG16_EXT, GL_RG, GL_UNSIGNED_SHORT},
-        FormatType{GL_RGB16_EXT, GL_RGB, GL_UNSIGNED_SHORT},
-        FormatType{GL_RGBA16_EXT, GL_RGBA, GL_UNSIGNED_SHORT},
-        FormatType{GL_R16_SNORM_EXT, GL_RED, GL_SHORT},
-        FormatType{GL_RG16_SNORM_EXT, GL_RG, GL_SHORT},
-        FormatType{GL_RGB16_SNORM_EXT, GL_RGB, GL_SHORT},
-        FormatType{GL_RGBA16_SNORM_EXT, GL_RGBA, GL_SHORT},
+        {GL_R16_EXT, GL_RED, GL_UNSIGNED_SHORT},
+        {GL_RG16_EXT, GL_RG, GL_UNSIGNED_SHORT},
+        {GL_RGB16_EXT, GL_RGB, GL_UNSIGNED_SHORT},
+        {GL_RGBA16_EXT, GL_RGBA, GL_UNSIGNED_SHORT},
+        {GL_R16_SNORM_EXT, GL_RED, GL_SHORT},
+        {GL_RG16_SNORM_EXT, GL_RG, GL_SHORT},
+        {GL_RGB16_SNORM_EXT, GL_RGB, GL_SHORT},
+        {GL_RGBA16_SNORM_EXT, GL_RGBA, GL_SHORT},
     };
 
     static const FormatType kSupportedFormatTypesES2Only[] = {
         // Exposed by GL_OES_texture_float and GL_OES_texture_half_float
-        FormatType{GL_RGB, GL_RGB, GL_FLOAT},
-        FormatType{GL_RGBA, GL_RGBA, GL_FLOAT},
-        FormatType{GL_LUMINANCE_ALPHA, GL_LUMINANCE_ALPHA, GL_FLOAT},
-        FormatType{GL_LUMINANCE, GL_LUMINANCE, GL_FLOAT},
-        FormatType{GL_ALPHA, GL_ALPHA, GL_FLOAT},
-        FormatType{GL_RGB, GL_RGB, GL_HALF_FLOAT_OES},
-        FormatType{GL_RGBA, GL_RGBA, GL_HALF_FLOAT_OES},
-        FormatType{GL_LUMINANCE_ALPHA, GL_LUMINANCE_ALPHA, GL_HALF_FLOAT_OES},
-        FormatType{GL_LUMINANCE, GL_LUMINANCE, GL_HALF_FLOAT_OES},
-        FormatType{GL_ALPHA, GL_ALPHA, GL_HALF_FLOAT_OES},
+        {GL_RGB, GL_RGB, GL_FLOAT},
+        {GL_RGBA, GL_RGBA, GL_FLOAT},
+        {GL_LUMINANCE_ALPHA, GL_LUMINANCE_ALPHA, GL_FLOAT},
+        {GL_LUMINANCE, GL_LUMINANCE, GL_FLOAT},
+        {GL_ALPHA, GL_ALPHA, GL_FLOAT},
+        {GL_RGB, GL_RGB, GL_HALF_FLOAT_OES},
+        {GL_RGBA, GL_RGBA, GL_HALF_FLOAT_OES},
+        {GL_LUMINANCE_ALPHA, GL_LUMINANCE_ALPHA, GL_HALF_FLOAT_OES},
+        {GL_LUMINANCE, GL_LUMINANCE, GL_HALF_FLOAT_OES},
+        {GL_ALPHA, GL_ALPHA, GL_HALF_FLOAT_OES},
 
         // Exposed by GL_ANGLE_depth_texture
-        FormatType{GL_DEPTH_COMPONENT, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT},
-        FormatType{GL_DEPTH_COMPONENT, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT},
-        FormatType{GL_DEPTH_STENCIL, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8},
+        {GL_DEPTH_COMPONENT, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT},
+        {GL_DEPTH_COMPONENT, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT},
+        {GL_DEPTH_STENCIL, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8},
 
         // Exposed by GL_EXT_sRGB
-        FormatType{GL_SRGB, GL_SRGB, GL_UNSIGNED_BYTE},
-        FormatType{GL_SRGB_ALPHA, GL_SRGB_ALPHA, GL_UNSIGNED_BYTE},
+        {GL_SRGB, GL_SRGB, GL_UNSIGNED_BYTE},
+        {GL_SRGB_ALPHA, GL_SRGB_ALPHA, GL_UNSIGNED_BYTE},
 
         // Exposed by GL_EXT_texture_rg
-        FormatType{GL_RED, GL_RED, GL_UNSIGNED_BYTE},
-        FormatType{GL_RG, GL_RG, GL_UNSIGNED_BYTE},
-        FormatType{GL_RED, GL_RED, GL_FLOAT},
-        FormatType{GL_RG, GL_RG, GL_FLOAT},
-        FormatType{GL_RED, GL_RED, GL_HALF_FLOAT_OES},
-        FormatType{GL_RG, GL_RG, GL_HALF_FLOAT_OES},
+        {GL_RED, GL_RED, GL_UNSIGNED_BYTE},
+        {GL_RG, GL_RG, GL_UNSIGNED_BYTE},
+        {GL_RED, GL_RED, GL_FLOAT},
+        {GL_RG, GL_RG, GL_FLOAT},
+        {GL_RED, GL_RED, GL_HALF_FLOAT_OES},
+        {GL_RG, GL_RG, GL_HALF_FLOAT_OES},
     };
 
-    for (size_t ii = 0; ii < base::size(kSupportedFormatTypes); ++ii) {
+    for (size_t ii = 0; ii < std::size(kSupportedFormatTypes); ++ii) {
       supported_combinations_.insert(kSupportedFormatTypes[ii]);
     }
 
-    for (size_t ii = 0; ii < base::size(kSupportedFormatTypesES2Only); ++ii) {
+    for (size_t ii = 0; ii < std::size(kSupportedFormatTypesES2Only); ++ii) {
       supported_combinations_es2_only_.insert(kSupportedFormatTypesES2Only[ii]);
     }
   }
@@ -273,7 +273,7 @@ class FormatTypeValidator {
   // This may be accessed from multiple threads.
   bool IsValid(ContextType context_type, GLenum internal_format, GLenum format,
                GLenum type) const {
-    FormatType query{ internal_format, format, type };
+    FormatType query = { internal_format, format, type };
     if (supported_combinations_.find(query) != supported_combinations_.end()) {
       return true;
     }
@@ -315,7 +315,7 @@ static const Texture::CompatibilitySwizzle kSwizzledFormats[] = {
 
 const Texture::CompatibilitySwizzle* GetCompatibilitySwizzleInternal(
     GLenum format) {
-  size_t count = base::size(kSwizzledFormats);
+  size_t count = std::size(kSwizzledFormats);
   for (size_t i = 0; i < count; ++i) {
     if (kSwizzledFormats[i].format == format)
       return &kSwizzledFormats[i];
@@ -360,6 +360,8 @@ bool SizedFormatAvailable(const FeatureInfo* feature_info,
 
   if ((feature_info->feature_flags().chromium_image_ycbcr_420v &&
        internal_format == GL_RGB_YCBCR_420V_CHROMIUM) ||
+      (feature_info->feature_flags().chromium_image_ycbcr_p010 &&
+       internal_format == GL_RGB_YCBCR_P010_CHROMIUM) ||
       (feature_info->feature_flags().chromium_image_ycbcr_422 &&
        internal_format == GL_RGB_YCBCR_422_CHROMIUM)) {
     return true;
@@ -411,7 +413,7 @@ class ScopedResetPixelUnpackBuffer{
   }
 
  private:
-    Buffer* buffer_;
+  raw_ptr<Buffer> buffer_;
 };
 
 class ScopedMemTrackerChange {
@@ -432,8 +434,8 @@ class ScopedMemTrackerChange {
   }
 
  private:
-  Texture* texture_;
-  MemoryTypeTracker* previous_tracker_;
+  raw_ptr<Texture> texture_;
+  raw_ptr<MemoryTypeTracker> previous_tracker_;
   uint32_t previous_size_;
 };
 
@@ -497,7 +499,7 @@ void TextureManager::Destroy() {
   }
 
   if (have_context_) {
-    glDeleteTextures(base::size(black_texture_ids_), black_texture_ids_);
+    glDeleteTextures(std::size(black_texture_ids_), black_texture_ids_);
   }
 
   DCHECK_EQ(0u, memory_type_tracker_->GetMemRepresented());
@@ -3867,6 +3869,7 @@ GLenum TextureManager::ExtractFormatFromStorageFormat(GLenum internalformat) {
     case GL_ETC1_RGB8_OES:
     case GL_RGB:
     case GL_RGB8:
+    case GL_RGBX8_ANGLE:
     case GL_SRGB8:
     case GL_RGB16:
     case GL_R11F_G11F_B10F:
@@ -4083,6 +4086,8 @@ GLenum TextureManager::ExtractTypeFromStorageFormat(GLenum internalformat) {
     case GL_RGB32I:
       return GL_INT;
     case GL_RGBA8:
+      return GL_UNSIGNED_BYTE;
+    case GL_RGBX8_ANGLE:
       return GL_UNSIGNED_BYTE;
     case GL_SRGB8_ALPHA8:
       return GL_UNSIGNED_BYTE;

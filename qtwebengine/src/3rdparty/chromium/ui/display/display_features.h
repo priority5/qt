@@ -6,18 +6,28 @@
 #define UI_DISPLAY_DISPLAY_FEATURES_H_
 
 #include "base/feature_list.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/display/display_export.h"
 
 namespace display {
 namespace features {
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 DISPLAY_EXPORT extern const base::Feature kUseHDRTransferFunction;
 #endif
 
 DISPLAY_EXPORT extern const base::Feature kListAllDisplayModes;
 
 DISPLAY_EXPORT bool IsListAllDisplayModesEnabled();
+
+DISPLAY_EXPORT extern const base::Feature kEnableHardwareMirrorMode;
+
+DISPLAY_EXPORT bool IsHardwareMirrorModeEnabled();
+
+#if BUILDFLAG(IS_MAC)
+// If enabled, vsync of 120 is forced to 60.
+DISPLAY_EXPORT extern const base::Feature kForce60Hz;
+#endif
 
 }  // namespace features
 }  // namespace display

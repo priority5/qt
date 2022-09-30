@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/containers/span.h"
-#include "base/strings/string16.h"
+#include "base/gtest_prod_util.h"
 #include "base/values.h"
 #include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/browser/ui/webui/settings/chromeos/constants/setting.mojom.h"
@@ -65,7 +65,7 @@ class OsSettingsSection {
         mojom::SearchResultDefaultRank default_rank,
         const std::string& url_path_with_parameters) = 0;
 
-    // Registers a subpage whose paernt is another subpage in this section.
+    // Registers a subpage whose parent is another subpage in this section.
     virtual void RegisterNestedSubpage(
         int name_message_id,
         mojom::Subpage subpage,
@@ -123,7 +123,9 @@ class OsSettingsSection {
   // whether the setting change was logged.
   virtual bool LogMetric(mojom::Setting setting, base::Value& value) const = 0;
 
-  // Registers the subpages and/or settings which reside in this section.
+  // Registers the subpages and/or settings which reside in this section. Every
+  // subpage and setting within a section must be registered, regardless of
+  // whether or not the subpage or setting is gated behind a feature flag.
   virtual void RegisterHierarchy(HierarchyGenerator* generator) const = 0;
 
   // Modifies a URL to be used by settings search. Some URLs require dynamic
@@ -142,8 +144,9 @@ class OsSettingsSection {
   mojom::SearchResultPtr GenerateSectionSearchResult(
       double relevance_score) const;
 
+  static std::u16string GetHelpUrlWithBoard(const std::string& original_url);
+
  protected:
-  static base::string16 GetHelpUrlWithBoard(const std::string& original_url);
   static void RegisterNestedSettingBulk(
       mojom::Subpage,
       const base::span<const mojom::Setting>& settings,
@@ -159,13 +162,10 @@ class OsSettingsSection {
   SearchTagRegistry* registry() { return search_tag_registry_; }
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, SectionWithFlag);
-  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, SectionNoFlag);
-  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, SubpageWithFlag);
-  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, SubpageNoFlag);
-  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, SettingWithFlag);
-  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, SettingExistingQueryWithFlag);
-  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, SettingNoFlag);
+  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, Section);
+  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, Subpage);
+  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, Setting);
+  FRIEND_TEST_ALL_PREFIXES(OsSettingsSectionTest, SettingExistingQuery);
 
   static constexpr char kSettingIdUrlParam[] = "settingId";
 

@@ -8,7 +8,6 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/pickle.h"
 #include "base/time/time.h"
-#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/cert/sct_status_flags.h"
 #include "net/cert/signed_certificate_timestamp.h"
@@ -16,7 +15,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_connection_status_flags.h"
-#include "net/third_party/quiche/src/quic/core/quic_versions.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 
 using base::Time;
@@ -115,6 +114,9 @@ enum {
   // restricted in some way.
   RESPONSE_INFO_RESTRICTED_PREFETCH = 1 << 26,
 
+  // This bit is set if the response has a nonempty `dns_aliases` entry.
+  RESPONSE_INFO_HAS_DNS_ALIASES = 1 << 27,
+
   // TODO(darin): Add other bits to indicate alternate request methods.
   // For now, we don't support storing those.
 };
@@ -165,6 +167,8 @@ HttpResponseInfo::ConnectionInfoCoarse HttpResponseInfo::ConnectionInfoToCoarse(
     case CONNECTION_INFO_QUIC_DRAFT_28:
     case CONNECTION_INFO_QUIC_DRAFT_29:
     case CONNECTION_INFO_QUIC_T051:
+    case CONNECTION_INFO_QUIC_RFC_V1:
+    case CONNECTION_INFO_QUIC_2_DRAFT_1:
       return CONNECTION_INFO_COARSE_QUIC;
 
     case CONNECTION_INFO_UNKNOWN:
@@ -182,7 +186,6 @@ HttpResponseInfo::ConnectionInfoCoarse HttpResponseInfo::ConnectionInfoToCoarse(
 HttpResponseInfo::HttpResponseInfo()
     : was_cached(false),
       cache_entry_status(CacheEntryStatus::ENTRY_UNDEFINED),
-      server_data_unavailable(false),
       network_accessed(false),
       was_fetched_via_spdy(false),
       was_alpn_negotiated(false),
@@ -337,8 +340,7 @@ bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
   if (flags & RESPONSE_INFO_HAS_STALENESS) {
     if (!iter.ReadInt64(&time_val))
       return false;
-    stale_revalidate_timeout =
-        base::Time() + base::TimeDelta::FromMicroseconds(time_val);
+    stale_revalidate_timeout = base::Time() + base::Microseconds(time_val);
   }
 
   was_fetched_via_spdy = (flags & RESPONSE_INFO_WAS_SPDY) != 0;
@@ -367,6 +369,20 @@ bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
     }
     ssl_info.peer_signature_algorithm =
         base::checked_cast<uint16_t>(peer_signature_algorithm);
+  }
+
+  // Read DNS aliases.
+  if (flags & RESPONSE_INFO_HAS_DNS_ALIASES) {
+    int num_aliases;
+    if (!iter.ReadInt(&num_aliases))
+      return false;
+
+    std::string alias;
+    for (int i = 0; i < num_aliases; i++) {
+      if (!iter.ReadString(&alias))
+        return false;
+      dns_aliases.insert(alias);
+    }
   }
 
   return true;
@@ -410,6 +426,8 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
     flags |= RESPONSE_INFO_PKP_BYPASSED;
   if (!stale_revalidate_timeout.is_null())
     flags |= RESPONSE_INFO_HAS_STALENESS;
+  if (!dns_aliases.empty())
+    flags |= RESPONSE_INFO_HAS_DNS_ALIASES;
 
   pickle->WriteInt(flags);
   pickle->WriteInt64(request_time.ToInternalValue());
@@ -459,6 +477,12 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
 
   if (ssl_info.is_valid() && ssl_info.peer_signature_algorithm != 0)
     pickle->WriteInt(ssl_info.peer_signature_algorithm);
+
+  if (!dns_aliases.empty()) {
+    pickle->WriteInt(dns_aliases.size());
+    for (const auto& alias : dns_aliases)
+      pickle->WriteString(alias);
+  }
 }
 
 bool HttpResponseInfo::DidUseQuic() const {
@@ -504,6 +528,8 @@ bool HttpResponseInfo::DidUseQuic() const {
     case CONNECTION_INFO_QUIC_DRAFT_28:
     case CONNECTION_INFO_QUIC_DRAFT_29:
     case CONNECTION_INFO_QUIC_T051:
+    case CONNECTION_INFO_QUIC_RFC_V1:
+    case CONNECTION_INFO_QUIC_2_DRAFT_1:
       return true;
     case NUM_OF_CONNECTION_INFOS:
       NOTREACHED();
@@ -600,6 +626,10 @@ std::string HttpResponseInfo::ConnectionInfoToString(
       return "http2+quic/999";
     case CONNECTION_INFO_QUIC_T051:
       return "h3-T051";
+    case CONNECTION_INFO_QUIC_RFC_V1:
+      return "h3";
+    case CONNECTION_INFO_QUIC_2_DRAFT_1:
+      return "h3/quic2draft01";
     case NUM_OF_CONNECTION_INFOS:
       break;
   }

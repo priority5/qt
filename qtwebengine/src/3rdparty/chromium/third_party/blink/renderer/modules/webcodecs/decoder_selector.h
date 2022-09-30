@@ -39,7 +39,7 @@ class DecoderSelector {
   // including destruction must use |task_runner| thread.
   // Provided callbacks will be called on |task_runner|. |output_cb| will always
   // be Post()'ed.
-  DecoderSelector(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+  DecoderSelector(scoped_refptr<base::SequencedTaskRunner> task_runner,
                   CreateDecodersCB create_decoders_cb,
                   typename Decoder::OutputCB output_cb);
 
@@ -54,6 +54,7 @@ class DecoderSelector {
   // be returned via |select_decoder_cb| posted to |task_runner_|. Subsequent
   // calls will again select from the full list of decoders.
   void SelectDecoder(const DecoderConfig& config,
+                     bool low_delay,
                      SelectDecoderCB select_decoder_cb);
 
  private:

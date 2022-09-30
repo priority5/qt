@@ -7,11 +7,12 @@
 #include <utility>
 
 #include "base/callback.h"
+#include "base/logging.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
 
 namespace autofill_assistant {
 namespace {
-constexpr base::TimeDelta kDefaultTimeout = base::TimeDelta::FromSeconds(20);
+constexpr base::TimeDelta kDefaultTimeout = base::Seconds(20);
 }  // namespace
 
 WaitForNavigationAction::WaitForNavigationAction(ActionDelegate* delegate,
@@ -25,14 +26,16 @@ WaitForNavigationAction::~WaitForNavigationAction() {}
 void WaitForNavigationAction::InternalProcessAction(
     ProcessActionCallback callback) {
   callback_ = std::move(callback);
-  base::TimeDelta timeout = base::TimeDelta::FromMilliseconds(
-      proto_.wait_for_navigation().timeout_ms());
+  base::TimeDelta timeout =
+      base::Milliseconds(proto_.wait_for_navigation().timeout_ms());
   if (timeout.is_zero())
     timeout = kDefaultTimeout;
 
   timer_.Start(FROM_HERE, timeout,
                base::BindOnce(&WaitForNavigationAction::OnTimeout,
                               weak_ptr_factory_.GetWeakPtr()));
+
+  action_stopwatch_.StartWaitTime();
   if (!delegate_->WaitForNavigation(
           base::BindOnce(&WaitForNavigationAction::OnWaitForNavigation,
                          weak_ptr_factory_.GetWeakPtr()))) {
@@ -49,7 +52,7 @@ void WaitForNavigationAction::OnWaitForNavigation(bool success) {
     // Already timed out.
     return;
   }
-
+  action_stopwatch_.StartActiveTime();
   SendResult(success ? ACTION_APPLIED : NAVIGATION_ERROR);
 }
 
@@ -64,6 +67,7 @@ void WaitForNavigationAction::OnTimeout() {
     // OnWaitForNavigation.
     return;
   }
+  action_stopwatch_.StartActiveTime();
   SendResult(TIMED_OUT);
 }
 

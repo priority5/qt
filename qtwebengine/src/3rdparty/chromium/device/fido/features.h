@@ -9,6 +9,7 @@
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace url {
 class Origin;
@@ -16,49 +17,46 @@ class Origin;
 
 namespace device {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // Controls whether on Windows, U2F/CTAP2 requests are forwarded to the
 // native WebAuthentication API, where available.
 COMPONENT_EXPORT(DEVICE_FIDO)
 extern const base::Feature kWebAuthUseNativeWinApi;
-#endif  // defined(OS_WIN)
-
-// Enable biometric enrollment in the security keys settings UI.
-COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::Feature kWebAuthBiometricEnrollment;
+#endif  // BUILDFLAG(IS_WIN)
 
 // Enable using a phone as a generic security key.
 COMPONENT_EXPORT(DEVICE_FIDO)
 extern const base::Feature kWebAuthPhoneSupport;
 
-// Enable WebAuthn GetAssertion calls in cross-origin iframes if allowed by
-// Feature Policy.
+// Enable some experimental UI changes
 COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::Feature kWebAuthGetAssertionFeaturePolicy;
+extern const base::Feature kWebAuthPasskeysUI;
 
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
-// Use a low connection latency BLE mode when connecting to caBLE
-// authenticators.
+// Support the caBLE extension in assertion requests from any origin.
 COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::Feature kWebAuthCableLowLatency;
-#endif  // defined(OS_CHROMEOS) || defined(OS_LINUX)
+extern const base::Feature kWebAuthCableExtensionAnywhere;
 
-#if defined(OS_CHROMEOS)
+// Enable discoverable credentials on caBLE authenticators.
+COMPONENT_EXPORT(DEVICE_FIDO)
+extern const base::Feature kWebAuthCableDisco;
+
+#if BUILDFLAG(IS_CHROMEOS)
 // Enable a ChromeOS platform authenticator
 COMPONENT_EXPORT(DEVICE_FIDO)
 extern const base::Feature kWebAuthCrosPlatformAuthenticator;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::Feature kWebAuthAttestationBlockList;
-COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::FeatureParam<std::string> kWebAuthAttestationBlockedDomains;
+extern const base::Feature kU2fPermissionPrompt;
 
-// DoesMatchWebAuthAttestationBlockedDomains returns true if the
-// |kWebAuthAttestationBlocked| feature is enabled and |origin| is listed
-// in |kWebAuthAttestationBlockedDomains|.
+// Feature flag for the Google-internal
+// `WebAuthenticationAllowGoogleCorpRemoteRequestProxying` enterprise policy.
 COMPONENT_EXPORT(DEVICE_FIDO)
-bool DoesMatchWebAuthAttestationBlockedDomains(const url::Origin& origin);
+extern const base::Feature kWebAuthnGoogleCorpRemoteDesktopClientPrivilege;
+
+// Enable some experimental UI changes
+COMPONENT_EXPORT(DEVICE_FIDO)
+extern const base::Feature kWebAuthPasskeysUIExperiment;
 
 }  // namespace device
 

@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/debug/alias.h"
 #include "base/logging.h"
+#include "build/build_config.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_features.h"
 #include "ui/gl/gl_switches.h"
@@ -17,16 +18,28 @@
 #include "ui/gl/gl_surface_egl.h"
 #endif  // defined(USE_EGL)
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/posix/eintr_wrapper.h"
 #include "third_party/libsync/src/include/sync/sync.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
+#include <d3d11_1.h>
+#include "base/strings/stringprintf.h"
+#include "media/base/win/mf_helpers.h"
 #include "ui/gl/direct_composition_surface_win.h"
 #endif
 
 namespace gl {
+namespace {
+
+int GetIntegerv(unsigned int name) {
+  int value = 0;
+  glGetIntegerv(name, &value);
+  return value;
+}
+
+}  // namespace
 
 // Used by chrome://gpucrash and gpu_benchmarking_extension's
 // CrashForTesting.
@@ -59,7 +72,7 @@ void Hang() {
   }
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 base::ScopedFD MergeFDs(base::ScopedFD a, base::ScopedFD b) {
   if (!a.is_valid())
     return b;
@@ -85,8 +98,7 @@ bool UsePassthroughCommandDecoder(const base::CommandLine* command_line) {
     return false;
   } else {
     // Unrecognized or missing switch, use the default.
-    return base::FeatureList::IsEnabled(
-        features::kDefaultPassthroughCommandDecoder);
+    return features::UsePassthroughCommandDecoder();
   }
 }
 
@@ -105,7 +117,7 @@ bool PassthroughCommandDecoderSupported() {
 #endif  // defined(USE_EGL)
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // This function is thread safe.
 bool AreOverlaysSupportedWin() {
   return gl::DirectCompositionSurfaceWin::AreOverlaysSupported();
@@ -120,6 +132,12 @@ unsigned int FrameRateToPresentDuration(float frame_rate) {
 
 UINT GetOverlaySupportFlags(DXGI_FORMAT format) {
   return gl::DirectCompositionSurfaceWin::GetOverlaySupportFlags(format);
+}
+
+unsigned int DirectCompositionRootSurfaceBufferCount() {
+  return base::FeatureList::IsEnabled(features::kDCompTripleBufferRootSwapChain)
+             ? 3u
+             : 2u;
 }
 
 bool ShouldForceDirectCompositionRootSurfaceFullDamage() {
@@ -143,5 +161,75 @@ bool ShouldForceDirectCompositionRootSurfaceFullDamage() {
   }();
   return should_force;
 }
-#endif  // OS_WIN
+
+// Labels swapchain buffers with the string name_prefix + _Buffer_ +
+// <buffer_number>
+void LabelSwapChainBuffers(IDXGISwapChain* swap_chain,
+                           const char* name_prefix) {
+  DXGI_SWAP_CHAIN_DESC desc;
+  HRESULT hr = swap_chain->GetDesc(&desc);
+  if (FAILED(hr)) {
+    DLOG(ERROR) << "Failed to GetDesc from swap chain: "
+                << logging::SystemErrorCodeToString(hr);
+    return;
+  }
+  for (unsigned int i = 0; i < desc.BufferCount; i++) {
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> swap_chain_buffer;
+    hr = swap_chain->GetBuffer(i, IID_PPV_ARGS(&swap_chain_buffer));
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "GetBuffer on swap chain buffer " << i
+                  << "failed: " << logging::SystemErrorCodeToString(hr);
+      return;
+    }
+    const std::string buffer_name =
+        base::StringPrintf("%s_Buffer_%d", name_prefix, i);
+    hr = media::SetDebugName(swap_chain_buffer.Get(), buffer_name.c_str());
+    if (FAILED(hr)) {
+      DLOG(ERROR) << "Failed to label swap chain buffer " << i << ": "
+                  << logging::SystemErrorCodeToString(hr);
+    }
+  }
+}
+
+// Same as LabelSwapChainAndBuffers, but only does the buffers. Used for resize
+// operations
+void LabelSwapChainAndBuffers(IDXGISwapChain* swap_chain,
+                              const char* name_prefix) {
+  media::SetDebugName(swap_chain, name_prefix);
+  LabelSwapChainBuffers(swap_chain, name_prefix);
+}
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_MAC)
+
+ScopedEnableTextureRectangleInShaderCompiler::
+    ScopedEnableTextureRectangleInShaderCompiler(gl::GLApi* gl_api) {
+  if (gl_api) {
+    DCHECK(!gl_api->glIsEnabledFn(GL_TEXTURE_RECTANGLE_ANGLE));
+    gl_api->glEnableFn(GL_TEXTURE_RECTANGLE_ANGLE);
+    gl_api_ = gl_api;
+  } else {
+    gl_api_ = nullptr;  // Signal to the destructor that this is a no-op.
+  }
+}
+
+ScopedEnableTextureRectangleInShaderCompiler::
+    ~ScopedEnableTextureRectangleInShaderCompiler() {
+  if (gl_api_)
+    gl_api_->glDisableFn(GL_TEXTURE_RECTANGLE_ANGLE);
+}
+
+#endif  // BUILDFLAG(IS_MAC)
+
+ScopedPixelStore::ScopedPixelStore(unsigned int name, int value)
+    : name_(name), old_value_(GetIntegerv(name)), value_(value) {
+  if (value_ != old_value_)
+    glPixelStorei(name_, value_);
+}
+
+ScopedPixelStore::~ScopedPixelStore() {
+  if (value_ != old_value_)
+    glPixelStorei(name_, old_value_);
+}
+
 }  // namespace gl

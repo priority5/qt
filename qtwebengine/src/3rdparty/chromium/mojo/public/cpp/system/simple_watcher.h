@@ -8,7 +8,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
@@ -90,7 +89,11 @@ class MOJO_CPP_SYSTEM_EXPORT SimpleWatcher {
                 ArmingPolicy arming_policy,
                 scoped_refptr<base::SequencedTaskRunner> runner =
                     base::SequencedTaskRunnerHandle::Get(),
-                const char* heap_profiler_tag = nullptr);
+                const char* handler_tag = nullptr);
+
+  SimpleWatcher(const SimpleWatcher&) = delete;
+  SimpleWatcher& operator=(const SimpleWatcher&) = delete;
+
   ~SimpleWatcher();
 
   // Indicates if the SimpleWatcher is currently watching a handle.
@@ -226,11 +229,9 @@ class MOJO_CPP_SYSTEM_EXPORT SimpleWatcher {
 
   // Tag used to ID memory allocations that originated from notifications in
   // this watcher.
-  const char* heap_profiler_tag_ = nullptr;
+  const char* handler_tag_ = nullptr;
 
   base::WeakPtrFactory<SimpleWatcher> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SimpleWatcher);
 };
 
 }  // namespace mojo

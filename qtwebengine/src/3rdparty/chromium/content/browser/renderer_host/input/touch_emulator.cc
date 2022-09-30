@@ -4,6 +4,8 @@
 
 #include "content/browser/renderer_host/input/touch_emulator.h"
 
+#include <memory>
+
 #include "base/containers/queue.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -60,8 +62,7 @@ int ModifiersWithoutMouseButtons(const WebInputEvent& event) {
 
 // Time between two consecutive mouse moves, during which second mouse move
 // is not converted to touch.
-constexpr base::TimeDelta kMouseMoveDropInterval =
-    base::TimeDelta::FromMilliseconds(5);
+constexpr base::TimeDelta kMouseMoveDropInterval = base::Milliseconds(5);
 
 } // namespace
 
@@ -107,8 +108,8 @@ void TouchEmulator::Enable(Mode mode,
       mode_ != mode) {
     mode_ = mode;
     gesture_provider_config_type_ = config_type;
-    gesture_provider_.reset(new ui::FilteredGestureProvider(
-        GetEmulatorGestureProviderConfig(config_type, mode), this));
+    gesture_provider_ = std::make_unique<ui::FilteredGestureProvider>(
+        GetEmulatorGestureProviderConfig(config_type, mode), this);
     gesture_provider_->SetDoubleTapSupportForPageEnabled(double_tap_enabled_);
     // TODO(dgozman): Use synthetic secondary touch to support multi-touch.
     gesture_provider_->SetMultiTouchZoomSupportEnabled(
@@ -288,12 +289,12 @@ bool TouchEmulator::HandleEmulatedTouchEvent(
     return true;
 
   const bool event_consumed = true;
-  const bool is_source_touch_event_set_non_blocking = false;
+  const bool is_source_touch_event_set_blocking = false;
   // Block emulated event when emulated native stream is active.
   if (native_stream_active_sequence_count_) {
     gesture_provider_->OnTouchEventAck(event.unique_touch_event_id,
                                        event_consumed,
-                                       is_source_touch_event_set_non_blocking);
+                                       is_source_touch_event_set_blocking);
     return true;
   }
 
@@ -302,7 +303,7 @@ bool TouchEmulator::HandleEmulatedTouchEvent(
   if (!emulated_stream_active_sequence_count_ && !is_sequence_start) {
     gesture_provider_->OnTouchEventAck(event.unique_touch_event_id,
                                        event_consumed,
-                                       is_source_touch_event_set_non_blocking);
+                                       is_source_touch_event_set_blocking);
     return true;
   }
 
@@ -358,8 +359,20 @@ void TouchEmulator::OnViewDestroyed(RenderWidgetHostViewBase* destroyed_view) {
   if (destroyed_view != last_emulated_start_target_)
     return;
 
-  last_emulated_start_target_ = nullptr;
   emulated_stream_active_sequence_count_ = 0;
+  // If we aren't enabled, just reset out target.
+  if (!gesture_provider_) {
+    last_emulated_start_target_ = nullptr;
+    return;
+  }
+
+  // TouchEmulator is still enabled. To reset the state go through a
+  // Disable/Enable sequence to destroy the GestureRecognizer otherwise it will
+  // be left in an unknown state because the associated view was destroyed.
+  ui::GestureProviderConfigType config_type = gesture_provider_config_type_;
+  Mode mode = mode_;
+  Disable();
+  Enable(mode, config_type);
 }
 
 void TouchEmulator::OnGestureEvent(const ui::GestureEventData& gesture) {

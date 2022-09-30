@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <utility>
-#include <vector>
 
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
@@ -16,10 +15,6 @@
 
 namespace syncer {
 namespace {
-
-// Name of obsolete preference that stores most recently used past cache
-// GUIDs, most recent first.
-const char kObsoleteDeviceInfoRecentGUIDs[] = "sync.local_device_guids";
 
 // Preference name for storing recently used cache GUIDs and their timestamps
 // in days since Windows epoch. Most recent first.
@@ -31,8 +26,7 @@ const char kCacheGuidKey[] = "cache_guid";
 const char kTimestampKey[] = "timestamp";
 
 // The max time a local device's cached GUIDs will be stored.
-constexpr base::TimeDelta kMaxTimeDeltaLocalCacheGuidsStored =
-    base::TimeDelta::FromDays(10);
+constexpr base::TimeDelta kMaxTimeDeltaLocalCacheGuidsStored = base::Days(10);
 
 // The max number of local device most recent cached GUIDs that will be stored
 // in preferences.
@@ -54,25 +48,6 @@ bool MatchesGuidInDictionary(const base::Value& dict,
 // static
 void DeviceInfoPrefs::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterListPref(kDeviceInfoRecentGUIDsWithTimestamps);
-  registry->RegisterListPref(kObsoleteDeviceInfoRecentGUIDs);
-}
-
-// static
-void DeviceInfoPrefs::MigrateRecentLocalCacheGuidsPref(
-    PrefService* pref_service) {
-  base::Value::ConstListView obsolete_cache_guids =
-      pref_service->GetList(kObsoleteDeviceInfoRecentGUIDs)->GetList();
-  DeviceInfoPrefs prefs(pref_service, base::DefaultClock::GetInstance());
-
-  // Iterate in reverse order to maintain original order.
-  for (auto it = obsolete_cache_guids.rbegin();
-       it != obsolete_cache_guids.rend(); ++it) {
-    if (it->is_string()) {
-      prefs.AddLocalCacheGuid(it->GetString());
-    }
-  }
-
-  pref_service->ClearPref(kObsoleteDeviceInfoRecentGUIDs);
 }
 
 DeviceInfoPrefs::DeviceInfoPrefs(PrefService* pref_service,
@@ -82,12 +57,13 @@ DeviceInfoPrefs::DeviceInfoPrefs(PrefService* pref_service,
   DCHECK(clock_);
 }
 
-DeviceInfoPrefs::~DeviceInfoPrefs() {}
+DeviceInfoPrefs::~DeviceInfoPrefs() = default;
 
 bool DeviceInfoPrefs::IsRecentLocalCacheGuid(
     const std::string& cache_guid) const {
   base::Value::ConstListView recent_local_cache_guids =
-      pref_service_->GetList(kDeviceInfoRecentGUIDsWithTimestamps)->GetList();
+      pref_service_->GetList(kDeviceInfoRecentGUIDsWithTimestamps)
+          ->GetListDeprecated();
 
   for (const auto& v : recent_local_cache_guids) {
     if (MatchesGuidInDictionary(v, cache_guid)) {
@@ -102,8 +78,8 @@ void DeviceInfoPrefs::AddLocalCacheGuid(const std::string& cache_guid) {
   ListPrefUpdate update_cache_guids(pref_service_,
                                     kDeviceInfoRecentGUIDsWithTimestamps);
 
-  for (auto it = update_cache_guids->GetList().begin();
-       it != update_cache_guids->GetList().end(); it++) {
+  for (auto it = update_cache_guids->GetListDeprecated().begin();
+       it != update_cache_guids->GetListDeprecated().end(); it++) {
     if (MatchesGuidInDictionary(*it, cache_guid)) {
       // Remove it from the list, to be reinserted below, in the first
       // position.
@@ -118,11 +94,13 @@ void DeviceInfoPrefs::AddLocalCacheGuid(const std::string& cache_guid) {
       kTimestampKey,
       base::Value(clock_->Now().ToDeltaSinceWindowsEpoch().InDays()));
 
-  update_cache_guids->Insert(update_cache_guids->GetList().begin(),
+  update_cache_guids->Insert(update_cache_guids->GetListDeprecated().begin(),
                              std::move(new_entry));
 
-  while (update_cache_guids->GetList().size() > kMaxLocalCacheGuidsStored) {
-    update_cache_guids->EraseListIter(update_cache_guids->GetList().end() - 1);
+  while (update_cache_guids->GetListDeprecated().size() >
+         kMaxLocalCacheGuidsStored) {
+    update_cache_guids->EraseListIter(
+        update_cache_guids->GetListDeprecated().end() - 1);
   }
 }
 
@@ -136,7 +114,7 @@ void DeviceInfoPrefs::GarbageCollectExpiredCacheGuids() {
       return true;
     }
 
-    base::Optional<int> days_since_epoch = dict.FindIntKey(kTimestampKey);
+    absl::optional<int> days_since_epoch = dict.FindIntKey(kTimestampKey);
 
     // Avoid crashes if the dictionary contains no timestamp and meanwhile clean
     // up these corrupt entries.
@@ -144,8 +122,8 @@ void DeviceInfoPrefs::GarbageCollectExpiredCacheGuids() {
       return true;
     }
 
-    const base::Time creation_time = base::Time::FromDeltaSinceWindowsEpoch(
-        base::TimeDelta::FromDays(*days_since_epoch));
+    const base::Time creation_time =
+        base::Time::FromDeltaSinceWindowsEpoch(base::Days(*days_since_epoch));
     return creation_time < clock_->Now() - kMaxTimeDeltaLocalCacheGuidsStored;
   });
 }

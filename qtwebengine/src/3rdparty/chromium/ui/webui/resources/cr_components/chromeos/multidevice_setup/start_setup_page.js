@@ -2,6 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/**
+ * The multidevice setup animation for light mode.
+ * @type {string}
+ */
+const MULTIDEVICE_ANIMATION_DARK_URL = 'multidevice_setup_dark.json';
+
+/**
+ * The multidevice setup animation for dark mode.
+ * @type {string}
+ */
+const MULTIDEVICE_ANIMATION_LIGHT_URL = 'multidevice_setup_light.json';
+
 Polymer({
   is: 'start-setup-page',
 
@@ -21,7 +33,7 @@ Polymer({
     /**
      * Array of objects representing all potential MultiDevice hosts.
      *
-     * @type {!Array<!chromeos.multideviceSetup.mojom.HostDevice>}
+     * @type {!Array<!ash.multideviceSetup.mojom.HostDevice>}
      */
     devices: {
       type: Array,
@@ -53,21 +65,30 @@ Polymer({
     delegate: Object,
 
     /** @private */
-    phoneHubEnabled_: {
-      type: Boolean,
-      value() {
-        return loadTimeData.valueExists('phoneHubEnabled') &&
-            loadTimeData.getBoolean('phoneHubEnabled');
-      },
-    },
-
-    /** @private */
     wifiSyncEnabled_: {
       type: Boolean,
       value() {
         return loadTimeData.valueExists('wifiSyncEnabled') &&
             loadTimeData.getBoolean('wifiSyncEnabled');
       },
+    },
+
+    /** @private */
+    phoneHubCameraRollEnabled_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.valueExists('phoneHubCameraRollEnabled') &&
+            loadTimeData.getBoolean('phoneHubCameraRollEnabled');
+      },
+    },
+
+    /**
+     * Whether the multidevice setup page is being rendered in dark mode.
+     * @private {boolean}
+     */
+    isDarkModeActive_: {
+      type: Boolean,
+      value: false,
     },
   },
 
@@ -80,7 +101,16 @@ Polymer({
   attached() {
     this.addWebUIListener(
         'multidevice_setup.initializeSetupFlow',
-        this.initializeSetupFlow_.bind(this));
+        () => this.initializeSetupFlow_());
+  },
+
+  /**
+   * This will play or stop the screen's lottie animation.
+   * @param {boolean} enabled Whether the animation should play or not.
+   */
+  setPlayAnimation(enabled) {
+    /** @type {!CrLottieElement} */ (this.$.multideviceSetupAnimation)
+        .setPlay(enabled);
   },
 
   /** @private */
@@ -90,7 +120,6 @@ Polymer({
     // manaully add onclick handlers.
     const helpArticleLinks = [
       this.$$('#multidevice-summary-message a'),
-      this.$$('#awm-summary-message a')
     ];
     for (let i = 0; i < helpArticleLinks.length; i++) {
       helpArticleLinks[i].onclick = this.fire.bind(
@@ -108,7 +137,7 @@ Polymer({
   },
 
   /**
-   * @param {!Array<!chromeos.multideviceSetup.mojom.HostDevice>} devices
+   * @param {!Array<!ash.multideviceSetup.mojom.HostDevice>} devices
    * @return {string} Label for devices selection content.
    * @private
    */
@@ -124,7 +153,7 @@ Polymer({
   },
 
   /**
-   * @param {!Array<!chromeos.multideviceSetup.mojom.HostDevice>} devices
+   * @param {!Array<!ash.multideviceSetup.mojom.HostDevice>} devices
    * @return {boolean} True if there are more than one potential host devices.
    * @private
    */
@@ -133,7 +162,7 @@ Polymer({
   },
 
   /**
-   * @param {!Array<!chromeos.multideviceSetup.mojom.HostDevice>} devices
+   * @param {!Array<!ash.multideviceSetup.mojom.HostDevice>} devices
    * @return {boolean} True if there is exactly one potential host device.
    * @private
    */
@@ -142,7 +171,7 @@ Polymer({
   },
 
   /**
-   * @param {!Array<!chromeos.multideviceSetup.mojom.HostDevice>} devices
+   * @param {!Array<!ash.multideviceSetup.mojom.HostDevice>} devices
    * @return {string} Name of the first device in device list if there are any.
    *     Returns an empty string otherwise.
    * @private
@@ -152,25 +181,25 @@ Polymer({
   },
 
   /**
-   * @param {!chromeos.deviceSync.mojom.ConnectivityStatus} connectivityStatus
+   * @param {!ash.deviceSync.mojom.ConnectivityStatus} connectivityStatus
    * @return {string} The classes to bind to the device name option.
    * @private
    */
   getDeviceOptionClass_(connectivityStatus) {
     return connectivityStatus ===
-            chromeos.deviceSync.mojom.ConnectivityStatus.kOffline ?
+            ash.deviceSync.mojom.ConnectivityStatus.kOffline ?
         'offline-device-name' :
         '';
   },
 
   /**
-   * @param {!chromeos.multideviceSetup.mojom.HostDevice} device
+   * @param {!ash.multideviceSetup.mojom.HostDevice} device
    * @return {string} Name of the device, with connectivity status information.
    * @private
    */
   getDeviceNameWithConnectivityStatus_(device) {
     return device.connectivityStatus ===
-            chromeos.deviceSync.mojom.ConnectivityStatus.kOffline ?
+            ash.deviceSync.mojom.ConnectivityStatus.kOffline ?
         this.i18n(
             'startSetupPageOfflineDeviceOption',
             device.remoteDevice.deviceName) :
@@ -178,7 +207,7 @@ Polymer({
   },
 
   /**
-   * @param {!chromeos.multideviceSetup.mojom.HostDevice} device
+   * @param {!ash.multideviceSetup.mojom.HostDevice} device
    * @return {string} Returns a unique identifier for the input device, using
    *     the device's Instance ID if it is available; otherwise, the device's
    *     legacy device ID is used.
@@ -218,5 +247,16 @@ Polymer({
    */
   i18nAdvancedDynamic_(locale, textId) {
     return this.i18nAdvanced(textId);
+  },
+
+  /**
+   * Returns the URL for the asset that defines the multidevice setup page's
+   * animation
+   * @return {string}
+   * @private
+   */
+  getAnimationUrl_() {
+    return this.isDarkModeActive_ ? MULTIDEVICE_ANIMATION_DARK_URL :
+                                    MULTIDEVICE_ANIMATION_LIGHT_URL;
   },
 });

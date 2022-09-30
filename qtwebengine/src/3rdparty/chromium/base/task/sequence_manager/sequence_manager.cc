@@ -19,6 +19,8 @@ SequenceManager::Settings::Settings() = default;
 
 SequenceManager::Settings::Settings(Settings&& move_from) noexcept = default;
 
+SequenceManager::Settings::~Settings() = default;
+
 SequenceManager::Settings::Builder::Builder() = default;
 
 SequenceManager::Settings::Builder::~Builder() = default;
@@ -69,14 +71,6 @@ SequenceManager::Settings::Builder&
 SequenceManager::Settings::Builder::SetLogTaskDelayExpiry(
     bool log_task_delay_expiry_val) {
   settings_.log_task_delay_expiry = log_task_delay_expiry_val;
-  return *this;
-}
-
-SequenceManager::Settings::Builder&
-SequenceManager::Settings::Builder::SetLogRunloopQuitAndQuitWhenIdle(
-    bool log_runloop_quit_and_quit_when_idle_val) {
-  settings_.log_runloop_quit_and_quit_when_idle =
-      log_runloop_quit_and_quit_when_idle_val;
   return *this;
 }
 

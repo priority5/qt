@@ -6,18 +6,22 @@
 
 #include <memory>
 
+#include "base/auto_reset.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/html/closewatcher/close_watcher.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/html_dialog_element.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
@@ -26,6 +30,7 @@
 #include "third_party/blink/renderer/core/input/scroll_manager.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
+#include "third_party/blink/renderer/core/page/focusgroup_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
@@ -34,9 +39,9 @@
 #include "third_party/blink/renderer/platform/windows_keyboard_codes.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
-#elif defined(OS_MAC)
+#elif BUILDFLAG(IS_MAC)
 #import <Carbon/Carbon.h>
 #endif
 
@@ -49,7 +54,7 @@ const int kVKeyProcessKey = 229;
 bool MapKeyCodeForScroll(int key_code,
                          WebInputEvent::Modifiers modifiers,
                          mojom::blink::ScrollDirection* scroll_direction,
-                         ScrollGranularity* scroll_granularity,
+                         ui::ScrollGranularity* scroll_granularity,
                          WebFeature* scroll_use_uma) {
   if (modifiers & WebInputEvent::kShiftKey ||
       modifiers & WebInputEvent::kMetaKey)
@@ -79,8 +84,8 @@ bool MapKeyCodeForScroll(int key_code,
           mojom::blink::ScrollDirection::kScrollLeftIgnoringWritingMode;
       *scroll_granularity =
           RuntimeEnabledFeatures::PercentBasedScrollingEnabled()
-              ? ScrollGranularity::kScrollByPercentage
-              : ScrollGranularity::kScrollByLine;
+              ? ui::ScrollGranularity::kScrollByPercentage
+              : ui::ScrollGranularity::kScrollByLine;
       *scroll_use_uma = WebFeature::kScrollByKeyboardArrowKeys;
       break;
     case VKEY_RIGHT:
@@ -88,8 +93,8 @@ bool MapKeyCodeForScroll(int key_code,
           mojom::blink::ScrollDirection::kScrollRightIgnoringWritingMode;
       *scroll_granularity =
           RuntimeEnabledFeatures::PercentBasedScrollingEnabled()
-              ? ScrollGranularity::kScrollByPercentage
-              : ScrollGranularity::kScrollByLine;
+              ? ui::ScrollGranularity::kScrollByPercentage
+              : ui::ScrollGranularity::kScrollByLine;
       *scroll_use_uma = WebFeature::kScrollByKeyboardArrowKeys;
       break;
     case VKEY_UP:
@@ -97,8 +102,8 @@ bool MapKeyCodeForScroll(int key_code,
           mojom::blink::ScrollDirection::kScrollUpIgnoringWritingMode;
       *scroll_granularity =
           RuntimeEnabledFeatures::PercentBasedScrollingEnabled()
-              ? ScrollGranularity::kScrollByPercentage
-              : ScrollGranularity::kScrollByLine;
+              ? ui::ScrollGranularity::kScrollByPercentage
+              : ui::ScrollGranularity::kScrollByLine;
       *scroll_use_uma = WebFeature::kScrollByKeyboardArrowKeys;
       break;
     case VKEY_DOWN:
@@ -106,32 +111,32 @@ bool MapKeyCodeForScroll(int key_code,
           mojom::blink::ScrollDirection::kScrollDownIgnoringWritingMode;
       *scroll_granularity =
           RuntimeEnabledFeatures::PercentBasedScrollingEnabled()
-              ? ScrollGranularity::kScrollByPercentage
-              : ScrollGranularity::kScrollByLine;
+              ? ui::ScrollGranularity::kScrollByPercentage
+              : ui::ScrollGranularity::kScrollByLine;
       *scroll_use_uma = WebFeature::kScrollByKeyboardArrowKeys;
       break;
     case VKEY_HOME:
       *scroll_direction =
           mojom::blink::ScrollDirection::kScrollUpIgnoringWritingMode;
-      *scroll_granularity = ScrollGranularity::kScrollByDocument;
+      *scroll_granularity = ui::ScrollGranularity::kScrollByDocument;
       *scroll_use_uma = WebFeature::kScrollByKeyboardHomeEndKeys;
       break;
     case VKEY_END:
       *scroll_direction =
           mojom::blink::ScrollDirection::kScrollDownIgnoringWritingMode;
-      *scroll_granularity = ScrollGranularity::kScrollByDocument;
+      *scroll_granularity = ui::ScrollGranularity::kScrollByDocument;
       *scroll_use_uma = WebFeature::kScrollByKeyboardHomeEndKeys;
       break;
     case VKEY_PRIOR:  // page up
       *scroll_direction =
           mojom::blink::ScrollDirection::kScrollUpIgnoringWritingMode;
-      *scroll_granularity = ScrollGranularity::kScrollByPage;
+      *scroll_granularity = ui::ScrollGranularity::kScrollByPage;
       *scroll_use_uma = WebFeature::kScrollByKeyboardPageUpDownKeys;
       break;
     case VKEY_NEXT:  // page down
       *scroll_direction =
           mojom::blink::ScrollDirection::kScrollDownIgnoringWritingMode;
-      *scroll_granularity = ScrollGranularity::kScrollByPage;
+      *scroll_granularity = ui::ScrollGranularity::kScrollByPage;
       *scroll_use_uma = WebFeature::kScrollByKeyboardPageUpDownKeys;
       break;
     default:
@@ -153,6 +158,7 @@ void KeyboardEventManager::Trace(Visitor* visitor) const {
 }
 
 bool KeyboardEventManager::HandleAccessKey(const WebKeyboardEvent& evt) {
+  base::AutoReset<bool> is_handling_key_event(&is_handling_key_event_, true);
   // TODO: Ignoring the state of Shift key is what neither IE nor Firefox do.
   // IE matches lower and upper case access keys regardless of Shift key state -
   // but if both upper and lower case variants are present in a document, the
@@ -169,14 +175,13 @@ bool KeyboardEventManager::HandleAccessKey(const WebKeyboardEvent& evt) {
     return false;
   elem->focus(FocusParams(SelectionBehaviorOnFocus::kReset,
                           mojom::blink::FocusType::kAccessKey, nullptr));
-  elem->AccessKeyAction(false);
+  elem->AccessKeyAction(SimulatedClickCreationScope::kFromUserAgent);
   return true;
 }
 
 WebInputEventResult KeyboardEventManager::KeyEvent(
     const WebKeyboardEvent& initial_key_event) {
-  frame_->GetChromeClient().ClearToolTip(*frame_);
-
+  base::AutoReset<bool> is_handling_key_event(&is_handling_key_event_, true);
   if (initial_key_event.windows_key_code == VK_CAPITAL)
     CapsLockStateMayHaveChanged();
 
@@ -321,7 +326,7 @@ WebInputEventResult KeyboardEventManager::KeyEvent(
   if (!node)
     return WebInputEventResult::kNotHandled;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // According to NSEvents.h, OpenStep reserves the range 0xF700-0xF8FF for
   // function keys. However, some actual private use characters happen to be
   // in this range, e.g. the Apple logo (Option+Shift+K). 0xF7FF is an
@@ -414,7 +419,7 @@ void KeyboardEventManager::DefaultSpaceEventHandler(
   // TODO(bokan): enable scroll customization in this case. See
   // crbug.com/410974.
   if (scroll_manager_->LogicalScroll(direction,
-                                     ScrollGranularity::kScrollByPage, nullptr,
+                                     ui::ScrollGranularity::kScrollByPage, nullptr,
                                      possible_focused_node)) {
     UseCounter::Count(frame_->GetDocument(),
                       WebFeature::kScrollByKeyboardSpacebarKey);
@@ -432,6 +437,12 @@ void KeyboardEventManager::DefaultArrowEventHandler(
   if (!page)
     return;
 
+  if (RuntimeEnabledFeatures::FocusgroupEnabled() &&
+      FocusgroupController::HandleArrowKeyboardEvent(event, frame_)) {
+    event->SetDefaultHandled();
+    return;
+  }
+
   if (IsSpatialNavigationEnabled(frame_) &&
       !frame_->GetDocument()->InDesignMode()) {
     if (page->GetSpatialNavigationController().HandleArrowKeyboardEvent(
@@ -445,7 +456,7 @@ void KeyboardEventManager::DefaultArrowEventHandler(
     return;
 
   mojom::blink::ScrollDirection scroll_direction;
-  ScrollGranularity scroll_granularity;
+  ui::ScrollGranularity scroll_granularity;
   WebFeature scroll_use_uma;
   if (!MapKeyCodeForScroll(event->keyCode(), event->GetModifiers(),
                            &scroll_direction, &scroll_granularity,
@@ -476,7 +487,7 @@ void KeyboardEventManager::DefaultTabEventHandler(KeyboardEvent* event) {
     return;
   }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
   // Option-Tab is a shortcut based on a system-wide preference on Mac but
   // should be ignored on all other platforms.
   if (event->altKey()) {
@@ -547,8 +558,12 @@ void KeyboardEventManager::DefaultEscapeEventHandler(KeyboardEvent* event) {
     page->GetSpatialNavigationController().HandleEscapeKeyboardEvent(event);
   }
 
-  if (HTMLDialogElement* dialog = frame_->GetDocument()->ActiveModalDialog())
+  HTMLDialogElement* dialog = frame_->GetDocument()->ActiveModalDialog();
+  if (dialog && !RuntimeEnabledFeatures::CloseWatcherEnabled()) {
     dialog->DispatchEvent(*Event::CreateCancelable(event_type_names::kCancel));
+  }
+
+  frame_->DomWindow()->closewatcher_stack()->EscapeKeyHandler(event);
 }
 
 void KeyboardEventManager::DefaultEnterEventHandler(KeyboardEvent* event) {
@@ -583,7 +598,7 @@ void KeyboardEventManager::SetCurrentCapsLockState(
 bool KeyboardEventManager::CurrentCapsLockState() {
   switch (g_override_caps_lock_state) {
     case OverrideCapsLockState::kDefault:
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       return GetCurrentKeyModifiers() & alphaLock;
 #else
       // Caps lock state use is limited to Mac password input
@@ -599,7 +614,7 @@ bool KeyboardEventManager::CurrentCapsLockState() {
 }
 
 WebInputEvent::Modifiers KeyboardEventManager::GetCurrentModifierState() {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   unsigned modifiers = 0;
   UInt32 current_modifiers = GetCurrentKeyModifiers();
   if (current_modifiers & ::shiftKey)

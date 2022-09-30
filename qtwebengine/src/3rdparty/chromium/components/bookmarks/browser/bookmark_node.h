@@ -11,7 +11,8 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/guid.h"
+#include "base/strings/string_piece.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "components/bookmarks/browser/titled_url_node.h"
@@ -45,14 +46,22 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
 
   typedef std::map<std::string, std::string> MetaInfoMap;
 
+  // TODO(crbug.com/1026195): Make these constants of type base::GUID once there
+  // exists a constexpr constructor.
   static const char kRootNodeGuid[];
   static const char kBookmarkBarNodeGuid[];
   static const char kOtherBookmarksNodeGuid[];
   static const char kMobileBookmarksNodeGuid[];
   static const char kManagedNodeGuid[];
 
+  // A bug in sync caused some problematic GUIDs to be produced.
+  static const char kBannedGuidDueToPastSyncBug[];
+
   // Creates a new node with |id|, |guid| and |url|.
-  BookmarkNode(int64_t id, const std::string& guid, const GURL& url);
+  BookmarkNode(int64_t id, const base::GUID& guid, const GURL& url);
+
+  BookmarkNode(const BookmarkNode&) = delete;
+  BookmarkNode& operator=(const BookmarkNode&) = delete;
 
   ~BookmarkNode() override;
 
@@ -63,7 +72,7 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
   // Set the node's internal title. Note that this neither invokes observers
   // nor updates any bookmark model this node may be in. For that functionality,
   // BookmarkModel::SetTitle(..) should be used instead.
-  void SetTitle(const base::string16& title) override;
+  void SetTitle(const std::u16string& title) override;
 
   // Returns an unique id for this node.
   // For bookmark nodes that are managed by the bookmark model, the IDs are
@@ -71,11 +80,11 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
   int64_t id() const { return id_; }
   void set_id(int64_t id) { id_ = id; }
 
-  // Returns the GUID for this node.
+  // Returns this node's GUID, which is guaranteed to be valid.
   // For bookmark nodes that are managed by the bookmark model, the GUIDs are
   // persisted across sessions and stable throughout the lifetime of the
   // bookmark.
-  const std::string& guid() const { return guid_; }
+  const base::GUID& guid() const { return guid_; }
 
   const GURL& url() const { return url_; }
   void set_url(const GURL& url) { url_ = url; }
@@ -125,15 +134,17 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
   const MetaInfoMap* GetMetaInfoMap() const;
 
   // TitledUrlNode interface methods.
-  const base::string16& GetTitledUrlNodeTitle() const override;
+  const std::u16string& GetTitledUrlNodeTitle() const override;
   const GURL& GetTitledUrlNodeUrl() const override;
+  std::vector<base::StringPiece16> GetTitledUrlNodeAncestorTitles()
+      const override;
 
   // TODO(sky): Consider adding last visit time here, it'll greatly simplify
   // HistoryContentsProvider.
 
  protected:
   BookmarkNode(int64_t id,
-               const std::string& guid,
+               const base::GUID& guid,
                const GURL& url,
                Type type,
                bool is_permanent_node);
@@ -173,7 +184,7 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
   // stable throughout the lifetime of the bookmark, with the exception of nodes
   // added to the Managed Bookmarks folder, whose GUIDs are re-assigned at
   // start-up every time.
-  const std::string guid_;
+  const base::GUID guid_;
 
   // The URL of this node. BookmarkModel maintains maps off this URL, so changes
   // to the URL must be done through the BookmarkModel.
@@ -199,7 +210,7 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
 
   // If not base::CancelableTaskTracker::kBadTaskId, it indicates
   // we're loading the
-  // favicon and the task is tracked by CancelabelTaskTracker.
+  // favicon and the task is tracked by CancelableTaskTracker.
   base::CancelableTaskTracker::TaskId favicon_load_task_id_ =
       base::CancelableTaskTracker::kBadTaskId;
 
@@ -207,8 +218,6 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
   std::unique_ptr<MetaInfoMap> meta_info_map_;
 
   const bool is_permanent_node_;
-
-  DISALLOW_COPY_AND_ASSIGN(BookmarkNode);
 };
 
 // BookmarkPermanentNode -------------------------------------------------------
@@ -219,6 +228,9 @@ class BookmarkPermanentNode : public BookmarkNode {
   // Permanent nodes are well-known, it's not allowed to create arbitrary ones.
   static std::unique_ptr<BookmarkPermanentNode> CreateManagedBookmarks(
       int64_t id);
+
+  BookmarkPermanentNode(const BookmarkPermanentNode&) = delete;
+  BookmarkPermanentNode& operator=(const BookmarkPermanentNode&) = delete;
 
   ~BookmarkPermanentNode() override;
 
@@ -243,13 +255,11 @@ class BookmarkPermanentNode : public BookmarkNode {
   // other than the well-known ones, see factory methods.
   BookmarkPermanentNode(int64_t id,
                         Type type,
-                        const std::string& guid,
-                        const base::string16& title,
+                        const base::GUID& guid,
+                        const std::u16string& title,
                         bool visible_when_empty);
 
   const bool visible_when_empty_;
-
-  DISALLOW_COPY_AND_ASSIGN(BookmarkPermanentNode);
 };
 
 // If you are looking for gMock printing via PrintTo(), please check

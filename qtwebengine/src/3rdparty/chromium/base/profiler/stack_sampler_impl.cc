@@ -9,6 +9,7 @@
 
 #include "base/check.h"
 #include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "base/profiler/metadata_recorder.h"
 #include "base/profiler/profile_builder.h"
 #include "base/profiler/sample_metadata.h"
@@ -16,6 +17,7 @@
 #include "base/profiler/stack_copier.h"
 #include "base/profiler/suspendable_thread_delegate.h"
 #include "base/profiler/unwinder.h"
+#include "base/ranges/algorithm.h"
 #include "build/build_config.h"
 
 // IMPORTANT NOTE: Some functions within this implementation are invoked while
@@ -57,9 +59,9 @@ class StackCopierDelegate : public StackCopier::Delegate {
   }
 
  private:
-  const base::circular_deque<std::unique_ptr<Unwinder>>* unwinders_;
-  ProfileBuilder* const profile_builder_;
-  const MetadataRecorder::MetadataProvider* const metadata_provider_;
+  raw_ptr<const base::circular_deque<std::unique_ptr<Unwinder>>> unwinders_;
+  const raw_ptr<ProfileBuilder> profile_builder_;
+  const raw_ptr<const MetadataRecorder::MetadataProvider> metadata_provider_;
 };
 
 }  // namespace
@@ -91,16 +93,23 @@ void StackSamplerImpl::Initialize() {
                     std::make_move_iterator(unwinders.rend()));
 
   for (const auto& unwinder : unwinders_)
-    unwinder->AddInitialModules(module_cache_);
+    unwinder->Initialize(module_cache_);
+
+  was_initialized_ = true;
 }
 
 void StackSamplerImpl::AddAuxUnwinder(std::unique_ptr<Unwinder> unwinder) {
-  unwinder->AddInitialModules(module_cache_);
+  // Initialize() invokes Initialize() on the unwinders that are present
+  // at the time. If it hasn't occurred yet, we allow it to add the initial
+  // modules, otherwise we do it here.
+  if (was_initialized_)
+    unwinder->Initialize(module_cache_);
   unwinders_.push_front(std::move(unwinder));
 }
 
 void StackSamplerImpl::RecordStackFrames(StackBuffer* stack_buffer,
-                                         ProfileBuilder* profile_builder) {
+                                         ProfileBuilder* profile_builder,
+                                         PlatformThreadId thread_id) {
   DCHECK(stack_buffer);
 
   if (record_sample_callback_)
@@ -115,7 +124,7 @@ void StackSamplerImpl::RecordStackFrames(StackBuffer* stack_buffer,
     // Make this scope as small as possible because |metadata_provider| is
     // holding a lock.
     MetadataRecorder::MetadataProvider metadata_provider(
-        GetSampleMetadataRecorder());
+        GetSampleMetadataRecorder(), thread_id);
     StackCopierDelegate delegate(&unwinders_, profile_builder,
                                  &metadata_provider);
     copy_stack_succeeded = stack_copier_->CopyStack(
@@ -128,7 +137,7 @@ void StackSamplerImpl::RecordStackFrames(StackBuffer* stack_buffer,
   }
 
   for (const auto& unwinder : unwinders_)
-    unwinder->UpdateModules(module_cache_);
+    unwinder->UpdateModules();
 
   if (test_delegate_)
     test_delegate_->OnPreStackWalk();
@@ -169,24 +178,22 @@ std::vector<Frame> StackSamplerImpl::WalkStack(
   do {
     // Choose an authoritative unwinder for the current module. Use the first
     // unwinder that thinks it can unwind from the current frame.
-    auto unwinder =
-        std::find_if(unwinders.begin(), unwinders.end(),
-                     [&stack](const std::unique_ptr<Unwinder>& unwinder) {
-                       return unwinder->CanUnwindFrom(stack.back());
-                     });
+    auto unwinder = ranges::find_if(
+        unwinders, [&stack](const std::unique_ptr<Unwinder>& unwinder) {
+          return unwinder->CanUnwindFrom(stack.back());
+        });
     if (unwinder == unwinders.end())
       return stack;
 
     prior_stack_size = stack.size();
-    result = unwinder->get()->TryUnwind(thread_context, stack_top, module_cache,
-                                        &stack);
+    result = unwinder->get()->TryUnwind(thread_context, stack_top, &stack);
 
     // The unwinder with the lowest priority should be the only one that returns
     // COMPLETED since the stack starts in native code.
-    DCHECK(result != UnwindResult::COMPLETED ||
+    DCHECK(result != UnwindResult::kCompleted ||
            unwinder->get() == unwinders.back().get());
-  } while (result != UnwindResult::ABORTED &&
-           result != UnwindResult::COMPLETED &&
+  } while (result != UnwindResult::kAborted &&
+           result != UnwindResult::kCompleted &&
            // Give up if the authoritative unwinder for the module was unable to
            // unwind.
            stack.size() > prior_stack_size);

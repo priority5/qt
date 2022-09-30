@@ -16,24 +16,25 @@
 
 #include "include/gpu/vk/GrVkExtensions.h"
 #include "include/gpu/vk/GrVkTypes.h"
-#include "src/gpu/vk/GrVkImage.h"
-#include "src/gpu/vk/GrVkUtil.h"
+#include "src/gpu/ganesh/vk/GrVkImage.h"
+#include "src/gpu/ganesh/vk/GrVkUtil.h"
 
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 // windows wants to define this as CreateSemaphoreA or CreateSemaphoreW
 #undef CreateSemaphore
 #endif
 
-#define GET_PROC(F) f ## F = (PFN_vk ## F) fGetInstanceProcAddr(fInstance, "vk" #F)
-#define GET_DEV_PROC(F) f ## F = (PFN_vk ## F) fGetDeviceProcAddr(fDevice, "vk" #F)
+#define GET_PROC(F) f ## F = \
+    (PFN_vk ## F) backendContext.fGetProc("vk" #F, fInstance, VK_NULL_HANDLE)
+#define GET_DEV_PROC(F) f ## F = \
+    (PFN_vk ## F) backendContext.fGetProc("vk" #F, VK_NULL_HANDLE, fDevice)
 
 namespace sk_app {
 
 VulkanWindowContext::VulkanWindowContext(const DisplayParams& params,
                                          CreateVkSurfaceFn createVkSurface,
                                          CanPresentFn canPresent,
-                                         PFN_vkGetInstanceProcAddr instProc,
-                                         PFN_vkGetDeviceProcAddr devProc)
+                                         PFN_vkGetInstanceProcAddr instProc)
     : WindowContext(params)
     , fCreateVkSurfaceFn(createVkSurface)
     , fCanPresentFn(canPresent)
@@ -44,7 +45,6 @@ VulkanWindowContext::VulkanWindowContext(const DisplayParams& params,
     , fSurfaces(nullptr)
     , fBackbuffers(nullptr) {
     fGetInstanceProcAddr = instProc;
-    fGetDeviceProcAddr = devProc;
     this->initializeContext();
 }
 
@@ -53,19 +53,12 @@ void VulkanWindowContext::initializeContext() {
     // any config code here (particularly for msaa)?
 
     PFN_vkGetInstanceProcAddr getInstanceProc = fGetInstanceProcAddr;
-    PFN_vkGetDeviceProcAddr getDeviceProc = fGetDeviceProcAddr;
-    auto getProc = [getInstanceProc, getDeviceProc](const char* proc_name,
-                                                    VkInstance instance, VkDevice device) {
-        if (device != VK_NULL_HANDLE) {
-            return getDeviceProc(device, proc_name);
-        }
-        return getInstanceProc(instance, proc_name);
-    };
     GrVkBackendContext backendContext;
     GrVkExtensions extensions;
     VkPhysicalDeviceFeatures2 features;
-    if (!sk_gpu_test::CreateVkBackendContext(getProc, &backendContext, &extensions, &features,
-                                             &fDebugCallback, &fPresentQueueIndex, fCanPresentFn)) {
+    if (!sk_gpu_test::CreateVkBackendContext(getInstanceProc, &backendContext, &extensions,
+                                             &features, &fDebugCallback, &fPresentQueueIndex,
+                                             fCanPresentFn)) {
         sk_gpu_test::FreeVulkanFeaturesStructs(&features);
         return;
     }
@@ -216,10 +209,15 @@ bool VulkanWindowContext::createSwapchain(int width, int height,
     }
 
     VkImageUsageFlags usageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                   VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
                                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     SkASSERT((caps.supportedUsageFlags & usageFlags) == usageFlags);
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT) {
+        usageFlags |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    }
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) {
+        usageFlags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    }
     SkASSERT(caps.supportedTransforms & caps.currentTransform);
     SkASSERT(caps.supportedCompositeAlpha & (VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR |
                                              VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR));
@@ -319,13 +317,19 @@ bool VulkanWindowContext::createSwapchain(int width, int height,
         fDestroySwapchainKHR(fDevice, swapchainCreateInfo.oldSwapchain, nullptr);
     }
 
-    this->createBuffers(swapchainCreateInfo.imageFormat, usageFlags, colorType,
-                        swapchainCreateInfo.imageSharingMode);
+    if (!this->createBuffers(swapchainCreateInfo.imageFormat, usageFlags, colorType,
+                             swapchainCreateInfo.imageSharingMode)) {
+        fDeviceWaitIdle(fDevice);
+
+        this->destroyBuffers();
+
+        fDestroySwapchainKHR(fDevice, swapchainCreateInfo.oldSwapchain, nullptr);
+    }
 
     return true;
 }
 
-void VulkanWindowContext::createBuffers(VkFormat format, VkImageUsageFlags usageFlags,
+bool VulkanWindowContext::createBuffers(VkFormat format, VkImageUsageFlags usageFlags,
                                         SkColorType colorType,
                                         VkSharingMode sharingMode) {
     fGetSwapchainImagesKHR(fDevice, fSwapchain, &fImageCount, nullptr);
@@ -350,20 +354,24 @@ void VulkanWindowContext::createBuffers(VkFormat format, VkImageUsageFlags usage
         info.fCurrentQueueFamily = fPresentQueueIndex;
         info.fSharingMode = sharingMode;
 
-        if (fSampleCount == 1) {
+        if (usageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) {
+            GrBackendTexture backendTexture(fWidth, fHeight, info);
+            fSurfaces[i] = SkSurface::MakeFromBackendTexture(
+                    fContext.get(), backendTexture, kTopLeft_GrSurfaceOrigin,
+                    fDisplayParams.fMSAASampleCount,
+                    colorType, fDisplayParams.fColorSpace, &fDisplayParams.fSurfaceProps);
+        } else {
+            if (fDisplayParams.fMSAASampleCount > 1) {
+                return false;
+            }
             GrBackendRenderTarget backendRT(fWidth, fHeight, fSampleCount, info);
-
             fSurfaces[i] = SkSurface::MakeFromBackendRenderTarget(
                     fContext.get(), backendRT, kTopLeft_GrSurfaceOrigin, colorType,
                     fDisplayParams.fColorSpace, &fDisplayParams.fSurfaceProps);
-        } else {
-            GrBackendTexture backendTexture(fWidth, fHeight, info);
 
-            // We don't set the sampled usage bit on the swapchain so this can't be a GrTexture.
-            fSurfaces[i] = SkSurface::MakeFromBackendTextureAsRenderTarget(
-                    fContext.get(), backendTexture, kTopLeft_GrSurfaceOrigin, fSampleCount,
-                    colorType, fDisplayParams.fColorSpace, &fDisplayParams.fSurfaceProps);
-
+        }
+        if (!fSurfaces[i]) {
+            return false;
         }
     }
 
@@ -385,6 +393,7 @@ void VulkanWindowContext::createBuffers(VkFormat format, VkImageUsageFlags usage
         SkASSERT(result == VK_SUCCESS);
     }
     fCurrentBackbufferIndex = fImageCount;
+    return true;
 }
 
 void VulkanWindowContext::destroyBuffers() {

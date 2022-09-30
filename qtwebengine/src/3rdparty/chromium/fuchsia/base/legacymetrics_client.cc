@@ -6,11 +6,14 @@
 
 #include <lib/fit/function.h>
 #include <lib/sys/cpp/component_context.h>
+#include <zircon/errors.h>
+
 #include <algorithm>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "base/callback_helpers.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/fuchsia/process_context.h"
 #include "base/logging.h"
@@ -22,27 +25,59 @@ namespace cr_fuchsia {
 
 constexpr size_t LegacyMetricsClient::kMaxBatchSize;
 
+constexpr base::TimeDelta LegacyMetricsClient::kInitialReconnectDelay;
+constexpr base::TimeDelta LegacyMetricsClient::kMaxReconnectDelay;
+constexpr size_t LegacyMetricsClient::kReconnectBackoffFactor;
+
 LegacyMetricsClient::LegacyMetricsClient() = default;
 
 LegacyMetricsClient::~LegacyMetricsClient() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
+void LegacyMetricsClient::DisableAutoConnect() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(auto_connect_);
+  DCHECK_EQ(report_interval_, base::TimeDelta())
+      << "DisableAutoConnect() must be called before Start().";
+
+  auto_connect_ = false;
+}
+
+void LegacyMetricsClient::SetMetricsRecorder(
+    fidl::InterfaceHandle<fuchsia::legacymetrics::MetricsRecorder>
+        metrics_recorder) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(!auto_connect_);
+
+  auto weak_this = weak_factory_.GetWeakPtr();
+  ResetMetricsRecorderState();
+
+  // ResetMetricsRecorderState() may call |on_flush_complete_closures_|, which
+  // may destroy LegacyMetricsClient.
+  if (!weak_this)
+    return;
+
+  SetMetricsRecorderInternal(std::move(metrics_recorder));
+
+  if (report_interval_.is_positive())
+    ScheduleNextReport();
+}
+
 void LegacyMetricsClient::Start(base::TimeDelta report_interval) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK_GT(report_interval, base::TimeDelta::FromSeconds(0));
-  DCHECK(!metrics_recorder_) << "Start() called more than once.";
+  DCHECK_GT(report_interval, base::Seconds(0));
+
+  // Start recording user events.
+  user_events_recorder_ = std::make_unique<LegacyMetricsUserActionRecorder>();
 
   report_interval_ = report_interval;
-  metrics_recorder_ = base::ComponentContextForProcess()
-                          ->svc()
-                          ->Connect<fuchsia::legacymetrics::MetricsRecorder>();
-  metrics_recorder_.set_error_handler(fit::bind_member(
-      this, &LegacyMetricsClient::OnMetricsRecorderDisconnected));
-  metrics_recorder_.events().OnCloseSoon =
-      fit::bind_member(this, &LegacyMetricsClient::OnCloseSoon);
-  user_events_recorder_ = std::make_unique<LegacyMetricsUserActionRecorder>();
-  ScheduleNextReport();
+
+  if (auto_connect_)
+    ConnectFromComponentContext();
+
+  if (metrics_recorder_)
+    ScheduleNextReport();
 }
 
 void LegacyMetricsClient::SetReportAdditionalMetricsCallback(
@@ -65,13 +100,40 @@ void LegacyMetricsClient::SetNotifyFlushCallback(NotifyFlushCallback callback) {
   notify_flush_callback_ = std::move(callback);
 }
 
+void LegacyMetricsClient::ConnectFromComponentContext() {
+  DCHECK(!metrics_recorder_) << "Trying to connect when already connected.";
+  DVLOG(1) << "Trying to connect to MetricsRecorder service.";
+  DCHECK(auto_connect_);
+
+  fidl::InterfaceHandle<fuchsia::legacymetrics::MetricsRecorder>
+      metrics_recorder;
+  base::ComponentContextForProcess()->svc()->Connect(
+      metrics_recorder.NewRequest());
+  SetMetricsRecorderInternal(std::move(metrics_recorder));
+
+  ScheduleNextReport();
+}
+
+void LegacyMetricsClient::SetMetricsRecorderInternal(
+    fidl::InterfaceHandle<fuchsia::legacymetrics::MetricsRecorder>
+        metrics_recorder) {
+  metrics_recorder_.Bind(std::move(metrics_recorder));
+  metrics_recorder_.set_error_handler(fit::bind_member(
+      this, &LegacyMetricsClient::OnMetricsRecorderDisconnected));
+  metrics_recorder_.events().OnCloseSoon =
+      fit::bind_member(this, &LegacyMetricsClient::OnCloseSoon);
+}
+
 void LegacyMetricsClient::ScheduleNextReport() {
   DCHECK(!is_flushing_);
 
+  if (report_timer_.IsRunning())
+    return;
+
   DVLOG(1) << "Scheduling next report in " << report_interval_.InSeconds()
            << "seconds.";
-  timer_.Start(FROM_HERE, report_interval_, this,
-               &LegacyMetricsClient::StartReport);
+  report_timer_.Start(FROM_HERE, report_interval_, this,
+                      &LegacyMetricsClient::StartReport);
 }
 
 void LegacyMetricsClient::StartReport() {
@@ -85,8 +147,13 @@ void LegacyMetricsClient::StartReport() {
 
 void LegacyMetricsClient::Report(
     std::vector<fuchsia::legacymetrics::Event> events) {
-  DCHECK(metrics_recorder_);
   DVLOG(1) << __func__ << " called.";
+
+  // The connection might have dropped while additional metrics were being
+  // collected. Continue recording events and cache them locally in memory until
+  // connection is reestablished.
+  if (!metrics_recorder_)
+    return;
 
   // Include histograms.
   for (auto& histogram : GetLegacyMetricsDeltas()) {
@@ -123,10 +190,11 @@ void LegacyMetricsClient::DrainBuffer() {
 
     if (is_flushing_) {
       metrics_recorder_.Unbind();
-    } else {
-      ScheduleNextReport();
+      CompleteFlush();
+      return;
     }
 
+    ScheduleNextReport();
     return;
   }
 
@@ -142,6 +210,10 @@ void LegacyMetricsClient::DrainBuffer() {
   record_ack_pending_ = true;
   metrics_recorder_->Record(std::move(batch), [this]() {
     record_ack_pending_ = false;
+
+    // Reset the reconnect delay after a successful Record() call.
+    reconnect_delay_ = kInitialReconnectDelay;
+
     DrainBuffer();
   });
 }
@@ -149,15 +221,41 @@ void LegacyMetricsClient::DrainBuffer() {
 void LegacyMetricsClient::OnMetricsRecorderDisconnected(zx_status_t status) {
   ZX_LOG(ERROR, status) << "MetricsRecorder connection lost.";
 
-  // Stop recording & reporting user events.
-  user_events_recorder_.reset();
-  timer_.AbandonAndStop();
+  if (auto_connect_ && status == ZX_ERR_PEER_CLOSED) {
+    DVLOG(1) << "Scheduling reconnect after " << reconnect_delay_;
+
+    // Try to reconnect with exponential backoff.
+    reconnect_timer_.Start(FROM_HERE, reconnect_delay_, this,
+                           &LegacyMetricsClient::ReconnectMetricsRecorder);
+
+    // Increase delay exponentially. No random jittering since we don't expect
+    // many clients overloading the service with simultaneous reconnections.
+    reconnect_delay_ = std::min(reconnect_delay_ * kReconnectBackoffFactor,
+                                kMaxReconnectDelay);
+  }
+
+  ResetMetricsRecorderState();
 }
 
-void LegacyMetricsClient::OnCloseSoon() {
+void LegacyMetricsClient::ReconnectMetricsRecorder() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOG(1) << __func__ << " called.";
 
-  timer_.AbandonAndStop();
+  ConnectFromComponentContext();
+  ScheduleNextReport();
+}
+
+void LegacyMetricsClient::FlushAndDisconnect(
+    base::OnceClosure on_flush_complete) {
+  DVLOG(1) << __func__ << " called.";
+
+  if (on_flush_complete)
+    on_flush_complete_closures_.push_back(std::move(on_flush_complete));
+
+  if (is_flushing_)
+    return;
+
+  report_timer_.AbandonAndStop();
 
   is_flushing_ = true;
   if (notify_flush_callback_) {
@@ -168,6 +266,34 @@ void LegacyMetricsClient::OnCloseSoon() {
   } else {
     StartReport();
   }
+}
+
+void LegacyMetricsClient::OnCloseSoon() {
+  FlushAndDisconnect(base::OnceClosure());
+}
+
+void LegacyMetricsClient::CompleteFlush() {
+  DCHECK(is_flushing_);
+
+  is_flushing_ = false;
+
+  // One of the callbacks may destroy |this|, so move them all to the stack
+  // first.
+  std::vector<base::OnceClosure> on_flush_complete_closures;
+  on_flush_complete_closures.swap(on_flush_complete_closures_);
+  for (auto& closure : on_flush_complete_closures) {
+    std::move(closure).Run();
+  }
+}
+
+void LegacyMetricsClient::ResetMetricsRecorderState() {
+  // Stop reporting metric events.
+  report_timer_.AbandonAndStop();
+
+  record_ack_pending_ = false;
+
+  if (is_flushing_)
+    CompleteFlush();
 }
 
 }  // namespace cr_fuchsia

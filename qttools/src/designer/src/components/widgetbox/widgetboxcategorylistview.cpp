@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "widgetboxcategorylistview.h"
 
@@ -41,6 +16,7 @@
 #include <QtCore/qsortfilterproxymodel.h>
 
 #include <QtCore/qabstractitemmodel.h>
+#include <QtCore/qiodevice.h>
 #include <QtCore/qlist.h>
 #include <QtCore/qtextstream.h>
 #include <QtCore/qregularexpression.h>
@@ -129,7 +105,7 @@ public:
     bool removeCustomWidgets();
 
 private:
-    using WidgetBoxCategoryEntrys = QVector<WidgetBoxCategoryEntry>;
+    using WidgetBoxCategoryEntrys = QList<WidgetBoxCategoryEntry>;
 
     QDesignerFormEditorInterface *m_core;
     WidgetBoxCategoryEntrys m_items;
@@ -199,21 +175,21 @@ bool WidgetBoxCategoryModel::removeCustomWidgets()
 
 void WidgetBoxCategoryModel::addWidget(const QDesignerWidgetBoxInterface::Widget &widget, const QIcon &icon,bool editable)
 {
-    // build item. Filter on name + class name if it is different and not a layout.
+    static const QRegularExpression classNameRegExp(QStringLiteral("<widget +class *= *\"([^\"]+)\""));
+    Q_ASSERT(classNameRegExp.isValid());
+    const auto match = classNameRegExp.match(widget.domXml());
+    const QString className = match.hasMatch() ? match.captured(1) : QString{};
+
+    // Filter on name + class name if it is different and not a layout.
     QString filter = widget.name();
-    if (!filter.contains(QStringLiteral("Layout"))) {
-        static const QRegularExpression classNameRegExp(QStringLiteral("<widget +class *= *\"([^\"]+)\""));
-        Q_ASSERT(classNameRegExp.isValid());
-        const QRegularExpressionMatch match = classNameRegExp.match(widget.domXml());
-        if (match.hasMatch()) {
-            const QString className = match.captured(1);
-            if (!filter.contains(className))
-                filter += className;
-        }
-    }
+    if (!className.isEmpty() && !filter.contains(QStringLiteral("Layout")) && !filter.contains(className))
+        filter += className;
+
     WidgetBoxCategoryEntry item(widget, filter, icon, editable);
     const QDesignerWidgetDataBaseInterface *db = m_core->widgetDataBase();
-    const int dbIndex = db->indexOfClassName(widget.name());
+    int dbIndex = className.isEmpty() ? -1 : db->indexOfClassName(className);
+    if (dbIndex == -1)
+        dbIndex = db->indexOfClassName(widget.name());
     if (dbIndex != -1) {
         const QDesignerWidgetDataBaseItemInterface *dbItem = db->item(dbIndex);
         const QString toolTip = dbItem->toolTip();
@@ -268,8 +244,10 @@ QVariant WidgetBoxCategoryModel::data(const QModelIndex &index, int role) const
 bool WidgetBoxCategoryModel::setData(const QModelIndex &index, const QVariant &value, int role)
 {
     const int row = index.row();
-    if (role != Qt::EditRole || row < 0 || row >=  m_items.size() || value.type() != QVariant::String)
+    if (role != Qt::EditRole || row < 0 || row >=  m_items.size()
+        || value.metaType().id() != QMetaType::QString) {
         return false;
+    }
     // Set name and adapt Xml
     WidgetBoxCategoryEntry &item = m_items[row];
     const QString newName = value.toString();
@@ -482,9 +460,10 @@ QString WidgetBoxCategoryListView::widgetDomXml(const QDesignerWidgetBoxInterfac
     return domXml;
 }
 
-void WidgetBoxCategoryListView::filter(const QRegExp &re)
+void WidgetBoxCategoryListView::filter(const QString &needle, Qt::CaseSensitivity caseSensitivity)
 {
-    m_proxyModel->setFilterRegExp(re);
+    m_proxyModel->setFilterFixedString(needle);
+    m_proxyModel->setFilterCaseSensitivity(caseSensitivity);
 }
 
 QDesignerWidgetBoxInterface::Category WidgetBoxCategoryListView::category() const

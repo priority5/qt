@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \example widgets/icons
@@ -260,7 +236,7 @@
     QIcon::Active, QIcon::Disabled, QIcon::Selected and the rows in the order
     QIcon::Off, QIcon::On, which does not match the enumeration. The above code
     provides arrays allowing to map from enumeration value to row/column
-    (by using QVector::indexOf()) and back by using the array index and lists
+    (by using QList::indexOf()) and back by using the array index and lists
     of the matching strings. Qt's containers can be easily populated by
     using C++ 11 initializer lists.
 
@@ -631,7 +607,7 @@
     currently available GUI styles using
     QStyleFactory. QStyleFactory::keys() returns a list of valid keys,
     typically including "windows" and "fusion". Depending on the platform,
-    "windowsvista" and "macintosh" may be available.
+    "windowsvista" and "macos" may be available.
 
     We create one action for each key, and adds the action to the
     action group. Also, for each action, we call QAction::setData()
@@ -666,7 +642,7 @@
 
     For each action, we first extract the style name using
     QAction::data(). Since this is only a QStyleFactory key (e.g.,
-    "macintosh"), we cannot compare it directly to the current
+    "macos"), we cannot compare it directly to the current
     style's class name. We need to create a QStyle object using the
     static QStyleFactory::create() function and compare the class
     name of the created QStyle object with that of the current style.

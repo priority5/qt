@@ -5,7 +5,7 @@
 #include "services/video_capture/push_video_stream_subscription_impl.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "services/video_capture/broadcasting_receiver.h"
 
 namespace video_capture {
@@ -46,23 +46,29 @@ void PushVideoStreamSubscriptionImpl::OnDeviceStartSucceededWithSettings(
     // Creation callback has already been run from a previous device start.
     return;
   }
-  mojom::CreatePushSubscriptionResultCode result_code =
+  mojom::CreatePushSubscriptionSuccessCode success_code =
       settings == requested_settings_
-          ? mojom::CreatePushSubscriptionResultCode::
+          ? mojom::CreatePushSubscriptionSuccessCode::
                 kCreatedWithRequestedSettings
-          : mojom::CreatePushSubscriptionResultCode::
+          : mojom::CreatePushSubscriptionSuccessCode::
                 kCreatedWithDifferentSettings;
-  std::move(creation_callback_).Run(result_code, settings);
+  std::move(creation_callback_)
+      .Run(
+          mojom::CreatePushSubscriptionResultCode::NewSuccessCode(success_code),
+          settings);
   status_ = Status::kNotYetActivated;
 }
 
-void PushVideoStreamSubscriptionImpl::OnDeviceStartFailed() {
+void PushVideoStreamSubscriptionImpl::OnDeviceStartFailed(
+    media::VideoCaptureError error) {
+  DCHECK_NE(error, media::VideoCaptureError::kNone);
+
   if (status_ != Status::kCreationCallbackNotYetRun) {
     // Creation callback has already been run from a previous device start.
     return;
   }
   std::move(creation_callback_)
-      .Run(mojom::CreatePushSubscriptionResultCode::kFailed,
+      .Run(mojom::CreatePushSubscriptionResultCode::NewErrorCode(error),
            requested_settings_);
   status_ = Status::kClosed;
 }
@@ -160,6 +166,21 @@ void PushVideoStreamSubscriptionImpl::Close(CloseCallback callback) {
 void PushVideoStreamSubscriptionImpl::OnConnectionLost() {
   if (on_closed_handler_)
     std::move(on_closed_handler_).Run(base::DoNothing());
+}
+
+void PushVideoStreamSubscriptionImpl::ProcessFeedback(
+    const media::VideoCaptureFeedback& feedback) {
+  switch (status_) {
+    case Status::kCreationCallbackNotYetRun:  // Fall through.
+    case Status::kClosed:
+      // Ignore the call.
+      return;
+    case Status::kNotYetActivated:  // Fall through.
+    case Status::kActive:           // Fall through.
+    case Status::kSuspended:
+      (*device_)->ProcessFeedback(feedback);
+      return;
+  }
 }
 
 }  // namespace video_capture

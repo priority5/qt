@@ -4,7 +4,9 @@
 
 #include "content/web_test/browser/fake_bluetooth_delegate.h"
 
+#include "base/containers/contains.h"
 #include "content/public/browser/web_contents.h"
+#include "content/web_test/browser/web_test_control_host.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "third_party/blink/public/common/bluetooth/web_bluetooth_device_id.h"
 #include "third_party/blink/public/mojom/bluetooth/web_bluetooth.mojom.h"
@@ -16,9 +18,42 @@ using device::BluetoothUUID;
 
 namespace content {
 
+namespace {
+
+class AlwaysAllowBluetoothScanning : public BluetoothScanningPrompt {
+ public:
+  explicit AlwaysAllowBluetoothScanning(const EventHandler& event_handler) {
+    event_handler.Run(BluetoothScanningPrompt::Event::kAllow);
+  }
+};
+
+}  // namespace
+
 // public
 FakeBluetoothDelegate::FakeBluetoothDelegate() = default;
 FakeBluetoothDelegate::~FakeBluetoothDelegate() = default;
+
+std::unique_ptr<BluetoothChooser> FakeBluetoothDelegate::RunBluetoothChooser(
+    RenderFrameHost* frame,
+    const BluetoothChooser::EventHandler& event_handler) {
+  if (auto* web_test_control_host = WebTestControlHost::Get())
+    return web_test_control_host->RunBluetoothChooser(frame, event_handler);
+  return nullptr;
+}
+
+std::unique_ptr<BluetoothScanningPrompt>
+FakeBluetoothDelegate::ShowBluetoothScanningPrompt(
+    RenderFrameHost* frame,
+    const BluetoothScanningPrompt::EventHandler& event_handler) {
+  return std::make_unique<AlwaysAllowBluetoothScanning>(event_handler);
+}
+
+void FakeBluetoothDelegate::ShowDeviceCredentialsPrompt(
+    RenderFrameHost* frame,
+    const std::u16string& device_identifier,
+    CredentialsCallback callback) {
+  std::move(callback).Run(DeviceCredentialsPromptResult::kCancelled, u"");
+}
 
 WebBluetoothDeviceId FakeBluetoothDelegate::GetWebBluetoothDeviceId(
     RenderFrameHost* frame,
@@ -65,6 +100,17 @@ bool FakeBluetoothDelegate::HasDevicePermission(
   return base::Contains(device_id_to_services_map_, device_id);
 }
 
+void FakeBluetoothDelegate::RevokeDevicePermissionWebInitiated(
+    RenderFrameHost* frame,
+    const WebBluetoothDeviceId& device_id) {
+  device_id_to_services_map_.erase(device_id);
+  device_id_to_name_map_.erase(device_id);
+  device_id_to_manufacturer_code_map_.erase(device_id);
+  auto& device_address_to_id_map = GetAddressToIdMapForOrigin(frame);
+  base::EraseIf(device_address_to_id_map,
+                [device_id](auto& entry) { return entry.second == device_id; });
+}
+
 bool FakeBluetoothDelegate::IsAllowedToAccessService(
     RenderFrameHost* frame,
     const WebBluetoothDeviceId& device_id,
@@ -97,6 +143,12 @@ bool FakeBluetoothDelegate::IsAllowedToAccessManufacturerData(
 
   return base::Contains(id_to_manufacturer_data_it->second, manufacturer_code);
 }
+
+void FakeBluetoothDelegate::AddFramePermissionObserver(
+    FramePermissionObserver* observer) {}
+
+void FakeBluetoothDelegate::RemoveFramePermissionObserver(
+    FramePermissionObserver* observer) {}
 
 std::vector<blink::mojom::WebBluetoothDevicePtr>
 FakeBluetoothDelegate::GetPermittedDevices(RenderFrameHost* frame) {

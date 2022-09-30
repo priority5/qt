@@ -11,43 +11,27 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/video_frame.h"
+#include "media/fuchsia/cdm/fuchsia_cdm_context.h"
 #include "media/fuchsia/cdm/fuchsia_stream_decryptor.h"
 
 namespace media {
 
-FuchsiaDecryptor::FuchsiaDecryptor(
-    fuchsia::media::drm::ContentDecryptionModule* cdm)
-    : cdm_(cdm) {
-  DCHECK(cdm_);
+FuchsiaDecryptor::FuchsiaDecryptor(FuchsiaCdmContext* cdm_context)
+    : cdm_context_(cdm_context) {
+  DCHECK(cdm_context_);
 }
 
 FuchsiaDecryptor::~FuchsiaDecryptor() {
-  if (audio_decryptor_) {
-    audio_decryptor_task_runner_->DeleteSoon(FROM_HERE,
-                                             std::move(audio_decryptor_));
-  }
 }
 
 void FuchsiaDecryptor::Decrypt(StreamType stream_type,
                                scoped_refptr<DecoderBuffer> encrypted,
                                DecryptCB decrypt_cb) {
-  if (stream_type != StreamType::kAudio) {
-    std::move(decrypt_cb).Run(Status::kError, nullptr);
-    return;
-  }
-
-  if (!audio_decryptor_) {
-    audio_decryptor_task_runner_ = base::ThreadTaskRunnerHandle::Get();
-    audio_decryptor_ = FuchsiaClearStreamDecryptor::Create(cdm_);
-  }
-
-  audio_decryptor_->Decrypt(std::move(encrypted), std::move(decrypt_cb));
+  std::move(decrypt_cb).Run(Status::kError, nullptr);
 }
 
 void FuchsiaDecryptor::CancelDecrypt(StreamType stream_type) {
-  if (stream_type == StreamType::kAudio && audio_decryptor_) {
-    audio_decryptor_->CancelDecrypt();
-  }
+  NOTREACHED();
 }
 
 void FuchsiaDecryptor::InitializeAudioDecoder(const AudioDecoderConfig& config,
@@ -64,16 +48,16 @@ void FuchsiaDecryptor::InitializeVideoDecoder(const VideoDecoderConfig& config,
 
 void FuchsiaDecryptor::DecryptAndDecodeAudio(
     scoped_refptr<DecoderBuffer> encrypted,
-    const AudioDecodeCB& audio_decode_cb) {
+    AudioDecodeCB audio_decode_cb) {
   NOTREACHED();
-  audio_decode_cb.Run(Status::kError, AudioFrames());
+  std::move(audio_decode_cb).Run(Status::kError, AudioFrames());
 }
 
 void FuchsiaDecryptor::DecryptAndDecodeVideo(
     scoped_refptr<DecoderBuffer> encrypted,
-    const VideoDecodeCB& video_decode_cb) {
+    VideoDecodeCB video_decode_cb) {
   NOTREACHED();
-  video_decode_cb.Run(Status::kError, nullptr);
+  std::move(video_decode_cb).Run(Status::kError, nullptr);
 }
 
 void FuchsiaDecryptor::ResetDecoder(StreamType stream_type) {

@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Linguist of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "messageeditorwidgets.h"
 #include "messagehighlighter.h"
@@ -58,8 +33,10 @@ ExpandingTextEdit::ExpandingTextEdit(QWidget *parent)
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     QAbstractTextDocumentLayout *docLayout = document()->documentLayout();
-    connect(docLayout, SIGNAL(documentSizeChanged(QSizeF)), SLOT(updateHeight(QSizeF)));
-    connect(this, SIGNAL(cursorPositionChanged()), this, SLOT(reallyEnsureCursorVisible()));
+    connect(docLayout, &QAbstractTextDocumentLayout::documentSizeChanged,
+            this, &ExpandingTextEdit::updateHeight);
+    connect(this, &QTextEdit::cursorPositionChanged,
+            this, &ExpandingTextEdit::reallyEnsureCursorVisible);
 
     m_minimumHeight = qRound(docLayout->documentSize().height()) + frameWidth() * 2;
 }
@@ -187,9 +164,12 @@ FormWidget::FormWidget(const QString &label, bool isEditable, QWidget *parent)
 
     setLayout(layout);
 
-    connect(m_editor, SIGNAL(textChanged()), SLOT(slotTextChanged()));
-    connect(m_editor, SIGNAL(selectionChanged()), SLOT(slotSelectionChanged()));
-    connect(m_editor, SIGNAL(cursorPositionChanged()), SIGNAL(cursorPositionChanged()));
+    connect(m_editor, &QTextEdit::textChanged,
+            this, &FormWidget::slotTextChanged);
+    connect(m_editor, &QTextEdit::selectionChanged,
+            this, &FormWidget::slotSelectionChanged);
+    connect(m_editor, &QTextEdit::cursorPositionChanged,
+            this, &FormWidget::cursorPositionChanged);
 }
 
 void FormWidget::slotTextChanged()
@@ -233,7 +213,7 @@ public:
     }
 
 protected:
-    virtual bool eventFilter(QObject *object, QEvent *event)
+    bool eventFilter(QObject *object, QEvent *event) override
     {
         if (event->type() == QEvent::Resize) {
             QWidget *relator = static_cast<QWidget *>(object);
@@ -257,16 +237,15 @@ FormMultiWidget::FormMultiWidget(const QString &label, QWidget *parent)
     m_label->setText(label);
 
     m_plusButtons.append(
-            new ButtonWrapper(makeButton(m_plusIcon, SLOT(plusButtonClicked())), 0));
+            new ButtonWrapper(makeButton(m_plusIcon, &FormMultiWidget::plusButtonClicked), 0));
 }
 
-QAbstractButton *FormMultiWidget::makeButton(const QIcon &icon, const char *slot)
+QAbstractButton *FormMultiWidget::makeButton(const QIcon &icon)
 {
     QAbstractButton *btn = new QToolButton(this);
     btn->setIcon(icon);
     btn->setFixedSize(icon.availableSizes().first() /* + something */);
     btn->setFocusPolicy(Qt::NoFocus);
-    connect(btn, SIGNAL(clicked()), slot);
     return btn;
 }
 
@@ -275,13 +254,16 @@ void FormMultiWidget::addEditor(int idx)
     FormatTextEdit *editor = new FormatTextEdit(this);
     m_editors.insert(idx, editor);
 
-    m_minusButtons.insert(idx, makeButton(m_minusIcon, SLOT(minusButtonClicked())));
+    m_minusButtons.insert(idx, makeButton(m_minusIcon, &FormMultiWidget::minusButtonClicked));
     m_plusButtons.insert(idx + 1,
-            new ButtonWrapper(makeButton(m_plusIcon, SLOT(plusButtonClicked())), editor));
+            new ButtonWrapper(makeButton(m_plusIcon, &FormMultiWidget::plusButtonClicked), editor));
 
-    connect(editor, SIGNAL(textChanged()), SLOT(slotTextChanged()));
-    connect(editor, SIGNAL(selectionChanged()), SLOT(slotSelectionChanged()));
-    connect(editor, SIGNAL(cursorPositionChanged()), SIGNAL(cursorPositionChanged()));
+    connect(editor, &QTextEdit::textChanged,
+            this, &FormMultiWidget::slotTextChanged);
+    connect(editor, &QTextEdit::selectionChanged,
+            this, &FormMultiWidget::slotSelectionChanged);
+    connect(editor, &QTextEdit::cursorPositionChanged,
+            this, &FormMultiWidget::cursorPositionChanged);
     editor->installEventFilter(this);
 
     emit editorCreated(editor);
@@ -418,7 +400,7 @@ QString FormMultiWidget::getTranslation() const
     for (int i = 0; i < m_editors.count(); ++i) {
         if (i)
             ret += QChar(Translator::BinaryVariantSeparator);
-        ret += toPlainText(m_editors.at(i)->document()->docHandle()->plainText());
+        ret += toPlainText(m_editors.at(i)->document()->toRawText());
     }
     return ret;
 }

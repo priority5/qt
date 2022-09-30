@@ -1,41 +1,5 @@
-----------------------------------------------------------------------------
---
 -- Copyright (C) 2016 The Qt Company Ltd.
--- Contact: http://www.qt.io/licensing/
---
--- This file is part of the QtQml module of the Qt Toolkit.
---
--- $QT_BEGIN_LICENSE:LGPL$
--- Commercial License Usage
--- Licensees holding valid commercial Qt licenses may use this file in
--- accordance with the commercial license agreement provided with the
--- Software or, alternatively, in accordance with the terms contained in
--- a written agreement between you and The Qt Company. For licensing terms
--- and conditions see https://www.qt.io/terms-conditions. For further
--- information use the contact form at https://www.qt.io/contact-us.
---
--- GNU Lesser General Public License Usage
--- Alternatively, this file may be used under the terms of the GNU Lesser
--- General Public License version 3 as published by the Free Software
--- Foundation and appearing in the file LICENSE.LGPL3 included in the
--- packaging of this file. Please review the following information to
--- ensure the GNU Lesser General Public License version 3 requirements
--- will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
---
--- GNU General Public License Usage
--- Alternatively, this file may be used under the terms of the GNU
--- General Public License version 2.0 or (at your option) the GNU General
--- Public license version 3 or any later version approved by the KDE Free
--- Qt Foundation. The licenses are as published by the Free Software
--- Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
--- included in the packaging of this file. Please review the following
--- information to ensure the GNU General Public License requirements will
--- be met: https://www.gnu.org/licenses/gpl-2.0.html and
--- https://www.gnu.org/licenses/gpl-3.0.html.
---
--- $QT_END_LICENSE$
---
-----------------------------------------------------------------------------
+-- SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 %parser         QQmlJSGrammar
 %decl           qqmljsparser_p.h
@@ -81,6 +45,7 @@
 %token T_COMPATIBILITY_SEMICOLON
 %token T_ARROW "=>"
 %token T_QUESTION_QUESTION "??"
+%token T_QUESTION_DOT "?."
 %token T_ENUM "enum"
 %token T_ELLIPSIS "..."
 %token T_YIELD "yield"
@@ -131,44 +96,9 @@
 
 %start TopLevel
 
-/./****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+/.// Copyright (C) 2016 The Qt Company Ltd.
+// Contact: https://www.qt.io/licensing/
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <private/qqmljsengine_p.h>
 #include <private/qqmljslexer_p.h>
@@ -182,44 +112,9 @@
 
 ./
 
-/:/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+/:// Copyright (C) 2016 The Qt Company Ltd.
+// Contact: https://www.qt.io/licensing/
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 
 //
@@ -314,6 +209,7 @@ public:
       AST::UiPragma *UiPragma;
       AST::UiImport *UiImport;
       AST::UiParameterList *UiParameterList;
+      AST::UiPropertyAttributes *UiPropertyAttributes;
       AST::UiPublicMember *UiPublicMember;
       AST::UiObjectDefinition *UiObjectDefinition;
       AST::UiObjectInitializer *UiObjectInitializer;
@@ -403,10 +299,10 @@ protected:
     inline Value &sym(int index)
     { return sym_stack [tos + index - 1]; }
 
-    inline QStringRef &stringRef(int index)
+    inline QStringView &stringRef(int index)
     { return string_stack [tos + index - 1]; }
 
-    inline QStringRef &rawStringRef(int index)
+    inline QStringView &rawStringRef(int index)
     { return rawString_stack [tos + index - 1]; }
 
     inline SourceLocation &loc(int index)
@@ -444,8 +340,8 @@ protected:
     Value *sym_stack = nullptr;
     int *state_stack = nullptr;
     SourceLocation *location_stack = nullptr;
-    QVector<QStringRef> string_stack;
-    QVector<QStringRef> rawString_stack;
+    QList<QStringView> string_stack;
+    QList<QStringView> rawString_stack;
 
     AST::Node *program = nullptr;
 
@@ -456,14 +352,14 @@ protected:
        int token;
        double dval;
        SourceLocation loc;
-       QStringRef spell;
-       QStringRef raw;
+       QStringView spell;
+       QStringView raw;
     };
 
     int yytoken = -1;
     double yylval = 0.;
-    QStringRef yytokenspell;
-    QStringRef yytokenraw;
+    QStringView yytokenspell;
+    QStringView yytokenraw;
     SourceLocation yylloc;
     SourceLocation yyprevlloc;
 
@@ -472,6 +368,7 @@ protected:
     SavedToken *last_token = nullptr;
 
     int functionNestingLevel = 0;
+    int classNestingLevel = 0;
 
     enum CoverExpressionType {
         CE_Invalid,
@@ -555,7 +452,7 @@ static inline SourceLocation location(Lexer *lexer)
 
 AST::UiQualifiedId *Parser::reparseAsQualifiedId(AST::ExpressionNode *expr)
 {
-    QVarLengthArray<QStringRef, 4> nameIds;
+    QVarLengthArray<QStringView, 4> nameIds;
     QVarLengthArray<SourceLocation, 4> locations;
 
     AST::ExpressionNode *it = expr;
@@ -823,6 +720,16 @@ UiPragma: T_PRAGMA PragmaId Semicolon;
     } break;
 ./
 
+UiPragma: T_PRAGMA PragmaId T_COLON JsIdentifier Semicolon;
+/.
+    case $rule_number: {
+        AST::UiPragma *pragma = new (pool) AST::UiPragma(stringRef(2), stringRef(4));
+        pragma->pragmaToken = loc(1);
+        pragma->semicolonToken = loc(5);
+        sym(1).Node = pragma;
+    } break;
+./
+
 ImportId: MemberExpression;
 
 UiImport: UiImportHead Semicolon;
@@ -835,7 +742,15 @@ UiImport: UiImportHead Semicolon;
 UiVersionSpecifier: T_VERSION_NUMBER T_DOT T_VERSION_NUMBER;
 /.
     case $rule_number: {
-        auto version = new (pool) AST::UiVersionSpecifier(sym(1).dval, sym(3).dval);
+        const int major = sym(1).dval;
+        const int minor = sym(3).dval;
+        if (!QTypeRevision::isValidSegment(major) || !QTypeRevision::isValidSegment(minor)) {
+            diagnostic_messages.append(
+                    compileError(loc(1),
+                    QLatin1String("Invalid version. Version numbers must be >= 0 and < 255.")));
+            return false;
+        }
+        auto version = new (pool) AST::UiVersionSpecifier(major, minor);
         version->majorToken = loc(1);
         version->minorToken = loc(3);
         sym(1).UiVersionSpecifier = version;
@@ -846,7 +761,14 @@ UiVersionSpecifier: T_VERSION_NUMBER T_DOT T_VERSION_NUMBER;
 UiVersionSpecifier: T_VERSION_NUMBER;
 /.
     case $rule_number: {
-        auto version = new (pool) AST::UiVersionSpecifier(sym(1).dval, 0);
+        const int major = sym(1).dval;
+        if (!QTypeRevision::isValidSegment(major)) {
+            diagnostic_messages.append(
+                    compileError(loc(1),
+                    QLatin1String("Invalid major version. Version numbers must be >= 0 and < 255.")));
+            return false;
+        }
+        auto version = new (pool) AST::UiVersionSpecifier(sym(1).dval);
         version->majorToken = loc(1);
         sym(1).UiVersionSpecifier = version;
     } break;
@@ -1247,7 +1169,7 @@ UiObjectMember: T_SIGNAL T_IDENTIFIER T_LPAREN UiParameterListOpt T_RPAREN Semic
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(nullptr, stringRef(2));
         node->type = AST::UiPublicMember::Signal;
-        node->propertyToken = loc(1);
+        node->setPropertyToken(loc(1));
         node->typeToken = loc(2);
         node->identifierToken = loc(2);
         node->parameters = sym(4).UiParameterList;
@@ -1261,7 +1183,7 @@ UiObjectMember: T_SIGNAL T_IDENTIFIER Semicolon;
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(nullptr, stringRef(2));
         node->type = AST::UiPublicMember::Signal;
-        node->propertyToken = loc(1);
+        node->setPropertyToken(loc(1));
         node->typeToken = loc(2);
         node->identifierToken = loc(2);
         node->semicolonToken = loc(3);
@@ -1269,12 +1191,70 @@ UiObjectMember: T_SIGNAL T_IDENTIFIER Semicolon;
     } break;
 ./
 
-UiObjectMemberListPropertyNoInitialiser: T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier Semicolon;
+-------------------------------------------------------------------------------
+-- There is some ambiguity in whether required default property should be parsed
+-- as required (default (property)) or as ((required (default)) property)
+-- by reducing after each attribute modifier, we ensure that T_PROPERTY (which
+-- is always available is used as the base case (so we only have to allocate the
+-- node in the T_PROPERY case, and all other rules can assume that the node is
+-- already available).
+--------------------------------------------------------------------------------
+
+AttrRequired:  T_REQUIRED %prec REDUCE_HERE;
+AttrReadonly:  T_READONLY %prec REDUCE_HERE;
+AttrDefault:  T_DEFAULT %prec REDUCE_HERE;
+
+UiPropertyAttributes: AttrRequired UiPropertyAttributes;
+/.
+    case $rule_number: {
+        AST::UiPropertyAttributes *node = sym(2).UiPropertyAttributes;
+        if (node->isRequired())
+            diagnostic_messages.append(compileError(node->requiredToken(), QLatin1String("Duplicated 'required' attribute is not allowed."), QtCriticalMsg));
+        node->m_requiredToken = loc(1);
+        sym(1).UiPropertyAttributes = node;
+    } break;
+./
+
+UiPropertyAttributes: AttrDefault UiPropertyAttributes;
+/.
+    case $rule_number: {
+        AST::UiPropertyAttributes *node = sym(2).UiPropertyAttributes;
+        if (node->isDefaultMember())
+            diagnostic_messages.append(compileError(node->requiredToken(), QLatin1String("Duplicated 'default' attribute is not allowed."), QtCriticalMsg));
+        node->m_defaultToken = loc(1);
+        sym(1).UiPropertyAttributes = node;
+    } break;
+./
+
+UiPropertyAttributes: AttrReadonly UiPropertyAttributes;
+/.
+    case $rule_number: {
+        AST::UiPropertyAttributes *node = sym(2).UiPropertyAttributes;
+        if (node->isReadonly())
+            diagnostic_messages.append(compileError(node->requiredToken(), QLatin1String("Duplicated 'readonly' attribute is not allowed."), QtCriticalMsg));
+        node->m_readonlyToken = loc(1);
+        sym(1).UiPropertyAttributes = node;
+    } break;
+./
+
+UiPropertyAttributes: T_PROPERTY;
+/.
+    case $rule_number: {
+        AST::UiPropertyAttributes *node = new (pool) AST::UiPropertyAttributes();
+        node->m_propertyToken = loc(1);
+        sym(1).UiPropertyAttributes = node;
+    } break;
+./
+
+UiObjectMemberListPropertyNoInitialiser: UiPropertyAttributes T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier Semicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(4).UiQualifiedId->finish(), stringRef(6));
+        auto attributes = sym(1).UiPropertyAttributes;
+        node->setAttributes(attributes);
+        if (attributes->isReadonly())
+            diagnostic_messages.append(compileError(attributes->readonlyToken(), QLatin1String("Read-only properties require an initializer."), QtWarningMsg));
         node->typeModifier = stringRef(2);
-        node->propertyToken = loc(1);
         node->typeModifierToken = loc(2);
         node->typeToken = loc(4);
         node->identifierToken = loc(6);
@@ -1285,21 +1265,14 @@ UiObjectMemberListPropertyNoInitialiser: T_PROPERTY T_IDENTIFIER T_LT UiProperty
 
 UiObjectMember: UiObjectMemberListPropertyNoInitialiser;
 
-UiObjectMember: T_READONLY UiObjectMemberListPropertyNoInitialiser;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(2).UiPublicMember;
-        node->isReadonlyMember = true;
-        node->readonlyToken = loc(1);
-        sym(1).Node = node;
-    } break;
-./
-
-UiObjectMemberPropertyNoInitialiser: T_PROPERTY UiPropertyType QmlIdentifier Semicolon;
+UiObjectMemberPropertyNoInitialiser: UiPropertyAttributes UiPropertyType QmlIdentifier Semicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(2).UiQualifiedId->finish(), stringRef(3));
-        node->propertyToken = loc(1);
+        auto attributes = sym(1).UiPropertyAttributes;
+        if (attributes->isReadonly())
+            diagnostic_messages.append(compileError(attributes->readonlyToken(), QLatin1String("Read-only properties require an initializer."), QtCriticalMsg));
+        node->setAttributes(attributes);
         node->typeToken = loc(2);
         node->identifierToken = loc(3);
         node->semicolonToken = loc(4);
@@ -1309,51 +1282,6 @@ UiObjectMemberPropertyNoInitialiser: T_PROPERTY UiPropertyType QmlIdentifier Sem
 
 
 UiObjectMember: UiObjectMemberPropertyNoInitialiser;
-
-UiObjectMember: T_DEFAULT UiObjectMemberPropertyNoInitialiser;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(2).UiPublicMember;
-        node->isDefaultMember = true;
-        node->defaultToken = loc(1);
-        sym(1).Node = node;
-    } break;
-./
-
-UiObjectMember: T_DEFAULT UiObjectMemberListPropertyNoInitialiser;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(2).UiPublicMember;
-        node->isDefaultMember = true;
-        node->defaultToken = loc(1);
-        sym(1).Node = node;
-    } break;
-./
-
-UiObjectMember: T_DEFAULT T_REQUIRED UiObjectMemberPropertyNoInitialiser;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(3).UiPublicMember;
-        node->isDefaultMember = true;
-        node->defaultToken = loc(1);
-        node->isRequired = true;
-        node->requiredToken = loc(2);
-        sym(1).Node = node;
-    } break;
-./
-
-
-UiObjectMember: T_REQUIRED T_DEFAULT UiObjectMemberPropertyNoInitialiser;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(3).UiPublicMember;
-        node->isDefaultMember = true;
-        node->defaultToken = loc(2);
-        node->isRequired = true;
-        node->requiredToken = loc(1);
-        sym(1).Node = node;
-    } break;
-./
 
 OptionalSemicolon: | Semicolon;
 /.
@@ -1373,21 +1301,14 @@ UiRequired: T_REQUIRED QmlIdentifier Semicolon;
 
 UiObjectMember: UiRequired;
 
-UiObjectMember: T_REQUIRED UiObjectMemberPropertyNoInitialiser;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(2).UiPublicMember;
-        node->requiredToken = loc(1);
-        node->isRequired = true;
-        sym(1).Node = node;
-    } break;
-./
-
-UiObjectMemberWithScriptStatement: T_PROPERTY UiPropertyType QmlIdentifier T_COLON UiScriptStatement OptionalSemicolon;
+UiObjectMemberWithScriptStatement: UiPropertyAttributes UiPropertyType QmlIdentifier T_COLON UiScriptStatement OptionalSemicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(2).UiQualifiedId->finish(), stringRef(3), sym(5).Statement);
-        node->propertyToken = loc(1);
+        auto attributes = sym(1).UiPropertyAttributes;
+        if (attributes->isRequired())
+            diagnostic_messages.append(compileError(attributes->requiredToken(), QLatin1String("Required properties with initializer do not make sense."), QtCriticalMsg));
+        node->setAttributes(attributes);
         node->typeToken = loc(2);
         node->identifierToken = loc(3);
         node->colonToken = loc(4);
@@ -1395,34 +1316,34 @@ UiObjectMemberWithScriptStatement: T_PROPERTY UiPropertyType QmlIdentifier T_COL
     } break;
 ./
 
+UiObjectMemberWithScriptStatement: UiPropertyAttributes T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T_COLON UiScriptStatement OptionalSemicolon;
+/.
+    case $rule_number: {
+        AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(4).UiQualifiedId->finish(), stringRef(6), sym(8).Statement);
+        node->typeModifier = stringRef(2);
+        auto attributes = sym(1).UiPropertyAttributes;
+        if (attributes->isRequired())
+            diagnostic_messages.append(compileError(attributes->requiredToken(), QLatin1String("Required properties with initializer do not make sense."), QtCriticalMsg));
+        node->setAttributes(attributes);
+        node->typeModifierToken = loc(2);
+        node->typeToken = loc(4);
+        node->identifierToken = loc(6);
+        node->colonToken = loc(7);
+        sym(1).Node = node;
+    } break;
+./
+
 UiObjectMember: UiObjectMemberWithScriptStatement;
 
-UiObjectMember: T_READONLY UiObjectMemberWithScriptStatement;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(2).UiPublicMember;
-        node->isReadonlyMember = true;
-        node->readonlyToken = loc(1);
-        sym(1).Node = node;
-    } break;
-./
-
-UiObjectMember: T_DEFAULT UiObjectMemberWithScriptStatement;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(2).UiPublicMember;
-        node->isDefaultMember = true;
-        node->defaultToken = loc(1);
-        sym(1).Node = node;
-    } break;
-./
-
-UiObjectMemberWithArray: T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T_COLON T_LBRACKET UiArrayMemberList T_RBRACKET Semicolon;
+UiObjectMemberWithArray: UiPropertyAttributes T_IDENTIFIER T_LT UiPropertyType T_GT QmlIdentifier T_COLON ExpressionStatementLookahead T_LBRACKET UiArrayMemberList T_RBRACKET Semicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(4).UiQualifiedId->finish(), stringRef(6));
+        auto attributes = sym(1).UiPropertyAttributes;
+        if (attributes->isRequired())
+            diagnostic_messages.append(compileError(attributes->requiredToken(), QLatin1String("Required properties with initializer do not make sense."), QtCriticalMsg));
+        node->setAttributes(attributes);
         node->typeModifier = stringRef(2);
-        node->propertyToken = loc(1);
         node->typeModifierToken = loc(2);
         node->typeToken = loc(4);
         node->identifierToken = loc(6);
@@ -1430,12 +1351,12 @@ UiObjectMemberWithArray: T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIde
 
         AST::UiQualifiedId *propertyName = new (pool) AST::UiQualifiedId(stringRef(6));
         propertyName->identifierToken = loc(6);
-        propertyName->next = 0;
+        propertyName->next = nullptr;
 
-        AST::UiArrayBinding *binding = new (pool) AST::UiArrayBinding(propertyName, sym(9).UiArrayMemberList->finish());
+        AST::UiArrayBinding *binding = new (pool) AST::UiArrayBinding(propertyName, sym(10).UiArrayMemberList->finish());
         binding->colonToken = loc(7);
-        binding->lbracketToken = loc(8);
-        binding->rbracketToken = loc(10);
+        binding->lbracketToken = loc(9);
+        binding->rbracketToken = loc(11);
 
         node->binding = binding;
 
@@ -1445,28 +1366,21 @@ UiObjectMemberWithArray: T_PROPERTY T_IDENTIFIER T_LT UiPropertyType T_GT QmlIde
 
 UiObjectMember: UiObjectMemberWithArray;
 
-UiObjectMember: T_READONLY UiObjectMemberWithArray;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(2).UiPublicMember;
-        node->isReadonlyMember = true;
-        node->readonlyToken = loc(1);
-        sym(1).Node = node;
-    } break;
-./
-
-UiObjectMemberExpressionStatementLookahead: T_PROPERTY UiPropertyType QmlIdentifier T_COLON ExpressionStatementLookahead UiQualifiedId UiObjectInitializer Semicolon;
+UiObjectMemberExpressionStatementLookahead: UiPropertyAttributes UiPropertyType QmlIdentifier T_COLON ExpressionStatementLookahead UiQualifiedId UiObjectInitializer Semicolon;
 /.
     case $rule_number: {
         AST::UiPublicMember *node = new (pool) AST::UiPublicMember(sym(2).UiQualifiedId->finish(), stringRef(3));
-        node->propertyToken = loc(1);
+        auto attributes = sym(1).UiPropertyAttributes;
+        if (attributes->isRequired())
+            diagnostic_messages.append(compileError(attributes->requiredToken(), QLatin1String("Required properties with initializer do not make sense."), QtWarningMsg));
+        node->setAttributes(attributes);
         node->typeToken = loc(2);
         node->identifierToken = loc(3);
         node->semicolonToken = loc(4); // insert a fake ';' before ':'
 
         AST::UiQualifiedId *propertyName = new (pool) AST::UiQualifiedId(stringRef(3));
         propertyName->identifierToken = loc(3);
-        propertyName->next = 0;
+        propertyName->next = nullptr;
 
         AST::UiObjectBinding *binding = new (pool) AST::UiObjectBinding(
           propertyName, sym(6).UiQualifiedId, sym(7).UiObjectInitializer);
@@ -1479,16 +1393,6 @@ UiObjectMemberExpressionStatementLookahead: T_PROPERTY UiPropertyType QmlIdentif
 ./
 
 UiObjectMember: UiObjectMemberExpressionStatementLookahead;
-
-UiObjectMember: T_READONLY UiObjectMemberExpressionStatementLookahead;
-/.
-    case $rule_number: {
-        AST::UiPublicMember *node = sym(2).UiPublicMember;
-        node->isReadonlyMember = true;
-        node->readonlyToken = loc(1);
-        sym(1).Node = node;
-    } break;
-./
 
 UiObjectMember: GeneratorDeclaration;
 /.
@@ -1668,6 +1572,18 @@ Type: UiQualifiedId;
 /.
     case $rule_number: {
         sym(1).Type = new (pool) AST::Type(sym(1).UiQualifiedId);
+    } break;
+./
+
+Type: T_VAR;
+/.  case $rule_number: Q_FALLTHROUGH(); ./
+
+Type: T_VOID;
+/.
+    case $rule_number: {
+        AST::UiQualifiedId *id = new (pool) AST::UiQualifiedId(stringRef(1));
+        id->identifierToken = loc(1);
+        sym(1).Type = new (pool) AST::Type(id->finish());
     } break;
 ./
 
@@ -2063,6 +1979,7 @@ CoverInitializedName: IdentifierReference Initializer_In;
         if (auto *c = asAnonymousClassDefinition(sym(2).Expression))
             c->name = stringRef(1);
         AST::BinaryExpression *assignment = new (pool) AST::BinaryExpression(left, QSOperator::Assign, sym(2).Expression);
+        assignment->operatorToken = loc(2);
         AST::PatternProperty *node = new (pool) AST::PatternProperty(name, assignment);
         node->colonToken = loc(1);
         sym(1).Node = node;
@@ -2195,7 +2112,14 @@ InitializerOpt: Initializer;
 InitializerOpt_In: Initializer_In;
 
 TemplateLiteral: T_NO_SUBSTITUTION_TEMPLATE;
-/.  case $rule_number: Q_FALLTHROUGH(); ./
+/.
+    case $rule_number: {
+        AST::TemplateLiteral *node = new (pool) AST::TemplateLiteral(stringRef(1), rawStringRef(1), nullptr);
+        node->literalToken = loc(1);
+        node->hasNoSubstitution = true;
+        sym(1).Node = node;
+    } break;
+./
 
 TemplateSpans: T_TEMPLATE_TAIL;
 /.
@@ -2243,7 +2167,16 @@ MemberExpression: MemberExpression T_LBRACKET Expression_In T_RBRACKET;
         sym(1).Node = node;
     } break;
 ./
-
+MemberExpression: MemberExpression T_QUESTION_DOT T_LBRACKET Expression_In T_RBRACKET;
+/.
+    case $rule_number: {
+        AST::ArrayMemberExpression *node = new (pool) AST::ArrayMemberExpression(sym(1).Expression, sym(4).Expression);
+        node->lbracketToken = loc(3);
+        node->rbracketToken = loc(5);
+        node->isOptional = true;
+        sym(1).Node = node;
+    } break;
+./
 
 -- the identifier has to be "target", catched at codegen time
 NewTarget: T_NEW T_DOT T_IDENTIFIER;
@@ -2262,6 +2195,17 @@ MemberExpression: MemberExpression T_DOT IdentifierName;
         AST::FieldMemberExpression *node = new (pool) AST::FieldMemberExpression(sym(1).Expression, stringRef(3));
         node->dotToken = loc(2);
         node->identifierToken = loc(3);
+        sym(1).Node = node;
+    } break;
+./
+
+MemberExpression: MemberExpression T_QUESTION_DOT IdentifierName;
+/.
+    case $rule_number: {
+        AST::FieldMemberExpression *node = new (pool) AST::FieldMemberExpression(sym(1).Expression, stringRef(3));
+        node->dotToken = loc(2);
+        node->identifierToken = loc(3);
+        node->isOptional = true;
         sym(1).Node = node;
     } break;
 ./
@@ -2314,6 +2258,17 @@ CallExpression: MemberExpression T_LPAREN Arguments T_RPAREN;
     } break;
 ./
 
+CallExpression: MemberExpression T_QUESTION_DOT T_LPAREN Arguments T_RPAREN;
+/.
+    case $rule_number: {
+        AST::CallExpression *node = new (pool) AST::CallExpression(sym(1).Expression, sym(4).ArgumentList);
+        node->lparenToken = loc(3);
+        node->rparenToken = loc(5);
+        node->isOptional = true;
+        sym(1).Node = node;
+    } break;
+./
+
 CallExpression: Super T_LPAREN Arguments T_RPAREN;
 /.  case $rule_number: Q_FALLTHROUGH(); ./
 CallExpression: CallExpression T_LPAREN Arguments T_RPAREN;
@@ -2326,6 +2281,18 @@ CallExpression: CallExpression T_LPAREN Arguments T_RPAREN;
     } break;
 ./
 
+CallExpression: CallExpression T_QUESTION_DOT T_LPAREN Arguments T_RPAREN;
+/.
+    case $rule_number: {
+        AST::CallExpression *node = new (pool) AST::CallExpression(sym(1).Expression, sym(4).ArgumentList);
+        node->lparenToken = loc(3);
+        node->rparenToken = loc(5);
+        node->isOptional = true;
+        sym(1).Node = node;
+    } break;
+./
+
+
 CallExpression: CallExpression T_LBRACKET Expression_In T_RBRACKET;
 /.
     case $rule_number: {
@@ -2336,12 +2303,34 @@ CallExpression: CallExpression T_LBRACKET Expression_In T_RBRACKET;
     } break;
 ./
 
+CallExpression: CallExpression T_QUESTION_DOT T_LBRACKET Expression_In T_RBRACKET;
+/.
+    case $rule_number: {
+        AST::ArrayMemberExpression *node = new (pool) AST::ArrayMemberExpression(sym(1).Expression, sym(4).Expression);
+        node->lbracketToken = loc(3);
+        node->rbracketToken = loc(5);
+        node->isOptional = true;
+        sym(1).Node = node;
+    } break;
+./
+
 CallExpression: CallExpression T_DOT IdentifierName;
 /.
     case $rule_number: {
         AST::FieldMemberExpression *node = new (pool) AST::FieldMemberExpression(sym(1).Expression, stringRef(3));
         node->dotToken = loc(2);
         node->identifierToken = loc(3);
+        sym(1).Node = node;
+    } break;
+./
+
+CallExpression: CallExpression T_QUESTION_DOT IdentifierName;
+/.
+    case $rule_number: {
+        AST::FieldMemberExpression *node = new (pool) AST::FieldMemberExpression(sym(1).Expression, stringRef(3));
+        node->dotToken = loc(2);
+        node->identifierToken = loc(3);
+        node->isOptional = true;
         sym(1).Node = node;
     } break;
 ./
@@ -2639,6 +2628,12 @@ RelationalOperator: T_INSTANCEOF;
         sym(1).ival = QSOperator::InstanceOf;
     } break;
 ./
+RelationalOperator: T_AS;
+/.
+    case $rule_number: {
+        sym(1).ival = QSOperator::As;
+    } break;
+./
 
 RelationalExpression_In: RelationalExpression_In T_IN ShiftExpression;
 /.
@@ -2648,20 +2643,6 @@ RelationalExpression_In: RelationalExpression_In T_IN ShiftExpression;
         sym(1).Node = node;
     } break;
 ./
-
-TypeAssertExpression_In: RelationalExpression_In T_AS Type;
-/.  case $rule_number: Q_FALLTHROUGH(); ./
-TypeAssertExpression: RelationalExpression T_AS Type;
-/.
-    case $rule_number: {
-        AST::BinaryExpression *node = new (pool) AST::BinaryExpression(sym(1).Expression, QSOperator::As, sym(3).Expression);
-        node->operatorToken = loc(2);
-        sym(1).Node = node;
-    } break;
-./
-
-RelationalExpression_In: TypeAssertExpression_In;
-RelationalExpression: TypeAssertExpression;
 
 EqualityExpression_In: RelationalExpression_In;
 EqualityExpression: RelationalExpression;
@@ -2839,6 +2820,9 @@ AssignmentExpression: LeftHandSideExpression T_EQ AssignmentExpression;
 AssignmentExpression_In: LeftHandSideExpression T_EQ AssignmentExpression_In;
 /.
     case $rule_number: {
+        if (sym(1).Expression->containsOptionalChain()) {
+            syntaxError(loc(1), QStringLiteral("Optional chains are not permitted on the left-hand-side in assignments"));
+        }
         // need to convert the LHS to an AssignmentPattern if it was an Array/ObjectLiteral
         if (AST::Pattern *p = sym(1).Expression->patternCast()) {
             SourceLocation errorLoc;
@@ -2869,6 +2853,9 @@ AssignmentExpression: LeftHandSideExpression AssignmentOperator AssignmentExpres
 AssignmentExpression_In: LeftHandSideExpression AssignmentOperator AssignmentExpression_In;
 /.
     case $rule_number: {
+        if (sym(1).Expression->containsOptionalChain()) {
+            syntaxError(loc(1), QStringLiteral("Optional chains are not permitted on the left-hand-side in assignments"));
+        }
         AST::BinaryExpression *node = new (pool) AST::BinaryExpression(sym(1).Expression, sym(2).ival, sym(3).Expression);
         node->operatorToken = loc(2);
         sym(1).Node = node;
@@ -3590,7 +3577,7 @@ ContinueStatement: T_CONTINUE IdentifierReference Semicolon;
 BreakStatement: T_BREAK Semicolon;
 /.
     case $rule_number: {
-        AST::BreakStatement *node = new (pool) AST::BreakStatement(QStringRef());
+        AST::BreakStatement *node = new (pool) AST::BreakStatement(QStringView());
         node->breakToken = loc(1);
         node->semicolonToken = loc(2);
         sym(1).Node = node;
@@ -3864,7 +3851,7 @@ FunctionDeclaration_Default: Function T_LPAREN FormalParameters T_RPAREN TypeAnn
     case $rule_number: {
         if (!ensureNoFunctionTypeAnnotations(sym(5).TypeAnnotation, sym(3).FormalParameterList))
             return false;
-        AST::FunctionDeclaration *node = new (pool) AST::FunctionDeclaration(QStringRef(), sym(3).FormalParameterList, sym(7).StatementList,
+        AST::FunctionDeclaration *node = new (pool) AST::FunctionDeclaration(QStringView(), sym(3).FormalParameterList, sym(7).StatementList,
                                                                              /*type annotation*/nullptr);
         node->functionToken = loc(1);
         node->lparenToken = loc(2);
@@ -3898,7 +3885,7 @@ FunctionExpression: T_FUNCTION T_LPAREN FormalParameters T_RPAREN TypeAnnotation
     case $rule_number: {
         if (!ensureNoFunctionTypeAnnotations(sym(5).TypeAnnotation, sym(3).FormalParameterList))
             return false;
-        AST::FunctionExpression *node = new (pool) AST::FunctionExpression(QStringRef(), sym(3).FormalParameterList, sym(7).StatementList,
+        AST::FunctionExpression *node = new (pool) AST::FunctionExpression(QStringView(), sym(3).FormalParameterList, sym(7).StatementList,
                                                                            /*type annotation*/nullptr);
         node->functionToken = loc(1);
         node->lparenToken = loc(2);
@@ -3985,14 +3972,14 @@ ArrowFunction_In: ArrowParameters T_ARROW ConciseBodyLookahead AssignmentExpress
 /.
     case $rule_number: {
         AST::ReturnStatement *ret = new (pool) AST::ReturnStatement(sym(4).Expression);
-        ret->returnToken = sym(4).Node->firstSourceLocation();
-        ret->semicolonToken = sym(4).Node->lastSourceLocation();
+        ret->returnToken = sym(4).Node->firstSourceLocation().startZeroLengthLocation();
+        ret->semicolonToken = sym(4).Node->lastSourceLocation().endZeroLengthLocation(driver->code());
         AST::StatementList *statements = (new (pool) AST::StatementList(ret))->finish();
-        AST::FunctionExpression *f = new (pool) AST::FunctionExpression(QStringRef(), sym(1).FormalParameterList, statements);
+        AST::FunctionExpression *f = new (pool) AST::FunctionExpression(QStringView(), sym(1).FormalParameterList, statements);
         f->isArrowFunction = true;
-        f->functionToken = sym(1).Node ? sym(1).Node->firstSourceLocation() : loc(1);
-        f->lbraceToken = sym(4).Node->firstSourceLocation();
-        f->rbraceToken = sym(4).Node->lastSourceLocation();
+        f->functionToken = sym(1).Node ? sym(1).Node->firstSourceLocation().startZeroLengthLocation() : loc(1).startZeroLengthLocation();
+        f->lbraceToken = sym(4).Node->firstSourceLocation().startZeroLengthLocation();
+        f->rbraceToken = sym(4).Node->lastSourceLocation().endZeroLengthLocation(driver->code());
         sym(1).Node = f;
     } break;
 ./
@@ -4002,10 +3989,10 @@ ArrowFunction: ArrowParameters T_ARROW ConciseBodyLookahead T_FORCE_BLOCK Functi
 ArrowFunction_In: ArrowParameters T_ARROW ConciseBodyLookahead T_FORCE_BLOCK FunctionLBrace FunctionBody FunctionRBrace;
 /.
     case $rule_number: {
-        AST::FunctionExpression *f = new (pool) AST::FunctionExpression(QStringRef(), sym(1).FormalParameterList, sym(6).StatementList);
+        AST::FunctionExpression *f = new (pool) AST::FunctionExpression(QStringView(), sym(1).FormalParameterList, sym(6).StatementList);
         f->isArrowFunction = true;
-        f->functionToken = sym(1).Node ? sym(1).Node->firstSourceLocation() : loc(1);
-        f->lbraceToken = loc(6);
+        f->functionToken = sym(1).Node ? sym(1).Node->firstSourceLocation().startZeroLengthLocation() : loc(1).startZeroLengthLocation();
+        f->lbraceToken = loc(5);
         f->rbraceToken = loc(7);
         sym(1).Node = f;
     } break;
@@ -4163,7 +4150,7 @@ GeneratorDeclaration_Default: GeneratorDeclaration;
 GeneratorDeclaration_Default: FunctionStar GeneratorLParen FormalParameters T_RPAREN FunctionLBrace GeneratorBody GeneratorRBrace;
 /.
     case $rule_number: {
-        AST::FunctionDeclaration *node = new (pool) AST::FunctionDeclaration(QStringRef(), sym(3).FormalParameterList, sym(6).StatementList);
+        AST::FunctionDeclaration *node = new (pool) AST::FunctionDeclaration(QStringView(), sym(3).FormalParameterList, sym(6).StatementList);
         node->functionToken = loc(1);
         node->lparenToken = loc(2);
         node->rparenToken = loc(4);
@@ -4193,7 +4180,7 @@ GeneratorExpression: T_FUNCTION_STAR BindingIdentifier GeneratorLParen FormalPar
 GeneratorExpression: T_FUNCTION_STAR GeneratorLParen FormalParameters T_RPAREN FunctionLBrace GeneratorBody GeneratorRBrace;
 /.
     case $rule_number: {
-        AST::FunctionExpression *node = new (pool) AST::FunctionExpression(QStringRef(), sym(3).FormalParameterList, sym(6).StatementList);
+        AST::FunctionExpression *node = new (pool) AST::FunctionExpression(QStringView(), sym(3).FormalParameterList, sym(6).StatementList);
         node->functionToken = loc(1);
         node->lparenToken = loc(2);
         node->rparenToken = loc(4);
@@ -4268,7 +4255,7 @@ ClassExpression: T_CLASS BindingIdentifier ClassHeritageOpt ClassLBrace ClassBod
 ClassDeclaration_Default: T_CLASS ClassHeritageOpt ClassLBrace ClassBodyOpt ClassRBrace;
 /.
     case $rule_number: {
-        AST::ClassDeclaration *node = new (pool) AST::ClassDeclaration(QStringRef(), sym(2).Expression, sym(4).ClassElementList);
+        AST::ClassDeclaration *node = new (pool) AST::ClassDeclaration(QStringView(), sym(2).Expression, sym(4).ClassElementList);
         node->classToken = loc(1);
         node->lbraceToken = loc(3);
         node->rbraceToken = loc(5);
@@ -4279,7 +4266,7 @@ ClassDeclaration_Default: T_CLASS ClassHeritageOpt ClassLBrace ClassBodyOpt Clas
 ClassExpression: T_CLASS ClassHeritageOpt ClassLBrace ClassBodyOpt ClassRBrace;
 /.
     case $rule_number: {
-        AST::ClassExpression *node = new (pool) AST::ClassExpression(QStringRef(), sym(2).Expression, sym(4).ClassElementList);
+        AST::ClassExpression *node = new (pool) AST::ClassExpression(QStringView(), sym(2).Expression, sym(4).ClassElementList);
         node->classToken = loc(1);
         node->lbraceToken = loc(3);
         node->rbraceToken = loc(5);
@@ -4292,16 +4279,16 @@ ClassDeclaration_Default: ClassDeclaration;
 ClassLBrace: T_LBRACE;
 /.
     case $rule_number: {
-        lexer->setStaticIsKeyword(true);
+        if (++classNestingLevel == 1)
+            lexer->setStaticIsKeyword(true);
     } break;
 ./
 
 ClassRBrace: T_RBRACE;
-/. case $rule_number: ./
-ClassStaticQualifier: T_STATIC;
 /.
     case $rule_number: {
-        lexer->setStaticIsKeyword(false);
+        if (--classNestingLevel == 0)
+            lexer->setStaticIsKeyword(false);
     } break;
 ./
 
@@ -4356,10 +4343,9 @@ ClassElement: MethodDefinition;
     } break;
 ./
 
-ClassElement: ClassStaticQualifier MethodDefinition;
+ClassElement: T_STATIC MethodDefinition;
 /.
     case $rule_number: {
-        lexer->setStaticIsKeyword(true);
         AST::ClassElementList *node = new (pool) AST::ClassElementList(sym(2).PatternProperty, true);
         sym(1).Node = node;
     } break;

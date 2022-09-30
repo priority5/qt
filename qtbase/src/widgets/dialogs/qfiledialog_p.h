@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWidgets module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QFILEDIALOG_P_H
 #define QFILEDIALOG_P_H
@@ -57,7 +21,7 @@
 #include "private/qdialog_p.h"
 #include "qplatformdefs.h"
 
-#include "qfilesystemmodel_p.h"
+#include <QtGui/private/qfilesystemmodel_p.h>
 #include <qlistview.h>
 #include <qtreeview.h>
 #include <qcombobox.h>
@@ -69,6 +33,7 @@
 #include <qstackedwidget.h>
 #include <qdialogbuttonbox.h>
 #include <qabstractproxymodel.h>
+#include <qfileiconprovider.h>
 #if QT_CONFIG(completer)
 #include <qcompleter.h>
 #endif
@@ -116,7 +81,7 @@ class Q_WIDGETS_EXPORT QFileDialogPrivate : public QDialogPrivate
     Q_DECLARE_PUBLIC(QFileDialog)
 
 public:
-    using PersistentModelIndexList = QVector<QPersistentModelIndex>;
+    using PersistentModelIndexList = QList<QPersistentModelIndex>;
 
     struct HistoryItem
     {
@@ -181,7 +146,7 @@ public:
     {
 #if defined(Q_OS_WIN)
         QString n(path);
-        n.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        n.replace(u'\\', u'/');
         return n;
 #else // the compile should optimize away this
         return path;
@@ -285,6 +250,7 @@ public:
     QByteArray splitterState;
     QByteArray headerData;
     QList<QUrl> sidebarUrls;
+    QFileIconProvider defaultIconProvider;
 
     ~QFileDialogPrivate();
 
@@ -310,7 +276,8 @@ private:
 class QFileDialogComboBox : public QComboBox
 {
 public:
-    QFileDialogComboBox(QWidget *parent = nullptr) : QComboBox(parent), urlModel(nullptr) {}
+    QFileDialogComboBox(QWidget *parent = nullptr) :
+        QComboBox(parent), urlModel(nullptr), d_ptr(nullptr) {}
     void setFileDialogPrivate(QFileDialogPrivate *d_pointer);
     void showPopup() override;
     void setHistory(const QStringList &paths);
@@ -326,7 +293,7 @@ private:
 class QFileDialogListView : public QListView
 {
 public:
-    QFileDialogListView(QWidget *parent = nullptr);
+    QFileDialogListView(QWidget *parent = nullptr) : QListView(parent), d_ptr(nullptr) {}
     void setFileDialogPrivate(QFileDialogPrivate *d_pointer);
     QSize sizeHint() const override;
 protected:
@@ -338,7 +305,7 @@ private:
 class QFileDialogTreeView : public QTreeView
 {
 public:
-    QFileDialogTreeView(QWidget *parent);
+    QFileDialogTreeView(QWidget *parent) : QTreeView(parent), d_ptr(nullptr) {}
     void setFileDialogPrivate(QFileDialogPrivate *d_pointer);
     QSize sizeHint() const override;
 

@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/stl_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "components/password_manager/core/browser/password_form.h"
@@ -14,10 +14,6 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#if defined(PASSWORD_REUSE_DETECTION_ENABLED)
-#include "components/safe_browsing/core/common/safe_browsing_prefs.h"  // nogncheck
-#endif  // PASSWORD_REUSE_DETECTION_ENABLED
 
 using base::ASCIIToUTF16;
 
@@ -44,8 +40,8 @@ TEST_F(PasswordSyncUtilTest, GetSyncUsernameIfSyncingPasswords) {
     enum { SYNCING_PASSWORDS, NOT_SYNCING_PASSWORDS } password_sync;
     std::string fake_sync_username;
     std::string expected_result;
-    const syncer::SyncService* sync_service;
-    const signin::IdentityManager* identity_manager;
+    raw_ptr<const syncer::SyncService> sync_service;
+    raw_ptr<const signin::IdentityManager> identity_manager;
   } kTestCases[] = {
       {TestCase::NOT_SYNCING_PASSWORDS, "a@example.org", std::string(),
        sync_service(), identity_manager()},
@@ -65,7 +61,7 @@ TEST_F(PasswordSyncUtilTest, GetSyncUsernameIfSyncingPasswords) {
        nullptr},
   };
 
-  for (size_t i = 0; i < base::size(kTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "i=" << i);
     SetSyncingPasswords(kTestCases[i].password_sync ==
                         TestCase::SYNCING_PASSWORDS);
@@ -96,7 +92,7 @@ TEST_F(PasswordSyncUtilTest, IsSyncAccountCredential) {
        true},
   };
 
-  for (size_t i = 0; i < base::size(kTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "i=" << i);
     SetSyncingPasswords(true);
     FakeSigninAs(kTestCases[i].fake_sync_username);
@@ -120,7 +116,7 @@ TEST_F(PasswordSyncUtilTest, IsSyncAccountEmail) {
       {"sync_user@example.org", "non_sync_user@example.org", false},
   };
 
-  for (size_t i = 0; i < base::size(kTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "i=" << i);
     if (kTestCases[i].fake_sync_email.empty()) {
       EXPECT_EQ(kTestCases[i].expected_result,
@@ -133,22 +129,6 @@ TEST_F(PasswordSyncUtilTest, IsSyncAccountEmail) {
         IsSyncAccountEmail(kTestCases[i].input_username, identity_manager()));
   }
 }
-
-#if defined(PASSWORD_REUSE_DETECTION_ENABLED)
-class PasswordSyncUtilEnterpriseTest : public SyncUsernameTestBase {
- public:
-  void SetUp() override {
-    // prefs_ = std::make_unique<TestingPrefServiceSimple>();
-    prefs_.registry()->RegisterListPref(prefs::kPasswordProtectionLoginURLs);
-    prefs_.registry()->RegisterStringPref(
-        prefs::kPasswordProtectionChangePasswordURL, "");
-  }
-
- protected:
-  TestingPrefServiceSimple prefs_;
-};
-
-#endif  // PASSWORD_REUSE_DETECTION_ENABLED
 
 }  // namespace sync_util
 }  // namespace password_manager

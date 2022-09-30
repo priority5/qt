@@ -8,39 +8,49 @@
 #ifndef SKSL_EXPRESSION
 #define SKSL_EXPRESSION
 
-#include "src/sksl/ir/SkSLStatement.h"
+#include "include/private/SkSLStatement.h"
+#include "include/private/SkTHash.h"
 #include "src/sksl/ir/SkSLType.h"
 
+#include <optional>
 #include <unordered_map>
 
 namespace SkSL {
 
-struct Expression;
+class AnyConstructor;
+class Expression;
 class IRGenerator;
-struct Variable;
-
-typedef std::unordered_map<const Variable*, std::unique_ptr<Expression>*> DefinitionMap;
+class Variable;
 
 /**
  * Abstract supertype of all expressions.
  */
-struct Expression : public IRNode {
+class Expression : public IRNode {
+public:
     enum class Kind {
         kBinary = (int) Statement::Kind::kLast + 1,
-        kBoolLiteral,
-        kConstructor,
-        kDefined,
+        kChildCall,
+        kCodeString,
+        kConstructorArray,
+        kConstructorArrayCast,
+        kConstructorCompound,
+        kConstructorCompoundCast,
+        kConstructorDiagonalMatrix,
+        kConstructorMatrixResize,
+        kConstructorScalarCast,
+        kConstructorSplat,
+        kConstructorStruct,
         kExternalFunctionCall,
-        kExternalValue,
-        kIntLiteral,
+        kExternalFunctionReference,
         kFieldAccess,
-        kFloatLiteral,
         kFunctionReference,
         kFunctionCall,
         kIndex,
-        kNullLiteral,
-        kPrefix,
+        kLiteral,
+        kMethodReference,
+        kPoison,
         kPostfix,
+        kPrefix,
         kSetting,
         kSwizzle,
         kTernary,
@@ -56,26 +66,9 @@ struct Expression : public IRNode {
         kContainsRTAdjust
     };
 
-    Expression(int offset, const BoolLiteralData& data)
-        : INHERITED(offset, (int) Kind::kBoolLiteral, data) {
-    }
-
-    Expression(int offset, const IntLiteralData& data)
-        : INHERITED(offset, (int) Kind::kIntLiteral, data) {
-    }
-
-    Expression(int offset, Kind kind, ExternalValueData data)
-        : INHERITED(offset, (int) kind, data) {
-        SkASSERT(kind >= Kind::kFirst && kind <= Kind::kLast);
-    }
-
-    Expression(int offset, Kind kind, const Type* type)
-        : INHERITED(offset, (int) kind, type) {
-        SkASSERT(kind >= Kind::kFirst && kind <= Kind::kLast);
-    }
-
-    Expression(int offset, Kind kind, const TypeTokenData& data)
-        : INHERITED(offset, (int) kind, data) {
+    Expression(Position pos, Kind kind, const Type* type)
+        : INHERITED(pos, (int) kind)
+        , fType(type) {
         SkASSERT(kind >= Kind::kFirst && kind <= Kind::kLast);
     }
 
@@ -83,17 +76,39 @@ struct Expression : public IRNode {
         return (Kind) fKind;
     }
 
+    virtual const Type& type() const {
+        return *fType;
+    }
+
     /**
      *  Use is<T> to check the type of an expression.
-     *  e.g. replace `e.kind() == Expression::Kind::kIntLiteral` with `e.is<IntLiteral>()`.
+     *  e.g. replace `e.kind() == Expression::Kind::kLiteral` with `e.is<Literal>()`.
      */
     template <typename T>
     bool is() const {
         return this->kind() == T::kExpressionKind;
     }
 
+    bool isAnyConstructor() const {
+        static_assert((int)Kind::kConstructorArray - 1 == (int)Kind::kCodeString);
+        static_assert((int)Kind::kConstructorStruct + 1 == (int)Kind::kExternalFunctionCall);
+        return this->kind() >= Kind::kConstructorArray && this->kind() <= Kind::kConstructorStruct;
+    }
+
+    bool isIntLiteral() const {
+        return this->kind() == Kind::kLiteral && this->type().isInteger();
+    }
+
+    bool isFloatLiteral() const {
+        return this->kind() == Kind::kLiteral && this->type().isFloat();
+    }
+
+    bool isBoolLiteral() const {
+        return this->kind() == Kind::kLiteral && this->type().isBoolean();
+    }
+
     /**
-     *  Use as<T> to downcast expressions: e.g. replace `(IntLiteral&) i` with `i.as<IntLiteral>()`.
+     *  Use as<T> to downcast expressions: e.g. replace `(Literal&) i` with `i.as<Literal>()`.
      */
     template <typename T>
     const T& as() const {
@@ -107,6 +122,9 @@ struct Expression : public IRNode {
         return static_cast<T&>(*this);
     }
 
+    AnyConstructor& asAnyConstructor();
+    const AnyConstructor& asAnyConstructor() const;
+
     /**
      * Returns true if this expression is constant. compareConstant must be implemented for all
      * constants!
@@ -116,28 +134,24 @@ struct Expression : public IRNode {
     }
 
     /**
-     * Compares this constant expression against another constant expression of the same type. It is
-     * an error to call this on non-constant expressions, or if the types of the expressions do not
-     * match.
+     * Returns true if this expression is incomplete. Specifically, dangling function/method-call
+     * references that were never invoked, or type references that were never constructed, are
+     * considered incomplete expressions and should result in an error.
      */
-    virtual bool compareConstant(const Context& context, const Expression& other) const {
-        ABORT("cannot call compareConstant on this type");
-    }
+    bool isIncomplete(const Context& context) const;
 
     /**
-     * For an expression which evaluates to a constant int, returns the value. Otherwise calls
-     * ABORT.
+     * Compares this constant expression against another constant expression. Returns kUnknown if
+     * we aren't able to deduce a result (an expression isn't actually constant, the types are
+     * mismatched, etc).
      */
-    virtual int64_t getConstantInt() const {
-        ABORT("not a constant int");
-    }
-
-    /**
-     * For an expression which evaluates to a constant float, returns the value. Otherwise calls
-     * ABORT.
-     */
-    virtual double getConstantFloat() const {
-        ABORT("not a constant float");
+    enum class ComparisonResult {
+        kUnknown = -1,
+        kNotEqual,
+        kEqual
+    };
+    virtual ComparisonResult compareConstant(const Expression& other) const {
+        return ComparisonResult::kUnknown;
     }
 
     /**
@@ -159,51 +173,50 @@ struct Expression : public IRNode {
         return this->hasProperty(Property::kContainsRTAdjust);
     }
 
-    /**
-     * Given a map of known constant variable values, substitute them in for references to those
-     * variables occurring in this expression and its subexpressions.  Similar simplifications, such
-     * as folding a constant binary expression down to a single value, may also be performed.
-     * Returns a new expression which replaces this expression, or null if no replacements were
-     * made. If a new expression is returned, this expression is no longer valid.
-     */
-    virtual std::unique_ptr<Expression> constantPropagate(const IRGenerator& irGenerator,
-                                                          const DefinitionMap& definitions) {
-        return nullptr;
-    }
-
     virtual CoercionCost coercionCost(const Type& target) const {
         return this->type().coercionCost(target);
     }
 
     /**
-     * For a literal vector expression, return the floating point value of the n'th vector
-     * component. It is an error to call this method on an expression which is not a literal vector.
+     * Returns true if this expression type supports `getConstantValue`. (This particular expression
+     * may or may not actually contain a constant value.) It's harmless to call `getConstantValue`
+     * on expressions which don't support constant values or don't contain any constant values, but
+     * if `supportsConstantValues` returns false, you can assume that `getConstantValue` will return
+     * nullopt for every slot of this expression. This allows for early-out opportunities in some
+     * cases. (Some expressions have tons of slots but never hold a constant value; e.g. a variable
+     * holding a very large array.)
      */
-    virtual SKSL_FLOAT getFVecComponent(int n) const {
-        SkASSERT(false);
-        return 0;
+    virtual bool supportsConstantValues() const {
+        return false;
     }
 
     /**
-     * For a literal vector expression, return the integer value of the n'th vector component. It is
-     * an error to call this method on an expression which is not a literal vector.
+     * Returns the n'th compile-time constant value within a literal or constructor.
+     * Use Type::slotCount to determine the number of slots within an expression.
+     * Slots which do not contain compile-time constant values will return nullopt.
+     * `vec4(1, vec2(2), 3)` contains four compile-time constants: (1, 2, 2, 3)
+     * `mat2(f)` contains four slots, and two are constant: (nullopt, 0,
+     *                                                       0, nullopt)
+     * All classes which override this function must also implement `supportsConstantValues`.
      */
-    virtual SKSL_INT getIVecComponent(int n) const {
-        SkASSERT(false);
-        return 0;
-    }
-
-    /**
-     * For a literal matrix expression, return the floating point value of the component at
-     * [col][row]. It is an error to call this method on an expression which is not a literal
-     * matrix.
-     */
-    virtual SKSL_FLOAT getMatComponent(int col, int row) const {
-        SkASSERT(false);
-        return 0;
+    virtual std::optional<double> getConstantValue(int n) const {
+        SkASSERT(!this->supportsConstantValues());
+        return std::nullopt;
     }
 
     virtual std::unique_ptr<Expression> clone() const = 0;
+
+    /**
+     * Returns a clone with a modified position.
+     */
+    std::unique_ptr<Expression> clone(Position pos) {
+        std::unique_ptr<Expression> result = this->clone();
+        result->fPosition = pos;
+        return result;
+    }
+
+private:
+    const Type* fType;
 
     using INHERITED = IRNode;
 };

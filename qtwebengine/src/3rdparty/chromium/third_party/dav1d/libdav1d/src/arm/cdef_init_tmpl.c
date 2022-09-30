@@ -27,16 +27,17 @@
 #include "src/cpu.h"
 #include "src/cdef.h"
 
-#if BITDEPTH == 8 || ARCH_AARCH64
 decl_cdef_dir_fn(BF(dav1d_cdef_find_dir, neon));
 
 void BF(dav1d_cdef_padding4, neon)(uint16_t *tmp, const pixel *src,
                                    ptrdiff_t src_stride, const pixel (*left)[2],
-                                   const pixel *const top, int h,
+                                   const pixel *const top,
+                                   const pixel *const bottom, int h,
                                    enum CdefEdgeFlags edges);
 void BF(dav1d_cdef_padding8, neon)(uint16_t *tmp, const pixel *src,
                                    ptrdiff_t src_stride, const pixel (*left)[2],
-                                   const pixel *const top, int h,
+                                   const pixel *const top,
+                                   const pixel *const bottom, int h,
                                    enum CdefEdgeFlags edges);
 
 // Passing edges to this function, to allow it to switch to a more
@@ -53,9 +54,10 @@ void BF(dav1d_cdef_filter8, neon)(pixel *dst, ptrdiff_t dst_stride,
 
 #define DEFINE_FILTER(w, h, tmp_stride)                                      \
 static void                                                                  \
-cdef_filter_##w##x##h##_neon(pixel *dst,                                     \
-                             const ptrdiff_t stride,                         \
-                             const pixel (*left)[2], const pixel *const top, \
+cdef_filter_##w##x##h##_neon(pixel *dst, const ptrdiff_t stride,             \
+                             const pixel (*left)[2],                         \
+                             const pixel *const top,                         \
+                             const pixel *const bottom,                      \
                              const int pri_strength, const int sec_strength, \
                              const int dir, const int damping,               \
                              const enum CdefEdgeFlags edges                  \
@@ -63,7 +65,8 @@ cdef_filter_##w##x##h##_neon(pixel *dst,                                     \
 {                                                                            \
     ALIGN_STK_16(uint16_t, tmp_buf, 12 * tmp_stride + 8,);                   \
     uint16_t *tmp = tmp_buf + 2 * tmp_stride + 8;                            \
-    BF(dav1d_cdef_padding##w, neon)(tmp, dst, stride, left, top, h, edges);  \
+    BF(dav1d_cdef_padding##w, neon)(tmp, dst, stride,                        \
+                                    left, top, bottom, h, edges);            \
     BF(dav1d_cdef_filter##w, neon)(dst, stride, tmp, pri_strength,           \
                                    sec_strength, dir, damping, h, edges      \
                                    HIGHBD_TAIL_SUFFIX);                      \
@@ -72,7 +75,6 @@ cdef_filter_##w##x##h##_neon(pixel *dst,                                     \
 DEFINE_FILTER(8, 8, 16)
 DEFINE_FILTER(4, 8, 8)
 DEFINE_FILTER(4, 4, 8)
-#endif
 
 
 COLD void bitfn(dav1d_cdef_dsp_init_arm)(Dav1dCdefDSPContext *const c) {
@@ -80,10 +82,8 @@ COLD void bitfn(dav1d_cdef_dsp_init_arm)(Dav1dCdefDSPContext *const c) {
 
     if (!(flags & DAV1D_ARM_CPU_FLAG_NEON)) return;
 
-#if BITDEPTH == 8 || ARCH_AARCH64
     c->dir = BF(dav1d_cdef_find_dir, neon);
     c->fb[0] = cdef_filter_8x8_neon;
     c->fb[1] = cdef_filter_4x8_neon;
     c->fb[2] = cdef_filter_4x4_neon;
-#endif
 }

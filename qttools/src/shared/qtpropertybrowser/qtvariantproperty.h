@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QTVARIANTPROPERTY_H
 #define QTVARIANTPROPERTY_H
@@ -45,6 +9,8 @@
 #include <QtGui/QIcon>
 
 QT_BEGIN_NAMESPACE
+
+class QRegularExpression;
 
 typedef QMap<int, QIcon> QtIconMap;
 
@@ -102,12 +68,12 @@ Q_SIGNALS:
     void attributeChanged(QtProperty *property,
                 const QString &attribute, const QVariant &val);
 protected:
-    virtual bool hasValue(const QtProperty *property) const;
-    QString valueText(const QtProperty *property) const;
-    QIcon valueIcon(const QtProperty *property) const;
-    virtual void initializeProperty(QtProperty *property);
-    virtual void uninitializeProperty(QtProperty *property);
-    virtual QtProperty *createProperty();
+    bool hasValue(const QtProperty *property) const override;
+    QString valueText(const QtProperty *property) const override;
+    QIcon valueIcon(const QtProperty *property) const override;
+    void initializeProperty(QtProperty *property) override;
+    void uninitializeProperty(QtProperty *property) override;
+    QtProperty *createProperty() override;
 private:
     QScopedPointer<class QtVariantPropertyManagerPrivate> d_ptr;
     Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, int))
@@ -119,10 +85,10 @@ private:
     Q_PRIVATE_SLOT(d_func(), void slotDecimalsChanged(QtProperty *, int))
     Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, bool))
     Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, const QString &))
-    Q_PRIVATE_SLOT(d_func(), void slotRegExpChanged(QtProperty *, const QRegExp &))
-    Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, const QDate &))
-    Q_PRIVATE_SLOT(d_func(), void slotRangeChanged(QtProperty *, const QDate &, const QDate &))
-    Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, const QTime &))
+    Q_PRIVATE_SLOT(d_func(), void slotRegExpChanged(QtProperty *, const QRegularExpression &))
+    Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, QDate))
+    Q_PRIVATE_SLOT(d_func(), void slotRangeChanged(QtProperty *, QDate, QDate))
+    Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, QTime))
     Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, const QDateTime &))
     Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, const QKeySequence &))
     Q_PRIVATE_SLOT(d_func(), void slotValueChanged(QtProperty *, const QChar &))
@@ -158,10 +124,10 @@ public:
     QtVariantEditorFactory(QObject *parent = 0);
     ~QtVariantEditorFactory();
 protected:
-    void connectPropertyManager(QtVariantPropertyManager *manager);
+    void connectPropertyManager(QtVariantPropertyManager *manager) override;
     QWidget *createEditor(QtVariantPropertyManager *manager, QtProperty *property,
-                QWidget *parent);
-    void disconnectPropertyManager(QtVariantPropertyManager *manager);
+                QWidget *parent) override;
+    void disconnectPropertyManager(QtVariantPropertyManager *manager) override;
 private:
     QScopedPointer<class QtVariantEditorFactoryPrivate> d_ptr;
     Q_DECLARE_PRIVATE(QtVariantEditorFactory)

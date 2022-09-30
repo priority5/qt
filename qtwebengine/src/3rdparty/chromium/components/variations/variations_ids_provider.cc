@@ -7,16 +7,33 @@
 #include <algorithm>
 
 #include "base/base64.h"
-#include "base/memory/singleton.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
+#include "base/observer_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/synchronization/lock.h"
 #include "components/variations/proto/client_variations.pb.h"
 #include "components/variations/variations_client.h"
 #include "components/variations/variations_features.h"
 
 namespace variations {
+namespace {
+
+// Range of low entropy source values (8000) as variation ids for the
+// X-Client-Data header. This range is reserved in cl/333331461 (internal CL).
+const int kLowEntropySourceVariationIdRangeMin = 3320978;
+const int kLowEntropySourceVariationIdRangeMax = 3328977;
+
+VariationsIdsProvider* g_instance = nullptr;
+
+base::Lock& GetInstanceLock() {
+  static base::NoDestructor<base::Lock> lock;
+  return *lock;
+}
+
+}  // namespace
 
 bool VariationsHeaderKey::operator<(const VariationsHeaderKey& other) const {
   if (is_signed_in != other.is_signed_in)
@@ -38,8 +55,18 @@ bool VariationsHeaderKey::operator<(const VariationsHeaderKey& other) const {
 // function variations::CreateSimpleURLLoaderWithVariationsHeader().
 
 // static
+VariationsIdsProvider* VariationsIdsProvider::Create(Mode mode) {
+  base::AutoLock lock(GetInstanceLock());
+  DCHECK(!g_instance);
+  g_instance = new VariationsIdsProvider(mode);
+  return g_instance;
+}
+
+// static
 VariationsIdsProvider* VariationsIdsProvider::GetInstance() {
-  return base::Singleton<VariationsIdsProvider>::get();
+  base::AutoLock lock(GetInstanceLock());
+  DCHECK(g_instance);
+  return g_instance;
 }
 
 variations::mojom::VariationsHeadersPtr
@@ -47,6 +74,11 @@ VariationsIdsProvider::GetClientDataHeaders(bool is_signed_in) {
   // Lazily initialize the header, if not already done, before attempting to
   // transmit it.
   InitVariationIDsCacheIfNeeded();
+
+  if (mode_ == Mode::kIgnoreSignedInState)
+    is_signed_in = true;
+  else if (mode_ == Mode::kDontSendSignedInVariations)
+    is_signed_in = false;
 
   std::string first_party_header_copy;
   std::string any_context_header_copy;
@@ -110,6 +142,18 @@ VariationsIdsProvider::GetVariationsVectorForWebPropertiesKeys() {
   return GetVariationsVectorImpl(web_properties_keys);
 }
 
+void VariationsIdsProvider::SetLowEntropySourceValue(
+    absl::optional<int> low_entropy_source_value) {
+  // The low entropy source value is an integer that is between 0 and 7999,
+  // inclusive. See components/metrics/metrics_state_manager.cc for the logic to
+  // generate it.
+  if (low_entropy_source_value) {
+    DCHECK_GE(low_entropy_source_value.value(), 0);
+    DCHECK_LE(low_entropy_source_value.value(), 7999);
+  }
+  low_entropy_source_value_ = low_entropy_source_value;
+}
+
 VariationsIdsProvider::ForceIdsResult VariationsIdsProvider::ForceVariationIds(
     const std::vector<std::string>& variation_ids,
     const std::string& command_line_variation_ids) {
@@ -169,11 +213,25 @@ void VariationsIdsProvider::ResetForTesting() {
   variations_headers_map_.clear();
 }
 
-VariationsIdsProvider::VariationsIdsProvider()
-    : variation_ids_cache_initialized_(false) {}
+VariationsIdsProvider::VariationsIdsProvider(Mode mode)
+    : mode_(mode), variation_ids_cache_initialized_(false) {}
 
 VariationsIdsProvider::~VariationsIdsProvider() {
   base::FieldTrialList::RemoveObserver(this);
+}
+
+// static
+void VariationsIdsProvider::CreateInstanceForTesting(Mode mode) {
+  base::AutoLock lock(GetInstanceLock());
+  delete g_instance;
+  g_instance = new VariationsIdsProvider(mode);
+}
+
+// static
+void VariationsIdsProvider::DestroyInstanceForTesting() {
+  base::AutoLock lock(GetInstanceLock());
+  delete g_instance;
+  g_instance = nullptr;
 }
 
 void VariationsIdsProvider::OnFieldTrialGroupFinalized(
@@ -342,10 +400,10 @@ std::string VariationsIdsProvider::GenerateBase64EncodedProto(
   // This is the bottleneck for the creation of the header, so validate the size
   // here. Force a hard maximum on the ID count in case the Variations server
   // returns too many IDs and DOSs receiving servers with large requests.
-  DCHECK_LE(total_id_count, 35U);
+  DCHECK_LE(total_id_count, 50U);
   UMA_HISTOGRAM_COUNTS_100("Variations.Headers.ExperimentCount",
                            total_id_count);
-  if (total_id_count > 50)
+  if (total_id_count > 75)
     return std::string();
 
   std::string serialized;
@@ -423,6 +481,27 @@ VariationsIdsProvider::GetAllVariationIds() {
   for (const VariationIDEntry& entry : force_disabled_ids_set_) {
     all_variation_ids_set.erase(entry);
   }
+
+  // Add the low entropy source value, if it exists, which has one of
+  // 8000 possible values (between kLowEntropySourceVariationIdRange[Min/Max],
+  // ~13 bits). This is the value that has been used for deriving the variation
+  // ids included in the X-Client-Data header and therefore does not reveal
+  // additional information about the client when there are more than 13
+  // variations. A typical Chrome client has more than 13 variation ids
+  // reported.
+  //
+  // The entropy source value is used for retrospective A/A tests to validate
+  // that there's no existing bias between two randomized groups of clients for
+  // a later A/B study.
+  if (low_entropy_source_value_) {
+    int source_value = low_entropy_source_value_.value() +
+                       kLowEntropySourceVariationIdRangeMin;
+    DCHECK_GE(source_value, kLowEntropySourceVariationIdRangeMin);
+    DCHECK_LE(source_value, kLowEntropySourceVariationIdRangeMax);
+    all_variation_ids_set.insert(
+        VariationIDEntry(source_value, GOOGLE_WEB_PROPERTIES_FIRST_PARTY));
+  }
+
   return all_variation_ids_set;
 }
 

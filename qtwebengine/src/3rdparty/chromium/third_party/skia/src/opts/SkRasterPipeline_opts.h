@@ -10,7 +10,9 @@
 
 #include "include/core/SkData.h"
 #include "include/core/SkTypes.h"
+#include "include/third_party/skcms/skcms.h"
 #include "src/core/SkUtils.h"  // unaligned_{load,store}
+#include <cstdint>
 
 // Every function in this file should be marked static and inline using SI.
 #if defined(__clang__)
@@ -21,9 +23,9 @@
 
 template <typename Dst, typename Src>
 SI Dst widen_cast(const Src& src) {
-    static_assert(sizeof(Dst) > sizeof(Src), "");
-    static_assert(std::is_trivially_copyable<Dst>::value, "");
-    static_assert(std::is_trivially_copyable<Src>::value, "");
+    static_assert(sizeof(Dst) > sizeof(Src));
+    static_assert(std::is_trivially_copyable<Dst>::value);
+    static_assert(std::is_trivially_copyable<Src>::value);
     Dst dst;
     memcpy(&dst, &src, sizeof(Src));
     return dst;
@@ -104,8 +106,13 @@ struct Ctx {
     #include <immintrin.h>
 #endif
 
-namespace SK_OPTS_NS {
+// Notes:
+// * rcp_fast and rcp_precise both produce a reciprocal, but rcp_fast is an estimate with at least
+//   12 bits of precision while rcp_precise should be accurate for float size. For ARM rcp_precise
+//   requires 2 Newton-Raphson refinement steps because its estimate has 8 bit precision, and for
+//   Intel this requires one additional step because its estimate has 12 bit precision.
 
+namespace SK_OPTS_NS {
 #if defined(JUMPER_IS_SCALAR)
     // This path should lead to portable scalar code.
     using F   = float   ;
@@ -120,9 +127,11 @@ namespace SK_OPTS_NS {
     SI F   max(F a, F b)        { return fmaxf(a,b); }
     SI F   abs_  (F v)          { return fabsf(v); }
     SI F   floor_(F v)          { return floorf(v); }
-    SI F   rcp   (F v)          { return 1.0f / v; }
+    SI F   rcp_fast(F v)        { return 1.0f / v; }
     SI F   rsqrt (F v)          { return 1.0f / sqrtf(v); }
-    SI F    sqrt_(F v)          { return sqrtf(v); }
+    SI F   sqrt_ (F v)          { return sqrtf(v); }
+    SI F   rcp_precise (F v)    { return 1.0f / v; }
+
     SI U32 round (F v, F scale) { return (uint32_t)(v*scale + 0.5f); }
     SI U16 pack(U32 v)          { return (U16)v; }
     SI U8  pack(U16 v)          { return  (U8)v; }
@@ -193,8 +202,10 @@ namespace SK_OPTS_NS {
     SI F   min(F a, F b)                         { return vminq_f32(a,b);          }
     SI F   max(F a, F b)                         { return vmaxq_f32(a,b);          }
     SI F   abs_  (F v)                           { return vabsq_f32(v);            }
-    SI F   rcp   (F v) { auto e = vrecpeq_f32 (v); return vrecpsq_f32 (v,e  ) * e; }
-    SI F   rsqrt (F v) { auto e = vrsqrteq_f32(v); return vrsqrtsq_f32(v,e*e) * e; }
+    SI F   rcp_fast(F v) { auto e = vrecpeq_f32 (v); return vrecpsq_f32 (v,e  ) * e; }
+    SI F   rcp_precise (F v) { auto e = rcp_fast(v); return vrecpsq_f32 (v,e  ) * e; }
+    SI F   rsqrt (F v)   { auto e = vrsqrteq_f32(v); return vrsqrtsq_f32(v,e*e) * e; }
+
     SI U16 pack(U32 v)                           { return __builtin_convertvector(v, U16); }
     SI U8  pack(U16 v)                           { return __builtin_convertvector(v,  U8); }
 
@@ -332,7 +343,7 @@ namespace SK_OPTS_NS {
         }
     }
 
-#elif defined(JUMPER_IS_AVX) || defined(JUMPER_IS_HSW) || defined(JUMPER_IS_SKX)
+#elif defined(JUMPER_IS_HSW) || defined(JUMPER_IS_SKX)
     // These are __m256 and __m256i, but friendlier and strongly-typed.
     template <typename T> using V = T __attribute__((ext_vector_type(8)));
     using F   = V<float   >;
@@ -350,15 +361,24 @@ namespace SK_OPTS_NS {
     #endif
     }
 
-    SI F   min(F a, F b)        { return _mm256_min_ps(a,b);    }
-    SI F   max(F a, F b)        { return _mm256_max_ps(a,b);    }
-    SI F   abs_  (F v)          { return _mm256_and_ps(v, 0-v); }
-    SI F   floor_(F v)          { return _mm256_floor_ps(v);    }
-    SI F   rcp   (F v)          { return _mm256_rcp_ps  (v);    }
-    SI F   rsqrt (F v)          { return _mm256_rsqrt_ps(v);    }
-    SI F    sqrt_(F v)          { return _mm256_sqrt_ps (v);    }
-    SI U32 round (F v, F scale) { return _mm256_cvtps_epi32(v*scale); }
+    SI F   min(F a, F b) { return _mm256_min_ps(a,b);    }
+    SI F   max(F a, F b) { return _mm256_max_ps(a,b);    }
+    SI F   abs_  (F v)   { return _mm256_and_ps(v, 0-v); }
+    SI F   floor_(F v)   { return _mm256_floor_ps(v);    }
+    SI F   rcp_fast(F v) { return _mm256_rcp_ps  (v);    }
+    SI F   rsqrt (F v)   { return _mm256_rsqrt_ps(v);    }
+    SI F   sqrt_ (F v)   { return _mm256_sqrt_ps (v);    }
+    SI F rcp_precise (F v) {
+        F e = rcp_fast(v);
+        #if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_SKX)
+            return _mm256_fnmadd_ps(v, e, _mm256_set1_ps(2.0f)) * e;
+        #else
+            return e * (2.0f - v * e);
+        #endif
+    }
 
+
+    SI U32 round (F v, F scale) { return _mm256_cvtps_epi32(v*scale); }
     SI U16 pack(U32 v) {
         return _mm_packus_epi32(_mm256_extractf128_si256(v, 0),
                                 _mm256_extractf128_si256(v, 1));
@@ -671,8 +691,8 @@ namespace SK_OPTS_NS {
         }
     }
 
-#elif defined(JUMPER_IS_SSE2) || defined(JUMPER_IS_SSE41)
-    template <typename T> using V = T __attribute__((ext_vector_type(4)));
+#elif defined(JUMPER_IS_SSE2) || defined(JUMPER_IS_SSE41) || defined(JUMPER_IS_AVX)
+template <typename T> using V = T __attribute__((ext_vector_type(4)));
     using F   = V<float   >;
     using I32 = V< int32_t>;
     using U64 = V<uint64_t>;
@@ -684,9 +704,11 @@ namespace SK_OPTS_NS {
     SI F   min(F a, F b)       { return _mm_min_ps(a,b);    }
     SI F   max(F a, F b)       { return _mm_max_ps(a,b);    }
     SI F   abs_(F v)           { return _mm_and_ps(v, 0-v); }
-    SI F   rcp   (F v)         { return _mm_rcp_ps  (v);    }
+    SI F   rcp_fast(F v)       { return _mm_rcp_ps  (v);    }
+    SI F   rcp_precise (F v)   { F e = rcp_fast(v); return e * (2.0f - v * e); }
     SI F   rsqrt (F v)         { return _mm_rsqrt_ps(v);    }
     SI F    sqrt_(F v)         { return _mm_sqrt_ps (v);    }
+
     SI U32 round(F v, F scale) { return _mm_cvtps_epi32(v*scale); }
 
     SI U16 pack(U32 v) {
@@ -722,8 +744,6 @@ namespace SK_OPTS_NS {
     SI V<T> gather(const T* p, U32 ix) {
         return {p[ix[0]], p[ix[1]], p[ix[2]], p[ix[3]]};
     }
-
-    // TODO: these loads and stores are incredibly difficult to follow.
 
     SI void load2(const uint16_t* ptr, size_t tail, U16* r, U16* g) {
         __m128i _01;
@@ -980,10 +1000,13 @@ SI F approx_powf(F x, F y) {
 SI F from_half(U16 h) {
 #if defined(JUMPER_IS_NEON) && defined(SK_CPU_ARM64) \
     && !defined(SK_BUILD_FOR_GOOGLE3)  // Temporary workaround for some Google3 builds.
+#if defined(SK_BUILD_FOR_MAC)
+    return vcvt_f32_f16(h);
+#else
     __fp16 fp16;
     memcpy(&fp16, &h, sizeof(U16));
     return float(fp16);
-
+#endif
 #elif defined(JUMPER_IS_HSW) || defined(JUMPER_IS_SKX)
     return _mm256_cvtph_ps(h);
 
@@ -1003,11 +1026,14 @@ SI F from_half(U16 h) {
 SI U16 to_half(F f) {
 #if defined(JUMPER_IS_NEON) && defined(SK_CPU_ARM64) \
     && !defined(SK_BUILD_FOR_GOOGLE3)  // Temporary workaround for some Google3 builds.
+#if defined(SK_BUILD_FOR_MAC)
+    return vcvt_f16_f32(f);
+#else
     __fp16 fp16 = __fp16(f);
     U16 u16;
     memcpy(&u16, &fp16, sizeof(U16));
     return u16;
-
+#endif
 #elif defined(JUMPER_IS_HSW) || defined(JUMPER_IS_SKX)
     return _mm256_cvtps_ph(f, _MM_FROUND_CUR_DIRECTION);
 
@@ -1039,11 +1065,6 @@ static const size_t N = sizeof(F) / sizeof(float);
     // We can still only pass 16 floats, so best as 4x {r,g,b,a}.
     #define ABI __attribute__((pcs("aapcs-vfp")))
     #define JUMPER_NARROW_STAGES 1
-#elif 0 && defined(_MSC_VER) && defined(__clang__) && defined(__x86_64__)
-    // SysV ABI makes it very sensible to use wide stages with clang-cl.
-    // TODO: crashes during compilation  :(
-    #define ABI __attribute__((sysv_abi))
-    #define JUMPER_NARROW_STAGES 0
 #elif defined(_MSC_VER)
     // Even if not vectorized, this lets us pass {r,g,b,a} as registers,
     // instead of {b,a} on the stack.  Narrow stages work best for __vectorcall.
@@ -1259,7 +1280,6 @@ SI U32 ix_and_ptr(T** ptr, const SkRasterPipeline_GatherCtx* ctx, F x, F y) {
 //
 // You can adjust the expected input to [0,bias] by tweaking that parameter.
 SI U32 to_unorm(F v, F scale, F bias = 1.0f) {
-    // TODO: platform-specific implementations to to_unorm(), removing round() entirely?
     // Any time we use round() we probably want to use to_unorm().
     return round(min(max(0, v), bias), scale);
 }
@@ -1432,12 +1452,12 @@ BLEND_MODE(exclusion)  { return s + d - two(s*d); }
 BLEND_MODE(colorburn) {
     return if_then_else(d == da,    d +    s*inv(da),
            if_then_else(s ==  0, /* s + */ d*inv(sa),
-                                 sa*(da - min(da, (da-d)*sa*rcp(s))) + s*inv(da) + d*inv(sa)));
+                                sa*(da - min(da, (da-d)*sa*rcp_fast(s))) + s*inv(da) + d*inv(sa)));
 }
 BLEND_MODE(colordodge) {
     return if_then_else(d ==  0, /* d + */ s*inv(da),
            if_then_else(s == sa,    s +    d*inv(sa),
-                                 sa*min(da, (d*sa)*rcp(sa - s)) + s*inv(da) + d*inv(sa)));
+                                 sa*min(da, (d*sa)*rcp_fast(sa - s)) + s*inv(da) + d*inv(sa)));
 }
 BLEND_MODE(hardlight) {
     return s*inv(da) + d*inv(sa)
@@ -1459,7 +1479,11 @@ BLEND_MODE(softlight) {
     //    3. light src, light dst?
     F darkSrc = d*(sa + (s2 - sa)*(1.0f - m)),     // Used in case 1.
       darkDst = (m4*m4 + m4)*(m - 1.0f) + 7.0f*m,  // Used in case 2.
-      liteDst = rcp(rsqrt(m)) - m,                 // Used in case 3.
+    #if defined(SK_RASTER_PIPELINE_LEGACY_RCP_RSQRT)
+      liteDst = rcp_fast(rsqrt(m)) - m,                 // Used in case 3.
+    #else
+      liteDst = sqrt_(m) - m,
+    #endif
       liteSrc = d*sa + da*(s2 - sa) * if_then_else(two(two(d)) <= da, darkDst, liteDst); // 2 or 3?
     return s*inv(da) + d*inv(sa) + if_then_else(s2 <= sa, darkSrc, liteSrc);      // 1 or (2 or 3)?
 }
@@ -1653,6 +1677,12 @@ STAGE(move_dst_src, Ctx::None) {
     b = db;
     a = da;
 }
+STAGE(swap_src_dst, Ctx::None) {
+    std::swap(r, dr);
+    std::swap(g, dg);
+    std::swap(b, db);
+    std::swap(a, da);
+}
 
 STAGE(premul, Ctx::None) {
     r = r * a;
@@ -1815,7 +1845,7 @@ STAGE(emboss, const SkRasterPipeline_EmbossCtx* ctx) {
     b = mad(b, mul, add);
 }
 
-STAGE(byte_tables, const void* ctx) {  // TODO: rename Tables SkRasterPipeline_ByteTablesCtx
+STAGE(byte_tables, const void* ctx) {
     struct Tables { const uint8_t *r, *g, *b, *a; };
     auto tables = (const Tables*)ctx;
 
@@ -1882,12 +1912,13 @@ STAGE(HLGish, const skcms_TransferFunction* ctx) {
         v = strip_sign(v, &sign);
 
         const float R = ctx->a, G = ctx->b,
-                    a = ctx->c, b = ctx->d, c = ctx->e;
+                    a = ctx->c, b = ctx->d, c = ctx->e,
+                    K = ctx->f + 1.0f;
 
         F r = if_then_else(v*R <= 1, approx_powf(v*R, G)
                                    , approx_exp((v-c)*a) + b);
 
-        return apply_sign(r, sign);
+        return K * apply_sign(r, sign);
     };
     r = fn(r);
     g = fn(g);
@@ -1900,8 +1931,10 @@ STAGE(HLGinvish, const skcms_TransferFunction* ctx) {
         v = strip_sign(v, &sign);
 
         const float R = ctx->a, G = ctx->b,
-                    a = ctx->c, b = ctx->d, c = ctx->e;
+                    a = ctx->c, b = ctx->d, c = ctx->e,
+                    K = ctx->f + 1.0f;
 
+        v /= K;
         F r = if_then_else(v <= 1, R * approx_powf(v, G)
                                  , a * approx_log(v - b) + c);
 
@@ -1934,6 +1967,12 @@ STAGE(store_a8, const SkRasterPipeline_MemoryCtx* ctx) {
     auto ptr = ptr_at_xy<uint8_t>(ctx, dx,dy);
 
     U8 packed = pack(pack(to_unorm(a, 255)));
+    store(ptr, packed, tail);
+}
+STAGE(store_r8, const SkRasterPipeline_MemoryCtx* ctx) {
+    auto ptr = ptr_at_xy<uint8_t>(ctx, dx,dy);
+
+    U8 packed = pack(pack(to_unorm(r, 255)));
     store(ptr, packed, tail);
 }
 
@@ -2335,9 +2374,21 @@ STAGE(alpha_to_gray_dst, Ctx::None) {
     dr = dg = db = da;
     da = 1;
 }
+STAGE(alpha_to_red, Ctx::None) {
+    r = a;
+    a = 1;
+}
+STAGE(alpha_to_red_dst, Ctx::None) {
+    dr = da;
+    da = 1;
+}
+
 STAGE(bt709_luminance_or_luma_to_alpha, Ctx::None) {
     a = r*0.2126f + g*0.7152f + b*0.0722f;
     r = g = b = 0;
+}
+STAGE(bt709_luminance_or_luma_to_rgb, Ctx::None) {
+    r = g = b = r*0.2126f + g*0.7152f + b*0.0722f;
 }
 
 STAGE(matrix_translate, const float* m) {
@@ -2349,8 +2400,8 @@ STAGE(matrix_scale_translate, const float* m) {
     g = mad(g,m[1], m[3]);
 }
 STAGE(matrix_2x3, const float* m) {
-    auto R = mad(r,m[0], mad(g,m[2], m[4])),
-         G = mad(r,m[1], mad(g,m[3], m[5]));
+    auto R = mad(r,m[0], mad(g,m[1], m[2])),
+         G = mad(r,m[3], mad(g,m[4], m[5]));
     r = R;
     g = G;
 }
@@ -2394,8 +2445,8 @@ STAGE(matrix_perspective, const float* m) {
     auto R = mad(r,m[0], mad(g,m[1], m[2])),
          G = mad(r,m[3], mad(g,m[4], m[5])),
          Z = mad(r,m[6], mad(g,m[7], m[8]));
-    r = R * rcp(Z);
-    g = G * rcp(Z);
+    r = R * rcp_precise(Z);
+    g = G * rcp_precise(Z);
 }
 
 SI void gradient_lookup(const SkRasterPipeline_GradientCtx* c, U32 idx, F t,
@@ -2449,7 +2500,6 @@ STAGE(gradient, const SkRasterPipeline_GradientCtx* c) {
 }
 
 STAGE(evenly_spaced_2_stop_gradient, const void* ctx) {
-    // TODO: Rename Ctx SkRasterPipeline_EvenlySpaced2StopGradientCtx.
     struct Ctx { float f[4], b[4]; };
     auto c = (const Ctx*)ctx;
 
@@ -2613,16 +2663,11 @@ STAGE(bilinear_py, SkRasterPipeline_SamplerCtx* ctx) { bilinear_y<+1>(ctx, &g); 
 // In bicubic interpolation, the 16 pixels and +/- 0.5 and +/- 1.5 offsets from the sample
 // pixel center are combined with a non-uniform cubic filter, with higher values near the center.
 //
-// We break this function into two parts, one for near 0.5 offsets and one for far 1.5 offsets.
-// See GrCubicEffect for details of this particular filter.
+// This helper computes the total weight along one axis (our bicubic filter is separable), given one
+// column of the sampling matrix, and a fractional pixel offset. See SkCubicResampler for details.
 
-SI F bicubic_near(F t) {
-    // 1/18 + 9/18t + 27/18t^2 - 21/18t^3 == t ( t ( -21/18t + 27/18) + 9/18) + 1/18
-    return mad(t, mad(t, mad((-21/18.0f), t, (27/18.0f)), (9/18.0f)), (1/18.0f));
-}
-SI F bicubic_far(F t) {
-    // 0/18 + 0/18*t - 6/18t^2 + 7/18t^3 == t^2 (7/18t - 6/18)
-    return (t*t)*mad((7/18.0f), t, (-6/18.0f));
+SI F bicubic_wts(F t, float A, float B, float C, float D) {
+    return mad(t, mad(t, mad(t, D, C), B), A);
 }
 
 template <int kScale>
@@ -2631,10 +2676,11 @@ SI void bicubic_x(SkRasterPipeline_SamplerCtx* ctx, F* x) {
     F fx = sk_unaligned_load<F>(ctx->fx);
 
     F scalex;
-    if (kScale == -3) { scalex = bicubic_far (1.0f - fx); }
-    if (kScale == -1) { scalex = bicubic_near(1.0f - fx); }
-    if (kScale == +1) { scalex = bicubic_near(       fx); }
-    if (kScale == +3) { scalex = bicubic_far (       fx); }
+    const float* w = ctx->weights;
+    if (kScale == -3) { scalex = bicubic_wts(fx, w[0], w[4], w[ 8], w[12]); }
+    if (kScale == -1) { scalex = bicubic_wts(fx, w[1], w[5], w[ 9], w[13]); }
+    if (kScale == +1) { scalex = bicubic_wts(fx, w[2], w[6], w[10], w[14]); }
+    if (kScale == +3) { scalex = bicubic_wts(fx, w[3], w[7], w[11], w[15]); }
     sk_unaligned_store(ctx->scalex, scalex);
 }
 template <int kScale>
@@ -2643,10 +2689,11 @@ SI void bicubic_y(SkRasterPipeline_SamplerCtx* ctx, F* y) {
     F fy = sk_unaligned_load<F>(ctx->fy);
 
     F scaley;
-    if (kScale == -3) { scaley = bicubic_far (1.0f - fy); }
-    if (kScale == -1) { scaley = bicubic_near(1.0f - fy); }
-    if (kScale == +1) { scaley = bicubic_near(       fy); }
-    if (kScale == +3) { scaley = bicubic_far (       fy); }
+    const float* w = ctx->weights;
+    if (kScale == -3) { scaley = bicubic_wts(fy, w[0], w[4], w[ 8], w[12]); }
+    if (kScale == -1) { scaley = bicubic_wts(fy, w[1], w[5], w[ 9], w[13]); }
+    if (kScale == +1) { scaley = bicubic_wts(fy, w[2], w[6], w[10], w[14]); }
+    if (kScale == +3) { scaley = bicubic_wts(fy, w[3], w[7], w[11], w[15]); }
     sk_unaligned_store(ctx->scaley, scaley);
 }
 
@@ -2685,7 +2732,7 @@ STAGE(gauss_a_to_rgba, Ctx::None) {
 SI F tile(F v, SkTileMode mode, float limit, float invLimit) {
     // The ix_and_ptr() calls in sample() will clamp tile()'s output, so no need to clamp here.
     switch (mode) {
-        case SkTileMode::kDecal:  // TODO, for now fallthrough to clamp
+        case SkTileMode::kDecal:
         case SkTileMode::kClamp:  return v;
         case SkTileMode::kRepeat: return v - floor_(v*invLimit)*limit;
         case SkTileMode::kMirror:
@@ -2700,7 +2747,7 @@ SI void sample(const SkRasterPipeline_SamplerCtx2* ctx, F x, F y,
     y = tile(y, ctx->tileY, ctx->height, ctx->invHeight);
 
     switch (ctx->ct) {
-        default: *r = *g = *b = *a = 0;  // TODO
+        default: *r = *g = *b = *a = 0;
                  break;
 
         case kRGBA_8888_SkColorType:
@@ -2750,8 +2797,15 @@ STAGE(bilinear, const SkRasterPipeline_SamplerCtx2* ctx) {
 STAGE(bicubic, SkRasterPipeline_SamplerCtx2* ctx) {
     F x = r, fx = fract(x + 0.5f),
       y = g, fy = fract(y + 0.5f);
-    const F wx[] = { bicubic_far(1-fx), bicubic_near(1-fx), bicubic_near(fx), bicubic_far(fx) };
-    const F wy[] = { bicubic_far(1-fy), bicubic_near(1-fy), bicubic_near(fy), bicubic_far(fy) };
+    const float* w = ctx->weights;
+    const F wx[] = {bicubic_wts(fx, w[0], w[4], w[ 8], w[12]),
+                    bicubic_wts(fx, w[1], w[5], w[ 9], w[13]),
+                    bicubic_wts(fx, w[2], w[6], w[10], w[14]),
+                    bicubic_wts(fx, w[3], w[7], w[11], w[15])};
+    const F wy[] = {bicubic_wts(fy, w[0], w[4], w[ 8], w[12]),
+                    bicubic_wts(fy, w[1], w[5], w[ 9], w[13]),
+                    bicubic_wts(fy, w[2], w[6], w[10], w[14]),
+                    bicubic_wts(fy, w[3], w[7], w[11], w[15])};
 
     sampler(ctx, x,y, wx,wy, &r,&g,&b,&a);
 }
@@ -2770,11 +2824,11 @@ STAGE(bilerp_clamp_8888, const SkRasterPipeline_GatherCtx* ctx) {
     // We'll accumulate the color of all four samples into {r,g,b,a} directly.
     r = g = b = a = 0;
 
-    for (float dy = -0.5f; dy <= +0.5f; dy += 1.0f)
-    for (float dx = -0.5f; dx <= +0.5f; dx += 1.0f) {
+    for (float py = -0.5f; py <= +0.5f; py += 1.0f)
+    for (float px = -0.5f; px <= +0.5f; px += 1.0f) {
         // (x,y) are the coordinates of this sample point.
-        F x = cx + dx,
-          y = cy + dy;
+        F x = cx + px,
+          y = cy + py;
 
         // ix_and_ptr() will clamp to the image's bounds for us.
         const uint32_t* ptr;
@@ -2787,8 +2841,8 @@ STAGE(bilerp_clamp_8888, const SkRasterPipeline_GatherCtx* ctx) {
         // are combined in direct proportion to their area overlapping that logical query pixel.
         // At positive offsets, the x-axis contribution to that rectangle is fx,
         // or (1-fx) at negative x.  Same deal for y.
-        F sx = (dx > 0) ? fx : 1.0f - fx,
-          sy = (dy > 0) ? fy : 1.0f - fy,
+        F sx = (px > 0) ? fx : 1.0f - fx,
+          sy = (py > 0) ? fy : 1.0f - fy,
           area = sx * sy;
 
         r += sr * area;
@@ -2812,14 +2866,15 @@ STAGE(bicubic_clamp_8888, const SkRasterPipeline_GatherCtx* ctx) {
     // We'll accumulate the color of all four samples into {r,g,b,a} directly.
     r = g = b = a = 0;
 
-    const F scaley[4] = {
-        bicubic_far (1.0f - fy), bicubic_near(1.0f - fy),
-        bicubic_near(       fy), bicubic_far (       fy),
-    };
-    const F scalex[4] = {
-        bicubic_far (1.0f - fx), bicubic_near(1.0f - fx),
-        bicubic_near(       fx), bicubic_far (       fx),
-    };
+    const float* w = ctx->weights;
+    const F scaley[4] = {bicubic_wts(fy, w[0], w[4], w[ 8], w[12]),
+                         bicubic_wts(fy, w[1], w[5], w[ 9], w[13]),
+                         bicubic_wts(fy, w[2], w[6], w[10], w[14]),
+                         bicubic_wts(fy, w[3], w[7], w[11], w[15])};
+    const F scalex[4] = {bicubic_wts(fx, w[0], w[4], w[ 8], w[12]),
+                         bicubic_wts(fx, w[1], w[5], w[ 9], w[13]),
+                         bicubic_wts(fx, w[2], w[6], w[10], w[14]),
+                         bicubic_wts(fx, w[3], w[7], w[11], w[15])};
 
     F sample_y = cy - 1.5f;
     for (int yy = 0; yy <= 3; ++yy) {
@@ -2845,7 +2900,7 @@ STAGE(bicubic_clamp_8888, const SkRasterPipeline_GatherCtx* ctx) {
     }
 }
 
-// ~~~~~~ GrSwizzle stage ~~~~~~ //
+// ~~~~~~ skgpu::Swizzle stage ~~~~~~ //
 
 STAGE(swizzle, void* ctx) {
     auto ir = r, ig = g, ib = b, ia = a;
@@ -2886,6 +2941,8 @@ namespace lowp {
     using I16 =  int16_t __attribute__((ext_vector_type(16)));
     using I32 =  int32_t __attribute__((ext_vector_type(16)));
     using U32 = uint32_t __attribute__((ext_vector_type(16)));
+    using I64 =  int64_t __attribute__((ext_vector_type(16)));
+    using U64 = uint64_t __attribute__((ext_vector_type(16)));
     using F   = float    __attribute__((ext_vector_type(16)));
 #else
     using U8  = uint8_t  __attribute__((ext_vector_type(8)));
@@ -2893,6 +2950,8 @@ namespace lowp {
     using I16 =  int16_t __attribute__((ext_vector_type(8)));
     using I32 =  int32_t __attribute__((ext_vector_type(8)));
     using U32 = uint32_t __attribute__((ext_vector_type(8)));
+    using I64 =  int64_t __attribute__((ext_vector_type(8)));
+    using U64 = uint64_t __attribute__((ext_vector_type(8)));
     using F   = float    __attribute__((ext_vector_type(8)));
 #endif
 
@@ -3049,16 +3108,46 @@ static void start_pipeline(const size_t x0,     const size_t y0,
 
 // ~~~~~~ Commonly used helper functions ~~~~~~ //
 
+/**
+ * Helpers to to properly rounded division (by 255). The ideal answer we want to compute is slow,
+ * thanks to a division by a non-power of two:
+ *   [1]  (v + 127) / 255
+ *
+ * There is a two-step process that computes the correct answer for all inputs:
+ *   [2]  (v + 128 + ((v + 128) >> 8)) >> 8
+ *
+ * There is also a single iteration approximation, but it's wrong (+-1) ~25% of the time:
+ *   [3]  (v + 255) >> 8;
+ *
+ * We offer two different implementations here, depending on the requirements of the calling stage.
+ */
+
+/**
+ * div255 favors speed over accuracy. It uses formula [2] on NEON (where we can compute it as fast
+ * as [3]), and uses [3] elsewhere.
+ */
 SI U16 div255(U16 v) {
-#if 0
-    return (v+127)/255;  // The ideal rounding divide by 255.
-#elif 1 && defined(JUMPER_IS_NEON)
-    // With NEON we can compute (v+127)/255 as (v + ((v+128)>>8) + 128)>>8
-    // just as fast as we can do the approximation below, so might as well be correct!
-    // First we compute v + ((v+128)>>8), then one more round of (...+128)>>8 to finish up.
+#if defined(JUMPER_IS_NEON)
+    // With NEON we can compute [2] just as fast as [3], so let's be correct.
+    // First we compute v + ((v+128)>>8), then one more round of (...+128)>>8 to finish up:
     return vrshrq_n_u16(vrsraq_n_u16(v, v, 8), 8);
 #else
-    return (v+255)/256;  // A good approximation of (v+127)/255.
+    // Otherwise, use [3], which is never wrong by more than 1:
+    return (v+255)/256;
+#endif
+}
+
+/**
+ * div255_accurate guarantees the right answer on all platforms, at the expense of performance.
+ */
+SI U16 div255_accurate(U16 v) {
+#if defined(JUMPER_IS_NEON)
+    // Our NEON implementation of div255 is already correct for all inputs:
+    return div255(v);
+#else
+    // This is [2] (the same formulation as NEON), but written without the benefit of intrinsics:
+    v += 128;
+    return (v+(v/256))/256;
 #endif
 }
 
@@ -3100,26 +3189,29 @@ SI F if_then_else(I32 c, F t, F e) {
 SI F max(F x, F y) { return if_then_else(x < y, y, x); }
 SI F min(F x, F y) { return if_then_else(x < y, x, y); }
 
+SI I32 if_then_else(I32 c, I32 t, I32 e) {
+    return (t & c) | (e & ~c);
+}
+SI I32 max(I32 x, I32 y) { return if_then_else(x < y, y, x); }
+SI I32 min(I32 x, I32 y) { return if_then_else(x < y, x, y); }
+
 SI F mad(F f, F m, F a) { return f*m+a; }
 SI U32 trunc_(F x) { return (U32)cast<I32>(x); }
 
-SI F rcp(F x) {
+// Use approximate instructions and one Newton-Raphson step to calculate 1/x.
+SI F rcp_precise(F x) {
 #if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_SKX)
     __m256 lo,hi;
     split(x, &lo,&hi);
-    return join<F>(_mm256_rcp_ps(lo), _mm256_rcp_ps(hi));
+    return join<F>(SK_OPTS_NS::rcp_precise(lo), SK_OPTS_NS::rcp_precise(hi));
 #elif defined(JUMPER_IS_SSE2) || defined(JUMPER_IS_SSE41) || defined(JUMPER_IS_AVX)
     __m128 lo,hi;
     split(x, &lo,&hi);
-    return join<F>(_mm_rcp_ps(lo), _mm_rcp_ps(hi));
+    return join<F>(SK_OPTS_NS::rcp_precise(lo), SK_OPTS_NS::rcp_precise(hi));
 #elif defined(JUMPER_IS_NEON)
-    auto rcp = [](float32x4_t v) {
-        auto est = vrecpeq_f32(v);
-        return vrecpsq_f32(v,est)*est;
-    };
     float32x4_t lo,hi;
     split(x, &lo,&hi);
-    return join<F>(rcp(lo), rcp(hi));
+    return join<F>(SK_OPTS_NS::rcp_precise(lo), SK_OPTS_NS::rcp_precise(hi));
 #else
     return 1.0f / x;
 #endif
@@ -3173,6 +3265,45 @@ SI F floor_(F x) {
     return roundtrip - if_then_else(roundtrip > x, F(1), F(0));
 #endif
 }
+
+// scaled_mult interprets a and b as number on [-1, 1) which are numbers in Q15 format. Functionally
+// this multiply is:
+//     (2 * a * b + (1 << 15)) >> 16
+// The result is a number on [-1, 1).
+// Note: on neon this is a saturating multiply while the others are not.
+SI I16 scaled_mult(I16 a, I16 b) {
+#if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_SKX)
+    return _mm256_mulhrs_epi16(a, b);
+#elif defined(JUMPER_IS_SSE41) || defined(JUMPER_IS_AVX)
+    return _mm_mulhrs_epi16(a, b);
+#elif defined(SK_CPU_ARM64)
+    return vqrdmulhq_s16(a, b);
+#elif defined(JUMPER_IS_NEON)
+    return vqrdmulhq_s16(a, b);
+#else
+    const I32 roundingTerm = 1 << 14;
+    return cast<I16>((cast<I32>(a) * cast<I32>(b) + roundingTerm) >> 15);
+#endif
+}
+
+// This sum is to support lerp where the result will always be a positive number. In general,
+// a sum like this would require an additional bit, but because we know the range of the result
+// we know that the extra bit will always be zero.
+SI U16 constrained_add(I16 a, U16 b) {
+    #if defined(SK_DEBUG)
+        for (size_t i = 0; i < N; i++) {
+            // Ensure that a + b is on the interval [0, UINT16_MAX]
+            int ia = a[i],
+                ib = b[i];
+            // Use 65535 here because fuchsia's compiler evaluates UINT16_MAX - ib, which is
+            // 65536U - ib, as an uint32_t instead of an int32_t. This was forcing ia to be
+            // interpreted as an uint32_t.
+            SkASSERT(-ib <= ia && ia <= 65535 - ib);
+        }
+    #endif
+    return b + a;
+}
+
 SI F fract(F x) { return x - floor_(x); }
 SI F abs_(F x) { return sk_bit_cast<F>( sk_bit_cast<I32>(x) & 0x7fffffff ); }
 
@@ -3196,8 +3327,8 @@ STAGE_GG(matrix_scale_translate, const float* m) {
     y = mad(y,m[1], m[3]);
 }
 STAGE_GG(matrix_2x3, const float* m) {
-    auto X = mad(x,m[0], mad(y,m[2], m[4])),
-         Y = mad(x,m[1], mad(y,m[3], m[5]));
+    auto X = mad(x,m[0], mad(y,m[1], m[2])),
+         Y = mad(x,m[3], mad(y,m[4], m[5]));
     x = X;
     y = Y;
 }
@@ -3206,8 +3337,8 @@ STAGE_GG(matrix_perspective, const float* m) {
     auto X = mad(x,m[0], mad(y,m[1], m[2])),
          Y = mad(x,m[3], mad(y,m[4], m[5])),
          Z = mad(x,m[6], mad(y,m[7], m[8]));
-    x = X * rcp(Z);
-    y = Y * rcp(Z);
+    x = X * rcp_precise(Z);
+    y = Y * rcp_precise(Z);
 }
 
 STAGE_PP(uniform_color, const SkRasterPipeline_UniformColorCtx* c) {
@@ -3246,14 +3377,14 @@ STAGE_PP(clamp_gamut, Ctx::None) {
 }
 
 STAGE_PP(premul, Ctx::None) {
-    r = div255(r * a);
-    g = div255(g * a);
-    b = div255(b * a);
+    r = div255_accurate(r * a);
+    g = div255_accurate(g * a);
+    b = div255_accurate(b * a);
 }
 STAGE_PP(premul_dst, Ctx::None) {
-    dr = div255(dr * da);
-    dg = div255(dg * da);
-    db = div255(db * da);
+    dr = div255_accurate(dr * da);
+    dg = div255_accurate(dg * da);
+    db = div255_accurate(db * da);
 }
 
 STAGE_PP(force_opaque    , Ctx::None) {  a = 255; }
@@ -3282,6 +3413,13 @@ STAGE_PP(move_dst_src, Ctx::None) {
     g = dg;
     b = db;
     a = da;
+}
+
+STAGE_PP(swap_src_dst, Ctx::None) {
+    std::swap(r, dr);
+    std::swap(g, dg);
+    std::swap(b, db);
+    std::swap(a, da);
 }
 
 // ~~~~~~ Blend modes ~~~~~~ //
@@ -3357,6 +3495,19 @@ SI U32 ix_and_ptr(T** ptr, const SkRasterPipeline_GatherCtx* ctx, F x, F y) {
 
     *ptr = (const T*)ctx->pixels;
     return trunc_(y)*ctx->stride + trunc_(x);
+}
+
+template <typename T>
+SI U32 ix_and_ptr(T** ptr, const SkRasterPipeline_GatherCtx* ctx, I32 x, I32 y) {
+    // Exclusive -> inclusive.
+    const I32 w =  ctx->width - 1,
+              h = ctx->height - 1;
+
+    U32 ax = cast<U32>(min(max(0, x), w)),
+        ay = cast<U32>(min(max(0, y), h));
+
+    *ptr = (const T*)ctx->pixels;
+    return ay * ctx->stride + ax;
 }
 
 template <typename V, typename T>
@@ -3714,6 +3865,9 @@ STAGE_GP(gather_a8, const SkRasterPipeline_GatherCtx* ctx) {
     r = g = b = 0;
     a = cast<U16>(gather<U8>(ptr, ix));
 }
+STAGE_PP(store_r8, const SkRasterPipeline_MemoryCtx* ctx) {
+    store_8(ptr_at_xy<uint8_t>(ctx, dx,dy), tail, r);
+}
 
 STAGE_PP(alpha_to_gray, Ctx::None) {
     r = g = b = a;
@@ -3723,9 +3877,21 @@ STAGE_PP(alpha_to_gray_dst, Ctx::None) {
     dr = dg = db = da;
     da = 255;
 }
+STAGE_PP(alpha_to_red, Ctx::None) {
+    r = a;
+    a = 255;
+}
+STAGE_PP(alpha_to_red_dst, Ctx::None) {
+    dr = da;
+    da = 255;
+}
+
 STAGE_PP(bt709_luminance_or_luma_to_alpha, Ctx::None) {
     a = (r*54 + g*183 + b*19)/256;  // 0.2126, 0.7152, 0.0722 with 256 denominator.
     r = g = b = 0;
+}
+STAGE_PP(bt709_luminance_or_luma_to_rgb, Ctx::None) {
+    r = g = b =(r*54 + g*183 + b*19)/256;  // 0.2126, 0.7152, 0.0722 with 256 denominator.
 }
 
 // ~~~~~~ Coverage scales / lerps ~~~~~~ //
@@ -3962,6 +4128,105 @@ STAGE_GP(evenly_spaced_2_stop_gradient, const SkRasterPipeline_EvenlySpaced2Stop
                    &r,&g,&b,&a);
 }
 
+SI F   cast  (U32 v) { return      __builtin_convertvector((I32)v,   F); }
+#if !defined(SK_SUPPORT_LEGACY_BILERP_HIGHP)
+STAGE_GP(bilerp_clamp_8888, const SkRasterPipeline_GatherCtx* ctx) {
+    // Quantize sample point and transform into lerp coordinates converting them to 16.16 fixed
+    // point number.
+    I32 qx = cast<I32>(floor_(65536.0f * x + 0.5f)) - 32768,
+        qy = cast<I32>(floor_(65536.0f * y + 0.5f)) - 32768;
+
+    // Calculate screen coordinates sx & sy by flooring qx and qy.
+    I32 sx = qx >> 16,
+        sy = qy >> 16;
+
+    // We are going to perform a change of parameters for qx on [0, 1) to tx on [-1, 1).
+    // This will put tx in Q15 format for use with q_mult.
+    // Calculate tx and ty on the interval of [-1, 1). Give {qx} and {qy} are on the interval
+    // [0, 1), where {v} is fract(v), we can transform to tx in the following manner ty follows
+    // the same math:
+    //     tx = 2 * {qx} - 1, so
+    //     {qx} = (tx + 1) / 2.
+    // Calculate {qx} - 1 and {qy} - 1 where the {} operation is handled by the cast, and the - 1
+    // is handled by the ^ 0x8000, dividing by 2 is deferred and handled in lerpX and lerpY in
+    // order to use the full 16-bit resolution.
+    I16 tx = cast<I16>(qx ^ 0x8000),
+        ty = cast<I16>(qy ^ 0x8000);
+
+    // Substituting the {qx} by the equation for tx from above into the lerp equation where v is
+    // the lerped value:
+    //         v = {qx}*(R - L) + L,
+    //         v = 1/2*(tx + 1)*(R - L) + L
+    //     2 * v = (tx + 1)*(R - L) + 2*L
+    //           = tx*R - tx*L + R - L + 2*L
+    //           = tx*(R - L) + (R + L).
+    // Since R and L are on [0, 255] we need them on the interval [0, 1/2] to get them into form
+    // for Q15_mult. If L and R where in 16.16 format, this would be done by dividing by 2^9. In
+    // code, we can multiply by 2^7 to get the value directly.
+    //            2 * v = tx*(R - L) + (R + L)
+    //     2^-9 * 2 * v = tx*(R - L)*2^-9 + (R + L)*2^-9
+    //         2^-8 * v = 2^-9 * (tx*(R - L) + (R + L))
+    //                v = 1/2 * (tx*(R - L) + (R + L))
+    auto lerpX = [&](U16 left, U16 right) -> U16 {
+        I16 width  = (I16)(right - left) << 7;
+        U16 middle = (right + left) << 7;
+        // The constrained_add is the most subtle part of lerp. The first term is on the interval
+        // [-1, 1), and the second term is on the interval is on the interval [0, 1) because
+        // both terms are too high by a factor of 2 which will be handled below. (Both R and L are
+        // on [0, 1/2), but the sum R + L is on the interval [0, 1).) Generally, the sum below
+        // should overflow, but because we know that sum produces an output on the
+        // interval [0, 1) we know that the extra bit that would be needed will always be 0. So
+        // we need to be careful to treat this sum as an unsigned positive number in the divide
+        // by 2 below. Add +1 for rounding.
+        U16 v2  = constrained_add(scaled_mult(tx, width), middle) + 1;
+        // Divide by 2 to calculate v and at the same time bring the intermediate value onto the
+        // interval [0, 1/2] to set up for the lerpY.
+        return v2 >> 1;
+    };
+
+    const uint32_t* ptr;
+    U32 ix = ix_and_ptr(&ptr, ctx, sx, sy);
+    U16 leftR, leftG, leftB, leftA;
+    from_8888(gather<U32>(ptr, ix), &leftR,&leftG,&leftB,&leftA);
+
+    ix = ix_and_ptr(&ptr, ctx, sx+1, sy);
+    U16 rightR, rightG, rightB, rightA;
+    from_8888(gather<U32>(ptr, ix), &rightR,&rightG,&rightB,&rightA);
+
+    U16 topR = lerpX(leftR, rightR),
+        topG = lerpX(leftG, rightG),
+        topB = lerpX(leftB, rightB),
+        topA = lerpX(leftA, rightA);
+
+    ix = ix_and_ptr(&ptr, ctx, sx, sy+1);
+    from_8888(gather<U32>(ptr, ix), &leftR,&leftG,&leftB,&leftA);
+
+    ix = ix_and_ptr(&ptr, ctx, sx+1, sy+1);
+    from_8888(gather<U32>(ptr, ix), &rightR,&rightG,&rightB,&rightA);
+
+    U16 bottomR = lerpX(leftR, rightR),
+        bottomG = lerpX(leftG, rightG),
+        bottomB = lerpX(leftB, rightB),
+        bottomA = lerpX(leftA, rightA);
+
+    // lerpY plays the same mathematical tricks as lerpX, but the final divide is by 256 resulting
+    // in a value on [0, 255].
+    auto lerpY = [&](U16 top, U16 bottom) -> U16 {
+        I16 width  = (I16)bottom - top;
+        U16 middle = bottom + top;
+        // Add + 0x80 for rounding.
+        U16 blend  = constrained_add(scaled_mult(ty, width), middle) + 0x80;
+
+        return blend >> 8;
+    };
+
+    r = lerpY(topR, bottomR);
+    g = lerpY(topG, bottomG);
+    b = lerpY(topB, bottomB);
+    a = lerpY(topA, bottomA);
+}
+#endif  // SK_SUPPORT_LEGACY_BILERP_HIGHP
+
 STAGE_GG(xy_to_unit_angle, Ctx::None) {
     F xabs = abs_(x),
       yabs = abs_(y);
@@ -4002,151 +4267,7 @@ STAGE_PP(srcover_rgba_8888, const SkRasterPipeline_MemoryCtx* ctx) {
     store_8888_(ptr, tail, r,g,b,a);
 }
 
-#if defined(SK_DISABLE_LOWP_BILERP_CLAMP_CLAMP_STAGE)
-    static void(*bilerp_clamp_8888)(void) = nullptr;
-    static void(*bilinear)(void) = nullptr;
-#else
-STAGE_GP(bilerp_clamp_8888, const SkRasterPipeline_GatherCtx* ctx) {
-    // (cx,cy) are the center of our sample.
-    F cx = x,
-      cy = y;
-
-    // All sample points are at the same fractional offset (fx,fy).
-    // They're the 4 corners of a logical 1x1 pixel surrounding (x,y) at (0.5,0.5) offsets.
-    F fx = fract(cx + 0.5f),
-      fy = fract(cy + 0.5f);
-
-    // We'll accumulate the color of all four samples into {r,g,b,a} directly.
-    r = g = b = a = 0;
-
-    // The first three sample points will calculate their area using math
-    // just like in the float code above, but the fourth will take up all the rest.
-    //
-    // Logically this is the same as doing the math for the fourth pixel too,
-    // but rounding error makes this a better strategy, keeping opaque opaque, etc.
-    //
-    // We can keep up to 8 bits of fractional precision without overflowing 16-bit,
-    // so our "1.0" area is 256.
-    const uint16_t bias = 256;
-    U16 remaining = bias;
-
-    for (float dy = -0.5f; dy <= +0.5f; dy += 1.0f)
-    for (float dx = -0.5f; dx <= +0.5f; dx += 1.0f) {
-        // (x,y) are the coordinates of this sample point.
-        F x = cx + dx,
-          y = cy + dy;
-
-        // ix_and_ptr() will clamp to the image's bounds for us.
-        const uint32_t* ptr;
-        U32 ix = ix_and_ptr(&ptr, ctx, x,y);
-
-        U16 sr,sg,sb,sa;
-        from_8888(gather<U32>(ptr, ix), &sr,&sg,&sb,&sa);
-
-        // In bilinear interpolation, the 4 pixels at +/- 0.5 offsets from the sample pixel center
-        // are combined in direct proportion to their area overlapping that logical query pixel.
-        // At positive offsets, the x-axis contribution to that rectangle is fx,
-        // or (1-fx) at negative x.  Same deal for y.
-        F sx = (dx > 0) ? fx : 1.0f - fx,
-          sy = (dy > 0) ? fy : 1.0f - fy;
-
-        U16 area = (dy == 0.5f && dx == 0.5f) ? remaining
-                                              : cast<U16>(sx * sy * bias);
-        for (size_t i = 0; i < N; i++) {
-            SkASSERT(remaining[i] >= area[i]);
-        }
-        remaining -= area;
-
-        r += sr * area;
-        g += sg * area;
-        b += sb * area;
-        a += sa * area;
-    }
-
-    r = (r + bias/2) / bias;
-    g = (g + bias/2) / bias;
-    b = (b + bias/2) / bias;
-    a = (a + bias/2) / bias;
-}
-
-// TODO: lowp::tile() is identical to the highp tile()... share?
-SI F tile(F v, SkTileMode mode, float limit, float invLimit) {
-    // After ix_and_ptr() will clamp the output of tile(), so we need not clamp here.
-    switch (mode) {
-        case SkTileMode::kDecal:  // TODO, for now fallthrough to clamp
-        case SkTileMode::kClamp:  return v;
-        case SkTileMode::kRepeat: return v - floor_(v*invLimit)*limit;
-        case SkTileMode::kMirror:
-            return abs_( (v-limit) - (limit+limit)*floor_((v-limit)*(invLimit*0.5f)) - limit );
-    }
-    SkUNREACHABLE;
-}
-
-SI void sample(const SkRasterPipeline_SamplerCtx2* ctx, F x, F y,
-               U16* r, U16* g, U16* b, U16* a) {
-    x = tile(x, ctx->tileX, ctx->width , ctx->invWidth );
-    y = tile(y, ctx->tileY, ctx->height, ctx->invHeight);
-
-    switch (ctx->ct) {
-        default: *r = *g = *b = *a = 0;  // TODO
-                 break;
-
-        case kRGBA_8888_SkColorType:
-        case kBGRA_8888_SkColorType: {
-            const uint32_t* ptr;
-            U32 ix = ix_and_ptr(&ptr, ctx, x,y);
-            from_8888(gather<U32>(ptr, ix), r,g,b,a);
-            if (ctx->ct == kBGRA_8888_SkColorType) {
-                std::swap(*r,*b);
-            }
-        } break;
-    }
-}
-
-template <int D>
-SI void sampler(const SkRasterPipeline_SamplerCtx2* ctx,
-                F cx, F cy, const F (&wx)[D], const F (&wy)[D],
-                U16* r, U16* g, U16* b, U16* a) {
-
-    float start = -0.5f*(D-1);
-
-    const uint16_t bias = 256;
-    U16 remaining = bias;
-
-    *r = *g = *b = *a = 0;
-    F y = cy + start;
-    for (int j = 0; j < D; j++, y += 1.0f) {
-        F x = cx + start;
-        for (int i = 0; i < D; i++, x += 1.0f) {
-            U16 R,G,B,A;
-            sample(ctx, x,y, &R,&G,&B,&A);
-
-            U16 w = (i == D-1 && j == D-1) ? remaining
-                                           : cast<U16>(wx[i]*wy[j]*bias);
-            remaining -= w;
-            *r += w*R;
-            *g += w*G;
-            *b += w*B;
-            *a += w*A;
-        }
-    }
-    *r = (*r + bias/2) / bias;
-    *g = (*g + bias/2) / bias;
-    *b = (*b + bias/2) / bias;
-    *a = (*a + bias/2) / bias;
-}
-
-STAGE_GP(bilinear, const SkRasterPipeline_SamplerCtx2* ctx) {
-    F fx = fract(x + 0.5f),
-      fy = fract(y + 0.5f);
-    const F wx[] = {1.0f - fx, fx};
-    const F wy[] = {1.0f - fy, fy};
-
-    sampler(ctx, x,y, wx,wy, &r,&g,&b,&a);
-}
-#endif
-
-// ~~~~~~ GrSwizzle stage ~~~~~~ //
+// ~~~~~~ skgpu::Swizzle stage ~~~~~~ //
 
 STAGE_PP(swizzle, void* ctx) {
     auto ir = r, ig = g, ib = b, ia = a;
@@ -4171,11 +4292,10 @@ STAGE_PP(swizzle, void* ctx) {
 // If a pipeline uses these stages, it'll boot it out of lowp into highp.
 #define NOT_IMPLEMENTED(st) static void (*st)(void) = nullptr;
     NOT_IMPLEMENTED(callback)
-    NOT_IMPLEMENTED(interpreter)
     NOT_IMPLEMENTED(unbounded_set_rgb)
     NOT_IMPLEMENTED(unbounded_uniform_color)
     NOT_IMPLEMENTED(unpremul)
-    NOT_IMPLEMENTED(dither)  // TODO
+    NOT_IMPLEMENTED(dither)
     NOT_IMPLEMENTED(load_16161616)
     NOT_IMPLEMENTED(load_16161616_dst)
     NOT_IMPLEMENTED(store_16161616)
@@ -4211,7 +4331,7 @@ STAGE_PP(swizzle, void* ctx) {
     NOT_IMPLEMENTED(store_1010102)
     NOT_IMPLEMENTED(gather_1010102)
     NOT_IMPLEMENTED(store_u16_be)
-    NOT_IMPLEMENTED(byte_tables)  // TODO
+    NOT_IMPLEMENTED(byte_tables)
     NOT_IMPLEMENTED(colorburn)
     NOT_IMPLEMENTED(colordodge)
     NOT_IMPLEMENTED(softlight)
@@ -4221,8 +4341,8 @@ STAGE_PP(swizzle, void* ctx) {
     NOT_IMPLEMENTED(luminosity)
     NOT_IMPLEMENTED(matrix_3x3)
     NOT_IMPLEMENTED(matrix_3x4)
-    NOT_IMPLEMENTED(matrix_4x5)  // TODO
-    NOT_IMPLEMENTED(matrix_4x3)  // TODO
+    NOT_IMPLEMENTED(matrix_4x5)
+    NOT_IMPLEMENTED(matrix_4x3)
     NOT_IMPLEMENTED(parametric)
     NOT_IMPLEMENTED(gamma_)
     NOT_IMPLEMENTED(PQish)
@@ -4230,28 +4350,32 @@ STAGE_PP(swizzle, void* ctx) {
     NOT_IMPLEMENTED(HLGinvish)
     NOT_IMPLEMENTED(rgb_to_hsl)
     NOT_IMPLEMENTED(hsl_to_rgb)
-    NOT_IMPLEMENTED(gauss_a_to_rgba)  // TODO
-    NOT_IMPLEMENTED(mirror_x)         // TODO
-    NOT_IMPLEMENTED(repeat_x)         // TODO
-    NOT_IMPLEMENTED(mirror_y)         // TODO
-    NOT_IMPLEMENTED(repeat_y)         // TODO
+    NOT_IMPLEMENTED(gauss_a_to_rgba)
+    NOT_IMPLEMENTED(mirror_x)
+    NOT_IMPLEMENTED(repeat_x)
+    NOT_IMPLEMENTED(mirror_y)
+    NOT_IMPLEMENTED(repeat_y)
     NOT_IMPLEMENTED(negate_x)
-    NOT_IMPLEMENTED(bicubic)  // TODO if I can figure out negative weights
+    NOT_IMPLEMENTED(bilinear)
+#if defined(SK_SUPPORT_LEGACY_BILERP_HIGHP)
+    NOT_IMPLEMENTED(bilerp_clamp_8888)
+#endif
+    NOT_IMPLEMENTED(bicubic)
     NOT_IMPLEMENTED(bicubic_clamp_8888)
-    NOT_IMPLEMENTED(bilinear_nx)      // TODO
-    NOT_IMPLEMENTED(bilinear_ny)      // TODO
-    NOT_IMPLEMENTED(bilinear_px)      // TODO
-    NOT_IMPLEMENTED(bilinear_py)      // TODO
-    NOT_IMPLEMENTED(bicubic_n3x)      // TODO
-    NOT_IMPLEMENTED(bicubic_n1x)      // TODO
-    NOT_IMPLEMENTED(bicubic_p1x)      // TODO
-    NOT_IMPLEMENTED(bicubic_p3x)      // TODO
-    NOT_IMPLEMENTED(bicubic_n3y)      // TODO
-    NOT_IMPLEMENTED(bicubic_n1y)      // TODO
-    NOT_IMPLEMENTED(bicubic_p1y)      // TODO
-    NOT_IMPLEMENTED(bicubic_p3y)      // TODO
-    NOT_IMPLEMENTED(save_xy)          // TODO
-    NOT_IMPLEMENTED(accumulate)       // TODO
+    NOT_IMPLEMENTED(bilinear_nx)
+    NOT_IMPLEMENTED(bilinear_ny)
+    NOT_IMPLEMENTED(bilinear_px)
+    NOT_IMPLEMENTED(bilinear_py)
+    NOT_IMPLEMENTED(bicubic_n3x)
+    NOT_IMPLEMENTED(bicubic_n1x)
+    NOT_IMPLEMENTED(bicubic_p1x)
+    NOT_IMPLEMENTED(bicubic_p3x)
+    NOT_IMPLEMENTED(bicubic_n3y)
+    NOT_IMPLEMENTED(bicubic_n1y)
+    NOT_IMPLEMENTED(bicubic_p1y)
+    NOT_IMPLEMENTED(bicubic_p3y)
+    NOT_IMPLEMENTED(save_xy)
+    NOT_IMPLEMENTED(accumulate)
     NOT_IMPLEMENTED(xy_to_2pt_conical_well_behaved)
     NOT_IMPLEMENTED(xy_to_2pt_conical_strip)
     NOT_IMPLEMENTED(xy_to_2pt_conical_focal_on_circle)
@@ -4268,5 +4392,7 @@ STAGE_PP(swizzle, void* ctx) {
 }  // namespace lowp
 
 }  // namespace SK_OPTS_NS
+
+#undef SI
 
 #endif//SkRasterPipeline_opts_DEFINED

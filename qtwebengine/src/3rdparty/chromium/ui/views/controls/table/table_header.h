@@ -7,7 +7,8 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/font_list.h"
 #include "ui/views/controls/table/table_view.h"
 #include "ui/views/view.h"
@@ -18,8 +19,7 @@ namespace views {
 // Views used to render the header for the table.
 class VIEWS_EXPORT TableHeader : public views::View {
  public:
-  // Internal class name.
-  static const char kViewClassName[];
+  METADATA_HEADER(TableHeader);
 
   // Amount the text is padded on the left/right side.
   static const int kHorizontalPadding;
@@ -28,6 +28,8 @@ class VIEWS_EXPORT TableHeader : public views::View {
   static const int kSortIndicatorWidth;
 
   explicit TableHeader(TableView* table);
+  TableHeader(const TableHeader&) = delete;
+  TableHeader& operator=(const TableHeader&) = delete;
   ~TableHeader() override;
 
   const gfx::FontList& font_list() const { return font_list_; }
@@ -35,9 +37,12 @@ class VIEWS_EXPORT TableHeader : public views::View {
   void ResizeColumnViaKeyboard(int index,
                                TableView::AdvanceDirection direction);
 
+  // Call to update TableHeader objects that rely on the focus state of its
+  // corresponding virtual accessibility views.
+  void UpdateFocusState();
+
   // views::View overrides.
   void OnPaint(gfx::Canvas* canvas) override;
-  const char* GetClassName() const override;
   gfx::Size CalculatePreferredSize() const override;
   bool GetNeedsNotificationWhenVisibleBoundsChange() const override;
   void OnVisibleBoundsChanged() override;
@@ -51,6 +56,8 @@ class VIEWS_EXPORT TableHeader : public views::View {
   void OnThemeChanged() override;
 
  private:
+  class HighlightPathGenerator;
+
   // Used to track the column being resized.
   struct ColumnResizeDetails {
     ColumnResizeDetails() = default;
@@ -64,6 +71,15 @@ class VIEWS_EXPORT TableHeader : public views::View {
     // Width of the column when the drag started.
     int initial_width = 0;
   };
+
+  // Returns true if the TableView's header has focus.
+  bool GetHeaderRowHasFocus() const;
+
+  // Gets the bounds of the currently active header cell.
+  gfx::Rect GetActiveHeaderCellBounds() const;
+
+  // Returns true if one of the TableHeader's cells has a focus indicator.
+  bool HasFocusIndicator() const;
 
   // If not already resizing and |event| is over a resizable column starts
   // resizing.
@@ -84,12 +100,10 @@ class VIEWS_EXPORT TableHeader : public views::View {
 
   const gfx::FontList font_list_;
 
-  TableView* table_;
+  raw_ptr<TableView> table_;
 
   // If non-null a resize is in progress.
   std::unique_ptr<ColumnResizeDetails> resize_details_;
-
-  DISALLOW_COPY_AND_ASSIGN(TableHeader);
 };
 
 }  // namespace views

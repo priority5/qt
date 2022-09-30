@@ -6,6 +6,8 @@
 
 #import <Security/Security.h>
 
+#include <ostream>
+
 #include "base/check.h"
 #include "base/memory/ptr_util.h"
 #include "device/fido/mac/authenticator_config.h"
@@ -54,8 +56,8 @@ std::unique_ptr<TouchIdContext> ScopedTouchIdTestEnvironment::ForwardCreate() {
 
 // static
 bool ScopedTouchIdTestEnvironment::ForwardTouchIdAvailable(
-    const AuthenticatorConfig& config) {
-  return g_current_environment->TouchIdAvailable(config);
+    AuthenticatorConfig config) {
+  return g_current_environment->TouchIdAvailable(std::move(config));
 }
 
 bool ScopedTouchIdTestEnvironment::SetTouchIdAvailable(bool available) {
@@ -63,7 +65,7 @@ bool ScopedTouchIdTestEnvironment::SetTouchIdAvailable(bool available) {
 }
 
 bool ScopedTouchIdTestEnvironment::TouchIdAvailable(
-    const AuthenticatorConfig& config) {
+    AuthenticatorConfig config) {
   return touch_id_available_;
 }
 

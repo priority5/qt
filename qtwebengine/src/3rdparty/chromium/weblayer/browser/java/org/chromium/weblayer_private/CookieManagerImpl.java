@@ -11,7 +11,6 @@ import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
-import org.chromium.weblayer_private.interfaces.APICallException;
 import org.chromium.weblayer_private.interfaces.CookieChangeCause;
 import org.chromium.weblayer_private.interfaces.ICookieChangedCallbackClient;
 import org.chromium.weblayer_private.interfaces.ICookieManager;
@@ -20,6 +19,8 @@ import org.chromium.weblayer_private.interfaces.ObjectWrapper;
 import org.chromium.weblayer_private.interfaces.StrictModeWorkaround;
 
 import java.lang.ref.WeakReference;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Implementation of ICookieManager.
@@ -55,6 +56,16 @@ public final class CookieManagerImpl extends ICookieManager.Stub {
     }
 
     @Override
+    public void getResponseCookies(String url, IObjectWrapper callback) {
+        StrictModeWorkaround.apply();
+        ValueCallback<List<String>> valueCallback =
+                (ValueCallback<List<String>>) ObjectWrapper.unwrap(callback, ValueCallback.class);
+        Callback<String[]> baseCallback =
+                (String[] result) -> valueCallback.onReceiveValue(Arrays.asList(result));
+        CookieManagerImplJni.get().getResponseCookies(mNativeCookieManager, url, baseCallback);
+    }
+
+    @Override
     public IObjectWrapper addCookieChangedCallback(
             String url, String name, ICookieChangedCallbackClient callback) {
         StrictModeWorkaround.apply();
@@ -73,13 +84,9 @@ public final class CookieManagerImpl extends ICookieManager.Stub {
     }
 
     @CalledByNative
-    private static void onCookieChange(
-            ICookieChangedCallbackClient callback, String cookie, int cause) {
-        try {
-            callback.onCookieChanged(cookie, mojoCauseToJavaType(cause));
-        } catch (RemoteException e) {
-            throw new APICallException(e);
-        }
+    private static void onCookieChange(ICookieChangedCallbackClient callback, String cookie,
+            int cause) throws RemoteException {
+        callback.onCookieChanged(cookie, mojoCauseToJavaType(cause));
     }
 
     @CookieChangeCause
@@ -110,6 +117,8 @@ public final class CookieManagerImpl extends ICookieManager.Stub {
         boolean setCookie(
                 long nativeCookieManagerImpl, String url, String value, Callback<Boolean> callback);
         void getCookie(long nativeCookieManagerImpl, String url, Callback<String> callback);
+        void getResponseCookies(
+                long nativeCookieManagerImpl, String url, Callback<String[]> callback);
         int addCookieChangedCallback(long nativeCookieManagerImpl, String url, String name,
                 ICookieChangedCallbackClient callback);
         void removeCookieChangedCallback(long nativeCookieManagerImpl, int id);

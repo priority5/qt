@@ -51,7 +51,7 @@ PaintedScrollbarLayerImpl::PaintedScrollbarLayerImpl(
 PaintedScrollbarLayerImpl::~PaintedScrollbarLayerImpl() = default;
 
 std::unique_ptr<LayerImpl> PaintedScrollbarLayerImpl::CreateLayerImpl(
-    LayerTreeImpl* tree_impl) {
+    LayerTreeImpl* tree_impl) const {
   return PaintedScrollbarLayerImpl::Create(tree_impl, id(), orientation(),
                                            is_left_side_vertical_scrollbar(),
                                            is_overlay_scrollbar());
@@ -77,7 +77,7 @@ void PaintedScrollbarLayerImpl::PushPropertiesTo(LayerImpl* layer) {
   scrollbar_layer->set_track_ui_resource_id(track_ui_resource_id_);
   scrollbar_layer->set_thumb_ui_resource_id(thumb_ui_resource_id_);
 
-  scrollbar_layer->set_scrollbar_painted_opacity(painted_opacity_);
+  scrollbar_layer->SetScrollbarPaintedOpacity(painted_opacity_);
 }
 
 float PaintedScrollbarLayerImpl::OverlayScrollbarOpacity() const {
@@ -157,11 +157,12 @@ void PaintedScrollbarLayerImpl::AppendQuads(
   }
 }
 
-gfx::Rect PaintedScrollbarLayerImpl::GetEnclosingRectInTargetSpace() const {
+gfx::Rect PaintedScrollbarLayerImpl::GetEnclosingVisibleRectInTargetSpace()
+    const {
   if (internal_content_bounds_.IsEmpty())
     return gfx::Rect();
   DCHECK_GT(internal_contents_scale_, 0.f);
-  return GetScaledEnclosingRectInTargetSpace(internal_contents_scale_);
+  return GetScaledEnclosingVisibleRectInTargetSpace(internal_contents_scale_);
 }
 
 void PaintedScrollbarLayerImpl::SetJumpOnTrackClick(bool jump_on_track_click) {
@@ -274,6 +275,13 @@ void PaintedScrollbarLayerImpl::SetTrackRect(gfx::Rect track_rect) {
   if (track_rect_ == track_rect)
     return;
   track_rect_ = track_rect;
+  NoteLayerPropertyChanged();
+}
+
+void PaintedScrollbarLayerImpl::SetScrollbarPaintedOpacity(float opacity) {
+  if (painted_opacity_ == opacity)
+    return;
+  painted_opacity_ = opacity;
   NoteLayerPropertyChanged();
 }
 

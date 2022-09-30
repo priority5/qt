@@ -354,16 +354,15 @@ export class Mouse {
     async click(x, y, options = {}) {
         const { delay = null } = options;
         if (delay !== null) {
-            await Promise.all([this.move(x, y), this.down(options)]);
+            await this.move(x, y);
+            await this.down(options);
             await new Promise((f) => setTimeout(f, delay));
             await this.up(options);
         }
         else {
-            await Promise.all([
-                this.move(x, y),
-                this.down(options),
-                this.up(options),
-            ]);
+            await this.move(x, y);
+            await this.down(options);
+            await this.up(options);
         }
     }
     /**
@@ -429,6 +428,81 @@ export class Mouse {
             pointerType: 'mouse',
         });
     }
+    /**
+     * Dispatches a `drag` event.
+     * @param start - starting point for drag
+     * @param target - point to drag to
+     */
+    async drag(start, target) {
+        const promise = new Promise((resolve) => {
+            this._client.once('Input.dragIntercepted', (event) => resolve(event.data));
+        });
+        await this.move(start.x, start.y);
+        await this.down();
+        await this.move(target.x, target.y);
+        return promise;
+    }
+    /**
+     * Dispatches a `dragenter` event.
+     * @param target - point for emitting `dragenter` event
+     * @param data - drag data containing items and operations mask
+     */
+    async dragEnter(target, data) {
+        await this._client.send('Input.dispatchDragEvent', {
+            type: 'dragEnter',
+            x: target.x,
+            y: target.y,
+            modifiers: this._keyboard._modifiers,
+            data,
+        });
+    }
+    /**
+     * Dispatches a `dragover` event.
+     * @param target - point for emitting `dragover` event
+     * @param data - drag data containing items and operations mask
+     */
+    async dragOver(target, data) {
+        await this._client.send('Input.dispatchDragEvent', {
+            type: 'dragOver',
+            x: target.x,
+            y: target.y,
+            modifiers: this._keyboard._modifiers,
+            data,
+        });
+    }
+    /**
+     * Performs a dragenter, dragover, and drop in sequence.
+     * @param target - point to drop on
+     * @param data - drag data containing items and operations mask
+     */
+    async drop(target, data) {
+        await this._client.send('Input.dispatchDragEvent', {
+            type: 'drop',
+            x: target.x,
+            y: target.y,
+            modifiers: this._keyboard._modifiers,
+            data,
+        });
+    }
+    /**
+     * Performs a drag, dragenter, dragover, and drop in sequence.
+     * @param target - point to drag from
+     * @param target - point to drop on
+     * @param options - An object of options. Accepts delay which,
+     * if specified, is the time to wait between `dragover` and `drop` in milliseconds.
+     * Defaults to 0.
+     */
+    async dragAndDrop(start, target, options = {}) {
+        const { delay = null } = options;
+        const data = await this.drag(start, target);
+        await this.dragEnter(target, data);
+        await this.dragOver(target, data);
+        if (delay) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+        await this.drop(target, data);
+        await this.up();
+    }
 }
 /**
  * The Touchscreen class exposes touchscreen events.
@@ -448,13 +522,6 @@ export class Touchscreen {
      * @param y - Vertical position of the tap.
      */
     async tap(x, y) {
-        // Touches appear to be lost during the first frame after navigation.
-        // This waits a frame before sending the tap.
-        // @see https://crbug.com/613219
-        await this._client.send('Runtime.evaluate', {
-            expression: 'new Promise(x => requestAnimationFrame(() => requestAnimationFrame(x)))',
-            awaitPromise: true,
-        });
         const touchPoints = [{ x: Math.round(x), y: Math.round(y) }];
         await this._client.send('Input.dispatchTouchEvent', {
             type: 'touchStart',
@@ -468,3 +535,4 @@ export class Touchscreen {
         });
     }
 }
+//# sourceMappingURL=Input.js.map

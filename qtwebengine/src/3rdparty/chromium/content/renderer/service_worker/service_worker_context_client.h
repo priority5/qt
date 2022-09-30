@@ -14,11 +14,9 @@
 
 #include "base/callback.h"
 #include "base/containers/id_map.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/strings/string16.h"
 #include "base/time/time.h"
-#include "content/common/content_export.h"
 #include "ipc/ipc_listener.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -41,7 +39,7 @@
 #include "third_party/blink/public/web/modules/service_worker/web_service_worker_context_client.h"
 #include "third_party/blink/public/web/modules/service_worker/web_service_worker_context_proxy.h"
 #include "third_party/blink/public/web/web_embedded_worker.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-forward.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -49,6 +47,7 @@ class SingleThreadTaskRunner;
 }
 
 namespace blink {
+class ChildURLLoaderFactoryBundle;
 class WebServiceWorkerContextProxy;
 class WebURLResponse;
 struct WebServiceWorkerInstalledScriptsManagerParams;
@@ -56,9 +55,7 @@ struct WebServiceWorkerInstalledScriptsManagerParams;
 
 namespace content {
 
-class ChildURLLoaderFactoryBundle;
 class EmbeddedWorkerInstanceClientImpl;
-class WebServiceWorkerFetchContext;
 
 // ServiceWorkerContextClient is a "client" of a service worker execution
 // context. It enables communication between the embedder and Blink's
@@ -72,8 +69,7 @@ class WebServiceWorkerFetchContext;
 //
 // Unless otherwise noted (here or in base class documentation), all methods
 // are called on the worker thread.
-class CONTENT_EXPORT ServiceWorkerContextClient
-    : public blink::WebServiceWorkerContextClient {
+class ServiceWorkerContextClient : public blink::WebServiceWorkerContextClient {
  public:
   // Called on the initiator thread.
   // - |is_starting_installed_worker| is true if the script is already installed
@@ -94,7 +90,7 @@ class CONTENT_EXPORT ServiceWorkerContextClient
       const GURL& service_worker_scope,
       const GURL& script_url,
       bool is_starting_installed_worker,
-      blink::mojom::RendererPreferencesPtr renderer_preferences,
+      const blink::RendererPreferences& renderer_preferences,
       mojo::PendingReceiver<blink::mojom::ServiceWorker>
           service_worker_receiver,
       mojo::PendingReceiver<blink::mojom::ControllerServiceWorker>
@@ -113,6 +109,11 @@ class CONTENT_EXPORT ServiceWorkerContextClient
       scoped_refptr<base::SingleThreadTaskRunner> initiator_thread_task_runner,
       int32_t service_worker_route_id,
       const std::vector<std::string>& cors_exempt_header_list);
+
+  ServiceWorkerContextClient(const ServiceWorkerContextClient&) = delete;
+  ServiceWorkerContextClient& operator=(const ServiceWorkerContextClient&) =
+      delete;
+
   // Called on the initiator thread.
   ~ServiceWorkerContextClient() override;
 
@@ -160,36 +161,24 @@ class CONTENT_EXPORT ServiceWorkerContextClient
                             const blink::WebString& source_url) override;
   void SetupNavigationPreload(int fetch_event_id,
                               const blink::WebURL& url,
-                              std::unique_ptr<blink::WebFetchEventPreloadHandle>
-                                  preload_handle) override;
+                              blink::CrossVariantMojoReceiver<
+                                  network::mojom::URLLoaderClientInterfaceBase>
+                                  preload_url_loader_client_receiver) override;
   void RequestTermination(RequestTerminationCallback callback) override;
   scoped_refptr<blink::WebServiceWorkerFetchContext>
   CreateWorkerFetchContextOnInitiatorThread() override;
-
-  /////////////////////////////////////////////////////////////////////////////
-  // The following are for use by NavigationPreloadRequest.
-  //
-  // Called to resolve the FetchEvent.preloadResponse promise.
   void OnNavigationPreloadResponse(
       int fetch_event_id,
       std::unique_ptr<blink::WebURLResponse> response,
-      mojo::ScopedDataPipeConsumerHandle data_pipe);
-
-  // Called when the navigation preload request completed. Either
-  // OnNavigationPreloadComplete() or OnNavigationPreloadError() must be
-  // called to release the preload related resources.
+      mojo::ScopedDataPipeConsumerHandle data_pipe) override;
   void OnNavigationPreloadComplete(int fetch_event_id,
                                    base::TimeTicks completion_time,
                                    int64_t encoded_data_length,
                                    int64_t encoded_body_length,
-                                   int64_t decoded_body_length);
-
-  // Called when an error occurred while receiving the response of the
-  // navigation preload request.
+                                   int64_t decoded_body_length) override;
   void OnNavigationPreloadError(
       int fetch_event_id,
-      std::unique_ptr<blink::WebServiceWorkerError> error);
-  /////////////////////////////////////////////////////////////////////////////
+      std::unique_ptr<blink::WebServiceWorkerError> error) override;
 
  private:
   struct WorkerContextData;
@@ -222,7 +211,7 @@ class CONTENT_EXPORT ServiceWorkerContextClient
   // See comments in EmbeddedWorkerStartParams::script_url_to_skip_throttling.
   const GURL script_url_to_skip_throttling_;
 
-  blink::mojom::RendererPreferencesPtr renderer_preferences_;
+  blink::RendererPreferences renderer_preferences_;
   // Passed on creation of ServiceWorkerFetchContext.
   mojo::PendingReceiver<blink::mojom::RendererPreferenceWatcher>
       preference_watcher_receiver_;
@@ -273,7 +262,7 @@ class CONTENT_EXPORT ServiceWorkerContextClient
   blink::mojom::EmbeddedWorkerStartTimingPtr start_timing_;
 
   // A URLLoaderFactory instance used for subresource loading.
-  scoped_refptr<ChildURLLoaderFactoryBundle> loader_factories_;
+  scoped_refptr<blink::ChildURLLoaderFactoryBundle> loader_factories_;
 
   // Out-of-process NetworkService:
   // Detects disconnection from the network service.
@@ -285,8 +274,6 @@ class CONTENT_EXPORT ServiceWorkerContextClient
   int32_t service_worker_route_id_;
 
   std::vector<std::string> cors_exempt_header_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerContextClient);
 };
 
 }  // namespace content

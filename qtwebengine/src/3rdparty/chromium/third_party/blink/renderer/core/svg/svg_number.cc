@@ -32,7 +32,7 @@
 
 #include "third_party/blink/renderer/core/svg/animation/smil_animation_effect_parameters.h"
 #include "third_party/blink/renderer/core/svg/svg_parser_utilities.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 
 namespace blink {
@@ -41,6 +41,12 @@ SVGNumber::SVGNumber(float value) : value_(value) {}
 
 SVGNumber* SVGNumber::Clone() const {
   return MakeGarbageCollected<SVGNumber>(value_);
+}
+
+SVGPropertyBase* SVGNumber::CloneForAnimation(const String& value) const {
+  auto* property = MakeGarbageCollected<SVGNumber>();
+  property->SetValueAsString(value);
+  return property;
 }
 
 String SVGNumber::ValueAsString() const {
@@ -66,7 +72,7 @@ SVGParsingError SVGNumber::SetValueAsString(const String& string) {
     return SVGParseStatus::kNoError;
 
   return WTF::VisitCharacters(string, [&](const auto* chars, unsigned length) {
-    return this->Parse(chars, chars + length);
+    return Parse(chars, chars + length);
   });
 }
 

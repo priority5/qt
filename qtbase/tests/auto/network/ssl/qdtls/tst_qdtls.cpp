@@ -1,32 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QTestEventLoop>
 
 #include <QtNetwork/qsslpresharedkeyauthenticator.h>
 #include <QtNetwork/qsslconfiguration.h>
@@ -42,11 +18,11 @@
 #include <QtCore/qcryptographichash.h>
 #include <QtCore/qscopeguard.h>
 #include <QtCore/qbytearray.h>
-#include <QtCore/qvector.h>
 #include <QtCore/qobject.h>
 #include <QtCore/qstring.h>
-#include <QtCore/qobject.h>
 #include <QtCore/qlist.h>
+
+#include "../shared/tlshelpers.h"
 
 #include <algorithm>
 
@@ -165,12 +141,16 @@ Q_DECLARE_METATYPE(QSslSocket::SslMode)
 Q_DECLARE_METATYPE(QSslSocket::PeerVerifyMode)
 Q_DECLARE_METATYPE(QList<QSslCertificate>)
 Q_DECLARE_METATYPE(QSslKey)
-Q_DECLARE_METATYPE(QVector<QSslError>)
 
 QT_BEGIN_NAMESPACE
 
+void qt_ForceTlsSecurityLevel();
+
 void tst_QDtls::initTestCase()
 {
+    if (!TlsAux::classImplemented(QSsl::ImplementedClass::Dtls))
+        QSKIP("The active TLS backend does not support DTLS");
+
     certDirPath = QFileInfo(QFINDTESTDATA("certs")).absolutePath();
     QVERIFY(certDirPath.size() > 0);
     certDirPath += QDir::separator() + QStringLiteral("certs") + QDir::separator();
@@ -193,7 +173,6 @@ void tst_QDtls::initTestCase()
 
     hostName = QStringLiteral("bob.org");
 
-    void qt_ForceTlsSecurityLevel();
     qt_ForceTlsSecurityLevel();
 }
 
@@ -719,10 +698,10 @@ void tst_QDtls::verificationErrors()
 
 void tst_QDtls::presetExpectedErrors_data()
 {
-    QTest::addColumn<QVector<QSslError>>("expectedTlsErrors");
+    QTest::addColumn<QList<QSslError>>("expectedTlsErrors");
     QTest::addColumn<bool>("works");
 
-    QVector<QSslError> expectedErrors{{QSslError::HostNameMismatch, selfSignedCert}};
+    QList<QSslError> expectedErrors { { QSslError::HostNameMismatch, selfSignedCert } };
     QTest::addRow("unexpected-self-signed") << expectedErrors << false;
     expectedErrors.push_back({QSslError::SelfSignedCertificate, selfSignedCert});
     QTest::addRow("all-errors-ignored") << expectedErrors << true;
@@ -730,7 +709,7 @@ void tst_QDtls::presetExpectedErrors_data()
 
 void tst_QDtls::presetExpectedErrors()
 {
-    QFETCH(const QVector<QSslError>, expectedTlsErrors);
+    QFETCH(const QList<QSslError>, expectedTlsErrors);
     QFETCH(const bool, works);
 
     connectHandshakeReadingSlots();

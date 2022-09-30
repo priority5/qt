@@ -17,18 +17,13 @@ const FEEDBACK_MIN_WIDTH = 500;
  * @type {number}
  * @const
  */
-const FEEDBACK_MIN_HEIGHT = 585;
+const FEEDBACK_MIN_HEIGHT = 610;
 
 /**
  * @type {number}
  * @const
  */
 const FEEDBACK_MIN_HEIGHT_LOGIN = 482;
-
-/** @type {number}
- * @const
- */
-const CONTENT_MARGIN_HEIGHT = 40;
 
 /** @type {number}
  * @const
@@ -51,6 +46,25 @@ const lastReader = null;
 let isSystemInfoReady = false;
 
 /**
+ * Which questions have been appended to the issue description text area.
+ * @type {!Object<string, boolean>}
+ */
+const appendedQuestions = {};
+
+/**
+ * Builds a RegExp that matches one of the given words. Each word has to match
+ * at word boundary and is not at the end of the tested string. For example,
+ * the word "SIM" would match the string "I have a sim card issue" but not
+ * "I have a simple issue" nor "I have a sim" (because the user might not have
+ * finished typing yet).
+ * @param {Array<string>} words The words to match.
+ */
+function buildWordMatcher(words) {
+  return new RegExp(
+      words.map((word) => '\\b' + word + '\\b[^$]').join('|'), 'i');
+}
+
+/**
  * Regular expression to check for all variants of blu[e]toot[h] with or without
  * space between the words; for BT when used as an individual word, or as two
  * individual characters, and for BLE when used as an individual word. Case
@@ -58,6 +72,23 @@ let isSystemInfoReady = false;
  * @type {RegExp}
  */
 const btRegEx = new RegExp('blu[e]?[ ]?toot[h]?|\\bb[ ]?t\\b|\\bble\\b', 'i');
+
+/**
+ * Regular expression to check for wifi-related keywords.
+ * @type {RegExp}
+ */
+const wifiRegEx =
+    buildWordMatcher(['wifi', 'wi-fi', 'internet', 'network', 'hotspot']);
+
+/**
+ * Regular expression to check for cellular-related keywords.
+ * @type {RegExp}
+ */
+const cellularRegEx = buildWordMatcher([
+  '2G',     '3G',      '4G',  '5G',   'LTE',  'UMTS',     'SIM',     'eSIM',
+  'mmWave', 'mobile',  'APN', 'IMEI', 'IMSI', 'eUICC',    'carrier', 'T.Mobile',
+  'TMO',    'Verizon', 'VZW', 'AT&T', 'MVNO', 'pin.lock', 'cellular'
+]);
 
 /**
  * Regular expression to check for all strings indicating that a user can't
@@ -86,6 +117,14 @@ const tetherRegEx = new RegExp('tether(ing)?', 'i');
  * @type {RegExp}
  */
 const smartLockRegEx = new RegExp('(smart|easy)[ ]?(un)?lock', 'i');
+
+/**
+ * Regular expression to check for keywords related to Nearby Share like
+ * "nearby (share)" or "phone (hub)".
+ * Case insensitive matching.
+ * @type {RegExp}
+ */
+const nearbyShareRegEx = new RegExp('nearby|phone', 'i');
 
 /**
  * The callback used by the sys_info_page to receive the event that the system
@@ -173,12 +212,96 @@ function openSlowTraceWindow() {
  * we show the bluetooth logs option, otherwise hide it.
  * @param {Event} inputEvent The input event for the description textarea.
  */
-function checkForBluetoothKeywords(inputEvent) {
+function checkForSendBluetoothLogs(inputEvent) {
   const isRelatedToBluetooth = btRegEx.test(inputEvent.target.value) ||
       cantConnectRegEx.test(inputEvent.target.value) ||
       tetherRegEx.test(inputEvent.target.value) ||
-      smartLockRegEx.test(inputEvent.target.value);
+      smartLockRegEx.test(inputEvent.target.value) ||
+      nearbyShareRegEx.test(inputEvent.target.value);
   $('bluetooth-checkbox-container').hidden = !isRelatedToBluetooth;
+}
+
+/**
+ * Checks if any keywords have associated questionnaire in a domain. If so,
+ * we append the questionnaire in $('description-text').
+ * @param {Event} inputEvent The input event for the description textarea.
+ */
+function checkForShowQuestionnaire(inputEvent) {
+  const toAppend = [];
+
+  // Match user-entered description before the questionnaire to reduce false
+  // positives due to matching the questionnaire questions and answers.
+  const questionnaireBeginPos =
+      inputEvent.target.value.indexOf(questionnaireBegin);
+  const matchedText = questionnaireBeginPos >= 0 ?
+      inputEvent.target.value.substring(0, questionnaireBeginPos) :
+      inputEvent.target.value;
+
+  if (btRegEx.test(matchedText)) {
+    toAppend.push(...domainQuestions['bluetooth']);
+  }
+
+  if (wifiRegEx.test(matchedText)) {
+    toAppend.push(...domainQuestions['wifi']);
+  }
+
+  if (cellularRegEx.test(matchedText)) {
+    toAppend.push(...domainQuestions['cellular']);
+  }
+
+  if (toAppend.length === 0) {
+    return;
+  }
+
+  const savedCursor = $('description-text').selectionStart;
+  if (Object.keys(appendedQuestions).length === 0) {
+    $('description-text').value += '\n\n' + questionnaireBegin + '\n';
+    $('questionnaire-notification').textContent = questionnaireNotification;
+  }
+
+  for (const question of toAppend) {
+    if (question in appendedQuestions) {
+      continue;
+    }
+
+    $('description-text').value += '* ' + question + ' \n';
+    appendedQuestions[question] = true;
+  }
+
+  // After appending text, the web engine automatically moves the cursor to the
+  // end of the appended text, so we need to move the cursor back to where the
+  // user was typing before.
+  $('description-text').selectionEnd = savedCursor;
+}
+
+/**
+ * Updates the description-text box based on whether it was valid.
+ * If invalid, indicate an error to the user. If valid, remove indication of the
+ * error.
+ */
+function updateDescription(wasValid) {
+  // Set visibility of the alert text for users who don't use a screen
+  // reader.
+  $('description-empty-error').hidden = wasValid;
+
+  // Change the textarea's aria-labelled by to ensure the screen reader does
+  // (or doesn't) read the error, as appropriate.
+  // If it does read the error, it should do so _before_ it reads the normal
+  // description.
+  const description = $('description-text');
+  description.setAttribute(
+      'aria-labelledby',
+      (wasValid ? '' : 'description-empty-error ') + 'free-form-text');
+  // Indicate whether input is valid.
+  description.setAttribute('aria-invalid', !wasValid);
+  if (!wasValid) {
+    // Return focus to field so user can correct error.
+    description.focus();
+  }
+
+  // We may have added or removed a line of text, so make sure the app window
+  // is the right size.
+  resizeAppWindow();
 }
 
 /**
@@ -188,16 +311,18 @@ function checkForBluetoothKeywords(inputEvent) {
  * @return {boolean} True if the report was sent.
  */
 function sendReport() {
-  if ($('description-text').value.length == 0) {
-    const description = $('description-text');
-    description.placeholder = loadTimeData.getString('noDescription');
-    description.focus();
+  if ($('description-text').value.length === 0) {
+    updateDescription(false);
     return false;
   }
+  // This isn't strictly necessary, since if we get past this point we'll
+  // succeed, but for future-compatibility (and in case we later add more
+  // failure cases after this), re-hide the alert and reset the aria label.
+  updateDescription(true);
 
   // Prevent double clicking from sending additional reports.
   $('send-report-button').disabled = true;
-  console.log('Feedback: Sending report');
+  console.info('Feedback: Sending report');
   if (!feedbackInfo.attachedFile && attachedFileBlob) {
     feedbackInfo.attachedFile = {
       name: $('attach-file').value,
@@ -216,7 +341,7 @@ function sendReport() {
     useSystemInfo = useHistograms = true;
   }
 
-  // <if expr="chromeos">
+  // <if expr="chromeos_ash">
   if ($('assistant-info-checkbox') != null &&
       $('assistant-info-checkbox').checked &&
       !$('assistant-checkbox-container').hidden) {
@@ -225,7 +350,7 @@ function sendReport() {
   }
   // </if>
 
-  // <if expr="chromeos">
+  // <if expr="chromeos_ash">
   if ($('bluetooth-logs-checkbox') != null &&
       $('bluetooth-logs-checkbox').checked &&
       !$('bluetooth-checkbox-container').hidden) {
@@ -272,12 +397,12 @@ function sendReport() {
 function cancel(e) {
   e.preventDefault();
   scheduleWindowClose();
-  if (feedbackInfo.flow == chrome.feedbackPrivate.FeedbackFlow.LOGIN) {
+  if (feedbackInfo.flow === chrome.feedbackPrivate.FeedbackFlow.LOGIN) {
     chrome.feedbackPrivate.loginFeedbackComplete();
   }
 }
 
-// <if expr="chromeos">
+// <if expr="chromeos_ash">
 /**
  * Update the page when performance feedback state is changed.
  */
@@ -302,19 +427,27 @@ function resizeAppWindow() {
     width = FEEDBACK_MIN_WIDTH;
   }
 
-  // We get the height by adding the titlebar height and the content height +
-  // margins. We can't get the margins for the content-pane here by using
-  // style.margin - the variable seems to not exist.
-  let height = $('title-bar').scrollHeight + $('content-pane').scrollHeight +
-      CONTENT_MARGIN_HEIGHT;
+  // The Chrome App window's maxHeight is set to the available screen height. If
+  // |height| would result in a window that exceeds maxHeight a scrollbar will
+  // appear in the content-pane.
+  // |height| is calculated as the sum of the scrollHeights of the body's
+  // children. This is necessary as the content-pane is set to fill the
+  // remaining height of the body after its siblings have been laid out. Summing
+  // the children's scrollHeight gives us the desired height of the content area
+  // which the Chrome App window uses to size the window accordingly.
+  let height = Array.from(document.body.children)
+                   .reduce((acc, el) => acc + el.scrollHeight, 0);
 
   let minHeight = FEEDBACK_MIN_HEIGHT;
-  if (feedbackInfo.flow == chrome.feedbackPrivate.FeedbackFlow.LOGIN) {
+  if (feedbackInfo.flow === chrome.feedbackPrivate.FeedbackFlow.LOGIN) {
     minHeight = FEEDBACK_MIN_HEIGHT_LOGIN;
   }
   height = Math.max(height, minHeight);
 
-  chrome.app.window.current().resizeTo(width, height);
+  // Update |outerBounds.maxHeight| in case available screen height has changed.
+  chrome.app.window.current().outerBounds.maxHeight = window.screen.availHeight;
+  chrome.app.window.current().innerBounds.width = width;
+  chrome.app.window.current().innerBounds.height = height;
 }
 
 /**
@@ -360,14 +493,22 @@ function initialize() {
 
       if (feedbackInfo.includeBluetoothLogs) {
         assert(
-            feedbackInfo.flow ==
+            feedbackInfo.flow ===
             chrome.feedbackPrivate.FeedbackFlow.GOOGLE_INTERNAL);
         $('description-text')
-            .addEventListener('input', checkForBluetoothKeywords);
+            .addEventListener('input', checkForSendBluetoothLogs);
+      }
+
+      if (feedbackInfo.showQuestionnaire) {
+        assert(
+            feedbackInfo.flow ===
+            chrome.feedbackPrivate.FeedbackFlow.GOOGLE_INTERNAL);
+        $('description-text')
+            .addEventListener('input', checkForShowQuestionnaire);
       }
 
       if ($('assistant-checkbox-container') != null &&
-          feedbackInfo.flow ==
+          feedbackInfo.flow ===
               chrome.feedbackPrivate.FeedbackFlow.GOOGLE_INTERNAL &&
           feedbackInfo.fromAssistant) {
         $('assistant-checkbox-container').hidden = false;
@@ -441,14 +582,14 @@ function initialize() {
 
       // No URL, file attachment, or window minimizing for login screen
       // feedback.
-      if (feedbackInfo.flow == chrome.feedbackPrivate.FeedbackFlow.LOGIN) {
+      if (feedbackInfo.flow === chrome.feedbackPrivate.FeedbackFlow.LOGIN) {
         $('page-url').hidden = true;
         $('attach-file-container').hidden = true;
         $('attach-file-note').hidden = true;
         $('minimize-button').hidden = true;
       }
 
-      // <if expr="chromeos">
+      // <if expr="chromeos_ash">
       if (feedbackInfo.traceId && ($('performance-info-area'))) {
         $('performance-info-area').hidden = false;
         $('performance-info-checkbox').checked = true;
@@ -516,7 +657,7 @@ function initialize() {
 
         // The following URLs don't open on login screen, so hide them.
         // TODO(crbug.com/1116383): Find a solution to display them properly.
-        if (feedbackInfo.flow != chrome.feedbackPrivate.FeedbackFlow.LOGIN) {
+        if (feedbackInfo.flow !== chrome.feedbackPrivate.FeedbackFlow.LOGIN) {
           const legalHelpPageUrlElement = $('legal-help-page-url');
           if (legalHelpPageUrlElement) {
             setupLinkHandlers(
@@ -597,7 +738,7 @@ function initialize() {
     $('send-report-button').onclick = sendReport;
     $('cancel-button').onclick = cancel;
     $('remove-attached-file').onclick = clearAttachedFile;
-    // <if expr="chromeos">
+    // <if expr="chromeos_ash">
     $('performance-info-checkbox')
         .addEventListener('change', performanceFeedbackChanged);
     // </if>

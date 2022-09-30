@@ -12,13 +12,15 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/variations/client_filterable_state.h"
 #include "components/variations/processed_study.h"
 #include "components/variations/study_filtering.h"
 #include "components/variations/variations_associated_data.h"
+#include "components/variations/variations_layers.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace variations {
 
@@ -39,14 +41,14 @@ void RegisterExperimentParams(const Study& study,
 // Returns the IDCollectionKey with which |experiment| should be associated.
 // Returns nullopt when |experiment| doesn't have a Google web or Google web
 // trigger experiment ID.
-base::Optional<IDCollectionKey> GetKeyForWebExperiment(
+absl::optional<IDCollectionKey> GetKeyForWebExperiment(
     const Study_Experiment& experiment) {
   bool has_web_experiment_id = experiment.has_google_web_experiment_id();
   bool has_web_trigger_experiment_id =
       experiment.has_google_web_trigger_experiment_id();
 
   if (!has_web_experiment_id && !has_web_trigger_experiment_id)
-    return base::nullopt;
+    return absl::nullopt;
 
   // An experiment cannot have both |google_web_experiment_id| and
   // |google_trigger_web_experiment_id|. This is enforced by the variations
@@ -75,7 +77,7 @@ void RegisterVariationIds(const Study_Experiment& experiment,
                                     variation_id);
   }
 
-  base::Optional<IDCollectionKey> key = GetKeyForWebExperiment(experiment);
+  absl::optional<IDCollectionKey> key = GetKeyForWebExperiment(experiment);
   if (!key.has_value())
     return;
 
@@ -187,11 +189,9 @@ bool ShouldForceExperiment(const Study_Experiment& experiment,
 
 }  // namespace
 
-VariationsSeedProcessor::VariationsSeedProcessor() {
-}
+VariationsSeedProcessor::VariationsSeedProcessor() = default;
 
-VariationsSeedProcessor::~VariationsSeedProcessor() {
-}
+VariationsSeedProcessor::~VariationsSeedProcessor() = default;
 
 void VariationsSeedProcessor::CreateTrialsFromSeed(
     const VariationsSeed& seed,
@@ -199,8 +199,11 @@ void VariationsSeedProcessor::CreateTrialsFromSeed(
     const UIStringOverrideCallback& override_callback,
     const base::FieldTrial::EntropyProvider* low_entropy_provider,
     base::FeatureList* feature_list) {
+  base::UmaHistogramCounts1000("Variations.AppliedSeed.StudyCount",
+                               seed.study().size());
   std::vector<ProcessedStudy> filtered_studies;
-  FilterAndValidateStudies(seed, client_state, &filtered_studies);
+  VariationsLayers layers(seed, low_entropy_provider);
+  FilterAndValidateStudies(seed, client_state, layers, &filtered_studies);
   SetSeedVersion(seed.version());
 
   for (const ProcessedStudy& study : filtered_studies) {
@@ -211,6 +214,8 @@ void VariationsSeedProcessor::CreateTrialsFromSeed(
 
 // static
 bool VariationsSeedProcessor::ShouldStudyUseLowEntropy(const Study& study) {
+  // This should be kept in sync with the server-side layer validation
+  // code: https://go/chrome-variations-layer-validation
   for (int i = 0; i < study.experiment_size(); ++i) {
     const Study_Experiment& experiment = study.experiment(i);
     if (experiment.has_google_web_experiment_id() ||
@@ -267,6 +272,11 @@ void VariationsSeedProcessor::CreateTrialFromStudy(
       return;
     }
   }
+
+  // This study has no randomized experiments and none of its experiments were
+  // forced by flags so don't create a field trial.
+  if (processed_study.total_probability() <= 0)
+    return;
 
   uint32_t randomization_seed = 0;
   base::FieldTrial::RandomizationType randomization_type =

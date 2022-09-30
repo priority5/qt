@@ -8,17 +8,18 @@
 #include <vector>
 
 #include "base/containers/flat_map.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/viz/common/quads/aggregated_render_pass.h"
+#include "components/viz/service/display/aggregated_frame.h"
 #include "components/viz/service/viz_service_export.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkMatrix44.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/hdr_metadata.h"
 #include "ui/gfx/video_types.h"
 #include "ui/gl/gpu_switching_observer.h"
-#include "ui/gl/hdr_metadata.h"
 
 namespace viz {
 struct DebugRendererSettings;
@@ -57,9 +58,8 @@ class VIZ_SERVICE_EXPORT DCLayerOverlay {
   // after applying the |quad_rect.origin()| as an offset.
   gfx::Transform transform;
 
-  // If |is_clipped| is true, then clip to |clip_rect| in root target space.
-  bool is_clipped = false;
-  gfx::Rect clip_rect;
+  // If |clip_rect| is present, then clip to it in root target space.
+  absl::optional<gfx::Rect> clip_rect;
 
   // This is the color-space the texture should be displayed as. If invalid,
   // then the default for the texture should be used. For YUV textures, that's
@@ -69,7 +69,7 @@ class VIZ_SERVICE_EXPORT DCLayerOverlay {
   gfx::ProtectedVideoType protected_video_type =
       gfx::ProtectedVideoType::kClear;
 
-  gl::HDRMetadata hdr_metadata;
+  gfx::HDRMetadata hdr_metadata;
 };
 
 typedef std::vector<DCLayerOverlay> DCLayerOverlayList;
@@ -77,25 +77,33 @@ typedef std::vector<DCLayerOverlay> DCLayerOverlayList;
 class VIZ_SERVICE_EXPORT DCLayerOverlayProcessor
     : public ui::GpuSwitchingObserver {
  public:
+  using FilterOperationsMap =
+      base::flat_map<AggregatedRenderPassId, cc::FilterOperations*>;
   // When |skip_initialization_for_testing| is true, object will be isolated
   // for unit tests.
   explicit DCLayerOverlayProcessor(
       const DebugRendererSettings* debug_settings,
+      int allowed_yuv_overlay_count,
       bool skip_initialization_for_testing = false);
+
+  DCLayerOverlayProcessor(const DCLayerOverlayProcessor&) = delete;
+  DCLayerOverlayProcessor& operator=(const DCLayerOverlayProcessor&) = delete;
+
   virtual ~DCLayerOverlayProcessor();
 
   // Virtual for testing.
   virtual void Process(DisplayResourceProvider* resource_provider,
                        const gfx::RectF& display_rect,
+                       const FilterOperationsMap& render_pass_filters,
+                       const FilterOperationsMap& render_pass_backdrop_filters,
                        AggregatedRenderPassList* render_passes,
                        gfx::Rect* damage_rect,
+                       SurfaceDamageRectList surface_damage_rect_list,
                        DCLayerOverlayList* dc_layer_overlays);
   void ClearOverlayState();
   // This is the damage contribution due to previous frame's overlays which can
   // be empty.
-  gfx::Rect previous_frame_overlay_damage_contribution() {
-    return previous_frame_overlay_rect_union_;
-  }
+  gfx::Rect PreviousFrameOverlayDamageContribution();
 
   // GpuSwitchingObserver implementation.
   void OnDisplayAdded() override;
@@ -113,7 +121,6 @@ class VIZ_SERVICE_EXPORT DCLayerOverlayProcessor
                              bool is_overlay,
                              QuadList::Iterator* new_it,
                              size_t* new_index,
-                             gfx::Rect* this_frame_underlay_rect,
                              gfx::Rect* damage_rect,
                              DCLayerOverlayList* dc_layer_overlays);
 
@@ -126,31 +133,51 @@ class VIZ_SERVICE_EXPORT DCLayerOverlayProcessor
   void ProcessForUnderlay(const gfx::RectF& display_rect,
                           AggregatedRenderPass* render_pass,
                           const gfx::Rect& quad_rectangle,
+                          const gfx::Rect& occluding_damage_rect,
                           const QuadList::Iterator& it,
+                          size_t processed_overlay_count,
                           gfx::Rect* damage_rect,
-                          gfx::Rect* this_frame_underlay_rect,
                           DCLayerOverlay* dc_layer);
+
+  void UpdateRootDamageRect(const gfx::RectF& display_rect,
+                            gfx::Rect* damage_rect);
+
+  void RemoveOverlayDamageRect(const QuadList::Iterator& it,
+                               const gfx::Rect& quad_rectangle,
+                               const gfx::Rect& occluding_damage_rect,
+                               gfx::Rect* damage_rect);
 
   void InsertDebugBorderDrawQuad(const DCLayerOverlayList* dc_layer_overlays,
                                  AggregatedRenderPass* render_pass,
                                  const gfx::RectF& display_rect,
                                  gfx::Rect* damage_rect);
+  bool IsPreviousFrameUnderlayRect(const gfx::Rect& quad_rectangle,
+                                   size_t index);
 
   bool has_overlay_support_;
-  // Reference to the global viz singleton.
-  const DebugRendererSettings* const debug_settings_;
+  const int allowed_yuv_overlay_count_;
+  int processed_yuv_overlay_count_ = 0;
 
-  gfx::Rect previous_frame_underlay_rect_;
+  // Reference to the global viz singleton.
+  const raw_ptr<const DebugRendererSettings> debug_settings_;
+
+  bool previous_frame_underlay_is_opaque_ = true;
   gfx::RectF previous_display_rect_;
-  // previous and current overlay_rect_union_ include both overlay and underlay
-  gfx::Rect previous_frame_overlay_rect_union_;
-  gfx::Rect current_frame_overlay_rect_union_;
-  int previous_frame_processed_overlay_count_ = 0;
-  int current_frame_processed_overlay_count_ = 0;
+  std::vector<size_t> damages_to_be_removed_;
+
+  struct OverlayRect {
+    gfx::Rect rect;
+    bool is_overlay;  // If false, it's an underlay.
+    bool operator==(const OverlayRect& b) {
+      return rect == b.rect && is_overlay == b.is_overlay;
+    }
+    bool operator!=(const OverlayRect& b) { return !(*this == b); }
+  };
+  std::vector<OverlayRect> previous_frame_overlay_rects_;
+  std::vector<OverlayRect> current_frame_overlay_rects_;
+  SurfaceDamageRectList surface_damage_rect_list_;
 
   scoped_refptr<base::SingleThreadTaskRunner> viz_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(DCLayerOverlayProcessor);
 };
 
 }  // namespace viz

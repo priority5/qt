@@ -1,56 +1,22 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Assistant of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "helpgenerator.h"
 #include "qhelpprojectdata_p.h"
 #include <qhelp_global.h>
 
 #include <QtCore/QtMath>
+#include <QtCore/QMap>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QDir>
 #include <QtCore/QDebug>
-#include <QtCore/QRegExp>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
+#include <QtCore/QMap>
 #include <QtCore/QVariant>
 #include <QtCore/QDateTime>
-#include <QtCore/QTextCodec>
+#include <QtCore/QStringConverter>
 #include <QtCore/QDataStream>
 #include <QtSql/QSqlQuery>
 
@@ -484,10 +450,10 @@ bool HelpGeneratorPrivate::insertFiles(const QStringList &files, const QString &
         QByteArray data = fi.readAll();
         if (fileName.endsWith(QLatin1String(".html"))
             || fileName.endsWith(QLatin1String(".htm"))) {
-                charSet = QHelpGlobal::codecFromData(data);
-                QTextStream stream(&data);
-                stream.setCodec(QTextCodec::codecForName(charSet.toLatin1().constData()));
-                title = QHelpGlobal::documentTitle(stream.readAll());
+            auto encoding = QStringDecoder::encodingForHtml(data);
+            if (!encoding)
+                encoding = QStringDecoder::Utf8;
+            title = QHelpGlobal::documentTitle(QStringDecoder(*encoding)(data));
         } else {
             title = fileName.mid(fileName.lastIndexOf(QLatin1Char('/')) + 1);
         }
@@ -807,15 +773,18 @@ bool HelpGeneratorPrivate::checkLinks(const QHelpProjectData &helpData)
             emit warning(tr("File \"%1\" cannot be opened.").arg(fileName));
             continue;
         }
-        const QRegExp linkPattern(QLatin1String("<(?:a href|img src)=\"?([^#\">]+)[#\">]"));
-        QTextStream stream(&htmlFile);
-        const QString codec = QHelpGlobal::codecFromData(htmlFile.read(1000));
-        stream.setCodec(QTextCodec::codecForName(codec.toLatin1().constData()));
-        const QString &content = stream.readAll();
+        const QRegularExpression linkPattern(QLatin1String("<(?:a href|img src)=\"?([^#\">]+)[#\">]"));
+        QByteArray data = htmlFile.readAll();
+        auto encoding = QStringDecoder::encodingForHtml(data);
+        if (!encoding)
+            encoding = QStringDecoder::Utf8;
+        const QString &content = QStringDecoder(*encoding)(data);
         QStringList invalidLinks;
-        for (int pos = linkPattern.indexIn(content); pos != -1;
-             pos = linkPattern.indexIn(content, pos + 1)) {
-            const QString &linkedFileName = linkPattern.cap(1);
+        QRegularExpressionMatch match;
+        int pos = 0;
+        while ((match = linkPattern.match(content, pos)).hasMatch()) {
+            pos = match.capturedEnd();
+            const QString &linkedFileName = match.captured(1);
             if (linkedFileName.contains(QLatin1String("://")))
                 continue;
             const QString &curDir = QFileInfo(fileName).dir().path();

@@ -1,33 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
 
 #include "qpalette.h"
 
@@ -41,6 +16,12 @@ private Q_SLOTS:
     void copySemantics();
     void moveSemantics();
     void setBrush();
+
+    void isBrushSet();
+    void setAllPossibleBrushes();
+    void noBrushesSetForDefaultPalette();
+    void cannotCheckIfInvalidBrushSet();
+    void checkIfBrushForCurrentGroupSet();
 };
 
 void tst_QPalette::roleValues_data()
@@ -116,6 +97,33 @@ void tst_QPalette::resolve()
 
     QVERIFY(p2ResolvedTo1 != p1);
     QVERIFY(p2ResolvedTo1 != p2);
+
+    QPalette p3;
+    // ensure the resolve mask is full
+    for (int r = 0; r < QPalette::NColorRoles; ++r)
+        p3.setBrush(QPalette::All, QPalette::ColorRole(r), Qt::red);
+    const QPalette::ResolveMask fullMask = p3.resolveMask();
+
+    QPalette p3ResolvedToP1 = p3.resolve(p1);
+    QVERIFY(p3ResolvedToP1.isCopyOf(p3));
+
+    QPalette p4;
+    QCOMPARE(p4.resolveMask(), QPalette::ResolveMask{});
+    // resolve must detach even if p4 has no mask
+    p4 = p4.resolve(p3);
+    QCOMPARE(p3.resolveMask(), fullMask);
+}
+
+
+static void compareAllPaletteData(const QPalette &firstPalette, const QPalette &secondPalette)
+{
+    QCOMPARE(firstPalette, secondPalette);
+
+    // For historical reasons, operator== compares only brushes, but it's not enough for proper
+    // comparison after move/copy, because some additional data can also be moved/copied.
+    // Let's compare this data here.
+    QCOMPARE(firstPalette.resolveMask(), secondPalette.resolveMask());
+    QCOMPARE(firstPalette.currentColorGroup(), secondPalette.currentColorGroup());
 }
 
 void tst_QPalette::copySemantics()
@@ -124,17 +132,17 @@ void tst_QPalette::copySemantics()
     const QPalette control = src; // copy construction
     QVERIFY(src != dst);
     QVERIFY(!src.isCopyOf(dst));
-    QCOMPARE(src, control);
+    compareAllPaletteData(src, control);
     QVERIFY(src.isCopyOf(control));
     dst = src; // copy assignment
-    QCOMPARE(dst, src);
-    QCOMPARE(dst, control);
+    compareAllPaletteData(dst, src);
+    compareAllPaletteData(dst, control);
     QVERIFY(dst.isCopyOf(src));
 
     dst = QPalette(Qt::green);
     QVERIFY(dst != src);
     QVERIFY(dst != control);
-    QCOMPARE(src, control);
+    compareAllPaletteData(src, control);
     QVERIFY(!dst.isCopyOf(src));
     QVERIFY(src.isCopyOf(control));
 }
@@ -144,13 +152,13 @@ void tst_QPalette::moveSemantics()
     QPalette src(Qt::red), dst;
     const QPalette control = src;
     QVERIFY(src != dst);
-    QCOMPARE(src, control);
+    compareAllPaletteData(src, control);
     QVERIFY(!dst.isCopyOf(src));
     QVERIFY(!dst.isCopyOf(control));
     dst = std::move(src); // move assignment
     QVERIFY(!dst.isCopyOf(src)); // isCopyOf() works on moved-from palettes, too
     QVERIFY(dst.isCopyOf(control));
-    QCOMPARE(dst, control);
+    compareAllPaletteData(dst, control);
     src = control; // check moved-from 'src' can still be assigned to (doesn't crash)
     QVERIFY(src.isCopyOf(dst));
     QVERIFY(src.isCopyOf(control));
@@ -158,7 +166,7 @@ void tst_QPalette::moveSemantics()
     QVERIFY(!src.isCopyOf(dst));
     QVERIFY(!src.isCopyOf(dst2));
     QVERIFY(!src.isCopyOf(control));
-    QCOMPARE(dst2, control);
+    compareAllPaletteData(dst2, control);
     QVERIFY(dst2.isCopyOf(dst));
     QVERIFY(dst2.isCopyOf(control));
     // check moved-from 'src' can still be destroyed (doesn't crash)
@@ -189,9 +197,71 @@ void tst_QPalette::setBrush()
 
     const QPalette pp = p;
     QVERIFY(pp.isCopyOf(p));
-    // Setting the same brush won't detach
-    p.setBrush(QPalette::Disabled, QPalette::Button, Qt::green);
-    QVERIFY(pp.isCopyOf(p));
+}
+
+void tst_QPalette::isBrushSet()
+{
+    QPalette p;
+
+    // Set only one color group
+    p.setBrush(QPalette::Active, QPalette::Mid, QBrush(Qt::red));
+    QVERIFY(p.isBrushSet(QPalette::Active, QPalette::Mid));
+    QVERIFY(!p.isBrushSet(QPalette::Inactive, QPalette::Mid));
+    QVERIFY(!p.isBrushSet(QPalette::Disabled, QPalette::Mid));
+
+    // Set all color groups
+    p.setBrush(QPalette::LinkVisited, QBrush(Qt::green));
+    QVERIFY(p.isBrushSet(QPalette::Active, QPalette::LinkVisited));
+    QVERIFY(p.isBrushSet(QPalette::Inactive, QPalette::LinkVisited));
+    QVERIFY(p.isBrushSet(QPalette::Disabled, QPalette::LinkVisited));
+
+    // Don't set flag when brush doesn't change (and also don't detach - QTBUG-98762)
+    QPalette p2;
+    QPalette p3;
+    QVERIFY(!p2.isBrushSet(QPalette::Active, QPalette::Dark));
+    p2.setBrush(QPalette::Active, QPalette::Dark, p2.brush(QPalette::Active, QPalette::Dark));
+    QVERIFY(!p3.isBrushSet(QPalette::Active, QPalette::Dark));
+    QVERIFY(p2.isBrushSet(QPalette::Active, QPalette::Dark));
+}
+
+void tst_QPalette::setAllPossibleBrushes()
+{
+    QPalette p;
+
+    QCOMPARE(p.resolveMask(), QPalette::ResolveMask(0));
+
+    for (int r = 0; r < QPalette::NColorRoles; ++r) {
+        p.setBrush(QPalette::All, QPalette::ColorRole(r), Qt::red);
+    }
+
+    for (int r = 0; r < QPalette::NColorRoles; ++r) {
+        for (int g = 0; g < QPalette::NColorGroups; ++g) {
+            QVERIFY(p.isBrushSet(QPalette::ColorGroup(g), QPalette::ColorRole(r)));
+        }
+    }
+}
+
+void tst_QPalette::noBrushesSetForDefaultPalette()
+{
+    QCOMPARE(QPalette().resolveMask(), QPalette::ResolveMask(0));
+}
+
+void tst_QPalette::cannotCheckIfInvalidBrushSet()
+{
+    QPalette p(Qt::red);
+
+    QVERIFY(!p.isBrushSet(QPalette::All, QPalette::LinkVisited));
+    QVERIFY(!p.isBrushSet(QPalette::Active, QPalette::NColorRoles));
+}
+
+void tst_QPalette::checkIfBrushForCurrentGroupSet()
+{
+    QPalette p;
+
+    p.setCurrentColorGroup(QPalette::Disabled);
+    p.setBrush(QPalette::Current, QPalette::Link, QBrush(Qt::yellow));
+
+    QVERIFY(p.isBrushSet(QPalette::Current, QPalette::Link));
 }
 
 QTEST_MAIN(tst_QPalette)

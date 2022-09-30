@@ -268,22 +268,27 @@ class NoFreeList final : public FreeList {
  public:
   size_t GuaranteedAllocatable(size_t maximum_freed) final {
     FATAL("NoFreeList can't be used as a standard FreeList. ");
+    return 0;
   }
   size_t Free(Address start, size_t size_in_bytes, FreeMode mode) final {
     FATAL("NoFreeList can't be used as a standard FreeList.");
+    return 0;
   }
   V8_WARN_UNUSED_RESULT FreeSpace Allocate(size_t size_in_bytes,
                                            size_t* node_size,
                                            AllocationOrigin origin) final {
     FATAL("NoFreeList can't be used as a standard FreeList.");
+    return FreeSpace();
   }
   Page* GetPageForSize(size_t size_in_bytes) final {
     FATAL("NoFreeList can't be used as a standard FreeList.");
+    return nullptr;
   }
 
  private:
   FreeListCategoryType SelectFreeListCategoryType(size_t size_in_bytes) final {
     FATAL("NoFreeList can't be used as a standard FreeList.");
+    return 0;
   }
 };
 
@@ -486,31 +491,6 @@ class V8_EXPORT_PRIVATE FreeListManyCachedOrigin
   V8_WARN_UNUSED_RESULT FreeSpace Allocate(size_t size_in_bytes,
                                            size_t* node_size,
                                            AllocationOrigin origin) override;
-};
-
-// FreeList for maps: since maps are all the same size, uses a single freelist.
-class V8_EXPORT_PRIVATE FreeListMap : public FreeList {
- public:
-  size_t GuaranteedAllocatable(size_t maximum_freed) override;
-
-  Page* GetPageForSize(size_t size_in_bytes) override;
-
-  FreeListMap();
-  ~FreeListMap() override;
-
-  V8_WARN_UNUSED_RESULT FreeSpace Allocate(size_t size_in_bytes,
-                                           size_t* node_size,
-                                           AllocationOrigin origin) override;
-
- private:
-  static const size_t kMinBlockSize = Map::kSize;
-  static const size_t kMaxBlockSize = MemoryChunk::kPageSize;
-  static const FreeListCategoryType kOnlyCategory = 0;
-
-  FreeListCategoryType SelectFreeListCategoryType(
-      size_t size_in_bytes) override {
-    return kOnlyCategory;
-  }
 };
 
 }  // namespace internal

@@ -25,30 +25,49 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_ELEMENT_H_
 
+#include "base/dcheck_is_on.h"
+#include "base/gtest_prod_util.h"
+#include "base/types/pass_key.h"
 #include "third_party/blink/public/common/input/pointer_id.h"
 #include "third_party/blink/public/common/metrics/document_update_reason.h"
+#include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink-forward.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/animation/animatable.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
-#include "third_party/blink/renderer/core/css/style_recalc.h"
+#include "third_party/blink/renderer/core/css/style_recalc_change.h"
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/dom_high_res_time_stamp.h"
 #include "third_party/blink/renderer/core/dom/element_data.h"
+#include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
+#include "third_party/blink/renderer/core/dom/focusgroup_flags.h"
 #include "third_party/blink/renderer/core/dom/names_map.h"
 #include "third_party/blink/renderer/core/dom/whitespace_attacher.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/region_capture_crop_id.h"
+#include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_table.h"
+#include "ui/gfx/geometry/rect_f.h"
+
+namespace gfx {
+class QuadF;
+class Vector2dF;
+}  // namespace gfx
 
 namespace blink {
 
 class AccessibleNode;
 class Attr;
 class Attribute;
+class ContainerQueryData;
+class ContainerQueryEvaluator;
+class CSSPropertyName;
 class CSSPropertyValueSet;
 class CSSStyleDeclaration;
 class CustomElementDefinition;
@@ -58,15 +77,16 @@ class DOMStringMap;
 class DOMTokenList;
 class DisplayLockContext;
 class Document;
+class EditContext;
 class ElementAnimations;
 class ElementInternals;
 class ElementIntersectionObserverData;
 class ElementRareData;
 class ExceptionState;
-class FloatQuad;
-class FloatSize;
 class FocusOptions;
 class GetInnerHTMLOptions;
+class HTMLFieldSetElement;
+class HTMLSelectMenuElement;
 class HTMLTemplateElement;
 class Image;
 class InputDeviceCapabilities;
@@ -74,20 +94,21 @@ class Locale;
 class MutableCSSPropertyValueSet;
 class NamedNodeMap;
 class PointerLockOptions;
+class PopupData;
 class PseudoElement;
-class PseudoElementStyleRequest;
 class ResizeObservation;
 class ResizeObserver;
+class ResizeObserverSize;
 class ScrollIntoViewOptions;
-class ScrollIntoViewOptionsOrBoolean;
 class ScrollToOptions;
 class ShadowRoot;
 class ShadowRootInit;
 class SpaceSplitString;
-class StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURL;
 class StylePropertyMap;
 class StylePropertyMapReadOnly;
-class V0CustomElementDefinition;
+class StyleRecalcContext;
+class StyleRequest;
+class V8UnionBooleanOrScrollIntoViewOptions;
 
 enum class CSSPropertyID;
 enum class CSSValueID;
@@ -96,7 +117,7 @@ enum class DocumentUpdateReason;
 
 struct FocusParams;
 
-using ScrollOffset = FloatSize;
+using ScrollOffset = gfx::Vector2dF;
 
 enum SpellcheckAttributeState {
   kSpellcheckAttributeTrue,
@@ -117,7 +138,7 @@ enum class ElementFlags {
 
 enum class ShadowRootType;
 
-enum class SlotAssignmentMode { kManual, kAuto };
+enum class SlotAssignmentMode { kManual, kNamed };
 enum class FocusDelegation { kNone, kDelegateFocus };
 
 enum class SelectionBehaviorOnFocus {
@@ -133,6 +154,16 @@ enum class NamedItemType {
   kNameOrId,
   kNameOrIdWithName,
 };
+
+enum class PopupValueType {
+  kNone,
+  kPopup,
+  kHint,
+  kAsync,
+};
+constexpr const char* kPopupTypeValuePopup = "popup";
+constexpr const char* kPopupTypeValueHint = "hint";
+constexpr const char* kPopupTypeValueAsync = "async";
 
 typedef HeapVector<Member<Attr>> AttrNodeList;
 
@@ -153,7 +184,6 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   DEFINE_ATTRIBUTE_EVENT_LISTENER(beforecut, kBeforecut)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(beforepaste, kBeforepaste)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(search, kSearch)
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(beforematch, kBeforematch)
 
   bool hasAttribute(const QualifiedName&) const;
   const AtomicString& getAttribute(const QualifiedName&) const;
@@ -195,11 +225,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool HasExplicitlySetAttrAssociatedElements(const QualifiedName& name);
   Element* GetElementAttribute(const QualifiedName& name);
   void SetElementAttribute(const QualifiedName&, Element*);
-  base::Optional<HeapVector<Member<Element>>> GetElementArrayAttribute(
+  HeapVector<Member<Element>>* GetElementArrayAttribute(
       const QualifiedName& name);
   void SetElementArrayAttribute(
-      const QualifiedName&,
-      const base::Optional<HeapVector<Member<Element>>>&);
+      const QualifiedName& name,
+      const HeapVector<Member<Element>>* given_elements);
 
   // Call this to get the value of an attribute that is known not to be the
   // style attribute or one of the SVG animatable attributes.
@@ -209,7 +239,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool FastAttributeLookupAllowed(const QualifiedName&) const;
 #endif
 
-#ifdef DUMP_NODE_STATISTICS
+#if DUMP_NODE_STATISTICS
   bool HasNamedNodeMap() const;
 #endif
   bool hasAttributes() const;
@@ -228,19 +258,22 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   const AtomicString& getAttributeNS(const AtomicString& namespace_uri,
                                      const AtomicString& local_name) const;
 
-  void setAttribute(const AtomicString& name,
-                    AtomicString value,
+  void setAttribute(AtomicString name,
+                    String value,
                     ExceptionState& exception_state = ASSERT_NO_EXCEPTION) {
-    SetAttributeHinted(name, WeakLowercaseIfNecessary(name), value,
+    WTF::AtomicStringTable::WeakResult weak_lowercase_name =
+        WeakLowercaseIfNecessary(name);
+    SetAttributeHinted(std::move(name), weak_lowercase_name, std::move(value),
                        exception_state);
   }
 
   // Trusted Types variant for explicit setAttribute() use.
-  void setAttribute(const AtomicString& name,
-                    const StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURL&
-                        string_or_trusted,
+  void setAttribute(AtomicString name,
+                    const V8TrustedType* trusted_string,
                     ExceptionState& exception_state) {
-    SetAttributeHinted(name, WeakLowercaseIfNecessary(name), string_or_trusted,
+    WTF::AtomicStringTable::WeakResult weak_lowercase_name =
+        WeakLowercaseIfNecessary(name);
+    SetAttributeHinted(std::move(name), weak_lowercase_name, trusted_string,
                        exception_state);
   }
 
@@ -253,11 +286,14 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
                                  const AtomicString& namespace_uri,
                                  const AtomicString& qualified_name,
                                  ExceptionState&);
-  void setAttributeNS(
-      const AtomicString& namespace_uri,
-      const AtomicString& qualified_name,
-      const StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURL&,
-      ExceptionState&);
+  void setAttributeNS(const AtomicString& namespace_uri,
+                      const AtomicString& qualified_name,
+                      String value,
+                      ExceptionState& exception_state);
+  void setAttributeNS(const AtomicString& namespace_uri,
+                      const AtomicString& qualified_name,
+                      const V8TrustedType* trusted_string,
+                      ExceptionState& exception_state);
 
   bool toggleAttribute(const AtomicString&, ExceptionState&);
   bool toggleAttribute(const AtomicString&, bool force, ExceptionState&);
@@ -272,9 +308,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   //   If element is in the HTML namespace and its node document is an HTML
   //   document, then set qualifiedName to qualifiedName in ASCII lowercase.
   //   https://dom.spec.whatwg.org/#concept-element-attributes-get-by-name
-  AtomicString LowercaseIfNecessary(const AtomicString&) const;
+  AtomicString LowercaseIfNecessary(AtomicString) const;
   WTF::AtomicStringTable::WeakResult WeakLowercaseIfNecessary(
-      const StringView&) const;
+      const AtomicString&) const;
 
   // NoncedElement implementation: this is only used by HTMLElement and
   // SVGElement, but putting the implementation here allows us to use
@@ -295,11 +331,16 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // This variant will not update the potentially invalid attributes. To be used
   // when not interested in style attribute or one of the SVG attributes.
   AttributeCollection AttributesWithoutUpdate() const;
+  // Similar to AttributesWithoutUpdate(), but with only the style attribute
+  // exempt (ie., SVG attributes are always synchronized, for simplicity).
+  // The style attribute is special because it is so frequently updated from
+  // JavaScript and also easily identifiable (it is a single attribute).
+  AttributeCollection AttributesWithoutStyleUpdate() const;
 
-  void scrollIntoView(ScrollIntoViewOptionsOrBoolean);
+  void scrollIntoView(const V8UnionBooleanOrScrollIntoViewOptions* arg);
   void scrollIntoView(bool align_to_top = true);
   void scrollIntoViewWithOptions(const ScrollIntoViewOptions*);
-  void ScrollIntoViewNoVisualUpdate(const ScrollIntoViewOptions*);
+  void ScrollIntoViewNoVisualUpdate(mojom::blink::ScrollIntoViewParamsPtr);
   void scrollIntoViewIfNeeded(bool center_if_needed = true);
 
   int OffsetLeft();
@@ -316,8 +357,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   double scrollTop();
   void setScrollLeft(double);
   void setScrollTop(double);
-  int scrollWidth();
-  int scrollHeight();
+  virtual int scrollWidth();
+  virtual int scrollHeight();
 
   void scrollBy(double x, double y);
   void scrollBy(const ScrollToOptions*);
@@ -325,16 +366,17 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void scrollTo(const ScrollToOptions*);
   LayoutBox* GetLayoutBoxForScrolling() const override;
 
-  IntRect BoundsInViewport() const;
+  gfx::Rect BoundsInViewport() const;
   // Returns an intersection rectangle of the bounds rectangle and the visual
   // viewport's rectangle in the visual viewport's coordinate space.
   // Applies ancestors' frames' clipping, but does not (yet) apply (overflow)
   // element clipping (crbug.com/889840).
-  IntRect VisibleBoundsInVisualViewport() const;
-  Vector<IntRect> OutlineRectsInVisualViewport(
+  gfx::Rect VisibleBoundsInVisualViewport() const;
+  Vector<gfx::Rect> OutlineRectsInVisualViewport(
       DocumentUpdateReason reason = DocumentUpdateReason::kUnknown) const;
 
   DOMRectList* getClientRects();
+  gfx::RectF GetBoundingClientRectNoLifecycleUpdate() const;
   DOMRect* getBoundingClientRect();
 
   const AtomicString& computedRole();
@@ -378,6 +420,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool HasTagName(const HTMLQualifiedName& tag_name) const {
     return ContainerNode::HasTagName(tag_name);
   }
+  bool HasTagName(const MathMLQualifiedName& tag_name) const {
+    return ContainerNode::HasTagName(tag_name);
+  }
   bool HasTagName(const SVGQualifiedName& tag_name) const {
     return ContainerNode::HasTagName(tag_name);
   }
@@ -401,7 +446,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   String nodeName() const override;
 
-  Element& CloneWithChildren(Document* = nullptr) const;
+  Element& CloneWithChildren(CloneChildrenFlag flag, Document* = nullptr) const;
   Element& CloneWithoutChildren(Document* = nullptr) const;
 
   void SetBooleanAttribute(const QualifiedName&, bool);
@@ -409,7 +454,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   virtual const CSSPropertyValueSet* AdditionalPresentationAttributeStyle() {
     return nullptr;
   }
-  void InvalidateStyleAttribute();
+  void InvalidateStyleAttribute(bool only_changed_independent_properties);
 
   const CSSPropertyValueSet* InlineStyle() const {
     return GetElementData() ? GetElementData()->inline_style_.Get() : nullptr;
@@ -428,6 +473,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool SetInlineStyleProperty(CSSPropertyID,
                               const String& value,
                               bool important = false);
+  void SetInlineStyleProperty(const CSSPropertyName&,
+                              const CSSValue&,
+                              bool important = false);
 
   bool RemoveInlineStyleProperty(CSSPropertyID);
   bool RemoveInlineStyleProperty(const AtomicString&);
@@ -442,6 +490,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   virtual void CollectStyleForPresentationAttribute(
       const QualifiedName&,
       const AtomicString&,
+      MutableCSSPropertyValueSet*) {}
+  // Subclasses can override these functions if there is extra style that needs
+  // to be mapped like attributes.
+  virtual bool HasExtraStyleForPresentationAttribute() const { return false; }
+  virtual void CollectExtraStyleForPresentationAttribute(
       MutableCSSPropertyValueSet*) {}
 
   // For exposing to DOM only.
@@ -483,6 +536,24 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // attributes in a start tag were added to the element.
   virtual void ParseAttribute(const AttributeModificationParams&);
 
+  // Popup API related functions.
+  void UpdatePopupAttribute(String);
+  bool HasValidPopupAttribute() const;
+  PopupData* GetPopupData() const;
+  bool popupOpen() const;
+  void showPopup();
+  void hidePopup();
+  static const Element* NearestOpenAncestralPopup(Node* start_node);
+  static void HandlePopupLightDismiss(const Event& event);
+  void InvokePopup(Element* invoker);
+  void SetPopupFocusOnShow();
+
+  // TODO(crbug.com/1197720): The popup position should be provided by the new
+  // anchored positioning scheme.
+  void SetNeedsRepositioningForSelectMenu(bool flag);
+  void SetOwnerSelectMenuElement(HTMLSelectMenuElement* element);
+  void AdjustPopupPositionForSelectMenu(ComputedStyle& style);
+
   virtual bool HasLegalLinkAttribute(const QualifiedName&) const;
   virtual const QualifiedName& SubResourceAttributeName() const;
 
@@ -511,34 +582,49 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   virtual LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout);
   virtual bool LayoutObjectIsNeeded(const ComputedStyle&) const;
-  void RecalcStyle(const StyleRecalcChange);
+
+  const ComputedStyle* ParentComputedStyle() const;
+
+  void RecalcStyle(const StyleRecalcChange, const StyleRecalcContext&);
   void RecalcStyleForTraversalRootAncestor();
   void RebuildLayoutTreeForTraversalRootAncestor() {
     RebuildFirstLetterLayoutTree();
     WhitespaceAttacher whitespace_attacher;
     RebuildMarkerLayoutTree(whitespace_attacher);
+    HandleSubtreeModifications();
   }
-  bool NeedsRebuildLayoutTree(
+  bool NeedsRebuildChildLayoutTrees(
       const WhitespaceAttacher& whitespace_attacher) const {
-    // TODO(futhark@chromium.org): !CanParticipateInFlatTree() can be removed
-    // when Shadow DOM V0 support is removed.
-    return NeedsReattachLayoutTree() || ChildNeedsReattachLayoutTree() ||
-           !CanParticipateInFlatTree() ||
+    return ChildNeedsReattachLayoutTree() || NeedsWhitespaceChildrenUpdate() ||
            (whitespace_attacher.TraverseIntoDisplayContents() &&
             HasDisplayContentsStyle());
   }
+  bool NeedsRebuildLayoutTree(
+      const WhitespaceAttacher& whitespace_attacher) const {
+    return NeedsReattachLayoutTree() ||
+           NeedsRebuildChildLayoutTrees(whitespace_attacher) ||
+           NeedsLayoutSubtreeUpdate();
+  }
   void RebuildLayoutTree(WhitespaceAttacher&);
+  void HandleSubtreeModifications();
   void PseudoStateChanged(CSSSelector::PseudoType);
+  void PseudoStateChangedForTesting(CSSSelector::PseudoType);
   void SetAnimationStyleChange(bool);
   void SetNeedsAnimationStyleRecalc();
 
   void SetNeedsCompositingUpdate();
 
-  // If type of ShadowRoot (either closed or open) is explicitly specified,
-  // creation of multiple shadow roots is prohibited in any combination and
-  // throws an exception.  Multiple shadow roots are allowed only when
-  // createShadowRoot() is used without any parameters from JavaScript.
-  ShadowRoot* createShadowRoot(ExceptionState&);
+  // Assigns a crop-ID to the element. It's an error to try to call this
+  // if the element already has a crop-ID attached (even if attempting to
+  // set the same crop-ID again).
+  //
+  // Not all element types have a region capture crop-ID, however using it here
+  // allows access to the element rare data struct. Currently, once an element
+  // is marked for region capture it cannot be unmarked.
+  void SetRegionCaptureCropId(std::unique_ptr<RegionCaptureCropId> crop_id);
+
+  // Returns a pointer to the crop-ID if one was set; nullptr otherwise.
+  const RegionCaptureCropId* GetRegionCaptureCropId() const;
 
   ShadowRoot* attachShadow(const ShadowRootInit*, ExceptionState&);
 
@@ -547,14 +633,14 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
                                    FocusDelegation,
                                    SlotAssignmentMode);
 
-  ShadowRoot& CreateV0ShadowRootForTesting() {
-    return CreateShadowRootInternal();
-  }
   ShadowRoot& CreateUserAgentShadowRoot();
   ShadowRoot& AttachShadowRootInternal(
       ShadowRootType,
       FocusDelegation focus_delegation = FocusDelegation::kNone,
-      SlotAssignmentMode slot_assignment_mode = SlotAssignmentMode::kAuto);
+      SlotAssignmentMode slot_assignment_mode = SlotAssignmentMode::kNamed);
+  void InitializeShadowRootInternal(ShadowRoot&,
+                                    FocusDelegation,
+                                    SlotAssignmentMode);
 
   // Returns the shadow root attached to this element if it is a shadow host.
   ShadowRoot* GetShadowRoot() const;
@@ -563,9 +649,10 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   ShadowRoot* AuthorShadowRoot() const;
   ShadowRoot* UserAgentShadowRoot() const;
 
-  ShadowRoot* ShadowRootIfV1() const;
-
   ShadowRoot& EnsureUserAgentShadowRoot();
+
+  // Implements manual slot assignment for user agent shadow roots.
+  virtual void ManuallyAssignSlots() { DCHECK(false); }
 
   bool IsInDescendantTreeOf(const Element* shadow_host) const;
 
@@ -573,7 +660,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // stored on the Element, computes the ComputedStyle and stores it on the
   // Element’s ElementRareData.  Used for getComputedStyle when Element is
   // display none.
-  const ComputedStyle* EnsureComputedStyle(PseudoId = kPseudoIdNone);
+  const ComputedStyle* EnsureComputedStyle(
+      PseudoId = kPseudoIdNone,
+      const AtomicString& pseudo_argument = g_null_atom);
 
   bool HasDisplayContentsStyle() const;
 
@@ -602,17 +691,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
     return GetCustomElementState() == CustomElementState::kUncustomized ||
            GetCustomElementState() == CustomElementState::kCustom;
   }
-  bool IsUpgradedV0CustomElement() {
-    return GetV0CustomElementState() == kV0Upgraded;
-  }
-  bool IsUnresolvedV0CustomElement() {
-    return GetV0CustomElementState() == kV0WaitingForUpgrade;
-  }
 
   AtomicString ComputeInheritedLanguage() const;
   Locale& GetLocale() const;
 
-  virtual void AccessKeyAction(bool /*sendToAnyEvent*/) {}
+  virtual void AccessKeyAction(SimulatedClickCreationScope) {}
 
   virtual bool IsURLAttribute(const Attribute&) const { return false; }
   virtual bool IsHTMLContentAttribute(const Attribute&) const { return false; }
@@ -637,13 +720,21 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // delegatesFocus flag.
   bool DelegatesFocus() const;
   Element* GetFocusableArea() const;
+  Element* GetAutofocusDelegate() const;
+  // Element focus function called through IDL (i.e. element.focus() in JS)
+  void focusForBindings();
+  void focusForBindings(const FocusOptions*);
+  // Element focus function called from outside IDL (user focus,
+  // accessibility, etc...)
   virtual void focus(const FocusParams&);
   void focus();
   void focus(const FocusOptions*);
 
-  void UpdateFocusAppearance(SelectionBehaviorOnFocus);
-  virtual void UpdateFocusAppearanceWithOptions(SelectionBehaviorOnFocus,
-                                                const FocusOptions*);
+  void UpdateSelectionOnFocus(SelectionBehaviorOnFocus);
+  // This function is called after SetFocused(true) before dispatching 'focus'
+  // event, or is called just after a layout after changing <input> type.
+  virtual void UpdateSelectionOnFocus(SelectionBehaviorOnFocus,
+                                      const FocusOptions*);
   virtual void blur();
 
   // Whether this element can receive focus at all. Most elements are not
@@ -658,6 +749,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool IsFocusable() const;
   virtual bool IsKeyboardFocusable() const;
   virtual bool IsMouseFocusable() const;
+  // IsBaseElementFocusable() is used by some subclasses to check if the base
+  // element is focusable. This is used to avoid infinite recursion.
+  bool IsBaseElementFocusable() const;
   bool IsFocusedElementInDocument() const;
   Element* AdjustedFocusedElementInTreeScope() const;
   bool IsAutofocusable() const;
@@ -680,7 +774,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
       Element* new_focused_element,
       InputDeviceCapabilities* source_capabilities = nullptr);
 
-  // The implementation of |innerText()| is found in "element_inner_text.cc".
+  // The implementations of |innerText()| and |GetInnerTextWithoutUpdate()| are
+  // found in "element_inner_text.cc".
+  String GetInnerTextWithoutUpdate();  // Avoids layout update.
   String innerText();
   String outerText();
 
@@ -697,6 +793,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   String innerHTML() const;
   String outerHTML() const;
   void setInnerHTML(const String&, ExceptionState& = ASSERT_NO_EXCEPTION);
+  void setInnerHTMLWithDeclarativeShadowDOMForTesting(const String& html);
   String getInnerHTML(const GetInnerHTMLOptions* options) const;
   void setOuterHTML(const String&, ExceptionState& = ASSERT_NO_EXCEPTION);
 
@@ -728,17 +825,46 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // parsing a special case in this respect should be avoided if possible.
   virtual void FinishParsingChildren();
 
-  void BeginParsingChildren() { SetIsFinishedParsingChildren(false); }
+  virtual void BeginParsingChildren() { SetIsFinishedParsingChildren(false); }
 
-  PseudoElement* GetPseudoElement(PseudoId) const;
+  // Returns the pseudo element for the given PseudoId type.
+  // |document_transition_tag| is used to uniquely identify a pseudo element
+  // from a set of pseudo elements which share the same |pseudo_id|. The current
+  // usage of this ID is limited to pseudo elements generated for a
+  // DocumentTransition. See
+  // third_party/blink/renderer/core/document_transition/README.md
+  PseudoElement* GetPseudoElement(
+      PseudoId,
+      const AtomicString& document_transition_tag = g_null_atom) const;
   LayoutObject* PseudoElementLayoutObject(PseudoId) const;
 
   bool PseudoElementStylesDependOnFontMetrics() const;
+
+  // Retrieve the ComputedStyle (if any) corresponding to the provided
+  // PseudoId from cache, calculating the ComputedStyle on-demand if it's
+  // missing from the cache. The |pseudo_argument| is also used to match the
+  // ComputedStyle in cases where the PseudoId corresponds to a pseudo element
+  // that takes arguments (e.g. ::highlight()).
   const ComputedStyle* CachedStyleForPseudoElement(
-      const PseudoElementStyleRequest&);
-  scoped_refptr<ComputedStyle> StyleForPseudoElement(
-      const PseudoElementStyleRequest&,
-      const ComputedStyle* parent_style = nullptr);
+      PseudoId,
+      const AtomicString& pseudo_argument = g_null_atom);
+
+  // Calculate the ComputedStyle corresponding to the provided StyleRequest,
+  // bypassing the pseudo style cache.
+  //
+  // This is appropriate to use if the cached version is invalid in a given
+  // situation.
+  scoped_refptr<ComputedStyle> UncachedStyleForPseudoElement(
+      const StyleRequest&);
+
+  // This is the same as UncachedStyleForPseudoElement, except that the caller
+  // must provide an appropriate StyleRecalcContext such that e.g. @container
+  // queries are evaluated correctly.
+  //
+  // See StyleRecalcContext for more information.
+  scoped_refptr<ComputedStyle> StyleForPseudoElement(const StyleRecalcContext&,
+                                                     const StyleRequest&);
+
   virtual bool CanGeneratePseudoElement(PseudoId) const;
 
   virtual bool MatchesDefaultPseudoClass() const { return false; }
@@ -808,10 +934,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
     return StyleShouldForceLegacyLayout() || ShouldForceLegacyLayoutForChild();
   }
 
-  virtual void BuildPendingResource() {}
+  void ResetForceLegacyLayoutForPrinting();
 
-  void V0SetCustomElementDefinition(V0CustomElementDefinition*);
-  V0CustomElementDefinition* GetV0CustomElementDefinition() const;
+  virtual void BuildPendingResource() {}
 
   void SetCustomElementDefinition(CustomElementDefinition*);
   CustomElementDefinition* GetCustomElementDefinition() const;
@@ -846,7 +971,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool IsSpellCheckingEnabled() const;
 
   // FIXME: public for LayoutTreeBuilder, we shouldn't expose this though.
-  scoped_refptr<ComputedStyle> StyleForLayoutObject();
+  scoped_refptr<ComputedStyle> StyleForLayoutObject(const StyleRecalcContext&);
 
   bool HasID() const;
   bool HasClass() const;
@@ -884,6 +1009,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void setTabIndex(int);
   int tabIndex() const;
 
+  void setEditContext(EditContext* editContext);
+  EditContext* editContext() const;
+
   // Helpers for V8DOMActivityLogger::logEvent.  They call logEvent only if
   // the element is isConnected() and the context is an isolated world.
   void LogAddElementIfIsolatedWorldAndInDocument(const char element[],
@@ -911,7 +1039,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   HeapHashMap<Member<ResizeObserver>, Member<ResizeObservation>>&
   EnsureResizeObserverData();
 
-  DisplayLockContext* GetDisplayLockContext() const;
+  DisplayLockContext* GetDisplayLockContext() const {
+    if (LIKELY(!HasDisplayLockContext()))
+      return nullptr;
+    return GetDisplayLockContextFromRareData();
+  }
   DisplayLockContext& EnsureDisplayLockContext();
 
   bool ChildStyleRecalcBlockedByDisplayLock() const;
@@ -920,6 +1052,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // element. Return true if we activated at least one previously locked
   // element.
   bool ActivateDisplayLockIfNeeded(DisplayLockActivationReason reason);
+
+  ContainerQueryData* GetContainerQueryData() const;
+  void SetContainerQueryEvaluator(ContainerQueryEvaluator*);
+  ContainerQueryEvaluator* GetContainerQueryEvaluator() const;
+  bool SkippedContainerStyleRecalc() const;
 
   virtual void SetActive(bool active);
   virtual void SetHovered(bool hovered);
@@ -930,9 +1067,60 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   void NotifyInlineStyleMutation();
 
+  // For undo stack cleanup
+  bool HasUndoStack() const;
+  void SetHasUndoStack(bool);
+
+  // For font-related style invalidation.
+  void SetScrollbarPseudoElementStylesDependOnFontMetrics(bool);
+
+  bool AffectedByNonSubjectHas() const;
+  void SetAffectedByNonSubjectHas();
+  bool AncestorsOrAncestorSiblingsAffectedByHas() const;
+  void SetAncestorsOrAncestorSiblingsAffectedByHas();
+  bool SiblingsAffectedByHas() const;
+  void SetSiblingsAffectedByHas();
+  bool AffectedByPseudoInHas() const;
+  void SetAffectedByPseudoInHas();
+  bool AncestorsOrSiblingsAffectedByHoverInHas() const;
+  void SetAncestorsOrSiblingsAffectedByHoverInHas();
+  bool AncestorsOrSiblingsAffectedByActiveInHas() const;
+  void SetAncestorsOrSiblingsAffectedByActiveInHas();
+  bool AncestorsOrSiblingsAffectedByFocusInHas() const;
+  void SetAncestorsOrSiblingsAffectedByFocusInHas();
+  bool AncestorsOrSiblingsAffectedByFocusVisibleInHas() const;
+  void SetAncestorsOrSiblingsAffectedByFocusVisibleInHas();
+
+  void SaveIntrinsicSize(ResizeObserverSize* size);
+  const ResizeObserverSize* LastIntrinsicSize() const;
+
+  // Returns a unique pseudo element for the given |pseudo_id| and
+  // |document_transition_tag| originating from this DOM element.
+  // This pseudo element may be directly associated with this element or nested
+  // inside a hierarchy of pseudo elements.
+  PseudoElement* GetNestedPseudoElement(
+      PseudoId pseudo_id,
+      const AtomicString& document_transition_tag) const;
+
+  void RecalcTransitionPseudoTreeStyle(
+      const Vector<AtomicString>& document_transition_tags);
+  void RebuildTransitionPseudoLayoutTree(
+      const Vector<AtomicString>& document_transition_tags);
+
+  // Returns true if the element has the 'inert' attribute, forcing itself and
+  // all its subtree to be inert.
+  bool IsInertRoot();
+
+  FocusgroupFlags GetFocusgroupFlags() const;
+
  protected:
   const ElementData* GetElementData() const { return element_data_.Get(); }
   UniqueElementData& EnsureUniqueElementData();
+
+  bool IsViewportScrollElement();
+  void RecordScrollbarSizeForStudy(int measurement,
+                                   bool is_width,
+                                   bool is_offset);
 
   void AddPropertyToPresentationAttributeStyle(MutableCSSPropertyValueSet*,
                                                CSSPropertyID,
@@ -954,7 +1142,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   virtual void WillRecalcStyle(const StyleRecalcChange);
   virtual void DidRecalcStyle(const StyleRecalcChange);
-  virtual scoped_refptr<ComputedStyle> CustomStyleForLayoutObject();
+  virtual scoped_refptr<ComputedStyle> CustomStyleForLayoutObject(
+      const StyleRecalcContext&);
 
   virtual NamedItemType GetNamedItemType() const {
     return NamedItemType::kNone;
@@ -964,6 +1153,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   void ClearTabIndexExplicitlyIfNeeded();
   void SetTabIndexExplicitly();
+  // Returns false if the style prevents focus. Returning true doesn't imply
+  // focusability, there may be other conditions like SupportsFocus().
   // Subclasses may override this method to affect focusability. This method
   // must be called on an up-to-date ComputedStyle, so it may use existence of
   // layoutObject and the LayoutObject::style() to reason about focusability.
@@ -971,18 +1162,26 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // This method cannot be moved to LayoutObject because some focusable nodes
   // don't have layoutObjects. e.g., HTMLOptionElement.
   virtual bool IsFocusableStyle() const;
-  // Similar to above, except that it will ensure that any deferred work to
-  // create layout objects is completed (e.g. in display-locked trees).
+  // Contains the base logic for IsFocusableStyle. Doesn't require the node to
+  // have an up-to-date LayoutObject, it's up to the caller to pass the right
+  // one as an argument.
+  bool IsBaseElementFocusableStyle(const LayoutObject*) const;
+  // Similar to IsFocusableStyle, except that it will ensure that any deferred
+  // work to create layout objects is completed (e.g. in display-locked trees).
   bool IsFocusableStyleAfterUpdate() const;
 
-  // classAttributeChanged() exists to share code between
-  // parseAttribute (called via setAttribute()) and
-  // svgAttributeChanged (called when element.className.baseValue is set)
+  // ClassAttributeChanged() and UpdateClassList() exist to share code between
+  // ParseAttribute (called via setAttribute()) and SvgAttributeChanged (called
+  // when element.className.baseVal is set or when the 'class' attribute is
+  // animated by SMIL).
   void ClassAttributeChanged(const AtomicString& new_class_string);
+  void UpdateClassList(const AtomicString& old_class_string,
+                       const AtomicString& new_class_string);
 
   static bool AttributeValueIsJavaScriptURL(const Attribute&);
 
-  scoped_refptr<ComputedStyle> OriginalStyleForLayoutObject();
+  scoped_refptr<ComputedStyle> OriginalStyleForLayoutObject(
+      const StyleRecalcContext&);
 
   // Step 4 of http://domparsing.spec.whatwg.org/#insertadjacenthtml()
   Node* InsertAdjacent(const String& where, Node* new_child, ExceptionState&);
@@ -1006,8 +1205,14 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void AdjustForceLegacyLayout(const ComputedStyle*,
                                bool* should_force_legacy_layout);
 
+  // Reattach layout tree for all children but not the element itself. This is
+  // only used for reattaching fieldset children when the fieldset is a query
+  // container for size container queries.
+  void ReattachLayoutTreeChildren(base::PassKey<HTMLFieldSetElement>);
+
  private:
   friend class AXObject;
+  struct AffectedByPseudoStateChange;
 
   void ScrollLayoutBoxBy(const ScrollToOptions*);
   void ScrollLayoutBoxTo(const ScrollToOptions*);
@@ -1028,7 +1233,6 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool IsDocumentNode() const =
       delete;  // This will catch anyone doing an unnecessary check.
 
-  ShadowRoot& CreateShadowRootInternal();
   bool CanAttachShadowRoot() const;
   const char* ErrorMessageForAttachShadow() const;
 
@@ -1046,9 +1250,24 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // and returns the new style. Otherwise, returns null.
   scoped_refptr<ComputedStyle> PropagateInheritedProperties();
 
+  const ComputedStyle* EnsureOwnComputedStyle(
+      const StyleRecalcContext&,
+      PseudoId,
+      const AtomicString& pseudo_argument = g_null_atom);
+
   // Recalculate the ComputedStyle for this element and return a
   // StyleRecalcChange for propagation/traversal into child nodes.
-  StyleRecalcChange RecalcOwnStyle(const StyleRecalcChange);
+  StyleRecalcChange RecalcOwnStyle(const StyleRecalcChange,
+                                   const StyleRecalcContext&);
+
+  // Returns true if we should skip style recalc for the subtree because this
+  // element is a container for size container queries and we are guaranteed to
+  // reach this element during the subsequent layout to continue doing
+  // interleaved style and layout.
+  bool SkipStyleRecalcForContainer(const ComputedStyle& style,
+                                   const StyleRecalcChange& child_change);
+
+  void MarkNonSlottedHostChildrenForStyleRecalc();
 
   void RebuildPseudoElementLayoutTree(PseudoId, WhitespaceAttacher&);
   void RebuildFirstLetterLayoutTree();
@@ -1057,7 +1276,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   inline void CheckForEmptyStyleChange(const Node* node_before_change,
                                        const Node* node_after_change);
 
-  void UpdatePseudoElement(PseudoId, const StyleRecalcChange);
+  PseudoElement* UpdatePseudoElement(
+      PseudoId,
+      const StyleRecalcChange,
+      const StyleRecalcContext&,
+      const AtomicString& document_transition_tag = g_null_atom);
 
   enum class StyleUpdatePhase {
     kRecalc,
@@ -1065,11 +1288,49 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
     kAttachLayoutTree,
   };
 
+  // Retrieves the element pointed to by this element's 'anchor' content
+  // attribute, if that element exists.
+  Element* anchorElement() const;
+
+  // Special focus handling for popups.
+  Element* GetPopupFocusableArea(bool autofocus_only) const;
+
+  void UpdateFirstLetterPseudoElement(StyleUpdatePhase,
+                                      const StyleRecalcContext&);
+
+  // Creates a StyleRecalcContext and invokes the method above. Only use this
+  // when there is no StyleRecalcContext available.
   void UpdateFirstLetterPseudoElement(StyleUpdatePhase);
 
-  inline PseudoElement* CreatePseudoElementIfNeeded(PseudoId);
+  inline PseudoElement* CreatePseudoElementIfNeeded(
+      PseudoId,
+      const StyleRecalcContext&,
+      const AtomicString& document_transition_tag = g_null_atom);
   void AttachPseudoElement(PseudoId, AttachContext&);
   void DetachPseudoElement(PseudoId, bool performing_reattach);
+
+  void AttachPrecedingPseudoElements(AttachContext& context) {
+    AttachPseudoElement(kPseudoIdMarker, context);
+    AttachPseudoElement(kPseudoIdBefore, context);
+  }
+
+  void AttachSucceedingPseudoElements(AttachContext& context) {
+    AttachPseudoElement(kPseudoIdAfter, context);
+    AttachPseudoElement(kPseudoIdBackdrop, context);
+    UpdateFirstLetterPseudoElement(StyleUpdatePhase::kAttachLayoutTree);
+    AttachPseudoElement(kPseudoIdFirstLetter, context);
+  }
+
+  void DetachPrecedingPseudoElements(bool performing_reattach) {
+    DetachPseudoElement(kPseudoIdMarker, performing_reattach);
+    DetachPseudoElement(kPseudoIdBefore, performing_reattach);
+  }
+
+  void DetachSucceedingPseudoElements(bool performing_reattach) {
+    DetachPseudoElement(kPseudoIdAfter, performing_reattach);
+    DetachPseudoElement(kPseudoIdBackdrop, performing_reattach);
+    DetachPseudoElement(kPseudoIdFirstLetter, performing_reattach);
+  }
 
   ShadowRoot& CreateAndAttachShadowRoot(ShadowRootType);
 
@@ -1094,6 +1355,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   void SynchronizeAllAttributes() const;
   void SynchronizeAttribute(const QualifiedName&) const;
+  void SynchronizeAllAttributesExceptStyle() const;
 
   void UpdateId(const AtomicString& old_id, const AtomicString& new_id);
   void UpdateId(TreeScope&,
@@ -1101,7 +1363,9 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
                 const AtomicString& new_id);
   void UpdateName(const AtomicString& old_name, const AtomicString& new_name);
 
-  void ClientQuads(Vector<FloatQuad>& quads);
+  void UpdateFocusgroup(const AtomicString& input);
+
+  void ClientQuads(Vector<gfx::QuadF>& quads) const;
 
   NodeType getNodeType() const final;
   bool ChildTypeAllowed(NodeType) const final;
@@ -1133,25 +1397,25 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void SynchronizeAttributeHinted(
       const AtomicString& name,
       WTF::AtomicStringTable::WeakResult hint) const;
-  void SetAttributeHinted(const AtomicString& name,
+  void SetAttributeHinted(AtomicString name,
                           WTF::AtomicStringTable::WeakResult hint,
-                          const AtomicString& value,
+                          String value,
                           ExceptionState& = ASSERT_NO_EXCEPTION);
-  void SetAttributeHinted(
-      const AtomicString& name,
-      WTF::AtomicStringTable::WeakResult hint,
-      const StringOrTrustedHTMLOrTrustedScriptOrTrustedScriptURL&,
-      ExceptionState&);
+  void SetAttributeHinted(AtomicString name,
+                          WTF::AtomicStringTable::WeakResult hint,
+                          const V8TrustedType* trusted_string,
+                          ExceptionState& exception_state);
   std::pair<wtf_size_t, const QualifiedName> LookupAttributeQNameHinted(
-      const AtomicString& name,
+      AtomicString name,
       WTF::AtomicStringTable::WeakResult hint) const;
 
-  void CancelFocusAppearanceUpdate();
+  void CancelSelectionAfterLayout();
   virtual int DefaultTabIndex() const;
 
   const ComputedStyle* VirtualEnsureComputedStyle(
-      PseudoId pseudo_element_specifier = kPseudoIdNone) final {
-    return EnsureComputedStyle(pseudo_element_specifier);
+      PseudoId pseudo_element_specifier = kPseudoIdNone,
+      const AtomicString& pseudo_argument = g_null_atom) final {
+    return EnsureComputedStyle(pseudo_element_specifier, pseudo_argument);
   }
 
   inline void UpdateCallbackSelectors(const ComputedStyle* old_style,
@@ -1177,6 +1441,10 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
                                                         const QualifiedName&,
                                                         const AtomicString&);
 
+  void SetInnerHTMLInternal(const String&,
+                            bool include_shadow_roots,
+                            ExceptionState&);
+
   ElementRareData* GetElementRareData() const;
   ElementRareData& EnsureElementRareData();
 
@@ -1184,10 +1452,6 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void DetachAllAttrNodesFromElement();
   void DetachAttrNodeFromElementWithValue(Attr*, const AtomicString& value);
   void DetachAttrNodeAtIndex(Attr*, wtf_size_t index);
-
-  bool DisplayLockPreventsActivation(DisplayLockActivationReason reason) const;
-  FRIEND_TEST_ALL_PREFIXES(DisplayLockContextTest,
-                           DisplayLockPreventsActivation);
 
   // Return whether this element type requires legacy layout.
   virtual bool TypeShouldForceLegacyLayout() const { return false; }
@@ -1205,6 +1469,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
       return;
     SetStyleShouldForceLegacyLayoutInternal(force);
   }
+  FRIEND_TEST_ALL_PREFIXES(LayoutNGTextCombineTest, LegacyQuote);
   void SetStyleShouldForceLegacyLayoutInternal(bool);
 
   // Return whether this element needs legacy layout because of a child.
@@ -1224,7 +1489,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // Update ForceLegacyLayout flags for this element, and for ancestors, if
   // necessary. We cannot establish a ForceLegacyLayout subtree at an arbitrary
   // element; it needs to be a block formatting context root.
-  void UpdateForceLegacyLayout(const ComputedStyle& new_style,
+  // Returns true if we need to reattach this element or any ancestor element.
+  bool UpdateForceLegacyLayout(const ComputedStyle& new_style,
                                const ComputedStyle* old_style);
 
   // If this element requires legacy layout, and we can't tell for sure that it
@@ -1232,15 +1498,23 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // layout on ancestors until we reach one that we're sure that will establish
   // a new formatting context. LayoutNG and legacy layout cannot cooperate
   // within a formatting context.
-  void ForceLegacyLayoutInFormattingContext(const ComputedStyle& new_style);
+  // Returns true if we need to reattach this element or any ancestor element.
+  bool ForceLegacyLayoutInFormattingContext(const ComputedStyle& new_style);
 
   // If this element requires legacy layout, and we're inside a fragmentation
   // context, we need to force legacy layout for the entire fragmentation
   // context. LayoutNG block fragmentation and legacy block fragmentation cannot
   // cooperate within a fragmentation context.
-  void ForceLegacyLayoutInFragmentationContext(const ComputedStyle& new_style);
+  // Returns true if we need to reattach this element or any ancestor element.
+  bool ForceLegacyLayoutInFragmentationContext(const ComputedStyle& new_style);
+
   void SynchronizeContentAttributeAndElementReference(
       const QualifiedName& name);
+
+  DisplayLockContext* GetDisplayLockContextFromRareData() const;
+
+  void PseudoStateChanged(CSSSelector::PseudoType pseudo,
+                          AffectedByPseudoStateChange&&);
 
   Member<ElementData> element_data_;
 };
@@ -1264,7 +1538,6 @@ template <>
 struct DowncastTraits<Element> {
   static bool AllowFrom(const Node& node) { return node.IsElementNode(); }
 };
-
 
 inline bool IsDisabledFormControl(const Node* node) {
   auto* element = DynamicTo<Element>(node);
@@ -1307,6 +1580,13 @@ inline AttributeCollection Element::Attributes() const {
 inline AttributeCollection Element::AttributesWithoutUpdate() const {
   if (!GetElementData())
     return AttributeCollection();
+  return GetElementData()->Attributes();
+}
+
+inline AttributeCollection Element::AttributesWithoutStyleUpdate() const {
+  if (!GetElementData())
+    return AttributeCollection();
+  SynchronizeAllAttributesExceptStyle();
   return GetElementData()->Attributes();
 }
 

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtGui module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qprintpreviewwidget.h"
 #include "private/qwidget_p.h"
@@ -401,7 +365,7 @@ void QPrintPreviewWidgetPrivate::generatePreview()
     pictures = printer->d_func()->previewPages();
     populateScene(); // i.e. setPreviewPrintedPictures() e.l.
     layoutPages();
-    curPage = qBound(1, curPage, pages.count());
+    curPage = pages.count() > 0 ? qBound(1, curPage, pages.count()) : 1;
     if (fitting)
         _q_fit();
     emit q->previewChanged();
@@ -590,22 +554,20 @@ void QPrintPreviewWidget::setViewMode(ViewMode mode)
     Returns the current orientation of the preview. This value is
     obtained from the QPrinter object associated with the preview.
 */
-QPrinter::Orientation QPrintPreviewWidget::orientation() const
+QPageLayout::Orientation QPrintPreviewWidget::orientation() const
 {
     Q_D(const QPrintPreviewWidget);
-    return d->printer->pageLayout().orientation() == QPageLayout::Portrait
-           ? QPrinter::Portrait : QPrinter::Landscape;
+    return d->printer->pageLayout().orientation();
 }
 
 /*!
     Sets the current orientation to \a orientation. This value will be
     set on the QPrinter object associated with the preview.
 */
-void QPrintPreviewWidget::setOrientation(QPrinter::Orientation orientation)
+void QPrintPreviewWidget::setOrientation(QPageLayout::Orientation orientation)
 {
     Q_D(QPrintPreviewWidget);
-    d->printer->setPageOrientation(orientation == QPrinter::Portrait
-                                   ? QPageLayout::Portrait : QPageLayout::Landscape);
+    d->printer->setPageOrientation(orientation);
     d->generatePreview();
 }
 
@@ -744,20 +706,20 @@ QPrintPreviewWidget::ZoomMode QPrintPreviewWidget::zoomMode() const
 
 /*!
     This is a convenience function and is the same as calling \c
-    {setOrientation(QPrinter::Landscape)}.
+    {setOrientation(QPageLayout::Landscape)}.
 */
 void QPrintPreviewWidget::setLandscapeOrientation()
 {
-    setOrientation(QPrinter::Landscape);
+    setOrientation(QPageLayout::Landscape);
 }
 
 /*!
     This is a convenience function and is the same as calling \c
-    {setOrientation(QPrinter::Portrait)}.
+    {setOrientation(QPageLayout::Portrait)}.
 */
 void QPrintPreviewWidget::setPortraitOrientation()
 {
-    setOrientation(QPrinter::Portrait);
+    setOrientation(QPageLayout::Portrait);
 }
 
 /*!

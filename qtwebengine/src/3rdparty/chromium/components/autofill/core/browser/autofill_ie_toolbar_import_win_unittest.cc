@@ -5,9 +5,11 @@
 #include "components/autofill/core/browser/autofill_ie_toolbar_import_win.h"
 
 #include <stddef.h>
+#include <windows.h>
 
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
+#include <string>
+
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
@@ -15,8 +17,6 @@
 #include "components/os_crypt/os_crypt.h"
 #include "components/os_crypt/os_crypt_mocker.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#include <windows.h>
 
 using base::win::RegKey;
 
@@ -119,14 +119,16 @@ class AutofillIeToolbarImportTest : public testing::Test {
  public:
   AutofillIeToolbarImportTest();
 
+  AutofillIeToolbarImportTest(const AutofillIeToolbarImportTest&) = delete;
+  AutofillIeToolbarImportTest& operator=(const AutofillIeToolbarImportTest&) =
+      delete;
+
   // testing::Test method overrides:
   void SetUp() override;
   void TearDown() override;
 
  private:
   RegKey temp_hkcu_hive_key_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutofillIeToolbarImportTest);
 };
 
 AutofillIeToolbarImportTest::AutofillIeToolbarImportTest() {
@@ -155,13 +157,13 @@ TEST_F(AutofillIeToolbarImportTest, TestAutofillImport) {
   profile_key.Create(HKEY_CURRENT_USER, kProfileKey, KEY_ALL_ACCESS);
   EXPECT_TRUE(profile_key.Valid());
 
-  CreateSubkey(&profile_key, L"0", profile1, base::size(profile1));
-  CreateSubkey(&profile_key, L"1", profile2, base::size(profile2));
+  CreateSubkey(&profile_key, L"0", profile1, std::size(profile1));
+  CreateSubkey(&profile_key, L"1", profile2, std::size(profile2));
 
   RegKey cc_key;
   cc_key.Create(HKEY_CURRENT_USER, kCreditCardKey, KEY_ALL_ACCESS);
   EXPECT_TRUE(cc_key.Valid());
-  CreateSubkey(&cc_key, L"0", credit_card, base::size(credit_card));
+  CreateSubkey(&cc_key, L"0", credit_card, std::size(credit_card));
   EncryptAndWrite(&cc_key, &empty_password);
   EncryptAndWrite(&cc_key, &empty_salt);
 
@@ -173,32 +175,41 @@ TEST_F(AutofillIeToolbarImportTest, TestAutofillImport) {
   EXPECT_TRUE(ImportCurrentUserProfiles("en-US", &profiles, &credit_cards));
   ASSERT_EQ(2U, profiles.size());
   // The profiles are read in reverse order.
-  EXPECT_EQ(profile1[0].value, profiles[1].GetRawInfo(NAME_FIRST));
-  EXPECT_EQ(profile1[1].value, profiles[1].GetRawInfo(NAME_MIDDLE));
-  EXPECT_EQ(profile1[2].value, profiles[1].GetRawInfo(NAME_LAST));
-  EXPECT_EQ(profile1[3].value, profiles[1].GetRawInfo(EMAIL_ADDRESS));
-  EXPECT_EQ(profile1[4].value, profiles[1].GetRawInfo(COMPANY_NAME));
-  EXPECT_EQ(profile1[7].value,
+  EXPECT_EQ(base::WideToUTF16(profile1[0].value),
+            profiles[1].GetRawInfo(NAME_FIRST));
+  EXPECT_EQ(base::WideToUTF16(profile1[1].value),
+            profiles[1].GetRawInfo(NAME_MIDDLE));
+  EXPECT_EQ(base::WideToUTF16(profile1[2].value),
+            profiles[1].GetRawInfo(NAME_LAST));
+  EXPECT_EQ(base::WideToUTF16(profile1[3].value),
+            profiles[1].GetRawInfo(EMAIL_ADDRESS));
+  EXPECT_EQ(base::WideToUTF16(profile1[4].value),
+            profiles[1].GetRawInfo(COMPANY_NAME));
+  EXPECT_EQ(base::WideToUTF16(profile1[7].value),
             profiles[1].GetInfo(AutofillType(PHONE_HOME_COUNTRY_CODE), "US"));
-  EXPECT_EQ(profile1[6].value,
+  EXPECT_EQ(base::WideToUTF16(profile1[6].value),
             profiles[1].GetInfo(AutofillType(PHONE_HOME_CITY_CODE), "US"));
-  EXPECT_EQ(L"5555555",
+  EXPECT_EQ(u"5555555",
             profiles[1].GetInfo(AutofillType(PHONE_HOME_NUMBER), "US"));
-  EXPECT_EQ(L"1 650-555-5555", profiles[1].GetRawInfo(PHONE_HOME_WHOLE_NUMBER));
+  EXPECT_EQ(u"1 650-555-5555", profiles[1].GetRawInfo(PHONE_HOME_WHOLE_NUMBER));
 
-  EXPECT_EQ(profile2[0].value, profiles[0].GetRawInfo(NAME_FIRST));
-  EXPECT_EQ(profile2[1].value, profiles[0].GetRawInfo(NAME_LAST));
-  EXPECT_EQ(profile2[2].value, profiles[0].GetRawInfo(EMAIL_ADDRESS));
-  EXPECT_EQ(profile2[3].value, profiles[0].GetRawInfo(COMPANY_NAME));
+  EXPECT_EQ(base::WideToUTF16(profile2[0].value),
+            profiles[0].GetRawInfo(NAME_FIRST));
+  EXPECT_EQ(base::WideToUTF16(profile2[1].value),
+            profiles[0].GetRawInfo(NAME_LAST));
+  EXPECT_EQ(base::WideToUTF16(profile2[2].value),
+            profiles[0].GetRawInfo(EMAIL_ADDRESS));
+  EXPECT_EQ(base::WideToUTF16(profile2[3].value),
+            profiles[0].GetRawInfo(COMPANY_NAME));
 
   ASSERT_EQ(1U, credit_cards.size());
-  EXPECT_EQ(credit_card[0].value,
+  EXPECT_EQ(base::WideToUTF16(credit_card[0].value),
             credit_cards[0].GetRawInfo(CREDIT_CARD_NAME_FULL));
-  EXPECT_EQ(L"4111111111111111",
+  EXPECT_EQ(u"4111111111111111",
             credit_cards[0].GetRawInfo(CREDIT_CARD_NUMBER));
-  EXPECT_EQ(credit_card[2].value,
+  EXPECT_EQ(base::WideToUTF16(credit_card[2].value),
             credit_cards[0].GetRawInfo(CREDIT_CARD_EXP_MONTH));
-  EXPECT_EQ(credit_card[3].value,
+  EXPECT_EQ(base::WideToUTF16(credit_card[3].value),
             credit_cards[0].GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
   // Mock password encrypted cc.

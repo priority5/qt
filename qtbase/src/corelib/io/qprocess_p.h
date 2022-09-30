@@ -1,42 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2016 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2016 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QPROCESS_P_H
 #define QPROCESS_P_H
@@ -57,6 +21,7 @@
 #include "QtCore/qhash.h"
 #include "QtCore/qmap.h"
 #include "QtCore/qshareddata.h"
+#include "QtCore/qdeadlinetimer.h"
 #include "private/qiodevice_p.h"
 
 QT_REQUIRE_CONFIG(processenvironment);
@@ -80,7 +45,6 @@ class QSocketNotifier;
 class QWindowsPipeReader;
 class QWindowsPipeWriter;
 class QWinEventNotifier;
-class QTimer;
 
 #ifdef Q_OS_WIN
 class QProcEnvKey : public QString
@@ -99,7 +63,7 @@ inline bool operator<(const QProcEnvKey &a, const QProcEnvKey &b)
     return a.compare(b, Qt::CaseInsensitive) < 0;
 }
 
-Q_DECLARE_TYPEINFO(QProcEnvKey, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(QProcEnvKey, Q_RELOCATABLE_TYPE);
 
 typedef QString QProcEnvValue;
 #else
@@ -133,7 +97,7 @@ public:
     mutable QByteArray byteValue;
     mutable QString stringValue;
 };
-Q_DECLARE_TYPEINFO(QProcEnvValue, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(QProcEnvValue, Q_RELOCATABLE_TYPE);
 #endif
 
 class QProcessEnvironmentPrivate: public QSharedData
@@ -147,7 +111,7 @@ public:
     inline Value prepareValue(const QString &value) const { return value; }
     inline QString valueToString(const Value &value) const { return value; }
 #else
-    struct NameMapMutexLocker : public QMutexLocker
+    struct NameMapMutexLocker : public QMutexLocker<QMutex>
     {
         NameMapMutexLocker(const QProcessEnvironmentPrivate *d) : QMutexLocker(&d->nameMapMutex) {}
     };
@@ -230,22 +194,12 @@ public:
     Q_DECLARE_PUBLIC(QProcess)
 
     struct Channel {
-        enum ProcessChannelType {
+        enum ProcessChannelType : char {
             Normal = 0,
             PipeSource = 1,
             PipeSink = 2,
             Redirect = 3
-            // if you add "= 4" here, increase the number of bits below
         };
-
-        Channel() : process(nullptr), notifier(nullptr), type(Normal), closed(false), append(false)
-        {
-            pipe[0] = INVALID_Q_PIPE;
-            pipe[1] = INVALID_Q_PIPE;
-#ifdef Q_OS_WIN
-            reader = 0;
-#endif
-        }
 
         void clear();
 
@@ -272,19 +226,20 @@ public:
         }
 
         QString file;
-        QProcessPrivate *process;
-        QSocketNotifier *notifier;
-#ifdef Q_OS_WIN
+        QProcessPrivate *process = nullptr;
+#ifdef Q_OS_UNIX
+        QSocketNotifier *notifier = nullptr;
+#else
         union {
-            QWindowsPipeReader *reader;
+            QWindowsPipeReader *reader = nullptr;
             QWindowsPipeWriter *writer;
         };
 #endif
-        Q_PIPE pipe[2];
+        Q_PIPE pipe[2] = {INVALID_Q_PIPE, INVALID_Q_PIPE};
 
-        unsigned type : 2;
-        bool closed : 1;
-        bool append : 1;
+        ProcessChannelType type = Normal;
+        bool closed = false;
+        bool append = false;
     };
 
     QProcessPrivate();
@@ -293,28 +248,43 @@ public:
     // private slots
     bool _q_canReadStandardOutput();
     bool _q_canReadStandardError();
+#ifdef Q_OS_WIN
+    qint64 pipeWriterBytesToWrite() const;
+    void _q_bytesWritten(qint64 bytes);
+    void _q_writeFailed();
+#else
     bool _q_canWrite();
+    bool writeToStdin();
+#endif
     bool _q_startupNotification();
-    bool _q_processDied();
+    void _q_processDied();
 
-    QProcess::ProcessChannelMode processChannelMode;
-    QProcess::InputChannelMode inputChannelMode;
-    QProcess::ProcessError processError;
-    QProcess::ProcessState processState;
+    QProcess::ProcessChannelMode processChannelMode = QProcess::SeparateChannels;
+    QProcess::InputChannelMode inputChannelMode = QProcess::ManagedInputChannel;
+    QProcess::ProcessError processError = QProcess::UnknownError;
+    QProcess::ProcessState processState = QProcess::NotRunning;
     QString workingDirectory;
-    Q_PID pid;
-    int sequenceNumber;
+#ifdef Q_OS_WIN
+    Q_PROCESS_INFORMATION *pid = nullptr;
+#else
+    qint64 pid = 0;
+#endif
 
-    bool dying;
-    bool emittedReadyRead;
-    bool emittedBytesWritten;
+    bool emittedReadyRead = false;
+    bool emittedBytesWritten = false;
 
     Channel stdinChannel;
     Channel stdoutChannel;
     Channel stderrChannel;
+    bool openChannels();
+    bool openChannelsForDetached();
     bool openChannel(Channel &channel);
+#if defined(Q_OS_UNIX)
+    void commitChannels();
+#endif
     void closeChannel(Channel *channel);
     void closeWriteChannel();
+    void closeChannels();
     bool tryReadFromChannel(Channel *channel); // obviously, only stdout and stderr
 
     QString program;
@@ -322,20 +292,17 @@ public:
 #if defined(Q_OS_WIN)
     QString nativeArguments;
     QProcess::CreateProcessArgumentModifier modifyCreateProcessArgs;
+#else
+    std::function<void(void)> childProcessModifier;
 #endif
-    QProcessEnvironment environment;
+    QProcessEnvironment environment = QProcessEnvironment::InheritFromParent;
 
-    Q_PIPE childStartedPipe[2];
-    void destroyPipe(Q_PIPE pipe[2]);
-
-    QSocketNotifier *startupSocketNotifier;
-    QSocketNotifier *deathNotifier;
-
-    int forkfd;
-
-#ifdef Q_OS_WIN
-    QTimer *stdinWriteTrigger;
-    QWinEventNotifier *processFinishedNotifier;
+#ifdef Q_OS_UNIX
+    Q_PIPE childStartedPipe[2] = {INVALID_Q_PIPE, INVALID_Q_PIPE};
+    QSocketNotifier *stateNotifier = nullptr;
+    int forkfd = -1;
+#else
+    QWinEventNotifier *processFinishedNotifier = nullptr;
 #endif
 
     void start(QIODevice::OpenMode mode);
@@ -344,34 +311,35 @@ public:
     void execChild(const char *workingDirectory, char **argv, char **envp);
 #endif
     bool processStarted(QString *errorMessage = nullptr);
+    void processFinished();
     void terminateProcess();
     void killProcess();
-    void findExitCode();
 #ifdef Q_OS_UNIX
-    bool waitForDeadChild();
+    void waitForDeadChild();
+#else
+    void findExitCode();
 #endif
 #ifdef Q_OS_WIN
+    STARTUPINFOW createStartupInfo();
     bool callCreateProcess(QProcess::CreateProcessArguments *cpargs);
     bool drainOutputPipes();
-    void flushPipeWriter();
-    qint64 pipeWriterBytesToWrite() const;
 #endif
 
     bool startDetached(qint64 *pPid);
 
-    int exitCode;
-    QProcess::ExitStatus exitStatus;
-    bool crashed;
+    int exitCode = 0;
+    QProcess::ExitStatus exitStatus = QProcess::NormalExit;
+    bool crashed = false;
 
-    bool waitForStarted(int msecs = 30000);
-    bool waitForReadyRead(int msecs = 30000);
-    bool waitForBytesWritten(int msecs = 30000);
-    bool waitForFinished(int msecs = 30000);
+    bool waitForStarted(const QDeadlineTimer &deadline);
+    bool waitForReadyRead(const QDeadlineTimer &deadline);
+    bool waitForBytesWritten(const QDeadlineTimer &deadline);
+    bool waitForFinished(const QDeadlineTimer &deadline);
 
     qint64 bytesAvailableInChannel(const Channel *channel) const;
     qint64 readFromChannel(const Channel *channel, char *data, qint64 maxlen);
-    bool writeToStdin();
 
+    void destroyPipe(Q_PIPE pipe[2]);
     void cleanup();
     void setError(QProcess::ProcessError error, const QString &description = QString());
     void setErrorAndEmit(QProcess::ProcessError error, const QString &description = QString());

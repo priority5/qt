@@ -10,6 +10,8 @@
 
 #include "modules/congestion_controller/goog_cc/delay_based_bwe.h"
 
+#include <string>
+
 #include "api/transport/network_types.h"
 #include "modules/congestion_controller/goog_cc/acknowledged_bitrate_estimator.h"
 #include "modules/congestion_controller/goog_cc/delay_based_bwe_unittest_helper.h"

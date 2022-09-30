@@ -7,9 +7,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/x/connection.h"
-#include "ui/gfx/x/x11.h"
-#include "ui/gfx/x/x11_error_tracker.h"
-#include "ui/gfx/x/x11_types.h"
+#include "ui/gfx/x/future.h"
 #include "ui/gfx/x/xproto.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_surface_glx_x11.h"
@@ -31,8 +29,6 @@ TEST(GLContextGLXTest, MAYBE_DoNotDestroyOnFailedMakeCurrent) {
   auto* connection = x11::Connection::Get();
   ASSERT_TRUE(connection && connection->Ready());
 
-  gfx::X11ErrorTracker error_tracker;
-
   auto xwindow = connection->GenerateId<x11::Window>();
   connection->CreateWindow({
       .wid = xwindow,
@@ -49,7 +45,7 @@ TEST(GLContextGLXTest, MAYBE_DoNotDestroyOnFailedMakeCurrent) {
   // to ensure the map is complete.
   connection->Sync();
 
-  GLImageTestSupport::InitializeGL(base::nullopt);
+  GLImageTestSupport::InitializeGL(absl::nullopt);
   auto surface = gl::InitializeGLSurface(base::MakeRefCounted<GLSurfaceGLXX11>(
       static_cast<gfx::AcceleratedWidget>(xwindow)));
   scoped_refptr<GLContext> context =
@@ -65,7 +61,7 @@ TEST(GLContextGLXTest, MAYBE_DoNotDestroyOnFailedMakeCurrent) {
   // Since this window is override-redirect, syncing is sufficient
   // to ensure the window is destroyed and unmapped.
   connection->Sync();
-  ASSERT_FALSE(error_tracker.FoundNewError());
+  ASSERT_TRUE(connection->Ready());
 
   if (context->MakeCurrent(surface.get())) {
     // With some drivers, MakeCurrent() does not fail for an already-destroyed

@@ -11,7 +11,6 @@ mojom("mojom") {
     "constants.mojom",
     "media_controller.mojom",
     "media_session.mojom",
-    "media_session_service.mojom",
   ]
 
   public_deps = [
@@ -19,6 +18,8 @@ mojom("mojom") {
     "//ui/gfx/geometry/mojom",
     "//url/mojom:url_mojom_gurl",
   ]
+
+  webui_module_path = "/"
 
   # The blink variant of the Device Service mojom are depended on by the
   # blink platform target. All blink variant mojoms use WTF types, which are

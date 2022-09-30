@@ -1,32 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2008-2012 NVIDIA Corporation.
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of Qt Quick 3D.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2008-2012 NVIDIA Corporation.
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #ifndef QSSG_RENDER_GRAPH_OBJECT_H
 #define QSSG_RENDER_GRAPH_OBJECT_H
@@ -49,31 +23,109 @@
 
 QT_BEGIN_NAMESPACE
 
-// Types should be setup on construction.  Change the type
-// at your own risk as the type is used for RTTI purposes.
 struct Q_QUICK3DRUNTIMERENDER_EXPORT QSSGRenderGraphObject
 {
-    enum class Type : quint8
+    // Types should be setup on construction. Change the type
+    // at your own risk as the type is used for RTTI purposes.
+    // See QSSGRenderGraphObject, QQuick3DObject and QSSceneDesc (asset useage).
+
+    enum BaseType : quint16
     {
-        Unknown = 0,
-        Presentation,
-        Scene,
-        Node,
-        Layer,
-        Light,
-        Camera,
-        Model,
-        DefaultMaterial,
-        PrincipledMaterial,
-        Image,
-        Effect,
-        CustomMaterial,
-        RenderPlugin,
-        Lightmaps,
-        Geometry,
-        Item2D,
-        LastKnownGraphObjectType,
+        Node = 0x10,
+        Light = 0x20,
+        Camera = 0x40,
+        Renderable = 0x80,
+        Resource = 0x100,
+        Material = 0x200,
+        Texture = 0x400
     };
+
+    enum class Type : quint16 {
+        Unknown = 0,
+        // Nodes
+        Node = BaseType::Node,
+        Layer, // Node
+        Joint, // Node
+        Skeleton, // Node (A resource to the model node)
+        ImportScene, // Node
+        ReflectionProbe,
+        // Light nodes
+        DirectionalLight = BaseType::Light | BaseType::Node,
+        PointLight,
+        SpotLight,
+        // Camera nodes
+        OrthographicCamera = BaseType::Camera | BaseType::Node,
+        PerspectiveCamera,
+        CustomFrustumCamera, // Perspective camera with user specified frustum bounds.
+        CustomCamera,
+        // Renderable nodes
+        Model = BaseType::Renderable | BaseType::Node, // Renderable Node
+        Item2D, // Renderable Node
+        Particles, // Renderable Node
+        // Resources
+        SceneEnvironment = BaseType::Resource, // Resource
+        Effect, // Resource
+        Geometry, // Resource
+        TextureData, // Resource
+        MorphTarget, // Resource
+        ModelInstance, // Resource
+        ModelBlendParticle, // Resource
+        ResourceLoader, // Resource [meta]
+        // Materials
+        DefaultMaterial = BaseType::Material | BaseType::Resource, // Resource
+        PrincipledMaterial, // Resource
+        CustomMaterial, // Resource
+        SpecularGlossyMaterial, //Resource
+        Skin, // Resource
+        // Textures
+        Image2D = BaseType::Texture | BaseType::Resource, // Resource
+        ImageCube, // Resource
+    };
+
+    Q_REQUIRED_RESULT static inline constexpr bool isNodeType(Type type) Q_DECL_NOTHROW
+    {
+        return (quint16(type) & BaseType::Node);
+    }
+
+    Q_REQUIRED_RESULT static inline constexpr bool isLight(Type type) Q_DECL_NOTHROW
+    {
+        return (quint16(type) & BaseType::Light);
+    }
+
+    Q_REQUIRED_RESULT static inline constexpr bool isCamera(Type type) Q_DECL_NOTHROW
+    {
+        return (quint16(type) & BaseType::Camera);
+    }
+
+    Q_REQUIRED_RESULT static inline constexpr bool isMaterial(Type type) Q_DECL_NOTHROW
+    {
+        return (quint16(type) & BaseType::Material);
+    }
+
+    Q_REQUIRED_RESULT static inline constexpr bool isTexture(Type type) Q_DECL_NOTHROW
+    {
+        return (quint16(type) & BaseType::Texture);
+    }
+
+    Q_REQUIRED_RESULT static inline constexpr bool isRenderable(Type type) Q_DECL_NOTHROW
+    {
+        return (quint16(type) & BaseType::Renderable);
+    }
+
+    Q_REQUIRED_RESULT static inline constexpr bool isResource(Type type) Q_DECL_NOTHROW
+    {
+        return (quint16(type) & BaseType::Resource);
+    }
+
+    // These require special handling, see cleanupNodes() in the scene manager.
+    Q_REQUIRED_RESULT static inline constexpr bool hasGraphicsResources(Type type) Q_DECL_NOTHROW
+    {
+        return ((type == Type::Model)
+                || (isTexture(type))
+                || (type == Type::Geometry)
+                || (type == Type::TextureData)
+                || (type == Type::ResourceLoader));
+    }
 
     QAtomicInt ref;
     // Id's help debugging the object and are optionally set
@@ -83,38 +135,10 @@ struct Q_QUICK3DRUNTIMERENDER_EXPORT QSSGRenderGraphObject
     // Type is used for RTTI purposes down the road.
     Type type;
 
-    QSSGRenderGraphObject(QSSGRenderGraphObject::Type inType) : type(inType) {}
+    explicit QSSGRenderGraphObject(QSSGRenderGraphObject::Type inType) : type(inType) {}
     virtual ~QSSGRenderGraphObject();
 
-    // If you change any detail of the scene graph, or even *breath* on a
-    // scene graph object, you need to bump this binary version so at least
-    // we know if we can load a file or not.
-    static quint32 getSceneGraphBinaryVersion() { return 1; }
-
-    inline bool isMaterialType() const Q_DECL_NOTHROW
-    {
-        return (type == Type::CustomMaterial || type == Type::DefaultMaterial || type == Type::PrincipledMaterial);
-    }
-
-    inline bool isLightmapType() const Q_DECL_NOTHROW
-    {
-        return (type == Type::Lightmaps || type == Type::DefaultMaterial || type == Type::PrincipledMaterial);
-    }
-
-    inline bool isNodeType() const Q_DECL_NOTHROW
-    {
-        return (type == Type::Node ||
-                type == Type::Layer ||
-                type == Type::Light ||
-                type == Type::Camera ||
-                type == Type::Model);
-    }
-
-    inline bool isRenderableType() const Q_DECL_NOTHROW
-    {
-        return (type == Type::Model ||
-                type == Type::Item2D);
-    }
+    Q_DISABLE_COPY_MOVE(QSSGRenderGraphObject)
 };
 
 QT_END_NAMESPACE

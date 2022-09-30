@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "base/base_paths.h"
+#include "base/containers/flat_map.h"
 #include "base/debug/alias.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -23,10 +24,10 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "crypto/nss_crypto_module_delegate.h"
 #include "crypto/nss_util_internal.h"
 
@@ -34,13 +35,14 @@ namespace crypto {
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+
 // Fake certificate authority database used for testing.
 static const base::FilePath::CharType kReadOnlyCertDB[] =
     FILE_PATH_LITERAL("/etc/fake_root_ca/nssdb");
-#endif  // defined(OS_CHROMEOS)
 
-#if !defined(OS_CHROMEOS)
+#else
+
 base::FilePath GetDefaultConfigDirectory() {
   base::FilePath dir;
   base::PathService::Get(base::DIR_HOME, &dir);
@@ -56,7 +58,8 @@ base::FilePath GetDefaultConfigDirectory() {
   DVLOG(2) << "DefaultConfigDirectory: " << dir.value();
   return dir;
 }
-#endif  // !defined(OS_CHROMEOS)
+
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
 // On non-Chrome OS platforms, return the default config directory. On Chrome OS
 // test images, return a read-only directory with fake root CA certs (which are
@@ -64,14 +67,14 @@ base::FilePath GetDefaultConfigDirectory() {
 // code). On Chrome OS non-test images (where the read-only directory doesn't
 // exist), return an empty path.
 base::FilePath GetInitialConfigDirectory() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   base::FilePath database_dir = base::FilePath(kReadOnlyCertDB);
   if (!base::PathExists(database_dir))
     database_dir.clear();
   return database_dir;
 #else
   return GetDefaultConfigDirectory();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 // This callback for NSS forwards all requests to a caller-specified
@@ -81,9 +84,8 @@ char* PKCS11PasswordFunc(PK11SlotInfo* slot, PRBool retry, void* arg) {
       reinterpret_cast<crypto::CryptoModuleBlockingPasswordDelegate*>(arg);
   if (delegate) {
     bool cancelled = false;
-    std::string password = delegate->RequestPassword(PK11_GetTokenName(slot),
-                                                     retry != PR_FALSE,
-                                                     &cancelled);
+    std::string password = delegate->RequestPassword(
+        PK11_GetTokenName(slot), retry != PR_FALSE, &cancelled);
     if (cancelled)
       return nullptr;
     char* result = PORT_Strdup(password.c_str());
@@ -102,9 +104,7 @@ class NSPRInitSingleton {
  private:
   friend struct base::LazyInstanceTraitsBase<NSPRInitSingleton>;
 
-  NSPRInitSingleton() {
-    PR_Init(PR_USER_THREAD, PR_PRIORITY_NORMAL, 0);
-  }
+  NSPRInitSingleton() { PR_Init(PR_USER_THREAD, PR_PRIORITY_NORMAL, 0); }
 
   // NOTE(willchan): We don't actually cleanup on destruction since we leak NSS
   // to prevent non-joinable threads from using NSS after it's already been
@@ -112,8 +112,8 @@ class NSPRInitSingleton {
   ~NSPRInitSingleton() = delete;
 };
 
-base::LazyInstance<NSPRInitSingleton>::Leaky
-    g_nspr_singleton = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<NSPRInitSingleton>::Leaky g_nspr_singleton =
+    LAZY_INSTANCE_INITIALIZER;
 
 // Force a crash with error info on NSS_NoDB_Init failure.
 void CrashOnNSSInitFailure() {
@@ -127,6 +127,58 @@ void CrashOnNSSInitFailure() {
 }
 
 class NSSInitSingleton {
+ public:
+  // NOTE(willchan): We don't actually cleanup on destruction since we leak NSS
+  // to prevent non-joinable threads from using NSS after it's already been
+  // shut down.
+  ~NSSInitSingleton() = delete;
+
+  ScopedPK11Slot OpenSoftwareNSSDB(const base::FilePath& path,
+                                   const std::string& description) {
+    base::AutoLock lock(slot_map_lock_);
+
+    auto slot_map_iter = slot_map_.find(path);
+    if (slot_map_iter != slot_map_.end()) {
+      // PK11_ReferenceSlot returns a new PK11Slot instance which refers
+      // to the same slot.
+      return ScopedPK11Slot(PK11_ReferenceSlot(slot_map_iter->second.get()));
+    }
+
+    const std::string modspec =
+        base::StringPrintf("configDir='sql:%s' tokenDescription='%s'",
+                           path.value().c_str(), description.c_str());
+    PK11SlotInfo* db_slot_info = SECMOD_OpenUserDB(modspec.c_str());
+    if (db_slot_info) {
+      if (PK11_NeedUserInit(db_slot_info))
+        PK11_InitPin(db_slot_info, nullptr, nullptr);
+      slot_map_[path] = ScopedPK11Slot(PK11_ReferenceSlot(db_slot_info));
+    } else {
+      LOG(ERROR) << "Error opening persistent database (" << modspec
+                 << "): " << GetNSSErrorMessage();
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+      DiagnosePublicSlotAndCrash(path);
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+    }
+
+    return ScopedPK11Slot(db_slot_info);
+  }
+
+  SECStatus CloseSoftwareNSSDB(PK11SlotInfo* slot) {
+    if (!slot) {
+      return SECFailure;
+    }
+
+    base::AutoLock lock(slot_map_lock_);
+    CK_SLOT_ID slot_id = PK11_GetSlotID(slot);
+    for (auto const& [stored_path, stored_slot] : slot_map_) {
+      if (PK11_GetSlotID(stored_slot.get()) == slot_id) {
+        slot_map_.erase(stored_path);
+        return SECMOD_CloseUserDB(slot);
+      }
+    }
+    return SECFailure;
+  }
+
  private:
   friend struct base::LazyInstanceTraitsBase<NSSInitSingleton>;
 
@@ -157,15 +209,15 @@ class NSSInitSingleton {
       // Use "sql:" which can be shared by multiple processes safely.
       std::string nss_config_dir =
           base::StringPrintf("sql:%s", database_dir.value().c_str());
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
       status = NSS_Init(nss_config_dir.c_str());
 #else
       status = NSS_InitReadWrite(nss_config_dir.c_str());
 #endif
       if (status != SECSuccess) {
         LOG(ERROR) << "Error initializing NSS with a persistent "
-                      "database (" << nss_config_dir
-                   << "): " << GetNSSErrorMessage();
+                      "database ("
+                   << nss_config_dir << "): " << GetNSSErrorMessage();
       }
     }
     if (status != SECSuccess) {
@@ -200,35 +252,35 @@ class NSSInitSingleton {
     // Disable MD5 certificate signatures. (They are disabled by default in
     // NSS 3.14.)
     NSS_SetAlgorithmPolicy(SEC_OID_MD5, 0, NSS_USE_ALG_IN_CERT_SIGNATURE);
-    NSS_SetAlgorithmPolicy(SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION,
-                           0, NSS_USE_ALG_IN_CERT_SIGNATURE);
+    NSS_SetAlgorithmPolicy(SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION, 0,
+                           NSS_USE_ALG_IN_CERT_SIGNATURE);
   }
 
-  // NOTE(willchan): We don't actually cleanup on destruction since we leak NSS
-  // to prevent non-joinable threads from using NSS after it's already been
-  // shut down.
-  ~NSSInitSingleton() = delete;
+  // Stores opened software NSS databases.
+  base::flat_map<base::FilePath, /*slot=*/ScopedPK11Slot> slot_map_
+      GUARDED_BY(slot_map_lock_);
+  // Ensures thread-safety for the methods that modify slot_map_.
+  // Performance considerations:
+  // Opening/closing a database is a rare operation in Chrome. Actually opening
+  // a database is a blocking I/O operation. Chrome doesn't open a lot of
+  // different databases in parallel. So, waiting for another thread to finish
+  // opening a database and (almost certainly) reusing the result is comparable
+  // to opening the same database twice in parallel (but the latter is not
+  // supported by NSS).
+  base::Lock slot_map_lock_;
 };
 
-base::LazyInstance<NSSInitSingleton>::Leaky
-    g_nss_singleton = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<NSSInitSingleton>::Leaky g_nss_singleton =
+    LAZY_INSTANCE_INITIALIZER;
 }  // namespace
 
 ScopedPK11Slot OpenSoftwareNSSDB(const base::FilePath& path,
                                  const std::string& description) {
-  const std::string modspec =
-      base::StringPrintf("configDir='sql:%s' tokenDescription='%s'",
-                         path.value().c_str(),
-                         description.c_str());
-  PK11SlotInfo* db_slot = SECMOD_OpenUserDB(modspec.c_str());
-  if (db_slot) {
-    if (PK11_NeedUserInit(db_slot))
-      PK11_InitPin(db_slot, nullptr, nullptr);
-  } else {
-    LOG(ERROR) << "Error opening persistent database (" << modspec
-               << "): " << GetNSSErrorMessage();
-  }
-  return ScopedPK11Slot(db_slot);
+  return g_nss_singleton.Get().OpenSoftwareNSSDB(path, description);
+}
+
+SECStatus CloseSoftwareNSSDB(PK11SlotInfo* slot) {
+  return g_nss_singleton.Get().CloseSoftwareNSSDB(slot);
 }
 
 void EnsureNSPRInit() {
@@ -244,9 +296,9 @@ bool CheckNSSVersion(const char* version) {
 }
 
 AutoSECMODListReadLock::AutoSECMODListReadLock()
-      : lock_(SECMOD_GetDefaultModuleListLock()) {
-    SECMOD_GetReadLock(lock_);
-  }
+    : lock_(SECMOD_GetDefaultModuleListLock()) {
+  SECMOD_GetReadLock(lock_);
+}
 
 AutoSECMODListReadLock::~AutoSECMODListReadLock() {
   SECMOD_ReleaseReadLock(lock_);

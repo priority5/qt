@@ -8,6 +8,7 @@
 #include <shobjidl.h>
 #include <wrl/client.h>
 
+#include "base/memory/raw_ptr.h"
 #include "ui/display/win/base_window_finder_win.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/native_widget_types.h"
@@ -32,6 +33,7 @@ class LocalProcessWindowFinder : public BaseWindowFinderWin {
 
  private:
   LocalProcessWindowFinder(const gfx::Point& screen_loc,
+                           ScreenWin* screen_win,
                            const std::set<HWND>& ignore);
   LocalProcessWindowFinder(const LocalProcessWindowFinder& finder) = delete;
   LocalProcessWindowFinder& operator=(const LocalProcessWindowFinder& finder) =
@@ -44,6 +46,10 @@ class LocalProcessWindowFinder : public BaseWindowFinderWin {
   // The resulting window. This is initially null but set to true in
   // ShouldStopIterating if an appropriate window is found.
   HWND result_;
+
+  // ScreenWin we're looking on. Used to access WindowTreeHost, which
+  // ui/display code can't access directly.
+  raw_ptr<ScreenWin> screen_win_;
 
   // Only used on Win10+.
   Microsoft::WRL::ComPtr<IVirtualDesktopManager> virtual_desktop_manager_;

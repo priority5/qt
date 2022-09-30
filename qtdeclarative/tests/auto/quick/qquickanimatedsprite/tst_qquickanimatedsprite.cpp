@@ -1,41 +1,15 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <QtTest/QtTest>
-#include "../../shared/util.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
 #include <QtQuick/qquickview.h>
 #include <QtQuickTest/QtQuickTest>
 #include <private/qabstractanimation_p.h>
 #include <private/qquickanimatedsprite_p.h>
 #include <private/qquickitem_p.h>
+#include <private/qquickwindow_p.h>
 #include <QtCore/qscopedpointer.h>
 #include <QtGui/qpainter.h>
-#include <QtGui/qopenglcontext.h>
-#include <QtGui/qopenglfunctions.h>
 #include <QtGui/qoffscreensurface.h>
 #include <QtQml/qqmlproperty.h>
 
@@ -43,10 +17,10 @@ class tst_qquickanimatedsprite : public QQmlDataTest
 {
     Q_OBJECT
 public:
-    tst_qquickanimatedsprite(){}
+    tst_qquickanimatedsprite() : QQmlDataTest(QT_QMLTEST_DATADIR) {}
 
 private slots:
-    void initTestCase();
+    void initTestCase() override;
     void test_properties();
     void test_runningChangedSignal();
     void test_startStop();
@@ -221,7 +195,7 @@ public:
     {
     }
 
-    QPixmap requestPixmap(const QString &/*id*/, QSize *size, const QSize &requestedSize)
+    QPixmap requestPixmap(const QString &/*id*/, QSize *size, const QSize &requestedSize) override
     {
         if (requestedSize.isValid())
             qWarning() << "requestPixmap called with requestedSize of" << requestedSize;
@@ -283,7 +257,7 @@ void tst_qquickanimatedsprite::test_largeAnimation()
     sprite->setRunning(true);
     QTRY_VERIFY_WITH_TIMEOUT(!sprite->running(), 100000 /* make sure we wait until its done*/ );
     if (frameSync)
-        QVERIFY(isWithinRange(3*40, frameChangedSpy.count(), 3*40 + 1));
+        QVERIFY(isWithinRange(3*40, int(frameChangedSpy.count()), 3*40 + 1));
     int prevFrame = -1;
     int loopCounter = 0;
     int maxFrame = 0;
@@ -298,15 +272,7 @@ void tst_qquickanimatedsprite::test_largeAnimation()
         maxFrame = qMax(frame, maxFrame);
         prevFrame = frame;
     }
-    int maxTextureSize;
-    QOpenGLContext ctx;
-    ctx.create();
-    QOffscreenSurface offscreenSurface;
-    offscreenSurface.setFormat(ctx.format());
-    offscreenSurface.create();
-    QVERIFY(ctx.makeCurrent(&offscreenSurface));
-    ctx.functions()->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-    ctx.doneCurrent();
+    int maxTextureSize = QQuickWindowPrivate::get(window.data())->context->maxTextureSize();
     maxTextureSize /= 512;
     QVERIFY(maxFrame > maxTextureSize); // make sure we go beyond the texture width limitation
     QCOMPARE(loopCounter, sprite->loops());
@@ -330,7 +296,7 @@ void tst_qquickanimatedsprite::test_reparenting()
     // don't crash (QTBUG-51162)
     sprite->polish();
     QVERIFY(QQuickTest::qIsPolishScheduled(sprite));
-    QVERIFY(QQuickTest::qWaitForItemPolished(sprite));
+    QVERIFY(QQuickTest::qWaitForPolish(sprite));
 }
 
 class KillerThread : public QThread
@@ -338,9 +304,26 @@ class KillerThread : public QThread
     Q_OBJECT
 protected:
     void run() override {
-        sleep(3);
-        qFatal("Either the GUI or the render thread is stuck in an infinite loop.");
+        QMutexLocker lock(&abortMutex);
+        if (!aborted)
+            abortWaitCondition.wait(&abortMutex, 3000);
+
+        if (!aborted)
+            qFatal("Either the GUI or the render thread is stuck in an infinite loop.");
     }
+
+public:
+    void abort()
+    {
+        QMutexLocker lock(&abortMutex);
+        aborted = true;
+        abortWaitCondition.wakeAll();
+    }
+
+private:
+    QMutex abortMutex;
+    QWaitCondition abortWaitCondition;
+    bool aborted = false;
 };
 
 // Regression test for QTBUG-53937
@@ -365,7 +348,7 @@ void tst_qquickanimatedsprite::test_changeSourceToSmallerImgKeepingBigFrameSize(
 
     // If we reach this point it's because we didn't hit QTBUG-53937
 
-    killer->terminate();
+    killer->abort();
     killer->wait();
 }
 

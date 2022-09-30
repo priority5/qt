@@ -14,13 +14,13 @@ const char* const kAllowedTransformSchemes[4] = {
     url::kHttpScheme, url::kHttpsScheme, url::kFtpScheme,
     extensions::kExtensionScheme};
 
+const char kErrorRequestMethodDuplicated[] =
+    "Rule with id * includes and excludes the same request method.";
 const char kErrorResourceTypeDuplicated[] =
     "Rule with id * includes and excludes the same resource.";
 const char kErrorInvalidRuleKey[] =
     "Rule with id * has an invalid value for * key. This should be greater "
     "than or equal to *.";
-const char kErrorEmptyRulePriority[] =
-    "Rule with id * does not specify the value for priority key.";
 const char kErrorNoApplicableResourceTypes[] =
     "Rule with id * is not applicable to any resource type.";
 const char kErrorEmptyList[] =
@@ -42,6 +42,8 @@ const char kErrorInvalidTransformScheme[] =
     "values are: [*].";
 const char kErrorQueryAndTransformBothSpecified[] =
     "Rule with id * cannot specify both \"*\" and \"*\" keys.";
+const char kErrorDomainsAndInitiatorDomainsBothSpecified[] =
+    "Rule with id * cannot use deprecated field \"*\". Use \"*\" instead.";
 const char kErrorJavascriptRedirect[] =
     "Rule with id * specifies an incorrect value for the \"*\" key. Redirects "
     "to javascript urls are not supported.";
@@ -57,9 +59,6 @@ const char kErrorInvalidAllowAllRequestsResourceType[] =
 const char kErrorRegexTooLarge[] =
     "Rule with id * specified a more complex regex than allowed as part of the "
     "\"*\" key.";
-const char kErrorRegexesTooLarge[] =
-    "Rules with ids [*] specified a more complex regex than allowed as part of "
-    "the \"*\" key.";
 const char kErrorNoHeaderListsSpecified[] =
     "Rule with id * does not specify a value for \"*\" or \"*\" key. At least "
     "one of these keys must be specified with a non-empty list.";
@@ -74,6 +73,12 @@ const char kErrorHeaderValuePresent[] =
     "removed.";
 const char kErrorCannotAppendRequestHeader[] =
     "Rule with id * must not specify a request header to be appended.";
+const char kErrorTabIdsOnNonSessionRule[] =
+    "Rule with id * specifies a value for \"*\" or \"*\" key. These are only "
+    "supported for session-scoped rules.";
+const char kErrorTabIdDuplicated[] =
+    "Rule with id * includes and excludes the same tab ID.";
+
 const char kErrorListNotPassed[] = "Rules file must contain a list.";
 
 const char kRuleCountExceeded[] =
@@ -100,6 +105,10 @@ const char kDynamicRuleCountExceeded[] = "Dynamic rule count exceeded.";
 const char kDynamicRegexRuleCountExceeded[] =
     "Dynamic rule count for regex rules exceeded.";
 
+const char kSessionRuleCountExceeded[] = "Session rule count exceeded.";
+const char kSessionRegexRuleCountExceeded[] =
+    "Session rule count for regex rules exceeded.";
+
 const char kInvalidRulesetIDError[] = "Invalid ruleset id: *.";
 const char kEnabledRulesetsRuleCountExceeded[] =
     "The set of enabled rulesets exceeds the rule count limit.";
@@ -107,11 +116,17 @@ const char kEnabledRulesetsRegexRuleCountExceeded[] =
     "The set of enabled rulesets exceeds the regular expression rule count "
     "limit.";
 const char kInternalErrorUpdatingEnabledRulesets[] = "Internal error.";
+const char kEnabledRulesetCountExceeded[] =
+    "The number of enabled static rulesets exceeds the enabled ruleset count "
+    "limit.";
+
+const char kTabNotFoundError[] = "No tab with id: *.";
+const char kIncrementActionCountWithoutUseAsBadgeTextError[] =
+    "Cannot increment action count unless displaying action count as badge "
+    "text.";
 
 const char kIndexAndPersistRulesTimeHistogram[] =
     "Extensions.DeclarativeNetRequest.IndexAndPersistRulesTime";
-const char kManifestRulesCountHistogram[] =
-    "Extensions.DeclarativeNetRequest.ManifestRulesCount2";
 const char kManifestEnabledRulesCountHistogram[] =
     "Extensions.DeclarativeNetRequest.ManifestEnabledRulesCount2";
 const char kUpdateDynamicRulesStatusHistogram[] =
@@ -131,8 +146,7 @@ const char kErrorGetMatchedRulesMissingPermissions[] =
     "have activeTab granted for the specified tab ID in order to call this "
     "function.";
 
-const base::Feature kDeclarativeNetRequestGlobalRules{
-    "DeclarativeNetRequestGlobalRules", base::FEATURE_DISABLED_BY_DEFAULT};
+const char kEmbedderConditionsBufferIdentifier[] = "EMBR";
 
 }  // namespace declarative_net_request
 }  // namespace extensions

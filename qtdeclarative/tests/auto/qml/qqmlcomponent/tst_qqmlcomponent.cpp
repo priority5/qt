@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <qtest.h>
 #include <QDebug>
 
@@ -35,13 +10,41 @@
 #include <QtQuick>
 #include <QtQuick/private/qquickrectangle_p.h>
 #include <QtQuick/private/qquickmousearea_p.h>
-#include <private/qqmlcontext_p.h>
+#include <QtQuick/private/qquickpalette_p.h>
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include <QtQuickTestUtils/private/testhttpserver_p.h>
+#include <private/qqmlguardedcontextdata_p.h>
 #include <private/qv4qmlcontext_p.h>
 #include <private/qv4scopedvalue_p.h>
 #include <private/qv4qmlcontext_p.h>
 #include <qcolor.h>
-#include "../../shared/util.h"
-#include "testhttpserver.h"
+#include <qsignalspy.h>
+
+#include <algorithm>
+
+using namespace Qt::StringLiterals;
+
+class WithQJSValue : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QJSValue v READ v WRITE setV NOTIFY vChanged)
+
+public:
+    QJSValue v() const { return m_v; }
+    void setV(const QJSValue &newV)
+    {
+        if (!m_v.strictlyEquals(newV)) {
+            m_v = newV;
+            emit vChanged();
+        }
+    }
+
+signals:
+    void vChanged();
+
+private:
+    QJSValue m_v;
+};
 
 class MyIC : public QObject, public QQmlIncubationController
 {
@@ -49,7 +52,7 @@ class MyIC : public QObject, public QQmlIncubationController
 public:
     MyIC() { startTimer(5); }
 protected:
-    virtual void timerEvent(QTimerEvent*) {
+    void timerEvent(QTimerEvent*) override {
         incubateFor(5);
     }
 };
@@ -96,7 +99,7 @@ class tst_qqmlcomponent : public QQmlDataTest
 {
     Q_OBJECT
 public:
-    tst_qqmlcomponent() { engine.setIncubationController(&ic); }
+    tst_qqmlcomponent() : QQmlDataTest(QT_QMLTEST_DATADIR) { engine.setIncubationController(&ic); }
 
 private slots:
     void null();
@@ -105,6 +108,8 @@ private slots:
     void qmlCreateObjectAutoParent_data();
     void qmlCreateObjectAutoParent();
     void qmlCreateObjectWithProperties();
+    void qmlCreateObjectClean();
+    void qmlCreateObjectDirty();
     void qmlIncubateObject();
     void qmlCreateParentReference();
     void async();
@@ -125,6 +130,12 @@ private slots:
     void testRequiredProperties();
     void testRequiredPropertiesFromQml();
     void testSetInitialProperties();
+    void createInsideJSModule();
+    void qmlErrorIsReported();
+    void initJSValueProp();
+    void qmlPropertySignalExists();
+    void componentTypes();
+    void boundComponent();
 
 private:
     QQmlEngine engine;
@@ -177,6 +188,7 @@ void tst_qqmlcomponent::qmlCreateWindow()
     QQmlEngine engine;
     QQmlComponent component(&engine);
     component.loadUrl(testFileUrl("createWindow.qml"));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QScopedPointer<QQuickWindow> window(qobject_cast<QQuickWindow *>(component.create()));
     QVERIFY(!window.isNull());
 }
@@ -301,6 +313,42 @@ void tst_qqmlcomponent::qmlCreateObjectWithProperties()
         testBindingThisObj->setProperty("width", 200);
         QCOMPARE(testBindingThisObj->property("testValue").value<int>(), 200 * 3);
     }
+}
+
+void tst_qqmlcomponent::qmlCreateObjectClean()
+{
+    QQmlEngine engine;
+    QVERIFY(engine.outputWarningsToStandardError());
+    QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError> &) {
+        QFAIL("Calls with suitable parameters should not generate any warnings.");
+    });
+    QQmlComponent component(&engine, testFileUrl("createObjectClean.qml"));
+    QVERIFY2(component.errorString().isEmpty(), component.errorString().toUtf8());
+    QScopedPointer<QObject> object(component.create());
+    QVERIFY(!object.isNull());
+
+    QVERIFY(qvariant_cast<QObject *>(object->property("a")) != nullptr);
+    QVERIFY(qvariant_cast<QObject *>(object->property("b")) != nullptr);
+    QVERIFY(qvariant_cast<QObject *>(object->property("c")) != nullptr);
+    QVERIFY(qvariant_cast<QObject *>(object->property("d")) != nullptr);
+}
+
+void tst_qqmlcomponent::qmlCreateObjectDirty()
+{
+    QQmlEngine engine;
+    engine.setOutputWarningsToStandardError(false);
+    QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError> &warnings) {
+        QCOMPARE(warnings.count(), 1);
+        QCOMPARE(warnings[0].description(),
+                "QML Component: Unsuitable arguments passed to createObject(). The first argument "
+                "should be a QObject* or null, and the second argument should be a JavaScript "
+                "object or a QVariantMap");
+    });
+    QQmlComponent component(&engine, testFileUrl("createObjectDirty.qml"));
+    QVERIFY2(component.errorString().isEmpty(), component.errorString().toUtf8());
+    QScopedPointer<QObject> object(component.create());
+    QVERIFY(!object.isNull());
+    QVERIFY(qvariant_cast<QObject *>(object->property("a")) != nullptr);
 }
 
 void tst_qqmlcomponent::qmlCreateParentReference()
@@ -515,6 +563,7 @@ void tst_qqmlcomponent::recursion()
 {
     QQmlEngine engine;
     QQmlComponent component(&engine, testFileUrl("recursion.qml"));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
 
     QTest::ignoreMessage(QtWarningMsg, QLatin1String("QQmlComponent: Component creation is recursing - aborting").data());
     QScopedPointer<QObject> object(component.create());
@@ -682,20 +731,117 @@ private:
     QQuickItem *m_defaultProperty = nullptr;
 };
 
+class TwoRequiredProperties : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int index READ index WRITE setIndex NOTIFY indexChanged REQUIRED)
+    Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged REQUIRED)
+
+    int m_index = 0;
+    QString m_name;
+
+public:
+    TwoRequiredProperties(QObject *parent = nullptr) : QObject(parent) { }
+
+    int index() const { return m_index; }
+    QString name() const { return m_name; }
+
+    void setIndex(int x)
+    {
+        if (m_index == x)
+            return;
+        m_index = x;
+        Q_EMIT indexChanged();
+    }
+    void setName(const QString &x)
+    {
+        if (m_name == x)
+            return;
+        m_name = x;
+        Q_EMIT nameChanged();
+    }
+
+Q_SIGNALS:
+    void indexChanged();
+    void nameChanged();
+};
+
+class ShadowedRequiredProperty : public TwoRequiredProperties
+{
+    Q_OBJECT
+    Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged /* REQUIRED */)
+    // Note: should be able to take methods from the base class
+};
+
+class AttachedRequiredProperties : public QObject
+{
+    Q_OBJECT
+    QML_ATTACHED(TwoRequiredProperties)
+public:
+    AttachedRequiredProperties(QObject *parent = nullptr) : QObject(parent) { }
+    static TwoRequiredProperties *qmlAttachedProperties(QObject *parent)
+    {
+        return new TwoRequiredProperties(parent);
+    }
+};
+
+class GroupedRequiredProperties : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(TwoRequiredProperties *group READ group)
+    TwoRequiredProperties m_group;
+
+public:
+    GroupedRequiredProperties(QObject *parent = nullptr) : QObject(parent) { }
+    TwoRequiredProperties *group() { return &m_group; }
+};
+
+class RequiredGroup : public QObject
+{
+    Q_OBJECT
+    // use QQuickPalette not to create an extra test-only
+    Q_PROPERTY(QQuickPalette *group READ group REQUIRED)
+    QQuickPalette m_group;
+
+public:
+    RequiredGroup(QObject *parent = nullptr) : QObject(parent) { }
+    QQuickPalette *group() { return &m_group; }
+};
+
 void tst_qqmlcomponent::testRequiredProperties_data()
 {
     qmlRegisterType<RequiredDefaultCpp>("qt.test", 1, 0, "RequiredDefaultCpp");
+    qmlRegisterType<TwoRequiredProperties>("qt.test", 1, 0, "TwoRequiredProperties");
+    qmlRegisterType<ShadowedRequiredProperty>("qt.test", 1, 0, "ShadowedRequiredProperty");
+    qmlRegisterUncreatableType<AttachedRequiredProperties>(
+            "qt.test", 1, 0, "AttachedRequiredProperty",
+            tr("AttachedRequiredProperties is an attached property"));
+    qmlRegisterType<GroupedRequiredProperties>("qt.test", 1, 0, "GroupedRequiredProperty");
+    qmlRegisterType<RequiredGroup>("qt.test", 1, 0, "RequiredGroup");
+
     QTest::addColumn<QUrl>("testFile");
     QTest::addColumn<bool>("shouldSucceed");
     QTest::addColumn<QString>("errorMsg");
 
     QTest::addRow("requiredSetViaChainedAlias") << testFileUrl("requiredSetViaChainedAlias.qml") << true << "";
     QTest::addRow("requiredNotSet") << testFileUrl("requiredNotSet.qml") << false << "Required property i was not initialized";
-    QTest::addRow("requiredSetInSameFile") << testFileUrl("requiredSetInSameFile.qml") << true << "";
+    QTest::addRow("requiredSetInSameFile") << testFileUrl("RequiredSetInSameFile.qml") << true << "";
     QTest::addRow("requiredSetViaAlias1") << testFileUrl("requiredSetViaAliasBeforeSameFile.qml") << true << "";
     QTest::addRow("requiredSetViaAlias2") << testFileUrl("requiredSetViaAliasAfterSameFile.qml") << true << "";
     QTest::addRow("requiredSetViaAlias3") << testFileUrl("requiredSetViaAliasParentFile.qml") << true << "";
+    QTest::addRow("requiredSetInBase") << testFileUrl("requiredChildOfGoodBase.qml") << true << "";
+    QTest::addRow("requiredNotSetInBase") << testFileUrl("requiredChildOfBadBase.qml") << false << "Required property i was not initialized";
+    QTest::addRow("rerequiredSet") << testFileUrl("rerequiredSet.qml") << true << "";
+    QTest::addRow("rerequiredNotSet") << testFileUrl("RerequiredNotSet.qml") << false
+                                      << "Required property i was not initialized";
+    QTest::addRow("requiredSetLater(rerequired)")
+            << testFileUrl("requiredSetLater.rerequired.qml") << true << "";
+    QTest::addRow("rerequiredSetLater") << testFileUrl("rerequiredSetLater.qml") << true << "";
     QTest::addRow("shadowing") << testFileUrl("shadowing.qml") << false <<  "Required property i was not initialized";
+    QTest::addRow("shadowing (C++)") << testFileUrl("shadowingFromCpp.qml") << false
+                                     << "Required property name was not initialized";
+    QTest::addRow("shadowing (C++ indirect)") << testFileUrl("shadowingFromQmlChild.qml") << false
+                                              << "Required property name was not initialized";
     QTest::addRow("setLater") << testFileUrl("requiredSetLater.qml") << true << "";
     QTest::addRow("setViaAliasToSubcomponent") << testFileUrl("setViaAliasToSubcomponent.qml") << true << "";
     QTest::addRow("aliasToSubcomponentNotSet") << testFileUrl("aliasToSubcomponentNotSet.qml") << false << "It can be set via the alias property i_alias";
@@ -703,8 +849,54 @@ void tst_qqmlcomponent::testRequiredProperties_data()
     QTest::addRow("required default not set") << testFileUrl("requiredDefault.2.qml") << false << "Required property requiredDefault was not initialized";
     QTest::addRow("required default set (C++)") << testFileUrl("requiredDefault.3.qml") << true << "";
     QTest::addRow("required default not set (C++)") << testFileUrl("requiredDefault.4.qml") << false << "Required property defaultProperty was not initialized";
-}
+    // QTBUG-96200:
+    QTest::addRow("required two set one (C++)") << testFileUrl("requiredTwoProperties.qml") << false
+                                                << "Required property name was not initialized";
+    QTest::addRow("required two set two (C++)")
+            << testFileUrl("RequiredTwoPropertiesSet.qml") << true << "";
+    QTest::addRow("required two set two (C++ indirect)")
+            << testFileUrl("requiredTwoPropertiesDummy.qml") << true << "";
 
+    QTest::addRow("required set (inline component)")
+            << testFileUrl("requiredPropertyInlineComponent.good.qml") << true << "";
+    QTest::addRow("required not set (inline component)")
+            << testFileUrl("requiredPropertyInlineComponent.bad.qml") << false
+            << "Required property i was not initialized";
+    QTest::addRow("required set (inline component, C++)")
+            << testFileUrl("requiredPropertyInlineComponentWithCppBase.good.qml") << true << "";
+    QTest::addRow("required not set (inline component, C++)")
+            << testFileUrl("requiredPropertyInlineComponentWithCppBase.bad.qml") << false
+            << "Required property name was not initialized";
+    QTest::addRow("required set (inline component, C++ indirect)")
+            << testFileUrl("requiredPropertyInlineComponentWithIndirectCppBase.qml") << true << "";
+    QTest::addRow("required not set (attached)")
+            << testFileUrl("requiredPropertiesInAttached.bad.qml") << false
+            << "Attached property has required properties. This is not supported";
+    QTest::addRow("required two set one (attached)")
+            << testFileUrl("requiredPropertiesInAttached.bad2.qml") << false
+            << "Attached property has required properties. This is not supported";
+    QTest::addRow("required two set two (attached)")
+            << testFileUrl("RequiredPropertiesInAttached.qml") << false
+            << "Attached property has required properties. This is not supported";
+    QTest::addRow("required two set two (attached indirect)")
+            << testFileUrl("requiredPropertiesInAttachedIndirect.qml") << false
+            << "Attached property has required properties. This is not supported";
+    QTest::addRow("required itself not set (group)")
+            << testFileUrl("requiredGroup.bad.qml") << false
+            << "Required property group was not initialized";
+    QTest::addRow("required itself set (group)")
+            << testFileUrl("requiredGroup.good.qml") << true << "";
+    QTest::addRow("required not set (group)")
+            << testFileUrl("requiredPropertiesInGroup.bad.qml") << false
+            << "Required property index was not initialized";
+    QTest::addRow("required two set one (group)")
+            << testFileUrl("requiredPropertiesInGroup.bad2.qml") << false
+            << "Required property name was not initialized";
+    QTest::addRow("required two set two (group)")
+            << testFileUrl("RequiredPropertiesInGroup.qml") << true << "";
+    QTest::addRow("required two set two (group indirect)")
+            << testFileUrl("requiredPropertiesInGroupIndirect.qml") << true << "";
+}
 
 void tst_qqmlcomponent::testRequiredProperties()
 {
@@ -715,12 +907,21 @@ void tst_qqmlcomponent::testRequiredProperties()
     QQmlComponent comp(&eng);
     comp.loadUrl(testFile);
     QScopedObjPointer obj {comp.create()};
-    if (shouldSucceed)
+    QEXPECT_FAIL("required not set (group)",
+                 "We fail to recognize required sub-properties inside a group property when that "
+                 "group property is unused (QTBUG-96544)",
+                 Abort);
+    QEXPECT_FAIL("required two set one (group)",
+                 "We fail to recognized required sub-properties inside a group property, even when "
+                 "that group property is used (QTBUG-96544)",
+                 Abort);
+    if (shouldSucceed) {
+        QVERIFY2(comp.isReady(), qPrintable(comp.errorString()));
         QVERIFY(obj);
-    else {
-        QVERIFY(!obj);
+    } else {
+        QVERIFY2(!obj, "The object is valid when it shouldn't be");
         QFETCH(QString, errorMsg);
-        QVERIFY(comp.errorString().contains(errorMsg));
+        QVERIFY2(comp.errorString().contains(errorMsg), qPrintable(comp.errorString()));
     }
 }
 
@@ -802,7 +1003,7 @@ void tst_qqmlcomponent::testSetInitialProperties()
         COMPARE(myurl);
         COMPARE(myfont);
         COMPARE(mydate);
-        COMPARE(mypoint);
+        QCOMPARE(obj->property("mypoint"), QPointF(mypoint));
         COMPARE(mysize);
         COMPARE(matrix);
         COMPARE(quat);
@@ -829,6 +1030,181 @@ void tst_qqmlcomponent::testSetInitialProperties()
         };
         QVERIFY(obj);
         QVERIFY(comp.errorString().contains("Setting initial properties failed: Item does not have a property called notThePropertiesYoureLookingFor"));
+    }
+}
+
+void tst_qqmlcomponent::createInsideJSModule()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("jsmodule/test.qml"));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVERIFY(root->property("ok").toBool());
+}
+
+void tst_qqmlcomponent::qmlErrorIsReported()
+{
+    struct LogControl
+    {
+        LogControl() { QLoggingCategory::setFilterRules("qt.qml.diskcache.debug=true"); }
+        ~LogControl() { QLoggingCategory::setFilterRules(QString()); }
+    };
+    LogControl lc;
+    Q_UNUSED(lc);
+
+    QRegularExpression errorMessage(
+            R"(.*Cannot assign to non-existent property.*onSomePropertyChanged.*)");
+    QTest::ignoreMessage(QtDebugMsg, errorMessage);
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("qmlWithError.qml"));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY(root == nullptr);
+    QVERIFY(component.isError());
+    const auto componentErrors = component.errors();
+    QVERIFY(std::any_of(componentErrors.begin(), componentErrors.end(), [&](const QQmlError &e) {
+        return errorMessage.match(e.toString()).hasMatch();
+    }));
+}
+
+void tst_qqmlcomponent::initJSValueProp()
+{
+    qmlRegisterType<WithQJSValue>("ComponentTest", 1, 0, "WithQJSValue");
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData("import ComponentTest\nWithQJSValue {}", QUrl());
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QScopedPointer<QObject> o(component.createWithInitialProperties({{ u"v"_s, 5}}));
+    QVERIFY(!o.isNull());
+    WithQJSValue *withQJSValue = qobject_cast<WithQJSValue *>(o.data());
+    QVERIFY(withQJSValue);
+    const QJSValue jsValue = withQJSValue->v();
+    QVERIFY(jsValue.isNumber());
+    QCOMPARE(jsValue.toInt(), 5);
+}
+
+void tst_qqmlcomponent::qmlPropertySignalExists()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData("import QtQml; QtObject { property int p: 41; function doStuff() { p++; } }",
+                      QUrl());
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QScopedPointer<QObject> o(component.create());
+    QVERIFY(!o.isNull());
+
+    QSignalSpy changeSignalSpy(o.get(), SIGNAL(pChanged()));
+    QVERIFY(QMetaObject::invokeMethod(o.get(), "doStuff"));
+    QCOMPARE(changeSignalSpy.count(), 1);
+    QCOMPARE(o->property("p").toInt(), 42);
+}
+
+void tst_qqmlcomponent::componentTypes()
+{
+    {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        // not allowed: "Cannot create empty component specification"
+        component.setData("import QtQml; Component { }", QUrl());
+        QVERIFY(!component.isReady());
+    }
+
+    {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.loadUrl(testFileUrl("ComponentType.qml"));
+        QScopedPointer<QObject> o(component.create());
+        QVERIFY2(!o.isNull(), qPrintable(component.errorString()));
+        QQmlComponent *oComponent = qobject_cast<QQmlComponent *>(o.get());
+        QVERIFY(oComponent);
+        QScopedPointer<QObject> enclosed(oComponent->create());
+        QVERIFY(!enclosed.isNull());
+        QCOMPARE(enclosed->objectName(), u"enclosed"_s);
+    }
+
+    {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.loadUrl(testFileUrl("componentTypes.qml"));
+        QScopedPointer<QObject> o(component.create());
+        QVERIFY2(!o.isNull(), qPrintable(component.errorString()));
+
+        QQmlContext *ctx = engine.contextForObject(o.get());
+
+        QObject *normal = ctx->objectForName(u"normal"_s);
+        QVERIFY(normal);
+        QCOMPARE(normal->property("text").toString(), u"indirect component"_s);
+
+        // check (and thus "document" in code) various ways of how ids work
+        QVERIFY(ctx->objectForName(u"accessibleNormal"_s));
+        QVERIFY(!ctx->objectForName(u"inaccessibleNormal"_s));
+        QVERIFY(ctx->objectForName(u"accessible"_s));
+        QVERIFY(!ctx->objectForName(u"inaccessible"_s));
+        QVERIFY(ctx->objectForName(u"accessibleDelegate"_s));
+        QVERIFY(!ctx->objectForName(u"inaccessibleDelegate"_s));
+
+        QCOMPARE(qvariant_cast<QObject *>(o->property("p2"))->property("text").toString(),
+                 u"foo"_s);
+        auto p3Object = qvariant_cast<QObject *>(o->property("p3"));
+        QVERIFY(p3Object);
+        QVERIFY(p3Object->property("text").toString().isEmpty());
+
+        QQmlComponent *normalComponent = qobject_cast<QQmlComponent *>(normal);
+        QVERIFY(normalComponent);
+        QScopedPointer<QObject> enclosed(normalComponent->create());
+        QVERIFY(enclosed);
+        QCOMPARE(enclosed->objectName(), u"enclosed"_s);
+    }
+}
+
+void tst_qqmlcomponent::boundComponent()
+{
+    QQmlEngine engine;
+    {
+        QQmlComponent component(&engine, testFileUrl("nestedBoundComponent.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+        QScopedPointer<QObject> o(component.create());
+        QVERIFY(!o.isNull());
+
+        QQmlComponent *nestedComponent = o->property("c").value<QQmlComponent *>();
+        QVERIFY(nestedComponent != nullptr);
+
+        QObject *nestedObject = o->property("o").value<QObject *>();
+        QVERIFY(nestedObject != nullptr);
+        QCOMPARE(nestedObject->objectName(), QLatin1String("bound"));
+
+        QScopedPointer<QObject> contextedObject(nestedComponent->create(qmlContext(o.data())));
+        QVERIFY(!contextedObject.isNull());
+
+        QScopedPointer<QObject> uncontextedObject(nestedComponent->create());
+        QVERIFY(uncontextedObject.isNull());
+
+        QVERIFY(nestedComponent->errorString().contains(
+                QLatin1String("Cannot instantiate bound component outside its creation context")));
+    }
+
+    {
+        QQmlComponent component(&engine, testFileUrl("BoundInlineComponent.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+        QScopedPointer<QObject> o(component.create());
+        QVERIFY2(!o.isNull(), qPrintable(component.errorString()));
+
+        QObject *nestedObject = o->property("o").value<QObject *>();
+        QVERIFY(nestedObject != nullptr);
+
+        QCOMPARE(nestedObject->objectName(), QLatin1String("inline"));
+    }
+
+    {
+        QQmlComponent component(&engine, testFileUrl("boundInlineComponentUser.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> o(component.create());
+        QVERIFY(o.isNull());
+
+        QVERIFY(component.errorString().contains(
+                QLatin1String("Cannot instantiate bound inline component in different file")));
     }
 }
 

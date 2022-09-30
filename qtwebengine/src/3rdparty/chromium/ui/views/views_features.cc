@@ -12,12 +12,6 @@ namespace features {
 
 // Please keep alphabetized.
 
-// Increase corner radius on Dialogs for the material design refresh.
-// TODO(tluk): Remove this feature flag when platform inconsistencies
-// have been fixed as recorded on: https://crbug.com/932970
-const base::Feature kEnableMDRoundedCornersOnDialogs{
-    "EnableMDRoundedCornersOnDialogs", base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Use a high-contrast style for ink drops when in platform high-contrast mode,
 // including full opacity and a high-contrast color
 const base::Feature kEnablePlatformHighContrastInkDrop{
@@ -29,22 +23,14 @@ const base::Feature kEnablePlatformHighContrastInkDrop{
 const base::Feature kEnableViewPaintOptimization{
     "EnableViewPaintOptimization", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Change views::Textfield to take focus on a completed tap, rather than
-// immediately on tap down. This only affects touch input. See
-// https://crbug.com/1069634.
-const base::Feature kTextfieldFocusOnTapUp {
-  "TextfieldFocusOnTapUp",
-#if defined(OS_CHROMEOS)
-      base::FEATURE_DISABLED_BY_DEFAULT
-#else
-      base::FEATURE_ENABLED_BY_DEFAULT
-#endif  // defined(OS_CHROMEOS)
-};
-
-// Allows a "New" badge to be displayed on menu items that provide access to new
-// features.
-const base::Feature kEnableNewBadgeOnMenuItems{
-    "EnableNewBadgeOnMenuItems", base::FEATURE_DISABLED_BY_DEFAULT};
+#if BUILDFLAG(IS_MAC)
+// Pushing of fullscreen control from the cross-platform Widget level down to
+// the native NativeWidgetMac level and below. Once this lands and all bugs and
+// flakes are mopped up, this feature will be removed.
+// https://crbug.com/1302857
+const base::Feature kFullscreenControllerMac{"FullscreenControllerMac",
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
+#endif
 
 }  // namespace features
 }  // namespace views

@@ -30,19 +30,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_INIT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_INIT_H_
 
+#include "base/dcheck_is_on.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
-#include "third_party/blink/renderer/core/html/custom/v0_custom_element_registration_context.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
 
 class Document;
 class ExecutionContext;
-class HTMLImportsController;
 class LocalDOMWindow;
 class LocalFrame;
 class PluginData;
@@ -95,11 +94,6 @@ class CORE_EXPORT DocumentInit final {
   // Actually constructs the Document based on the provided state.
   Document* CreateDocument() const;
 
-  DocumentInit& WithImportsController(HTMLImportsController*);
-  HTMLImportsController* ImportsController() const {
-    return imports_controller_;
-  }
-
   bool IsSrcdocDocument() const;
   bool ShouldSetURL() const;
 
@@ -109,14 +103,16 @@ class CORE_EXPORT DocumentInit final {
   DocumentInit& ForInitialEmptyDocument(bool empty);
   bool IsInitialEmptyDocument() const { return is_initial_empty_document_; }
 
-  // Compute the type of document to be loaded inside a |frame|, given its |url|
-  // and its |mime_type|.
+  DocumentInit& ForPrerendering(bool is_prerendering);
+  bool IsPrerendering() const { return is_prerendering_; }
+
+  // Compute the type of document to be loaded inside a `frame`, given its
+  // `mime_type`.
   //
   // In case of plugin handled by MimeHandlerview (which do not create a
-  // PluginDocument), the type is Type::KHTML and |is_for_external_handler| is
+  // PluginDocument), the type is Type::KHTML and `is_for_external_handler` is
   // set to true.
   static Type ComputeDocumentType(LocalFrame* frame,
-                                  const KURL& url,
                                   const String& mime_type,
                                   bool* is_for_external_handler = nullptr);
   DocumentInit& WithTypeFrom(const String& mime_type);
@@ -135,10 +131,6 @@ class CORE_EXPORT DocumentInit final {
 
   DocumentInit& WithSrcdocDocument(bool is_srcdoc_document);
 
-  DocumentInit& WithRegistrationContext(V0CustomElementRegistrationContext*);
-  V0CustomElementRegistrationContext* RegistrationContext(Document*) const;
-  DocumentInit& WithNewRegistrationContext();
-
   DocumentInit& WithWebBundleClaimedUrl(const KURL& web_bundle_claimed_url);
   const KURL& GetWebBundleClaimedUrl() const { return web_bundle_claimed_url_; }
 
@@ -148,13 +140,13 @@ class CORE_EXPORT DocumentInit final {
  private:
   DocumentInit() = default;
 
-  static PluginData* GetPluginData(LocalFrame* frame, const KURL& url);
+  static PluginData* GetPluginData(LocalFrame* frame);
 
   Type type_ = Type::kUnspecified;
+  bool is_prerendering_ = false;
   bool is_initial_empty_document_ = false;
   String mime_type_;
   LocalDOMWindow* window_ = nullptr;
-  HTMLImportsController* imports_controller_ = nullptr;
   ExecutionContext* execution_context_ = nullptr;
   KURL url_;
   Document* owner_document_ = nullptr;
@@ -163,8 +155,6 @@ class CORE_EXPORT DocumentInit final {
   // affects security checks, since srcdoc's content comes directly from
   // the parent document, not from loading a URL.
   bool is_srcdoc_document_ = false;
-  V0CustomElementRegistrationContext* registration_context_ = nullptr;
-  bool create_new_registration_context_ = false;
 
   // The claimed URL inside Web Bundle file from which the document is loaded.
   // This URL is used for window.location and document.URL and relative path

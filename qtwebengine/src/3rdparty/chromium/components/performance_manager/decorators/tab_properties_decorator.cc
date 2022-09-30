@@ -40,8 +40,6 @@ class TabPropertiesDataImpl
   bool is_tab_ = false;
 };
 
-const char kDescriberName[] = "TabPropertiesDecorator";
-
 }  // namespace
 
 void TabPropertiesDecorator::SetIsTab(content::WebContents* contents,
@@ -60,7 +58,7 @@ void TabPropertiesDecorator::SetIsTabForTesting(PageNode* page_node,
 
 void TabPropertiesDecorator::OnPassedToGraph(Graph* graph) {
   graph->GetNodeDataDescriberRegistry()->RegisterDescriber(this,
-                                                           kDescriberName);
+                                                           "TabPropertiesDecorator");
 }
 
 void TabPropertiesDecorator::OnTakenFromGraph(Graph* graph) {
@@ -88,7 +86,7 @@ const TabPropertiesDecorator::Data* TabPropertiesDecorator::Data::FromPageNode(
 }
 
 TabPropertiesDecorator::Data*
-TabPropertiesDecorator::Data::GetOrCreateForTesting(PageNode* page_node) {
+TabPropertiesDecorator::Data::GetOrCreateForTesting(const PageNode* page_node) {
   return TabPropertiesDataImpl::GetOrCreate(PageNodeImpl::FromNode(page_node));
 }
 

@@ -13,11 +13,11 @@
 
 #include "base/callback_helpers.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "build/chromeos_buildflags.h"
 #include "device/gamepad/dualshock4_controller.h"
 #include "device/gamepad/gamepad_data_fetcher.h"
 #include "device/gamepad/hid_haptic_gamepad.h"
@@ -25,9 +25,9 @@
 #include "device/gamepad/xbox_hid_controller.h"
 #include "device/udev_linux/udev.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/dbus/permission_broker/permission_broker_client.h"
-#endif  // defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/dbus/permission_broker/permission_broker_client.h"  // nogncheck
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
 namespace device {
 
@@ -50,8 +50,9 @@ const size_t kSpecialKeys[] = {
     // Start, Back, and Guide buttons are often reported as Consumer Home or
     // Back.
     KEY_HOMEPAGE, KEY_BACK,
-};
-const size_t kSpecialKeysLen = base::size(kSpecialKeys);
+    // Record is used for Xbox Series X's share button over BT.
+    KEY_RECORD};
+const size_t kSpecialKeysLen = std::size(kSpecialKeys);
 
 #define LONG_BITS (CHAR_BIT * sizeof(long))
 #define BITS_TO_LONGS(x) (((x) + LONG_BITS - 1) / LONG_BITS)
@@ -197,7 +198,7 @@ uint16_t HexStringToUInt16WithDefault(base::StringPiece input,
   return static_cast<uint16_t>(out);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 void OnOpenPathSuccess(
     chromeos::PermissionBrokerClient::OpenPathCallback callback,
     scoped_refptr<base::SequencedTaskRunner> polling_runner,
@@ -221,15 +222,20 @@ void OpenPathWithPermissionBroker(
     scoped_refptr<base::SequencedTaskRunner> polling_runner) {
   auto* client = chromeos::PermissionBrokerClient::Get();
   DCHECK(client) << "Could not get permission broker client.";
-  auto copyable_callback = base::AdaptCallbackForRepeating(std::move(callback));
-  auto success_callback =
-      base::BindOnce(&OnOpenPathSuccess, copyable_callback, polling_runner);
-  auto error_callback =
-      base::BindOnce(&OnOpenPathError, copyable_callback, polling_runner);
+  auto split_callback = base::SplitOnceCallback(std::move(callback));
+  auto success_callback = base::BindOnce(
+      &OnOpenPathSuccess, std::move(split_callback.first), polling_runner);
+  auto error_callback = base::BindOnce(
+      &OnOpenPathError, std::move(split_callback.second), polling_runner);
   client->OpenPath(path, std::move(success_callback),
                    std::move(error_callback));
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+
+// Small helper to avoid constructing a StringPiece from nullptr.
+base::StringPiece ToStringPiece(const char* str) {
+  return str ? base::StringPiece(str) : base::StringPiece();
+}
 
 }  // namespace
 
@@ -392,7 +398,7 @@ bool GamepadDeviceLinux::ReadEvdevSpecialKeys(Gamepad* pad) {
   ssize_t bytes_read;
   while ((bytes_read = HANDLE_EINTR(
               read(evdev_fd_.get(), &ev, sizeof(input_event)))) > 0) {
-    if (size_t(bytes_read) < sizeof(input_event))
+    if (static_cast<size_t>(bytes_read) < sizeof(input_event))
       break;
     if (ev.type != EV_KEY)
       continue;
@@ -440,13 +446,13 @@ bool GamepadDeviceLinux::OpenJoydevNode(const UdevGamepadLinux& pad_info,
           device, kInputSubsystem, nullptr);
 
   const base::StringPiece vendor_id =
-      udev_device_get_sysattr_value(parent_device, "id/vendor");
+      ToStringPiece(udev_device_get_sysattr_value(parent_device, "id/vendor"));
   const base::StringPiece product_id =
-      udev_device_get_sysattr_value(parent_device, "id/product");
+      ToStringPiece(udev_device_get_sysattr_value(parent_device, "id/product"));
   const base::StringPiece hid_version =
-      udev_device_get_sysattr_value(parent_device, "id/version");
+      ToStringPiece(udev_device_get_sysattr_value(parent_device, "id/version"));
   const base::StringPiece name =
-      udev_device_get_sysattr_value(parent_device, "name");
+      ToStringPiece(udev_device_get_sysattr_value(parent_device, "name"));
 
   uint16_t vendor_id_int = HexStringToUInt16WithDefault(vendor_id, 0);
   uint16_t product_id_int = HexStringToUInt16WithDefault(product_id, 0);
@@ -463,9 +469,9 @@ bool GamepadDeviceLinux::OpenJoydevNode(const UdevGamepadLinux& pad_info,
   std::string name_string(name);
   if (usb_device) {
     const base::StringPiece usb_vendor_id =
-        udev_device_get_sysattr_value(usb_device, "idVendor");
+        ToStringPiece(udev_device_get_sysattr_value(usb_device, "idVendor"));
     const base::StringPiece usb_product_id =
-        udev_device_get_sysattr_value(usb_device, "idProduct");
+        ToStringPiece(udev_device_get_sysattr_value(usb_device, "idProduct"));
 
     if (vendor_id == usb_vendor_id && product_id == usb_product_id) {
       const char* manufacturer =
@@ -481,7 +487,7 @@ bool GamepadDeviceLinux::OpenJoydevNode(const UdevGamepadLinux& pad_info,
     }
 
     const base::StringPiece version_number =
-        udev_device_get_sysattr_value(usb_device, "bcdDevice");
+        ToStringPiece(udev_device_get_sysattr_value(usb_device, "bcdDevice"));
     version_number_int = HexStringToUInt16WithDefault(version_number, 0);
   }
 
@@ -561,7 +567,7 @@ void GamepadDeviceLinux::OpenHidrawNode(const UdevGamepadLinux& pad_info,
 
   auto fd = base::ScopedFD(open(pad_info.path.c_str(), O_RDWR | O_NONBLOCK));
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // If we failed to open the device it may be due to insufficient permissions.
   // Try again using the PermissionBrokerClient.
   if (!fd.is_valid()) {
@@ -576,7 +582,7 @@ void GamepadDeviceLinux::OpenHidrawNode(const UdevGamepadLinux& pad_info,
                        std::move(open_path_callback), polling_runner_));
     return;
   }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
   OnOpenHidrawNodeComplete(std::move(callback), std::move(fd));
 }

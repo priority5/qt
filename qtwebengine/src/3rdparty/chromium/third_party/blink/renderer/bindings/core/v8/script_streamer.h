@@ -6,15 +6,19 @@
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_STREAMER_H_
 
 #include <memory>
+#include <tuple>
 
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/core/script/script_scheduling_type.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "v8/include/v8.h"
 
+#include "third_party/blink/public/mojom/script/script_type.mojom-blink-forward.h"
 namespace mojo {
 class SimpleWatcher;
 }
@@ -58,10 +62,12 @@ class CORE_EXPORT ScriptStreamer final
     kModuleScript,
     kNoDataPipe,
     kLoadingCancelled,
+    kNonJavascriptModule,
     kDisabledByFeatureList,
+    kErrorScriptTypeMismatch,
 
     // Pseudo values that should never be seen in reported metrics
-    kMaxValue = kDisabledByFeatureList,
+    kMaxValue = kErrorScriptTypeMismatch,
     kInvalid = -1,
   };
 
@@ -69,10 +75,27 @@ class CORE_EXPORT ScriptStreamer final
       ScriptResource* resource,
       mojo::ScopedDataPipeConsumerHandle data_pipe,
       ResponseBodyLoaderClient* response_body_loader_client,
-      v8::ScriptCompiler::CompileOptions compile_options,
       scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner);
+
+  ScriptStreamer(const ScriptStreamer&) = delete;
+  ScriptStreamer& operator=(const ScriptStreamer&) = delete;
+
   ~ScriptStreamer();
   void Trace(Visitor*) const;
+
+  // Get a successful ScriptStreamer for the given ScriptResource.
+  // If
+  // - there was no streamer,
+  // - or streaming was suppressed,
+  // - or the expected_type does not match the one with which the ScripStramer
+  //    was started,
+  // nullptr instead of a valid ScriptStreamer is returned.
+  static std::tuple<ScriptStreamer*, NotStreamingReason> TakeFrom(
+      ScriptResource* resource,
+      mojom::blink::ScriptType expected_type);
+  static void RecordStreamingHistogram(ScriptSchedulingType type,
+                                       bool can_use_streamer,
+                                       ScriptStreamer::NotStreamingReason);
 
   // Returns false if we cannot stream the given encoding.
   static bool ConvertEncoding(const char* encoding_name,
@@ -84,7 +107,10 @@ class CORE_EXPORT ScriptStreamer final
   bool IsFinished() const;             // Has loading & streaming finished?
   bool IsStreamingSuppressed() const;  // Has streaming been suppressed?
 
-  v8::ScriptCompiler::StreamedSource* Source() { return source_.get(); }
+  v8::ScriptCompiler::StreamedSource* Source(v8::ScriptType expected_type) {
+    DCHECK_EQ(expected_type, script_type_);
+    return source_.get();
+  }
 
   // Called when the script is not needed any more (e.g., loading was
   // cancelled). After calling cancel, ClassicPendingScript can drop its
@@ -102,10 +128,6 @@ class CORE_EXPORT ScriptStreamer final
     return script_resource_identifier_;
   }
 
-  static void SetSmallScriptThresholdForTesting(size_t threshold) {
-    small_script_threshold_ = threshold;
-  }
-
  private:
   friend class SourceStream;
 
@@ -117,6 +139,8 @@ class CORE_EXPORT ScriptStreamer final
   //          v        v         v
   //      kLoaded   kFailed  kCancelled
   enum class LoadingState { kLoading, kLoaded, kFailed, kCancelled };
+
+  v8::ScriptType GetScriptType() const;
 
   static const char* str(LoadingState state) {
     switch (state) {
@@ -132,8 +156,8 @@ class CORE_EXPORT ScriptStreamer final
   }
 
   // Scripts whose first data chunk is smaller than this constant won't be
-  // streamed. Non-const for testing.
-  static size_t small_script_threshold_;
+  // streamed, unless small script streaming is enabled.
+  static constexpr size_t kSmallScriptThreshold = 30 * 1024;
   // Maximum size of the BOM marker.
   static constexpr size_t kMaximumLengthOfBOM = 4;
 
@@ -148,6 +172,8 @@ class CORE_EXPORT ScriptStreamer final
   // Given the data we have collected already, try to start an actual V8
   // streaming task. Returns true if the task was started.
   bool TryStartStreamingTask();
+
+  static v8::ScriptType ScriptTypeForStreamingTask(ScriptResource*);
 
   void Prefinalize();
 
@@ -201,9 +227,6 @@ class CORE_EXPORT ScriptStreamer final
   // The reason that streaming is disabled
   NotStreamingReason suppressed_reason_ = NotStreamingReason::kInvalid;
 
-  // What kind of cached data V8 produces during streaming.
-  v8::ScriptCompiler::CompileOptions compile_options_;
-
   // Keep the script URL string for event tracing.
   const String script_url_string_;
 
@@ -213,9 +236,9 @@ class CORE_EXPORT ScriptStreamer final
   // Encoding of the streamed script. Saved for sanity checking purposes.
   v8::ScriptCompiler::StreamedSource::Encoding encoding_;
 
-  scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner_;
+  v8::ScriptType script_type_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScriptStreamer);
+  scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner_;
 };
 
 }  // namespace blink

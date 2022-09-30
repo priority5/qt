@@ -10,7 +10,7 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/extensions/api/developer_private.h"
@@ -43,22 +43,26 @@ class ExtensionInfoGenerator {
  public:
   using ExtensionInfoList = std::vector<api::developer_private::ExtensionInfo>;
 
-  using ExtensionInfosCallback = base::Callback<void(ExtensionInfoList)>;
+  using ExtensionInfosCallback = base::OnceCallback<void(ExtensionInfoList)>;
 
   explicit ExtensionInfoGenerator(content::BrowserContext* context);
+
+  ExtensionInfoGenerator(const ExtensionInfoGenerator&) = delete;
+  ExtensionInfoGenerator& operator=(const ExtensionInfoGenerator&) = delete;
+
   ~ExtensionInfoGenerator();
 
   // Creates and asynchronously returns an ExtensionInfo for the given
   // |extension_id|, if the extension can be found.
   // If the extension cannot be found, an empty vector is passed to |callback|.
   void CreateExtensionInfo(const std::string& id,
-                           const ExtensionInfosCallback& callback);
+                           ExtensionInfosCallback callback);
 
   // Creates and asynchronously returns a collection of ExtensionInfos,
   // optionally including disabled and terminated.
   void CreateExtensionsInfo(bool include_disabled,
                             bool include_terminated,
-                            const ExtensionInfosCallback& callback);
+                            ExtensionInfosCallback callback);
 
  private:
   // Creates an ExtensionInfo for the given |extension| and |state|, and
@@ -78,14 +82,14 @@ class ExtensionInfoGenerator {
   std::string GetIconUrlFromImage(const gfx::Image& image);
 
   // Various systems, cached for convenience.
-  content::BrowserContext* browser_context_;
-  CommandService* command_service_;
-  ExtensionSystem* extension_system_;
-  ExtensionPrefs* extension_prefs_;
-  ExtensionActionAPI* extension_action_api_;
-  WarningService* warning_service_;
-  ErrorConsole* error_console_;
-  ImageLoader* image_loader_;
+  raw_ptr<content::BrowserContext> browser_context_;
+  raw_ptr<CommandService> command_service_;
+  raw_ptr<ExtensionSystem> extension_system_;
+  raw_ptr<ExtensionPrefs> extension_prefs_;
+  raw_ptr<ExtensionActionAPI> extension_action_api_;
+  raw_ptr<WarningService> warning_service_;
+  raw_ptr<ErrorConsole> error_console_;
+  raw_ptr<ImageLoader> image_loader_;
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   SupervisedUserService* supervised_user_service_;
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
@@ -100,8 +104,6 @@ class ExtensionInfoGenerator {
   ExtensionInfosCallback callback_;
 
   base::WeakPtrFactory<ExtensionInfoGenerator> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionInfoGenerator);
 };
 
 }  // namespace extensions

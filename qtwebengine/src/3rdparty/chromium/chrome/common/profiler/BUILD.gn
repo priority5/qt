@@ -32,6 +32,7 @@ source_set("profiler") {
     "//components/version_info:version_info",
     "//content/public/common",
     "//extensions/buildflags",
+    "//third_party/abseil-cpp:absl",
   ]
 
   if (is_android) {
@@ -59,6 +60,7 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//chrome/common:non_code_constants",
     "//components/metrics",
+    "//components/metrics:call_stack_profile_builder",
     "//components/version_info:version_info",
     "//content/public/common",
     "//extensions/buildflags",

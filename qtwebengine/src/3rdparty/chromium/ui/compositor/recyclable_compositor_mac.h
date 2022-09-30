@@ -5,6 +5,9 @@
 #ifndef UI_COMPOSITOR_RECYCLABLE_COMPOSITOR_MAC_H_
 #define UI_COMPOSITOR_RECYCLABLE_COMPOSITOR_MAC_H_
 
+#include <list>
+#include <memory>
+
 #include "base/no_destructor.h"
 #include "components/viz/common/surfaces/local_surface_id.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
@@ -26,6 +29,10 @@ class COMPOSITOR_EXPORT RecyclableCompositorMac
     : public ui::CompositorObserver {
  public:
   explicit RecyclableCompositorMac(ui::ContextFactory* context_factory);
+
+  RecyclableCompositorMac(const RecyclableCompositorMac&) = delete;
+  RecyclableCompositorMac& operator=(const RecyclableCompositorMac&) = delete;
+
   ~RecyclableCompositorMac() override;
 
   ui::Compositor* compositor() { return &compositor_; }
@@ -43,11 +50,12 @@ class COMPOSITOR_EXPORT RecyclableCompositorMac
   void UpdateSurface(const gfx::Size& size_pixels,
                      float scale_factor,
                      const gfx::DisplayColorSpaces& display_color_spaces);
-  // Invalidate the compositor's surface information.
-  void InvalidateSurface();
 
  private:
   friend class RecyclableCompositorMacFactory;
+
+  // Invalidate the compositor's surface information.
+  void InvalidateSurface();
 
   // ui::CompositorObserver implementation:
   void OnCompositingDidCommit(ui::Compositor* compositor) override;
@@ -62,8 +70,6 @@ class COMPOSITOR_EXPORT RecyclableCompositorMac
   std::unique_ptr<ui::AcceleratedWidgetMac> accelerated_widget_mac_;
   ui::Compositor compositor_;
   std::unique_ptr<ui::CompositorLock> compositor_suspended_lock_;
-
-  DISALLOW_COPY_AND_ASSIGN(RecyclableCompositorMac);
 };
 
 ////////////////////////////////////////////////////////////////////////////////

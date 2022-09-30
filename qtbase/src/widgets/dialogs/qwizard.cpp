@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWidgets module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qwizard.h"
 #include <QtWidgets/private/qtwidgetsglobal_p.h>
@@ -47,8 +11,6 @@
 #include "qapplication.h"
 #include "qboxlayout.h"
 #include "qlayoutitem.h"
-#include "qdesktopwidget.h"
-#include <private/qdesktopwidget_p.h>
 #include "qevent.h"
 #include "qframe.h"
 #include "qlabel.h"
@@ -56,7 +18,7 @@
 #include "qlineedit.h"
 #endif
 #include <qpointer.h>
-#include "qpainter.h"
+#include "qstylepainter.h"
 #include "qwindow.h"
 #include "qpushbutton.h"
 #include "qset.h"
@@ -66,7 +28,7 @@
 #include "qstyle.h"
 #include "qstyleoption.h"
 #include "qvarlengtharray.h"
-#if defined(Q_OS_MACX)
+#if defined(Q_OS_MACOS)
 #include <QtCore/QMetaMethod>
 #include <QtGui/QGuiApplication>
 #include <qpa/qplatformnativeinterface.h>
@@ -82,6 +44,8 @@
 #include <algorithm>
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 // These fudge terms were needed a few places to obtain pixel-perfect results
 const int GapBetweenLogoAndRightEdge = 5;
@@ -164,7 +128,7 @@ static const char *changed_signal(int which)
     case 5: return SIGNAL(currentRowChanged(int));
     case 6: return SIGNAL(valueChanged(int));
     };
-    Q_STATIC_ASSERT(7 == NFallbackDefaultProperties);
+    static_assert(7 == NFallbackDefaultProperties);
     Q_UNREACHABLE();
     return nullptr;
 }
@@ -181,7 +145,7 @@ public:
                                    const char *changedSignal)
         : className(className), property(property), changedSignal(changedSignal) {}
 };
-Q_DECLARE_TYPEINFO(QWizardDefaultProperty, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(QWizardDefaultProperty, Q_RELOCATABLE_TYPE);
 
 class QWizardField
 {
@@ -190,7 +154,7 @@ public:
     QWizardField(QWizardPage *page, const QString &spec, QObject *object, const char *property,
                   const char *changedSignal);
 
-    void resolve(const QVector<QWizardDefaultProperty> &defaultPropertyTable);
+    void resolve(const QList<QWizardDefaultProperty> &defaultPropertyTable);
     void findProperty(const QWizardDefaultProperty *properties, int propertyCount);
 
     QWizardPage *page;
@@ -201,20 +165,20 @@ public:
     QByteArray changedSignal;
     QVariant initialValue;
 };
-Q_DECLARE_TYPEINFO(QWizardField, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(QWizardField, Q_RELOCATABLE_TYPE);
 
 QWizardField::QWizardField(QWizardPage *page, const QString &spec, QObject *object,
                            const char *property, const char *changedSignal)
     : page(page), name(spec), mandatory(false), object(object), property(property),
       changedSignal(changedSignal)
 {
-    if (name.endsWith(QLatin1Char('*'))) {
+    if (name.endsWith(u'*')) {
         name.chop(1);
         mandatory = true;
     }
 }
 
-void QWizardField::resolve(const QVector<QWizardDefaultProperty> &defaultPropertyTable)
+void QWizardField::resolve(const QList<QWizardDefaultProperty> &defaultPropertyTable)
 {
     if (property.isEmpty())
         findProperty(defaultPropertyTable.constData(), defaultPropertyTable.count());
@@ -256,11 +220,11 @@ public:
     bool extension = false;
     bool sideWidget = false;
 
-    bool operator==(const QWizardLayoutInfo &other);
-    inline bool operator!=(const QWizardLayoutInfo &other) { return !operator==(other); }
+    bool operator==(const QWizardLayoutInfo &other) const;
+    inline bool operator!=(const QWizardLayoutInfo &other) const { return !operator==(other); }
 };
 
-bool QWizardLayoutInfo::operator==(const QWizardLayoutInfo &other)
+bool QWizardLayoutInfo::operator==(const QWizardLayoutInfo &other) const
 {
     return topLevelMarginLeft == other.topLevelMarginLeft
            && topLevelMarginRight == other.topLevelMarginRight
@@ -350,7 +314,7 @@ bool QWizardHeader::vistaDisabled() const
     bool styleDisabled = false;
     QWizard *wiz = parentWidget() ? qobject_cast <QWizard *>(parentWidget()->parentWidget()) : 0;
     if (wiz) {
-        // Designer dosen't support the Vista style for Wizards. This property is used to turn
+        // Designer doesn't support the Vista style for Wizards. This property is used to turn
         // off the Vista style.
         const QVariant v = wiz->property("_q_wizard_vista_off");
         styleDisabled = v.isValid() && v.toBool();
@@ -385,7 +349,7 @@ void QWizardHeader::setup(const QWizardLayoutInfo &info, const QString &title,
     logoLabel->setPixmap(logo);
 
     subTitleLabel->setTextFormat(subTitleFormat);
-    subTitleLabel->setText(QLatin1String("Pq\nPq"));
+    subTitleLabel->setText("Pq\nPq"_L1);
     int desiredSubTitleHeight = subTitleLabel->sizeHint().height();
     subTitleLabel->setText(subTitle);
 
@@ -399,7 +363,7 @@ void QWizardHeader::setup(const QWizardLayoutInfo &info, const QString &title,
         /*
             There is no widthForHeight() function, so we simulate it with a loop.
         */
-        int candidateSubTitleWidth = qMin(512, 2 * QDesktopWidgetPrivate::width() / 3);
+        int candidateSubTitleWidth = qMin(512, 2 * QGuiApplication::primaryScreen()->virtualGeometry().width() / 3);
         int delta = candidateSubTitleWidth >> 1;
         while (delta > 0) {
             if (subTitleLabel->heightForWidth(candidateSubTitleWidth - delta)
@@ -422,7 +386,7 @@ void QWizardHeader::setup(const QWizardLayoutInfo &info, const QString &title,
 
 void QWizardHeader::paintEvent(QPaintEvent * /* event */)
 {
-    QPainter painter(this);
+    QStylePainter painter(this);
     painter.drawPixmap(0, 0, bannerPixmap);
 
     int x = width() - 2;
@@ -454,7 +418,7 @@ public:
 
     QSize minimumSizeHint() const override {
         if (!pixmap(Qt::ReturnByValue).isNull())
-            return pixmap(Qt::ReturnByValue).size() / pixmap(Qt::ReturnByValue).devicePixelRatio();
+            return pixmap(Qt::ReturnByValue).deviceIndependentSize().toSize();
         return QFrame::minimumSizeHint();
     }
 
@@ -492,7 +456,7 @@ public:
     QString title;
     QString subTitle;
     QPixmap pixmaps[QWizard::NPixmaps];
-    QVector<QWizardField> pendingFields;
+    QList<QWizardField> pendingFields;
     mutable TriState completeState = Tri_Unknown;
     bool explicitlyFinal = false;
     bool commit = false;
@@ -531,7 +495,7 @@ public:
         : QWidget(wizard)
         , wizardPrivate(wizardPrivate) {}
 protected:
-    void paintEvent(QPaintEvent *);
+    void paintEvent(QPaintEvent *) override;
 #else
     QWizardAntiFlickerWidget(QWizard *wizard, QWizardPrivate *)
         : QWidget(wizard)
@@ -582,14 +546,14 @@ public:
     void _q_updateButtonStates();
     void _q_handleFieldObjectDestroyed(QObject *);
     void setStyle(QStyle *style);
-#ifdef Q_OS_MACX
+#ifdef Q_OS_MACOS
     static QPixmap findDefaultBackgroundPixmap();
 #endif
 
     PageMap pageMap;
-    QVector<QWizardField> fields;
+    QList<QWizardField> fields;
     QMap<QString, int> fieldIndexMap;
-    QVector<QWizardDefaultProperty> defaultPropertyTable;
+    QList<QWizardDefaultProperty> defaultPropertyTable;
     QList<int> history;
     int start = -1;
     bool startSetByUser = false;
@@ -1051,7 +1015,7 @@ void QWizardPrivate::recreateLayout(const QWizardLayoutInfo &info)
 
         if (aero) {
             // ### hardcoded for now:
-            titleFont = QFont(QLatin1String("Segoe UI"), 12);
+            titleFont = QFont("Segoe UI"_L1, 12);
             QPalette pal(titleLabel->palette());
             pal.setColor(QPalette::Text, QColor(0x00, 0x33, 0x99));
             titleLabel->setPalette(pal);
@@ -1367,11 +1331,11 @@ static QString object_name_for_button(QWizard::WizardButton which)
 {
     switch (which) {
     case QWizard::CommitButton:
-        return QLatin1String("qt_wizard_") + QLatin1String("commit");
+        return "qt_wizard_commit"_L1;
     case QWizard::FinishButton:
-        return QLatin1String("qt_wizard_") + QLatin1String("finish");
+        return "qt_wizard_finish"_L1;
     case QWizard::CancelButton:
-        return QLatin1String("qt_wizard_") + QLatin1String("cancel");
+        return "qt_wizard_cancel"_L1;
     case QWizard::BackButton:
     case QWizard::NextButton:
     case QWizard::HelpButton:
@@ -1379,7 +1343,7 @@ static QString object_name_for_button(QWizard::WizardButton which)
     case QWizard::CustomButton2:
     case QWizard::CustomButton3:
         // Make navigation buttons detectable as passive interactor in designer
-        return QLatin1String("__qt__passive_wizardbutton") + QString::number(which);
+        return "__qt__passive_wizardbutton"_L1 + QString::number(which);
     case QWizard::Stretch:
     case QWizard::NoButton:
     //case QWizard::NStandardButtons:
@@ -1402,7 +1366,7 @@ bool QWizardPrivate::ensureButton(QWizard::WizardButton which) const
         if (style != QApplication::style()) // Propagate style
             pushButton->setStyle(style);
         pushButton->setObjectName(object_name_for_button(which));
-#ifdef Q_OS_MACX
+#ifdef Q_OS_MACOS
         pushButton->setAutoDefault(false);
 #endif
         pushButton->hide();
@@ -1726,7 +1690,7 @@ void QWizardPrivate::_q_updateButtonStates()
 void QWizardPrivate::_q_handleFieldObjectDestroyed(QObject *object)
 {
     int destroyed_index = -1;
-    QVector<QWizardField>::iterator it = fields.begin();
+    QList<QWizardField>::iterator it = fields.begin();
     while (it != fields.end()) {
         const QWizardField &field = *it;
         if (field.object == object) {
@@ -1760,7 +1724,7 @@ void QWizardPrivate::setStyle(QStyle *style)
         it.value()->setStyle(style);
 }
 
-#ifdef Q_OS_MACX
+#ifdef Q_OS_MACOS
 
 QPixmap QWizardPrivate::findDefaultBackgroundPixmap()
 {
@@ -2227,7 +2191,7 @@ int QWizard::addPage(QWizardPage *page)
     Q_D(QWizard);
     int theid = 0;
     if (!d->pageMap.isEmpty())
-        theid = (d->pageMap.constEnd() - 1).key() + 1;
+        theid = d->pageMap.lastKey() + 1;
     setPage(theid, page);
     return theid;
 }
@@ -2263,7 +2227,7 @@ void QWizard::setPage(int theid, QWizardPage *page)
 
     page->setParent(d->pageFrame);
 
-    QVector<QWizardField> &pendingFields = page->d_func()->pendingFields;
+    QList<QWizardField> &pendingFields = page->d_func()->pendingFields;
     for (int i = 0; i < pendingFields.count(); ++i)
         d->addField(pendingFields.at(i));
     pendingFields.clear();
@@ -2386,7 +2350,7 @@ QWizardPage *QWizard::page(int theid) const
 
     Pressing \uicontrol Back marks the current page as "unvisited" again.
 
-    \sa visitedPages()
+    \sa visitedIds()
 */
 bool QWizard::hasVisitedPage(int theid) const
 {
@@ -2407,16 +2371,6 @@ QList<int> QWizard::visitedIds() const
     Q_D(const QWizard);
     return d->history;
 }
-
-/*!
-    \obsolete Use visitedIds() instead
-*/
-#if QT_DEPRECATED_SINCE(5, 15)
-QList<int> QWizard::visitedPages() const
-{
-    return visitedIds();
-}
-#endif
 
 /*!
     Returns the list of page IDs.
@@ -2724,7 +2678,7 @@ QString QWizard::buttonText(WizardButton which) const
         return d->buttonCustomTexts.value(which);
 
     const QString defText = buttonDefaultText(d->wizStyle, which, d);
-    if(!defText.isNull())
+    if (!defText.isNull())
         return defText;
 
     return d->btns[which]->text();
@@ -2901,7 +2855,7 @@ QPixmap QWizard::pixmap(WizardPixmap which) const
 {
     Q_D(const QWizard);
     Q_ASSERT(uint(which) < NPixmaps);
-#ifdef Q_OS_MACX
+#ifdef Q_OS_MACOS
     if (which == BackgroundPixmap && d->defaultPixmaps[BackgroundPixmap].isNull())
         d->defaultPixmaps[BackgroundPixmap] = d->findDefaultBackgroundPixmap();
 #endif
@@ -3154,6 +3108,42 @@ void QWizard::next()
 }
 
 /*!
+    Sets currentId to \a id, without visiting the pages between currentId and \a id.
+
+    Returns without page change, if
+    \list
+    \li wizard holds no pages
+    \li current page is invalid
+    \li given page equals currentId()
+    \li given page is out of range
+    \endlist
+
+    Note: If pages have been forward skipped and \a id is 0, page visiting history
+    will be deleted
+*/
+
+void QWizard::setCurrentId(int id)
+{
+    Q_D(QWizard);
+
+    if (d->current == -1)
+        return;
+
+    if (currentId() == id)
+        return;
+
+    if (!validateCurrentPage())
+        return;
+
+    if (id < 0 || Q_UNLIKELY(!d->pageMap.contains(id))) {
+        qWarning("QWizard::setCurrentId: No such page: %d", id);
+        return;
+    }
+
+    d->switchToPage(id, (id < currentId()) ? QWizardPrivate::Backward : QWizardPrivate::Forward);
+}
+
+/*!
     Restarts the wizard at the start page. This function is called automatically when the
     wizard is shown.
 
@@ -3241,7 +3231,7 @@ void QWizard::paintEvent(QPaintEvent * event)
         if (backgroundPixmap.isNull())
             return;
 
-        QPainter painter(this);
+        QStylePainter painter(this);
         painter.drawPixmap(0, (height() - backgroundPixmap.height()) / 2, backgroundPixmap);
     }
 #if QT_CONFIG(style_windowsvista)
@@ -3262,11 +3252,7 @@ void QWizard::paintEvent(QPaintEvent * event)
 /*!
     \reimp
 */
-#  if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 bool QWizard::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
-#  else
-bool QWizard::nativeEvent(const QByteArray &eventType, void *message, long *result)
-#  endif
 {
 #if QT_CONFIG(style_windowsvista)
     Q_D(QWizard);
@@ -3632,7 +3618,7 @@ void QWizardPage::cleanupPage()
 {
     Q_D(QWizardPage);
     if (d->wizard) {
-        const QVector<QWizardField> &fields = d->wizard->d_func()->fields;
+        const QList<QWizardField> &fields = d->wizard->d_func()->fields;
         for (const auto &field : fields) {
             if (field.page == this)
                 field.object->setProperty(field.property, field.initialValue);
@@ -3683,7 +3669,7 @@ bool QWizardPage::isComplete() const
     if (!d->wizard)
         return true;
 
-    const QVector<QWizardField> &wizardFields = d->wizard->d_func()->fields;
+    const QList<QWizardField> &wizardFields = d->wizard->d_func()->fields;
     for (int i = wizardFields.count() - 1; i >= 0; --i) {
         const QWizardField &field = wizardFields.at(i);
         if (field.page == this && field.mandatory) {

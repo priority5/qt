@@ -16,6 +16,7 @@
 import * as m from 'mithril';
 
 import {globals} from './globals';
+import {PIVOT_TABLE_FLAG} from './keyboard_event_handler';
 import {hideModel, showModal} from './modal';
 
 let helpModelOpen = false;
@@ -66,6 +67,22 @@ function showHelp() {
               m('td', keycap('f'), ' (with event selected)'),
               m('td', 'Scroll + zoom to current selection')),
             m('tr',
+              m('td', keycap('['), '/', keycap(']'), ' (with event selected)'),
+              m('td',
+                'Select next/previous slice that is connected by a flow.',
+                m('br'),
+                'If there are multiple flows,' +
+                    'the one that is in focus (bold) is selected')),
+            m('tr',
+              m('td',
+                keycap('Ctrl'),
+                ' + ',
+                keycap('['),
+                '/',
+                keycap(']'),
+                ' (with event selected)'),
+              m('td', 'Switch focus to another flow')),
+            m('tr',
               m('td', keycap('m'), ' (with event or area selected)'),
               m('td', 'Mark the area (temporarily)')),
             m('tr',
@@ -75,6 +92,12 @@ function showHelp() {
                 keycap('m'),
                 ' (with event or area selected)'),
               m('td', 'Mark the area (persistently)')),
+            m('tr',
+              m('td', keycap('Ctrl'), ' + ', keycap('b')),
+              m('td', 'Toggle display of sidebar')),
+            PIVOT_TABLE_FLAG.get() ?
+                m('tr', m('td', keycap('p')), m('td', 'Show pivot table')) :
+                null,
             m('tr', m('td', keycap('?')), m('td', 'Show help')),
             )),
     buttons: [],

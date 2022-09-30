@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -48,6 +48,8 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
     TIMEOUT,
     // There was an error reading the database metadata.
     METADATA_ERROR,
+    // Force closed due to shutdown.
+    FORCE_CLOSE,
   };
 
   // Defines a task that will be run after closing an IndexedDB backing store
@@ -84,8 +86,8 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
 
     bool set_metadata_was_called_ = false;
     // Raw pointer is safe because |database_| is owned by the
-    // IndexedDBOriginState.
-    leveldb::DB* const database_;
+    // IndexedDBStorageKeyState.
+    const raw_ptr<leveldb::DB> database_;
   };
 
   // |on_complete| must not contain a refptr to the IndexedDBBackingStore, as
@@ -94,6 +96,11 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
                              base::OnceClosure on_complete,
                              base::TimeDelta max_run_time,
                              std::unique_ptr<base::OneShotTimer> timer);
+
+  IndexedDBPreCloseTaskQueue(const IndexedDBPreCloseTaskQueue&) = delete;
+  IndexedDBPreCloseTaskQueue& operator=(const IndexedDBPreCloseTaskQueue&) =
+      delete;
+
   ~IndexedDBPreCloseTaskQueue();
 
   bool started() const { return started_; }
@@ -103,7 +110,7 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
 
   // Stops all tasks and destroys them. The |on_complete| callback will be
   // immediately called.
-  void StopForNewConnection();
+  void Stop(StopReason reason);
 
   // Starts running tasks. Can only be called once. MetadataFetcher is expected
   // to load the metadata from the database on disk.
@@ -134,8 +141,6 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   base::WeakPtrFactory<IndexedDBPreCloseTaskQueue> ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBPreCloseTaskQueue);
 };
 
 }  // namespace content

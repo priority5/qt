@@ -7,8 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "third_party/blink/renderer/platform/scheduler/public/agent_group_scheduler.h"
+#include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 
 namespace blink {
@@ -27,6 +26,8 @@ namespace scheduler {
 class SimpleThreadScheduler : public ThreadScheduler {
  public:
   SimpleThreadScheduler();
+  SimpleThreadScheduler(const SimpleThreadScheduler&) = delete;
+  SimpleThreadScheduler& operator=(const SimpleThreadScheduler&) = delete;
   ~SimpleThreadScheduler() override;
 
   // Do nothing.
@@ -59,12 +60,11 @@ class SimpleThreadScheduler : public ThreadScheduler {
   scoped_refptr<base::SingleThreadTaskRunner> DeprecatedDefaultTaskRunner()
       override;
 
-  // Unsupported. Return nullptr, and it may cause a crash.
-  std::unique_ptr<PageScheduler> CreatePageScheduler(
-      PageScheduler::Delegate*) override;
+  // Unsupported. Return nullptr.
+  std::unique_ptr<WebAgentGroupScheduler> CreateAgentGroupScheduler() override;
 
   // Return nullptr
-  AgentGroupScheduler* GetCurrentAgentGroupScheduler() override;
+  WebAgentGroupScheduler* GetCurrentAgentGroupScheduler() override;
 
   // Unsupported. Return nullptr, and it may cause a crash.
   std::unique_ptr<RendererPauseHandle> PauseScheduler() override;
@@ -81,9 +81,6 @@ class SimpleThreadScheduler : public ThreadScheduler {
   NonMainThreadSchedulerImpl* AsNonMainThreadScheduler() override;
 
   void SetV8Isolate(v8::Isolate* isolate) override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SimpleThreadScheduler);
 };
 
 }  // namespace scheduler

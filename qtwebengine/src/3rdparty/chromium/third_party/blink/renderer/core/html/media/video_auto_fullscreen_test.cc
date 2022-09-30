@@ -6,6 +6,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/fullscreen.mojom-blink.h"
+#include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -52,12 +53,14 @@ class VideoAutoFullscreenFrameHost : public FakeLocalFrameHost {
 class VideoAutoFullscreenFrameClient
     : public frame_test_helpers::TestWebFrameClient {
  public:
-  WebMediaPlayer* CreateMediaPlayer(const WebMediaPlayerSource&,
-                                    WebMediaPlayerClient*,
-                                    blink::MediaInspectorContext*,
-                                    WebMediaPlayerEncryptedMediaClient*,
-                                    WebContentDecryptionModule*,
-                                    const WebString& sink_id) final {
+  WebMediaPlayer* CreateMediaPlayer(
+      const WebMediaPlayerSource&,
+      WebMediaPlayerClient*,
+      blink::MediaInspectorContext*,
+      WebMediaPlayerEncryptedMediaClient*,
+      WebContentDecryptionModule*,
+      const WebString& sink_id,
+      const cc::LayerTreeSettings& settings) final {
     return new EmptyWebMediaPlayer();
   }
 };
@@ -71,7 +74,7 @@ class VideoAutoFullscreen : public testing::Test,
     frame_host_.Init(
         web_frame_client_.GetRemoteNavigationAssociatedInterfaces());
     GetWebView()->GetSettings()->SetAutoplayPolicy(
-        web_pref::AutoplayPolicy::kUserGestureRequired);
+        mojom::AutoplayPolicy::kUserGestureRequired);
 
     frame_test_helpers::LoadFrame(
         web_view_helper_.GetWebView()->MainFrameImpl(), "about:blank");
@@ -166,7 +169,9 @@ TEST_F(VideoAutoFullscreen, ExitFullscreenDoesNotPauseWithPlaysInline) {
   EXPECT_FALSE(Video()->paused());
 }
 
-TEST_F(VideoAutoFullscreen, OnPlayTriggersFullscreenWithoutGesture) {
+// This test is disabled because it requires adding a fake activation in
+// production code (crbug.com/1082258).
+TEST_F(VideoAutoFullscreen, DISABLED_OnPlayTriggersFullscreenWithoutGesture) {
   Video()->SetSrc("http://example.com/foo.mp4");
 
   LocalFrame::NotifyUserActivation(

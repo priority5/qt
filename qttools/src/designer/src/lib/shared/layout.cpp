@@ -1,63 +1,38 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "layout_p.h"
+#include "layoutdecoration.h"
 #include "qdesigner_utils_p.h"
+#include "qdesigner_widgetitem_p.h"
 #include "qlayout_widget_p.h"
 #include "spacer_widget_p.h"
-#include "layoutdecoration.h"
 #include "widgetfactory_p.h"
-#include "qdesigner_widgetitem_p.h"
 
 #include <QtDesigner/abstractformeditor.h>
 #include <QtDesigner/abstractformwindow.h>
-#include <QtDesigner/container.h>
-#include <QtDesigner/qextensionmanager.h>
-#include <QtDesigner/propertysheet.h>
-#include <QtDesigner/abstractwidgetdatabase.h>
 #include <QtDesigner/abstractmetadatabase.h>
+#include <QtDesigner/abstractwidgetdatabase.h>
+#include <QtDesigner/container.h>
+#include <QtDesigner/propertysheet.h>
+#include <QtDesigner/qextensionmanager.h>
 
 #include <QtCore/qdebug.h>
-#include <QtCore/qvector.h>
-
-#include <QtGui/qevent.h>
-#include <QtWidgets/qgridlayout.h>
-#include <QtGui/qpainter.h>
-#include <QtGui/qbitmap.h>
-#include <QtWidgets/qsplitter.h>
-#include <QtWidgets/qmainwindow.h>
-#include <QtWidgets/qapplication.h>
-#include <QtWidgets/qscrollarea.h>
-#include <QtWidgets/qformlayout.h>
-#include <QtWidgets/qlabel.h>
-#include <QtWidgets/qwizard.h>
-#include <QtCore/qdebug.h>
+#include <QtCore/qlist.h>
 #include <QtCore/qset.h>
+
+#include <QtGui/qbitmap.h>
+#include <QtGui/qevent.h>
+#include <QtGui/qpainter.h>
+
+#include <QtWidgets/qapplication.h>
+#include <QtWidgets/qformlayout.h>
+#include <QtWidgets/qgridlayout.h>
+#include <QtWidgets/qlabel.h>
+#include <QtWidgets/qmainwindow.h>
+#include <QtWidgets/qscrollarea.h>
+#include <QtWidgets/qsplitter.h>
+#include <QtWidgets/qwizard.h>
 
 #include <algorithm>
 
@@ -153,7 +128,7 @@ void Layout::setup()
     QWidgetList lastList;
     const QWidgetList &parents = lists.keys();
     for (QWidget *p : parents) {
-        if (lists.count(p) > lastList.count())
+        if (lists.count(p) > lastList.size())
             lastList = lists.values(p);
     }
 
@@ -162,7 +137,7 @@ void Layout::setup()
     // best list has only one entry and we do not layout a container,
     // we leave here.
     QDesignerWidgetDataBaseInterface *widgetDataBase = m_formWindow->core()->widgetDataBase();
-    if (lastList.count() < 2 &&
+    if (lastList.size() < 2 &&
                         (!m_layoutBase ||
                           (!widgetDataBase->isContainer(m_layoutBase, false) &&
                             m_layoutBase != m_formWindow->mainContainer()))
@@ -319,7 +294,7 @@ void Layout::finishLayout(bool needMove, QLayout *layout)
 
 void Layout::undoLayout()
 {
-    if (!m_widgets.count())
+    if (m_widgets.isEmpty())
         return;
 
     m_formWindow->selectWidget(m_layoutBase, false);
@@ -895,8 +870,8 @@ void Grid::simplify()
 void Grid::shrink()
 {
     //  tick off the occupied cols/rows (bordering on widget edges)
-    QVector<bool> columns(m_ncols, false);
-    QVector<bool> rows(m_nrows, false);
+    QList<bool> columns(m_ncols, false);
+    QList<bool> rows(m_nrows, false);
 
     for (int c = 0; c < m_ncols; c++)
         for (int r = 0; r < m_nrows; r++)
@@ -1122,12 +1097,12 @@ void GridLayout<GridLikeLayout, LayoutType, GridMode>::doLayout()
 }
 
 // Remove duplicate entries (Remove next, if equal to current)
-void removeIntVecDuplicates(QVector<int> &v)
+void removeIntVecDuplicates(QList<int> &v)
 {
     if (v.size() < 2)
         return;
 
-    for (QVector<int>::iterator current = v.begin() ; (current != v.end()) && ((current+1) != v.end()) ; )
+    for (QList<int>::iterator current = v.begin() ; (current != v.end()) && ((current+1) != v.end()) ; )
         if ( *current == *(current+1) )
             v.erase(current+1);
         else
@@ -1154,8 +1129,8 @@ QWidgetList GridLayout<GridLikeLayout, LayoutType, GridMode>::buildGrid(const QW
 
     // We need a list of both start and stop values for x- & y-axis
     const int widgetCount = widgetList.size();
-    QVector<int> x( widgetCount * 2 );
-    QVector<int> y( widgetCount * 2 );
+    QList<int> x( widgetCount * 2 );
+    QList<int> y( widgetCount * 2 );
 
     // Using push_back would look nicer, but operator[] is much faster
     int index  = 0;

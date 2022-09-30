@@ -1,5 +1,7 @@
 # How to disable a failing test/story on the perf waterfall
 
+**Important**: When making changes to this document, also update duplicate files under the [internal docs](http://goto.google.com/perf-bot-health-sheriffs).
+
 To disable a failing test/story, the first step is to figure
 out if the failing thing is gtest or Telemetry, then you can
 follow the below directions to disable the failing test/story.
@@ -65,7 +67,9 @@ Once you've committed your changes locally, your CL can be submitted with:
 
 *Please make sure to CC the benchmark owner so that they're aware that they've lost coverage.*
 
-The `Tbr:` and `No-Try:` are permitted and recommended so long as the only file changed is `tools/perf/expectations.config`. If your change touches real code rather than just that configuration data, you'll need a real review before submitting it.
+The `Tbr:` and `No-Try:` are permitted and recommended so long as the only file changed is `tools/perf/expectations.config`.
+To submit a `Tbr:` change, you will need to add `Rubber Stamper (rubber-stamper@appspot.gserviceaccount.com)` as a reviewer to the patch and wait for the bot's approval.
+If your change touches real code rather than just that configuration data, you'll need a real review before submitting it.
 
 # How to disable a failing gtest perf test
 

@@ -1,31 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-#include <QtTest/QtTest>
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+#include <QTest>
 
 #include <QCoreApplication>
 
@@ -33,9 +8,18 @@
 #include <QFileSystemWatcher>
 #include <QElapsedTimer>
 #include <QTextStream>
+#include <QMap>
+#include <QString>
 #include <QDir>
-#if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
-#include <windows.h>
+#include <QSignalSpy>
+#include <QTimer>
+#include <QTemporaryFile>
+#if defined(Q_OS_WIN)
+#include <qt_windows.h>
+#endif
+
+#ifdef Q_OS_ANDROID
+#include <QStandardPaths>
 #endif
 
 /* All tests need to run in temporary directories not used
@@ -82,7 +66,7 @@ private slots:
     void signalsEmittedAfterFileMoved();
 
     void watchUnicodeCharacters();
-#if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
+#if defined(Q_OS_WIN)
     void watchDirectoryAttributeChanges();
 #endif
 
@@ -97,7 +81,7 @@ tst_QFileSystemWatcher::tst_QFileSystemWatcher()
         m_tempDirPattern += QLatin1Char('/');
     m_tempDirPattern += QStringLiteral("tst_qfilesystemwatcherXXXXXX");
 
-#if defined(Q_OS_ANDROID) && !defined(Q_OS_ANDROID_EMBEDDED)
+#ifdef Q_OS_ANDROID
     QDir::setCurrent(QStandardPaths::writableLocation(QStandardPaths::CacheLocation));
 #endif
 }
@@ -117,7 +101,7 @@ void tst_QFileSystemWatcher::basicTest_data()
         + QChar(ushort(0x00DC)) // LATIN_CAPITAL_LETTER_U_WITH_DIAERESIS
         + QStringLiteral(".txt");
 
-#if !defined(Q_OS_QNX) || !defined(QT_NO_INOTIFY)
+#if !defined(QT_NO_INOTIFY)
     QTest::newRow("native backend-testfile") << "native" << testFile;
     QTest::newRow("native backend-specialchars") << "native" << specialCharacterFile;
 #endif
@@ -411,7 +395,7 @@ void tst_QFileSystemWatcher::addPaths()
 {
     QFileSystemWatcher watcher;
     QStringList paths;
-    paths << QDir::homePath() << QDir::currentPath();
+    paths << QDir::homePath() << QDir::tempPath();
     QCOMPARE(watcher.addPaths(paths), QStringList());
     QCOMPARE(watcher.directories().count(), 2);
 
@@ -479,7 +463,7 @@ void tst_QFileSystemWatcher::removePaths()
 {
     QFileSystemWatcher watcher;
     QStringList paths;
-    paths << QDir::homePath() << QDir::currentPath();
+    paths << QDir::homePath() << QDir::tempPath();
     QCOMPARE(watcher.addPaths(paths), QStringList());
     QCOMPARE(watcher.directories().count(), 2);
     QCOMPARE(watcher.removePaths(paths), QStringList());
@@ -722,7 +706,7 @@ public:
     SignalReceiver(const QDir &moveSrcDir,
                    const QString &moveDestination,
                    QFileSystemWatcher *watcher,
-                   QObject *parent = 0)
+                   QObject *parent = nullptr)
         : QObject(parent),
           added(false),
           moveSrcDir(moveSrcDir),
@@ -819,7 +803,7 @@ void tst_QFileSystemWatcher::watchUnicodeCharacters()
     QTRY_COMPARE(changedSpy.count(), 1);
 }
 
-#if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
+#if defined(Q_OS_WIN)
 void tst_QFileSystemWatcher::watchDirectoryAttributeChanges()
 {
     QTemporaryDir temporaryDirectory(m_tempDirPattern);

@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Linguist of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef METATRANSLATOR_H
 #define METATRANSLATOR_H
@@ -80,6 +55,7 @@ public:
     QString m_unTrPrefix; // QM specific
     QString m_sourceFileName;
     QString m_targetFileName;
+    QString m_compilationDatabaseDir;
     QStringList m_excludes;
     QDir m_sourceDir;
     QDir m_targetDir; // FIXME: TS specific
@@ -94,6 +70,7 @@ public:
     bool m_noUiLines;
     bool m_idBased;
     TranslatorSaveMode m_saveMode;
+    QStringList m_rootDirs;
 };
 
 class TMMKey {
@@ -104,8 +81,11 @@ public:
         { return context == o.context && source == o.source && comment == o.comment; }
     QString context, source, comment;
 };
-Q_DECLARE_TYPEINFO(TMMKey, Q_MOVABLE_TYPE);
-inline uint qHash(const TMMKey &key) { return qHash(key.context) ^ qHash(key.source) ^ qHash(key.comment); }
+Q_DECLARE_TYPEINFO(TMMKey, Q_RELOCATABLE_TYPE);
+inline size_t qHash(const TMMKey &key)
+{
+    return qHash(key.context) ^ qHash(key.source) ^ qHash(key.comment);
+}
 
 class Translator
 {
@@ -135,7 +115,7 @@ public:
     void dropTranslations();
     void dropUiLines();
     void makeFileNamesAbsolute(const QDir &originalPath);
-    bool translationsExist();
+    bool translationsExist() const;
 
     struct Duplicates { QSet<int> byId, byContents; };
     Duplicates resolveDuplicates();
@@ -149,12 +129,12 @@ public:
     LocationsType locationsType() const { return m_locationsType; }
 
     static QString makeLanguageCode(QLocale::Language language, QLocale::Country country);
-    static void languageAndCountry(const QString &languageCode,
-        QLocale::Language *lang, QLocale::Country *country);
+    static void languageAndCountry(QStringView languageCode,
+        QLocale::Language *langPtr, QLocale::Country *countryPtr);
     void setLanguageCode(const QString &languageCode) { m_language = languageCode; }
     void setSourceLanguageCode(const QString &languageCode) { m_sourceLanguage = languageCode; }
     static QString guessLanguageCodeFromFileName(const QString &fileName);
-    QList<TranslatorMessage> messages() const;
+    const QList<TranslatorMessage> &messages() const;
     static QStringList normalizedTranslations(const TranslatorMessage &m, int numPlurals);
     void normalizeTranslations(ConversionData &cd);
     QStringList normalizedTranslations(const TranslatorMessage &m, ConversionData &cd, bool *ok) const;

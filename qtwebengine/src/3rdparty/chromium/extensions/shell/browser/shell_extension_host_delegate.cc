@@ -11,20 +11,16 @@
 
 namespace extensions {
 
-ShellExtensionHostDelegate::ShellExtensionHostDelegate() {
-}
-
-ShellExtensionHostDelegate::~ShellExtensionHostDelegate() {
-}
+ShellExtensionHostDelegate::ShellExtensionHostDelegate() = default;
+ShellExtensionHostDelegate::~ShellExtensionHostDelegate() = default;
 
 void ShellExtensionHostDelegate::OnExtensionHostCreated(
     content::WebContents* web_contents) {
   ShellExtensionWebContentsObserver::CreateForWebContents(web_contents);
 }
 
-void ShellExtensionHostDelegate::OnRenderViewCreatedForBackgroundPage(
-    ExtensionHost* host) {
-}
+void ShellExtensionHostDelegate::OnMainFrameCreatedForBackgroundPage(
+    ExtensionHost* host) {}
 
 content::JavaScriptDialogManager*
 ShellExtensionHostDelegate::GetJavaScriptDialogManager() {
@@ -65,9 +61,7 @@ bool ShellExtensionHostDelegate::CheckMediaAccessPermission(
 
 content::PictureInPictureResult
 ShellExtensionHostDelegate::EnterPictureInPicture(
-    content::WebContents* web_contents,
-    const viz::SurfaceId& surface_id,
-    const gfx::Size& natural_size) {
+    content::WebContents* web_contents) {
   NOTREACHED();
   return content::PictureInPictureResult::kNotSupported;
 }

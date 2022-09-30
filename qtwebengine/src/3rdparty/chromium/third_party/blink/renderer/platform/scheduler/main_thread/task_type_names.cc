@@ -23,6 +23,8 @@ const char* TaskTypeNames::TaskTypeToString(TaskType task_type) {
       return "Networking";
     case TaskType::kNetworkingWithURLLoaderAnnotation:
       return "NetworkingWithURLLoaderAnnotation";
+    case TaskType::kNetworkingUnfreezable:
+      return "NetworkingUnfreezable";
     case TaskType::kNetworkingControl:
       return "NetworkingControl";
     case TaskType::kHistoryTraversal:
@@ -133,16 +135,24 @@ const char* TaskTypeNames::TaskTypeToString(TaskType task_type) {
       return "InternalNavigationAssociatedUnfreezable";
     case TaskType::kInternalContinueScriptLoading:
       return "InternalContinueScriptLoading";
-    case TaskType::kExperimentalWebScheduling:
-      return "ExperimentalWebScheduling";
+    case TaskType::kWebSchedulingPostedTask:
+      return "WebSchedulingPostedTask";
     case TaskType::kInternalFrameLifecycleControl:
       return "InternalFrameLifecycleControl";
     case TaskType::kInternalFindInPage:
       return "InternalFindInPage";
     case TaskType::kInternalHighPriorityLocalFrame:
       return "InternalHighPriorityLocalFrame";
-    case TaskType::kCount:
-      return "Count";
+    case TaskType::kInternalInputBlocking:
+      return "InternalInputBlocking";
+    case TaskType::kMainThreadTaskQueueIPCTracking:
+      return "MainThreadTaskQueueIPCTracking";
+    case TaskType::kWakeLock:
+      return "WakeLock";
+    case TaskType::kWebGPU:
+      return "WebGPU";
+    case TaskType::kInternalPostMessageForwarding:
+      return "InternalPostMessageForwarding";
   }
   // FrameSchedulerImpl should not call this for invalid TaskTypes.
   NOTREACHED();

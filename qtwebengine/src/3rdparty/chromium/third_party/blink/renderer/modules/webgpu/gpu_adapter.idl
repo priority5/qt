@@ -4,19 +4,14 @@
 
 // https://gpuweb.github.io/gpuweb/
 
-enum GPUExtensionName {
-    "texture-compression-bc",
-    "timestamp-query",
-    // Non-standard extension name string. Remove after a transition period.
-    "textureCompressionBC",
-    "shader-float16"
-};
-
 [
-    Exposed(Window WebGPU, Worker WebGPU)
+    Exposed(Window WebGPU, DedicatedWorker WebGPU),
+    SecureContext
 ] interface GPUAdapter {
     [HighEntropy=Direct, MeasureAs=GPUAdapter_Name] readonly attribute DOMString name;
-    [CallWith=ScriptState, SameObject] readonly attribute FrozenArray<GPUExtensionName> extensions;
+    [SameObject] readonly attribute GPUSupportedFeatures features;
+    [SameObject] readonly attribute GPUSupportedLimits limits;
+    readonly attribute boolean isFallbackAdapter;
 
     [CallWith=ScriptState] Promise<GPUDevice> requestDevice(optional GPUDeviceDescriptor descriptor = {});
 };

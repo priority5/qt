@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <QBuffer>
 #include <QFile>
@@ -54,6 +18,8 @@
 #include <WTFStubs.h>
 
 #undef ENABLE_ALL_ASSEMBLERS_FOR_REFACTORING_PURPOSES
+
+#if QT_CONFIG(qml_jit)
 
 QT_BEGIN_NAMESPACE
 namespace QV4 {
@@ -888,7 +854,7 @@ void BaselineAssembler::storeReg(int reg)
 void BaselineAssembler::loadLocal(int index, int level)
 {
     Heap::CallContext ctx;
-    Q_UNUSED(ctx)
+    Q_UNUSED(ctx);
     pasm()->loadPointerFromValue(regAddr(CallData::Context), PlatformAssembler::ScratchRegister);
     while (level) {
         pasm()->loadPtr(Address(PlatformAssembler::ScratchRegister, ctx.outer.offset), PlatformAssembler::ScratchRegister);
@@ -900,7 +866,7 @@ void BaselineAssembler::loadLocal(int index, int level)
 void BaselineAssembler::storeLocal(int index, int level)
 {
     Heap::CallContext ctx;
-    Q_UNUSED(ctx)
+    Q_UNUSED(ctx);
     pasm()->loadPtr(regAddr(CallData::Context), PlatformAssembler::ScratchRegister);
     while (level) {
         pasm()->loadPtr(Address(PlatformAssembler::ScratchRegister, ctx.outer.offset), PlatformAssembler::ScratchRegister);
@@ -1413,6 +1379,23 @@ int BaselineAssembler::jumpNotUndefined(int offset)
     return offset;
 }
 
+int BaselineAssembler::jumpEqNull(int offset)
+{
+    saveAccumulatorInFrame();
+    cmpeqNull();
+
+    pasm()->toBoolean([this, offset](PlatformAssembler::RegisterID resultReg) {
+        auto isFalse = pasm()->branch32(PlatformAssembler::Equal, TrustedImm32(0), resultReg);
+        loadValue(Encode::undefined());
+        pasm()->addJumpToOffset(pasm()->jump(), offset);
+        isFalse.link(pasm());
+        loadAccumulatorFromFrame();
+    });
+
+    return offset;
+}
+
+
 void BaselineAssembler::prepareCallWithArgCount(int argc)
 {
     pasm()->prepareCallWithArgCount(argc);
@@ -1475,7 +1458,7 @@ void BaselineAssembler::loadAccumulatorFromFrame()
                                                        offsetof(CallData, accumulator)));
 }
 
-static ReturnedValue TheJitIs__Tail_Calling__ToTheRuntimeSoTheJitFrameIsMissing(CppStackFrame *frame, ExecutionEngine *engine)
+static ReturnedValue TheJitIs__Tail_Calling__ToTheRuntimeSoTheJitFrameIsMissing(JSTypesStackFrame *frame, ExecutionEngine *engine)
 {
     return Runtime::TailCall::call(frame, engine);
 }
@@ -1557,15 +1540,15 @@ void BaselineAssembler::clearUnwindHandler()
 void JIT::BaselineAssembler::unwindDispatch()
 {
     checkException();
-    pasm()->load32(Address(PlatformAssembler::CppStackFrameRegister, offsetof(CppStackFrame, unwindLevel)), PlatformAssembler::ScratchRegister);
+    pasm()->load32(Address(PlatformAssembler::CppStackFrameRegister, offsetof(JSTypesStackFrame, unwindLevel)), PlatformAssembler::ScratchRegister);
     auto noUnwind = pasm()->branch32(PlatformAssembler::Equal, PlatformAssembler::ScratchRegister, TrustedImm32(0));
     pasm()->sub32(TrustedImm32(1), PlatformAssembler::ScratchRegister);
-    pasm()->store32(PlatformAssembler::ScratchRegister, Address(PlatformAssembler::CppStackFrameRegister, offsetof(CppStackFrame, unwindLevel)));
+    pasm()->store32(PlatformAssembler::ScratchRegister, Address(PlatformAssembler::CppStackFrameRegister, offsetof(JSTypesStackFrame, unwindLevel)));
     auto jump = pasm()->branch32(PlatformAssembler::Equal, PlatformAssembler::ScratchRegister, TrustedImm32(0));
     gotoCatchException();
     jump.link(pasm());
 
-    pasm()->loadPtr(Address(PlatformAssembler::CppStackFrameRegister, offsetof(CppStackFrame, unwindLabel)), PlatformAssembler::ScratchRegister);
+    pasm()->loadPtr(Address(PlatformAssembler::CppStackFrameRegister, offsetof(JSTypesStackFrame, unwindLabel)), PlatformAssembler::ScratchRegister);
     pasm()->jump(PlatformAssembler::ScratchRegister);
 
     noUnwind.link(pasm());
@@ -1573,9 +1556,9 @@ void JIT::BaselineAssembler::unwindDispatch()
 
 int JIT::BaselineAssembler::unwindToLabel(int level, int offset)
 {
-    auto l = pasm()->storePtrWithPatch(TrustedImmPtr(nullptr), Address(PlatformAssembler::CppStackFrameRegister, offsetof(CppStackFrame, unwindLabel)));
+    auto l = pasm()->storePtrWithPatch(TrustedImmPtr(nullptr), Address(PlatformAssembler::CppStackFrameRegister, offsetof(JSTypesStackFrame, unwindLabel)));
     pasm()->addEHTarget(l, offset);
-    pasm()->store32(TrustedImm32(level), Address(PlatformAssembler::CppStackFrameRegister, offsetof(CppStackFrame, unwindLevel)));
+    pasm()->store32(TrustedImm32(level), Address(PlatformAssembler::CppStackFrameRegister, offsetof(JSTypesStackFrame, unwindLevel)));
     gotoCatchException();
     return offset;
 }
@@ -1592,7 +1575,7 @@ void BaselineAssembler::pushCatchContext(int index, int name)
 void BaselineAssembler::popContext()
 {
     Heap::CallContext ctx;
-    Q_UNUSED(ctx)
+    Q_UNUSED(ctx);
     pasm()->loadPointerFromValue(regAddr(CallData::Context), PlatformAssembler::ScratchRegister);
     pasm()->loadPtr(Address(PlatformAssembler::ScratchRegister, ctx.outer.offset), PlatformAssembler::ScratchRegister);
     pasm()->storeHeapObject(PlatformAssembler::ScratchRegister, regAddr(CallData::Context));
@@ -1619,3 +1602,5 @@ void BaselineAssembler::ret()
 } // QV4 namepsace
 
 QT_END_NAMESPACE
+
+#endif // QT_CONFIG(qml_jit)

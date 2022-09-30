@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -15,7 +14,10 @@
 
 namespace content {
 enum class PermissionType;
+class RenderFrameHost;
 }  // namespace content
+
+class GURL;
 
 namespace permissions {
 
@@ -26,6 +28,7 @@ enum class PermissionAction {
   DISMISSED = 2,
   IGNORED = 3,
   REVOKED = 4,
+  GRANTED_ONCE = 5,
 
   // Always keep this at the end.
   NUM,
@@ -34,11 +37,12 @@ enum class PermissionAction {
 // A utility class for permissions.
 class PermissionUtil {
  public:
+  PermissionUtil() = delete;
+  PermissionUtil(const PermissionUtil&) = delete;
+  PermissionUtil& operator=(const PermissionUtil&) = delete;
+
   // Returns the permission string for the given permission.
   static std::string GetPermissionString(ContentSettingsType);
-
-  // Returns the request type corresponding to a permission type.
-  static PermissionRequestType GetRequestType(ContentSettingsType permission);
 
   // Returns the gesture type corresponding to whether a permission request is
   // made with or without a user gesture.
@@ -57,8 +61,18 @@ class PermissionUtil {
   // PermissionManager.
   static bool IsPermission(ContentSettingsType type);
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(PermissionUtil);
+  // Checks whether the given ContentSettingsType is a guard content setting,
+  // meaning it does not support allow setting and toggles between "ask" and
+  // "block" instead. This is primarily used for chooser-based permissions.
+  static bool IsGuardContentSetting(ContentSettingsType type);
+
+  // Checks whether the given ContentSettingsType supports one time grants.
+  static bool CanPermissionBeAllowedOnce(ContentSettingsType type);
+
+  // Returns the authoritative `embedding origin`, as a GURL, to be used for
+  // permission decisions in `render_frame_host`.
+  static GURL GetLastCommittedOriginAsURL(
+      content::RenderFrameHost* render_frame_host);
 };
 
 }  // namespace permissions

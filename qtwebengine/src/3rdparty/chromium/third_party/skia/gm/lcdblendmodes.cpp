@@ -72,7 +72,8 @@ protected:
         canvas->drawRect(r, p);
 
         SkImageInfo info = SkImageInfo::MakeN32Premul(kWidth, kHeight);
-        auto        surface(ToolUtils::makeSurface(canvas, info));
+        SkSurfaceProps props = SkSurfaceProps(0, kRGB_H_SkPixelGeometry);
+        auto surface(ToolUtils::makeSurface(canvas, info, &props));
 
         SkCanvas* surfCanvas = surface->getCanvas();
         this->drawColumn(surfCanvas, SK_ColorBLACK, SK_ColorWHITE, false);
@@ -85,7 +86,7 @@ protected:
 
         SkPaint surfPaint;
         surfPaint.setBlendMode(SkBlendMode::kSrcOver);
-        surface->draw(canvas, 0, 0, &surfPaint);
+        surface->draw(canvas, 0, 0, SkSamplingOptions(), &surfPaint);
     }
 
     void drawColumn(SkCanvas* canvas, SkColor backgroundColor, SkColor textColor, bool useGrad) {

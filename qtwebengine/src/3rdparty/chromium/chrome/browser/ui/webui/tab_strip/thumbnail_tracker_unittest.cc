@@ -8,6 +8,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/callback.h"
 #include "base/run_loop.h"
 #include "base/test/mock_callback.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -44,8 +45,8 @@ class ThumbnailTrackerTest : public ::testing::Test,
   ThumbnailTrackerTest()
       : thumbnail_tracker_(
             thumbnail_updated_callback_.Get(),
-            base::Bind(&ThumbnailTrackerTest::GetTestingThumbnail,
-                       base::Unretained(this))) {}
+            base::BindRepeating(&ThumbnailTrackerTest::GetTestingThumbnail,
+                                base::Unretained(this))) {}
 
   static SkBitmap CreateTestingBitmap() {
     SkBitmap bitmap;

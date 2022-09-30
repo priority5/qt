@@ -84,6 +84,12 @@ bool FrameResourceFetcherProperties::IsPaused() const {
   return frame->GetPage()->Paused();
 }
 
+LoaderFreezeMode FrameResourceFetcherProperties::FreezeMode() const {
+  LocalFrame* frame = document_->GetFrame();
+  DCHECK(frame);
+  return frame->GetLoaderFreezeMode();
+}
+
 bool FrameResourceFetcherProperties::IsLoadComplete() const {
   return document_->LoadEventFinished();
 }

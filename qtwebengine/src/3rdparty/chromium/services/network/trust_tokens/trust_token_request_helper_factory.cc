@@ -7,7 +7,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/callback_forward.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/strcat.h"
 #include "net/base/isolation_info.h"
@@ -15,18 +14,22 @@
 #include "net/log/net_log_with_source.h"
 #include "net/url_request/url_request.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/trust_token_http_headers.h"
 #include "services/network/public/cpp/trust_token_parameterization.h"
 #include "services/network/public/mojom/trust_tokens.mojom-shared.h"
 #include "services/network/trust_tokens/boringssl_trust_token_issuance_cryptographer.h"
 #include "services/network/trust_tokens/boringssl_trust_token_redemption_cryptographer.h"
-#include "services/network/trust_tokens/ed25519_key_pair_generator.h"
-#include "services/network/trust_tokens/ed25519_trust_token_request_signer.h"
+#include "services/network/trust_tokens/ecdsa_p256_key_pair_generator.h"
+#include "services/network/trust_tokens/ecdsa_sha256_trust_token_request_signer.h"
+#include "services/network/trust_tokens/local_trust_token_operation_delegate.h"
+#include "services/network/trust_tokens/local_trust_token_operation_delegate_impl.h"
+#include "services/network/trust_tokens/operating_system_matching.h"
+#include "services/network/trust_tokens/operation_timing_request_helper_wrapper.h"
 #include "services/network/trust_tokens/suitable_trust_token_origin.h"
-#include "services/network/trust_tokens/trust_token_http_headers.h"
 #include "services/network/trust_tokens/trust_token_key_commitment_controller.h"
+#include "services/network/trust_tokens/trust_token_operation_metrics_recorder.h"
 #include "services/network/trust_tokens/trust_token_parameterization.h"
 #include "services/network/trust_tokens/trust_token_request_canonicalizer.h"
-#include "services/network/trust_tokens/trust_token_request_issuance_helper.h"
 #include "services/network/trust_tokens/trust_token_request_redemption_helper.h"
 #include "services/network/trust_tokens/trust_token_request_signing_helper.h"
 #include "services/network/trust_tokens/types.h"
@@ -78,9 +81,12 @@ void LogOutcome(const net::NetLogWithSource& log,
 TrustTokenRequestHelperFactory::TrustTokenRequestHelperFactory(
     PendingTrustTokenStore* store,
     const TrustTokenKeyCommitmentGetter* key_commitment_getter,
+    base::RepeatingCallback<mojom::NetworkContextClient*(void)>
+        context_client_provider,
     base::RepeatingCallback<bool(void)> authorizer)
     : store_(store),
       key_commitment_getter_(key_commitment_getter),
+      context_client_provider_(std::move(context_client_provider)),
       authorizer_(std::move(authorizer)) {}
 TrustTokenRequestHelperFactory::~TrustTokenRequestHelperFactory() = default;
 
@@ -109,7 +115,7 @@ void TrustTokenRequestHelperFactory::CreateTrustTokenHelperForRequest(
     }
   }
 
-  base::Optional<SuitableTrustTokenOrigin> maybe_top_frame_origin;
+  absl::optional<SuitableTrustTokenOrigin> maybe_top_frame_origin;
   if (request.isolation_info().top_frame_origin()) {
     maybe_top_frame_origin = SuitableTrustTokenOrigin::Create(
         *request.isolation_info().top_frame_origin());
@@ -121,10 +127,10 @@ void TrustTokenRequestHelperFactory::CreateTrustTokenHelperForRequest(
     return;
   }
 
-  store_->ExecuteOrEnqueue(base::BindOnce(
-      &TrustTokenRequestHelperFactory::ConstructHelperUsingStore,
-      weak_factory_.GetWeakPtr(), *maybe_top_frame_origin,
-      base::Passed(params.Clone()), request.net_log(), std::move(done)));
+  store_->ExecuteOrEnqueue(
+      base::BindOnce(&TrustTokenRequestHelperFactory::ConstructHelperUsingStore,
+                     weak_factory_.GetWeakPtr(), *maybe_top_frame_origin,
+                     params.Clone(), request.net_log(), std::move(done)));
 }
 
 void TrustTokenRequestHelperFactory::ConstructHelperUsingStore(
@@ -135,28 +141,37 @@ void TrustTokenRequestHelperFactory::ConstructHelperUsingStore(
     TrustTokenStore* store) {
   DCHECK(params);
 
+  auto metrics_recorder =
+      std::make_unique<TrustTokenOperationMetricsRecorder>(params->type);
+
   switch (params->type) {
     case mojom::TrustTokenOperationType::kIssuance: {
       LogOutcome(net_log, params->type,
                  Outcome::kSuccessfullyCreatedAnIssuanceHelper);
-      std::move(done).Run(std::unique_ptr<TrustTokenRequestHelper>(
-          new TrustTokenRequestIssuanceHelper(
-              std::move(top_frame_origin), store, key_commitment_getter_,
-              std::make_unique<BoringsslTrustTokenIssuanceCryptographer>(),
-              std::move(net_log))));
+      auto helper = std::make_unique<TrustTokenRequestIssuanceHelper>(
+          std::move(top_frame_origin), store, key_commitment_getter_,
+          std::make_unique<BoringsslTrustTokenIssuanceCryptographer>(),
+          std::make_unique<LocalTrustTokenOperationDelegateImpl>(
+              context_client_provider_),
+          base::BindRepeating(&IsCurrentOperatingSystem),
+          metrics_recorder.get(), std::move(net_log));
+      std::move(done).Run(TrustTokenStatusOrRequestHelper(
+          std::make_unique<OperationTimingRequestHelperWrapper>(
+              std::move(metrics_recorder), std::move(helper))));
       return;
     }
 
     case mojom::TrustTokenOperationType::kRedemption: {
       LogOutcome(net_log, params->type,
                  Outcome::kSuccessfullyCreatedARedemptionHelper);
-      std::move(done).Run(std::unique_ptr<TrustTokenRequestHelper>(
-          new TrustTokenRequestRedemptionHelper(
-              std::move(top_frame_origin), params->refresh_policy, store,
-              key_commitment_getter_,
-              std::make_unique<Ed25519KeyPairGenerator>(),
-              std::make_unique<BoringsslTrustTokenRedemptionCryptographer>(),
-              std::move(net_log))));
+      auto helper = std::make_unique<TrustTokenRequestRedemptionHelper>(
+          std::move(top_frame_origin), params->refresh_policy, store,
+          key_commitment_getter_, std::make_unique<EcdsaP256KeyPairGenerator>(),
+          std::make_unique<BoringsslTrustTokenRedemptionCryptographer>(),
+          std::move(net_log));
+      std::move(done).Run(TrustTokenStatusOrRequestHelper(
+          std::make_unique<OperationTimingRequestHelperWrapper>(
+              std::move(metrics_recorder), std::move(helper))));
       return;
     }
 
@@ -169,7 +184,7 @@ void TrustTokenRequestHelperFactory::ConstructHelperUsingStore(
 
       std::vector<SuitableTrustTokenOrigin> issuers;
       for (url::Origin& potentially_unsuitable_issuer : params->issuers) {
-        base::Optional<SuitableTrustTokenOrigin> maybe_issuer =
+        absl::optional<SuitableTrustTokenOrigin> maybe_issuer =
             SuitableTrustTokenOrigin::Create(
                 std::move(potentially_unsuitable_issuer));
         if (!maybe_issuer) {
@@ -191,12 +206,14 @@ void TrustTokenRequestHelperFactory::ConstructHelperUsingStore(
 
       LogOutcome(net_log, params->type,
                  Outcome::kSuccessfullyCreatedASigningHelper);
-      std::move(done).Run(std::unique_ptr<TrustTokenRequestHelper>(
-          new TrustTokenRequestSigningHelper(
-              store, std::move(signing_params),
-              std::make_unique<Ed25519TrustTokenRequestSigner>(),
-              std::make_unique<TrustTokenRequestCanonicalizer>(),
-              std::move(net_log))));
+      auto helper = std::make_unique<TrustTokenRequestSigningHelper>(
+          store, std::move(signing_params),
+          std::make_unique<EcdsaSha256TrustTokenRequestSigner>(),
+          std::make_unique<TrustTokenRequestCanonicalizer>(),
+          std::move(net_log));
+      std::move(done).Run(TrustTokenStatusOrRequestHelper(
+          std::make_unique<OperationTimingRequestHelperWrapper>(
+              std::move(metrics_recorder), std::move(helper))));
       return;
     }
   }

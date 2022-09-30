@@ -41,10 +41,6 @@ class PLATFORM_EXPORT Matrix3DTransformOperation final
 
   TransformationMatrix Matrix() const { return matrix_; }
 
-  bool CanBlendWith(const TransformOperation& other) const override {
-    return false;
-  }
-
   static bool IsMatchingOperationType(OperationType type) {
     return type == kMatrix3D;
   }
@@ -60,7 +56,8 @@ class PLATFORM_EXPORT Matrix3DTransformOperation final
     return matrix_ == m->matrix_;
   }
 
-  void Apply(TransformationMatrix& transform, const FloatSize&) const override {
+  void Apply(TransformationMatrix& transform,
+             const gfx::SizeF&) const override {
     transform.Multiply(TransformationMatrix(matrix_));
   }
 
@@ -76,8 +73,12 @@ class PLATFORM_EXPORT Matrix3DTransformOperation final
   bool PreservesAxisAlignment() const final {
     return matrix_.Preserves2dAxisAlignment();
   }
+  bool IsIdentityOrTranslation() const final {
+    return matrix_.IsIdentityOrTranslation();
+  }
 
-  Matrix3DTransformOperation(const TransformationMatrix& mat) { matrix_ = mat; }
+  explicit Matrix3DTransformOperation(const TransformationMatrix& mat)
+      : matrix_(mat) {}
 
   TransformationMatrix matrix_;
 };

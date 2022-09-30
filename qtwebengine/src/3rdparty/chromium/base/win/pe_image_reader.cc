@@ -9,7 +9,7 @@
 #include <memory>
 
 #include "base/check_op.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/numerics/safe_math.h"
 
 namespace base {
@@ -35,11 +35,14 @@ struct OptionalHeaderTraits<IMAGE_OPTIONAL_HEADER64> {
 template <class OPTIONAL_HEADER_TYPE>
 class PeImageReader::OptionalHeaderImpl : public PeImageReader::OptionalHeader {
  public:
-  typedef OptionalHeaderTraits<OPTIONAL_HEADER_TYPE> TraitsType;
+  using TraitsType = OptionalHeaderTraits<OPTIONAL_HEADER_TYPE>;
 
   explicit OptionalHeaderImpl(const uint8_t* optional_header_start)
       : optional_header_(reinterpret_cast<const OPTIONAL_HEADER_TYPE*>(
             optional_header_start)) {}
+
+  OptionalHeaderImpl(const OptionalHeaderImpl&) = delete;
+  OptionalHeaderImpl& operator=(const OptionalHeaderImpl&) = delete;
 
   WordSize GetWordSize() override { return TraitsType::word_size; }
 
@@ -58,12 +61,10 @@ class PeImageReader::OptionalHeaderImpl : public PeImageReader::OptionalHeader {
   DWORD GetSizeOfImage() override { return optional_header_->SizeOfImage; }
 
  private:
-  const OPTIONAL_HEADER_TYPE* optional_header_;
-  DISALLOW_COPY_AND_ASSIGN(OptionalHeaderImpl);
+  raw_ptr<const OPTIONAL_HEADER_TYPE> optional_header_;
 };
 
-PeImageReader::PeImageReader()
-    : image_data_(), image_size_(), validation_state_() {}
+PeImageReader::PeImageReader() {}
 
 PeImageReader::~PeImageReader() {
   Clear();
@@ -249,11 +250,13 @@ bool PeImageReader::ValidateOptionalHeader() {
 
   std::unique_ptr<OptionalHeader> optional_header;
   if (*optional_header_magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
-    optional_header.reset(new OptionalHeaderImpl<IMAGE_OPTIONAL_HEADER32>(
-        image_data_ + optional_header_offset));
+    optional_header =
+        std::make_unique<OptionalHeaderImpl<IMAGE_OPTIONAL_HEADER32>>(
+            image_data_ + optional_header_offset);
   } else if (*optional_header_magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-    optional_header.reset(new OptionalHeaderImpl<IMAGE_OPTIONAL_HEADER64>(
-        image_data_ + optional_header_offset));
+    optional_header =
+        std::make_unique<OptionalHeaderImpl<IMAGE_OPTIONAL_HEADER64>>(
+            image_data_ + optional_header_offset);
   } else {
     return false;
   }

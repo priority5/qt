@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of Qt Quick 3D.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #ifndef QQUICK3DRENDERSTATS_H
 #define QQUICK3DRENDERSTATS_H
@@ -53,6 +27,7 @@ class Q_QUICK3D_EXPORT QQuick3DRenderStats : public QObject
     Q_PROPERTY(int fps READ fps NOTIFY fpsChanged)
     Q_PROPERTY(float frameTime READ frameTime NOTIFY frameTimeChanged)
     Q_PROPERTY(float renderTime READ renderTime NOTIFY renderTimeChanged)
+    Q_PROPERTY(float renderPrepareTime READ renderPrepareTime NOTIFY renderTimeChanged)
     Q_PROPERTY(float syncTime READ syncTime NOTIFY syncTimeChanged)
     Q_PROPERTY(float maxFrameTime READ maxFrameTime NOTIFY maxFrameTimeChanged)
 
@@ -62,12 +37,16 @@ public:
     int fps() const;
     float frameTime() const;
     float renderTime() const;
+    float renderPrepareTime() const;
     float syncTime() const;
     float maxFrameTime() const;
 
     void startSync();
     void endSync(bool dump = false);
+
     void startRender();
+    void startRenderPrepare();
+    void endRenderPrepare();
     void endRender(bool dump = false);
 
 Q_SIGNALS:
@@ -85,18 +64,23 @@ private:
     float m_secTimer = 0;
     float m_notifyTimer = 0;
     float m_renderStartTime = 0;
+    float m_renderPrepareStartTime = 0;
     float m_syncStartTime = 0;
 
     float m_internalMaxFrameTime = 0;
-    float m_notifiedFrameTime = 0;
-    float m_notifiedRenderTime = 0;
-    float m_notifiedSyncTime = 0;
+    float m_maxFrameTime = 0;
 
     int m_fps = 0;
-    float m_frameTime = 0;
-    float m_renderTime = 0;
-    float m_syncTime = 0;
-    float m_maxFrameTime = 0;
+
+    struct Results {
+        float frameTime = 0;
+        float renderTime = 0;
+        float renderPrepareTime = 0;
+        float syncTime = 0;
+    };
+
+    Results m_results;
+    Results m_notifiedResults;
 };
 
 QT_END_NAMESPACE

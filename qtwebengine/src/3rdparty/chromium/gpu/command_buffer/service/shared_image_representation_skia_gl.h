@@ -5,6 +5,7 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_REPRESENTATION_SKIA_GL_H_
 #define GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_REPRESENTATION_SKIA_GL_H_
 
+#include "base/memory/raw_ptr.h"
 #include "gpu/command_buffer/service/shared_image_representation.h"
 #include "ui/gl/gl_context.h"
 
@@ -32,6 +33,10 @@ class GPU_GLES2_EXPORT SharedImageRepresentationSkiaGL
       const SkSurfaceProps& surface_props,
       std::vector<GrBackendSemaphore>* begin_semaphores,
       std::vector<GrBackendSemaphore>* end_semaphores) override;
+  sk_sp<SkPromiseImageTexture> BeginWriteAccess(
+      std::vector<GrBackendSemaphore>* begin_semaphores,
+      std::vector<GrBackendSemaphore>* end_semaphores,
+      std::unique_ptr<GrBackendSurfaceMutableState>* end_state) override;
   void EndWriteAccess(sk_sp<SkSurface> surface) override;
   sk_sp<SkPromiseImageTexture> BeginReadAccess(
       std::vector<GrBackendSemaphore>* begin_semaphores,
@@ -57,7 +62,7 @@ class GPU_GLES2_EXPORT SharedImageRepresentationSkiaGL
   sk_sp<SkSurface> surface_;
   RepresentationAccessMode mode_ = RepresentationAccessMode::kNone;
 #if DCHECK_IS_ON()
-  gl::GLContext* context_;
+  raw_ptr<gl::GLContext> context_;
 #endif
 };
 

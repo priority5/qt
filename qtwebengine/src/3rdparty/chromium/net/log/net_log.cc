@@ -5,6 +5,7 @@
 #include "net/log/net_log.h"
 
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
@@ -56,15 +57,12 @@ void NetLog::ThreadSafeCaptureModeObserver::
 
 // static
 NetLog* NetLog::Get() {
-  static base::NoDestructor<NetLog> instance{util::PassKey<NetLog>()};
+  static base::NoDestructor<NetLog> instance{base::PassKey<NetLog>()};
   return instance.get();
 }
 
-NetLog::NetLog(util::PassKey<NetLog>) {}
-NetLog::NetLog(util::PassKey<NetLogWithSource>) {}
-NetLog::NetLog(util::PassKey<TestNetLog>) {}
-
-NetLog::~NetLog() = default;
+NetLog::NetLog(base::PassKey<NetLog>) {}
+NetLog::NetLog(base::PassKey<NetLogWithSource>) {}
 
 void NetLog::AddEntry(NetLogEventType type,
                       const NetLogSource& source,
@@ -183,24 +181,10 @@ std::string NetLog::TimeToString(const base::Time& time) {
 }
 
 // static
-const char* NetLog::EventTypeToString(NetLogEventType event) {
-  switch (event) {
-#define EVENT_TYPE(label)      \
-  case NetLogEventType::label: \
-    return #label;
-#include "net/log/net_log_event_type_list.h"
-#undef EVENT_TYPE
-    default:
-      NOTREACHED();
-      return nullptr;
-  }
-}
-
-// static
 base::Value NetLog::GetEventTypesAsValue() {
   base::Value dict(base::Value::Type::DICTIONARY);
   for (int i = 0; i < static_cast<int>(NetLogEventType::COUNT); ++i) {
-    dict.SetIntKey(EventTypeToString(static_cast<NetLogEventType>(i)), i);
+    dict.SetIntKey(NetLogEventTypeToString(static_cast<NetLogEventType>(i)), i);
   }
   return dict;
 }

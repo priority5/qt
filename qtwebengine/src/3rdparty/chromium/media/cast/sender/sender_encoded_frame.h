@@ -13,7 +13,7 @@ namespace cast {
 
 // Extends EncodedFrame with additional fields used within the sender-side of
 // the library.
-struct SenderEncodedFrame : public EncodedFrame {
+struct SenderEncodedFrame final : public EncodedFrame {
   SenderEncodedFrame();
   ~SenderEncodedFrame() final;
 
@@ -39,8 +39,8 @@ struct SenderEncodedFrame : public EncodedFrame {
   // encode the frame within the target bitrate (even at its lowest quality
   // setting).  Negative values indicate the field was not computed.
   //
-  // TODO(miu): Rename to idealized_bitrate_utilization.
-  double lossy_utilization;
+  // TODO(jophba): Rename to idealized_bitrate_utilization.
+  double lossy_utilization = {};
 
   // The time at which the encode of the frame completed.
   base::TimeTicks encode_completion_time;

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com, author Rafael Roquetto <rafael.roquetto@kdab.com>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com, author Rafael Roquetto <rafael.roquetto@kdab.com>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "provider.h"
 #include "panic.h"
@@ -43,8 +7,10 @@
 #include <qfile.h>
 #include <qfileinfo.h>
 #include <qtextstream.h>
-#include <qregexp.h>
+#include <qregularexpression.h>
 #include <qstring.h>
+
+using namespace Qt::StringLiterals;
 
 #ifdef TRACEGEN_DEBUG
 #include <qdebug.h>
@@ -87,12 +53,13 @@ static inline int arrayLength(const QString &rawType)
     /* matches the length of an ordinary array type
      * Ex: foo[10] yields '10'
      */
-    static const QRegExp rx(QStringLiteral(".*\\[([0-9]+)\\].*"));
+    static const QRegularExpression rx(QStringLiteral("\\[([0-9]+)\\]"));
 
-    if (!rx.exactMatch(rawType.trimmed()))
+    auto match = rx.match(rawType);
+    if (!match.hasMatch())
         return 0;
 
-    return rx.cap(1).toInt();
+    return match.captured(1).toInt();
 }
 
 static inline QString sequenceLength(const QString &rawType)
@@ -102,12 +69,13 @@ static inline QString sequenceLength(const QString &rawType)
      * Ex: in qcoreapplication_foo(const char[len], some_string, unsigned int, * len)
      * it will match the 'len' part of 'const char[len]')
      */
-    static const QRegExp rx(QStringLiteral(".*\\[([A-Za-z_][A-Za-z_0-9]*)\\].*"));
+    static const QRegularExpression rx(QStringLiteral("\\[([A-Za-z_][A-Za-z_0-9]*)\\]"));
 
-    if (!rx.exactMatch(rawType.trimmed()))
+    auto match = rx.match(rawType);
+    if (!match.hasMatch())
         return QString();
 
-    return rx.cap(1);
+    return match.captured(1);
 }
 
 static QString decayArrayToPointer(QString type)
@@ -115,15 +83,14 @@ static QString decayArrayToPointer(QString type)
     /* decays an array to a pointer, i.e., if 'type' holds int[10],
      * this function returns 'int *'
      */
-    static QRegExp rx(QStringLiteral("\\[(.+)\\]"));
+    static QRegularExpression rx(QStringLiteral("\\[([^\\]]+)\\]"));
 
-    rx.setMinimal(true);
     return type.replace(rx, QStringLiteral("*"));
 }
 
 static QString removeBraces(QString type)
 {
-    static const QRegExp rx(QStringLiteral("\\[.*\\]"));
+    static const QRegularExpression rx(QStringLiteral("\\[.*\\]"));
 
     return type.remove(rx);
 }
@@ -174,7 +141,7 @@ static Tracepoint::Field::BackendType backendType(QString rawType)
         static const size_t tableSize = sizeof (typeTable) / sizeof (typeTable[0]);
 
         for (size_t i = 0; i < tableSize; ++i) {
-            if (rawType == QLatin1String(typeTable[i].type))
+            if (rawType == QLatin1StringView(typeTable[i].type))
                 return typeTable[i].backendType;
         }
 
@@ -187,19 +154,19 @@ static Tracepoint::Field::BackendType backendType(QString rawType)
     if (!sequenceLength(rawType).isNull())
         return Tracepoint::Field::Sequence;
 
-    static const QRegExp constMatch(QStringLiteral("\\bconst\\b"));
+    static const QRegularExpression constMatch(QStringLiteral("\\bconst\\b"));
     rawType.remove(constMatch);
-    rawType.remove(QLatin1Char('&'));
+    rawType.remove(u'&');
 
-    static const QRegExp ptrMatch(QStringLiteral("\\s*\\*\\s*"));
+    static const QRegularExpression ptrMatch(QStringLiteral("\\s*\\*\\s*"));
     rawType.replace(ptrMatch, QStringLiteral("_ptr"));
     rawType = rawType.trimmed();
     rawType.replace(QStringLiteral(" "), QStringLiteral("_"));
 
-    if (rawType == QLatin1String("char_ptr"))
+    if (rawType == "char_ptr"_L1)
         return Tracepoint::Field::String;
 
-    if (rawType.endsWith(QLatin1String("_ptr")))
+    if (rawType.endsWith("_ptr"_L1))
         return Tracepoint::Field::Pointer;
 
     return backendType(rawType);
@@ -218,19 +185,19 @@ static Tracepoint parseTracepoint(const QString &name, const QStringList &args,
     auto end = args.constEnd();
     int argc = 0;
 
-    static const QRegExp rx(QStringLiteral("(.*)\\b([A-Za-z_][A-Za-z0-9_]*)$"));
+    static const QRegularExpression rx(QStringLiteral("^(.*)\\b([A-Za-z_][A-Za-z0-9_]*)$"));
 
     while (i != end) {
-        rx.exactMatch(*i);
+        auto match = rx.match(*i);
 
-        const QString type = rx.cap(1).trimmed();
+        const QString type = match.captured(1).trimmed();
 
         if (type.isNull()) {
             panic("Missing parameter type for argument %d of %s (%s:%d)",
                     argc, qPrintable(name), qPrintable(fileName), lineNumber);
         }
 
-        const QString name = rx.cap(2).trimmed();
+        const QString name = match.captured(2).trimmed();
 
         if (name.isNull()) {
             panic("Missing parameter name for argument %d of %s (%s:%d)",
@@ -270,7 +237,7 @@ Provider parseProvider(const QString &filename)
 
     QTextStream s(&f);
 
-    static const QRegExp tracedef(QStringLiteral("([A-Za-z][A-Za-z0-9_]*)\\((.*)\\)"));
+    static const QRegularExpression tracedef(QStringLiteral("^([A-Za-z][A-Za-z0-9_]*)\\((.*)\\)$"));
 
     Provider provider;
     provider.name = QFileInfo(filename).baseName();
@@ -279,10 +246,10 @@ Provider parseProvider(const QString &filename)
     for (int lineNumber = 1; !s.atEnd(); ++lineNumber) {
         QString line = s.readLine().trimmed();
 
-        if (line == QLatin1String("{")) {
+        if (line == "{"_L1) {
             parsingPrefixText = true;
             continue;
-        } else if (parsingPrefixText && line == QLatin1String("}")) {
+        } else if (parsingPrefixText && line == "}"_L1) {
             parsingPrefixText = false;
             continue;
         } else if (parsingPrefixText) {
@@ -290,13 +257,14 @@ Provider parseProvider(const QString &filename)
             continue;
         }
 
-        if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
+        if (line.isEmpty() || line.startsWith(u'#'))
             continue;
 
-        if (tracedef.exactMatch(line)) {
-            const QString name = tracedef.cap(1);
-            const QString argsString = tracedef.cap(2);
-            const QStringList args = argsString.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        auto match = tracedef.match(line);
+        if (match.hasMatch()) {
+            const QString name = match.captured(1);
+            const QString argsString = match.captured(2);
+            const QStringList args = argsString.split(u',', Qt::SkipEmptyParts);
 
             provider.tracepoints << parseTracepoint(name, args, filename, lineNumber);
         } else {

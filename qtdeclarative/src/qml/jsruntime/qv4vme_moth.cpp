@@ -1,47 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qv4vme_moth_p.h"
 
 #include <QtCore/qjsondocument.h>
 #include <QtCore/qjsonobject.h>
 
+#include <private/qv4alloca_p.h>
 #include <private/qv4instr_moth_p.h>
 #include <private/qv4value_p.h>
 #include <private/qv4debugging_p.h>
@@ -58,6 +23,7 @@
 #include <private/qv4generatorobject_p.h>
 #include <private/qv4alloca_p.h>
 #include <private/qqmljavascriptexpression_p.h>
+#include <private/qv4qmlcontext_p.h>
 #include <iostream>
 
 #if QT_CONFIG(qml_jit)
@@ -341,7 +307,7 @@ static struct InstrCount {
     }
 #endif
 
-static inline QV4::Value &stackValue(QV4::Value *stack, size_t slot, const CppStackFrame *frame)
+static inline QV4::Value &stackValue(QV4::Value *stack, size_t slot, const JSTypesStackFrame *frame)
 {
     Q_ASSERT(slot < CallData::HeaderSize() / sizeof(QV4::StaticValue)
                     + frame->jsFrame->argc()
@@ -358,7 +324,7 @@ static inline QV4::Value &stackValue(QV4::Value *stack, size_t slot, const CppSt
 #undef CHECK_EXCEPTION
 #endif
 #define CHECK_EXCEPTION \
-    if (engine->hasException || engine->isInterrupted.loadAcquire()) \
+    if (engine->hasException || engine->isInterrupted.loadRelaxed()) \
         goto handleUnwind
 
 static inline Heap::CallContext *getScope(QV4::Value *stack, int level)
@@ -423,11 +389,120 @@ static bool compareEqualInt(QV4::Value &accumulator, QV4::Value lhs, int rhs)
                 d = val.toNumberImpl(); \
                 CHECK_EXCEPTION; \
             } \
-            i = Double::toInt32(d); \
+            i = QJSNumberCoercion::toInteger(d); \
         } \
     } while (false)
 
-ReturnedValue VME::exec(CppStackFrame *frame, ExecutionEngine *engine)
+void VME::exec(MetaTypesStackFrame *frame, ExecutionEngine *engine)
+{
+    qt_v4ResolvePendingBreakpointsHook();
+    if (engine->checkStackLimits()) {
+        frame->setReturnValueUndefined();
+        return;
+    }
+    ExecutionEngineCallDepthRecorder executionEngineCallDepthRecorder(engine);
+
+    Function *function = frame->v4Function;
+    Q_ASSERT(function->aotFunction);
+    Q_TRACE_SCOPE(QQmlV4_function_call, engine, function->name()->toQString(),
+                  function->executableCompilationUnit()->fileName(),
+                  function->compiledFunction->location.line(),
+                  function->compiledFunction->location.column());
+    Profiling::FunctionCallProfiler profiler(engine, function); // start execution profiling
+
+    const qsizetype numFunctionArguments = function->aotFunction->argumentTypes.size();
+
+    Q_ALLOCA_DECLARE(void *, transformedArguments);
+    for (qsizetype i = 0; i < numFunctionArguments; ++i) {
+        const QMetaType argumentType = function->aotFunction->argumentTypes[i];
+        if (frame->argc() > i && argumentType == frame->argTypes()[i])
+            continue;
+
+        if (transformedArguments == nullptr) {
+            Q_ALLOCA_ASSIGN(void *, transformedArguments, numFunctionArguments * sizeof(void *));
+            memcpy(transformedArguments, frame->argv(), frame->argc() * sizeof(void *));
+        }
+
+        if (argumentType.sizeOf() == 0) {
+            transformedArguments[i] = nullptr;
+            continue;
+        }
+
+        Q_ALLOCA_VAR(void, arg, argumentType.sizeOf());
+
+        if (argumentType == QMetaType::fromType<QVariant>()) {
+            if (frame->argc() > i)
+                new (arg) QVariant(frame->argTypes()[i], frame->argv()[i]);
+            else
+                new (arg) QVariant();
+        } else if (argumentType == QMetaType::fromType<QJSPrimitiveValue>()) {
+            if (frame->argc() > i)
+                new (arg) QJSPrimitiveValue(frame->argTypes()[i], frame->argv()[i]);
+            else
+                new (arg) QJSPrimitiveValue();
+        } else {
+            argumentType.construct(arg);
+            if (frame->argc() > i)
+                QMetaType::convert(frame->argTypes()[i], frame->argv()[i], argumentType, arg);
+        }
+
+        transformedArguments[i] = arg;
+    }
+
+    const QMetaType returnType = function->aotFunction->returnType;
+    const QMetaType frameReturn = frame->returnType();
+    Q_ALLOCA_DECLARE(void, transformedResult);
+    if (frame->returnValue() && returnType != frameReturn) {
+        if (returnType.sizeOf() > 0)
+            Q_ALLOCA_ASSIGN(void, transformedResult, returnType.sizeOf());
+        else
+            transformedResult = frame; // Some non-null marker value
+    }
+
+    QQmlPrivate::AOTCompiledContext aotContext;
+    if (auto context = QV4::ExecutionEngine::qmlContext(frame->context()->d())) {
+        QV4::Heap::QQmlContextWrapper *wrapper = static_cast<Heap::QmlContext *>(context)->qml();
+        aotContext.qmlScopeObject = wrapper->scopeObject;
+        aotContext.qmlContext = wrapper->context;
+    }
+
+    aotContext.engine = engine->jsEngine();
+    aotContext.compilationUnit = function->executableCompilationUnit();
+
+    function->aotFunction->functionPtr(
+                &aotContext, transformedResult ? transformedResult : frame->returnValue(),
+                transformedArguments ? transformedArguments : frame->argv());
+
+    if (transformedResult) {
+        // Shortcut the common case of the AOT function returning a more generic QObject pointer
+        // that we need to QObject-cast. No need to construct or destruct anything in that case.
+        if ((frameReturn.flags() & QMetaType::PointerToQObject)
+                && (returnType.flags() & QMetaType::PointerToQObject)) {
+            QObject *resultObj = *static_cast<QObject **>(transformedResult);
+            *static_cast<QObject **>(frame->returnValue())
+                    = (resultObj && resultObj->metaObject()->inherits(frameReturn.metaObject()))
+                            ? resultObj
+                            : nullptr;
+        } else {
+            // Convert needs a pre-constructed target.
+            frameReturn.construct(frame->returnValue());
+            QMetaType::convert(returnType, transformedResult, frameReturn, frame->returnValue());
+            returnType.destruct(transformedResult);
+        }
+    }
+
+    if (transformedArguments) {
+        for (int i = 0; i < numFunctionArguments; ++i) {
+            void *arg = transformedArguments[i];
+            if (arg == nullptr)
+                continue;
+            if (i >= frame->argc() || arg != frame->argv()[i])
+                function->aotFunction->argumentTypes[i].destruct(arg);
+        }
+    }
+}
+
+ReturnedValue VME::exec(JSTypesStackFrame *frame, ExecutionEngine *engine)
 {
     qt_v4ResolvePendingBreakpointsHook();
     CHECK_STACK_LIMITS(engine);
@@ -435,8 +510,8 @@ ReturnedValue VME::exec(CppStackFrame *frame, ExecutionEngine *engine)
     Function *function = frame->v4Function;
     Q_TRACE_SCOPE(QQmlV4_function_call, engine, function->name()->toQString(),
                   function->executableCompilationUnit()->fileName(),
-                  function->compiledFunction->location.line,
-                  function->compiledFunction->location.column);
+                  function->compiledFunction->location.line(),
+                  function->compiledFunction->location.column());
     Profiling::FunctionCallProfiler profiler(engine, function); // start execution profiling
     QV4::Debugging::Debugger *debugger = engine->debugger();
 
@@ -459,6 +534,7 @@ ReturnedValue VME::exec(CppStackFrame *frame, ExecutionEngine *engine)
         debugger->enteringFunction();
 
     ReturnedValue result;
+    Q_ASSERT(!function->aotFunction);
     if (function->jittedCode != nullptr && debugger == nullptr) {
         result = function->jittedCode(frame, engine);
     } else {
@@ -472,7 +548,7 @@ ReturnedValue VME::exec(CppStackFrame *frame, ExecutionEngine *engine)
     return result;
 }
 
-QV4::ReturnedValue VME::interpret(CppStackFrame *frame, ExecutionEngine *engine, const char *code)
+QV4::ReturnedValue VME::interpret(JSTypesStackFrame *frame, ExecutionEngine *engine, const char *code)
 {
     QV4::Function *function = frame->v4Function;
     QV4::Value &accumulator = frame->jsFrame->accumulator.asValue<Value>();
@@ -624,6 +700,18 @@ QV4::ReturnedValue VME::interpret(CppStackFrame *frame, ExecutionEngine *engine,
         CHECK_EXCEPTION;
     MOTH_END_INSTR(LoadProperty)
 
+    MOTH_BEGIN_INSTR(LoadOptionalProperty)
+        STORE_IP();
+        STORE_ACC();
+        if (accumulator.isNullOrUndefined()) {
+            acc = Encode::undefined();
+            code += offset;
+        } else {
+            acc = Runtime::LoadProperty::call(engine, accumulator, name);
+        }
+        CHECK_EXCEPTION;
+    MOTH_END_INSTR(LoadOptionalProperty)
+
     MOTH_BEGIN_INSTR(GetLookup)
         STORE_IP();
         STORE_ACC();
@@ -641,6 +729,21 @@ QV4::ReturnedValue VME::interpret(CppStackFrame *frame, ExecutionEngine *engine,
         acc = l->getter(l, engine, accumulator);
         CHECK_EXCEPTION;
     MOTH_END_INSTR(GetLookup)
+
+    MOTH_BEGIN_INSTR(GetOptionalLookup)
+        STORE_IP();
+        STORE_ACC();
+
+        QV4::Lookup *l = function->executableCompilationUnit()->runtimeLookups + index;
+
+        if (accumulator.isNullOrUndefined()) {
+            acc = Encode::undefined();
+            code += offset;
+        } else {
+            acc = l->getter(l, engine, accumulator);
+        }
+    CHECK_EXCEPTION;
+    MOTH_END_INSTR(GetOptionalLookup)
 
     MOTH_BEGIN_INSTR(StoreProperty)
         STORE_IP();
@@ -672,14 +775,14 @@ QV4::ReturnedValue VME::interpret(CppStackFrame *frame, ExecutionEngine *engine,
     MOTH_END_INSTR(StoreSuperProperty)
 
     MOTH_BEGIN_INSTR(Yield)
-        frame->yield = code;
-        frame->yieldIsIterator = false;
+        frame->setYield(code);
+        frame->setYieldIsIterator(false);
         return acc;
     MOTH_END_INSTR(Yield)
 
     MOTH_BEGIN_INSTR(YieldStar)
-        frame->yield = code;
-        frame->yieldIsIterator = true;
+        frame->setYield(code);
+        frame->setYieldIsIterator(true);
         return acc;
     MOTH_END_INSTR(YieldStar)
 
@@ -1163,6 +1266,7 @@ QV4::ReturnedValue VME::interpret(CppStackFrame *frame, ExecutionEngine *engine,
     MOTH_END_INSTR(CmpStrictNotEqual)
 
     MOTH_BEGIN_INSTR(CmpIn)
+        STORE_IP();
         STORE_ACC();
         acc = Runtime::In::call(engine, STACK_VALUE(lhs), accumulator);
         CHECK_EXCEPTION;
@@ -1257,6 +1361,12 @@ QV4::ReturnedValue VME::interpret(CppStackFrame *frame, ExecutionEngine *engine,
             CHECK_EXCEPTION;
         }
     MOTH_END_INSTR(Sub)
+
+    MOTH_BEGIN_INSTR(As)
+        const Value left = STACK_VALUE(lhs);
+        STORE_ACC();
+        acc = Runtime::As::call(engine, left, accumulator);
+    MOTH_END_INSTR(As)
 
     MOTH_BEGIN_INSTR(Exp)
         const Value left = STACK_VALUE(lhs);
@@ -1391,7 +1501,7 @@ QV4::ReturnedValue VME::interpret(CppStackFrame *frame, ExecutionEngine *engine,
         // We do start the exception handler in case of isInterrupted. The exception handler will
         // immediately abort, due to the same isInterrupted. We don't skip the exception handler
         // because the current behavior is easier to implement in the JIT.
-        Q_ASSERT(engine->hasException || engine->isInterrupted.loadAcquire() || frame->unwindLevel);
+        Q_ASSERT(engine->hasException || engine->isInterrupted.loadRelaxed() || frame->unwindLevel);
         if (!frame->unwindHandler) {
             acc = Encode::undefined();
             return acc;

@@ -1,10 +1,15 @@
-# v-0016 - This fails because of the duplicate function `my_func`.
+// v-0016 - This fails because of the duplicate function `my_func`.
 
-fn my_func() -> void {}
-fn my_func() -> void {}
-
-fn main() -> void {
+fn my_func() {
   return;
 }
-entry_point vertex = main;
+
+fn my_func() {
+  return;
+}
+
+@stage(fragment)
+fn main() {
+  return;
+}
 

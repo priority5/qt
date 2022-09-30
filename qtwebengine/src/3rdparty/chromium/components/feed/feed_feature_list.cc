@@ -7,6 +7,7 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "build/build_config.h"
 
 namespace feed {
 
@@ -16,7 +17,16 @@ const base::Feature kInterestFeedContentSuggestions{
 // InterestFeedV2 is cached in ChromeCachedFlags. If the default value here is
 // changed, please update the cached one's default value in CachedFeatureFlags.
 const base::Feature kInterestFeedV2{"InterestFeedV2",
-                                    base::FEATURE_DISABLED_BY_DEFAULT};
+                                    base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kInterestFeedV2Autoplay{"InterestFeedV2Autoplay",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kInterestFeedV2Hearts{"InterestFeedV2Hearts",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kInterestFeedV2Scrolling{"InterestFeedV2Scrolling",
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::FeatureParam<std::string> kDisableTriggerTypes{
     &kInterestFeedContentSuggestions, "disable_trigger_types", ""};
@@ -30,16 +40,6 @@ const base::FeatureParam<bool> kOnlySetLastRefreshAttemptOnSuccess{
     &kInterestFeedContentSuggestions,
     "only_set_last_refresh_attempt_on_success", true};
 
-const base::Feature kInterestFeedFeedback{"InterestFeedFeedback",
-                                          base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kReportFeedUserActions{"ReportFeedUserActions",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Determines whether conditions should be reached before enabling the upload of
-// click and view actions in the feed (e.g., the user needs to view X cards).
-// For example, This is needed when the notice card is at the second position in
-// the feed.
 const base::Feature kInterestFeedV1ClicksAndViewsConditionalUpload{
     "InterestFeedV1ClickAndViewActionsConditionalUpload",
     base::FEATURE_DISABLED_BY_DEFAULT};
@@ -47,8 +47,56 @@ const base::Feature kInterestFeedV2ClicksAndViewsConditionalUpload{
     "InterestFeedV2ClickAndViewActionsConditionalUpload",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-const char kDefaultReferrerUrl[] =
-    "https://www.googleapis.com/auth/chrome-content-suggestions";
+#if BUILDFLAG(IS_IOS)
+const base::Feature kInterestFeedNoticeCardAutoDismiss{
+    "InterestFeedNoticeCardAutoDismiss", base::FEATURE_ENABLED_BY_DEFAULT};
+#endif
+
+const base::Feature kInterestFeedSpinnerAlwaysAnimate{
+    "InterestFeedSpinnerAlwaysAnimate", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kWebFeed{"WebFeed", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kDiscoFeedEndpoint{"DiscoFeedEndpoint",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kXsurfaceMetricsReporting{
+    "XsurfaceMetricsReporting", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kReliabilityLogging{"FeedReliabilityLogging",
+                                        base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kFeedInteractiveRefresh{"FeedInteractiveRefresh",
+                                            base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kFeedLoadingPlaceholder{"FeedLoadingPlaceholder",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
+const base::FeatureParam<bool>
+    kEnableFeedLoadingPlaceholderAnimationOnInstantStart{
+        &kFeedLoadingPlaceholder, "enable_animation_on_instant_start", false};
+const base::Feature kFeedImageMemoryCacheSizePercentage{
+    "FeedImageMemoryCacheSizePercentage", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kFeedClearImageMemoryCache{
+    "FeedClearImageMemoryCache", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kFeedBackToTop{"FeedBackToTop",
+                                   base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kFeedStamp{"FeedStamp", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const char kDefaultReferrerUrl[] = "https://www.google.com/";
+
+const base::Feature kWebFeedAwareness{"WebFeedAwareness",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kWebFeedOnboarding{"WebFeedOnboarding",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kWebFeedSort{"WebFeedSort",
+                                 base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kEnableOpenInNewTabFromStartSurfaceFeed{
+    "EnableOpenInNewTabFromStartSurfaceFeed",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kWebUiFeed{"FeedWebUi", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::FeatureParam<std::string> kWebUiScriptFetchUrl{
+    &kWebUiFeed, "scripturl", "chrome-untrusted://feed/feed.js"};
+const base::FeatureParam<bool> kWebUiDisableContentSecurityPolicy{
+    &kWebUiFeed, "disableCsp", false};
 
 std::string GetFeedReferrerUrl() {
   const base::Feature* feature = base::FeatureList::IsEnabled(kInterestFeedV2)
@@ -59,21 +107,7 @@ std::string GetFeedReferrerUrl() {
   return referrer.empty() ? kDefaultReferrerUrl : referrer;
 }
 
-// Chrome can be built with or without v1 or v2.
-// If both are built-in, use kInterestFeedV2 to decide whether v2 is used.
-// Otherwise use the version available.
-bool IsV2Enabled() {
-#if BUILDFLAG(ENABLE_FEED_V1) && BUILDFLAG(ENABLE_FEED_V2)
-  return base::FeatureList::IsEnabled(feed::kInterestFeedV2);
-#elif BUILDFLAG(ENABLE_FEED_V1)
-  return false;
-#else
-  return true;
-#endif
-}
-
-bool IsV1Enabled() {
-  return !IsV2Enabled();
-}
+const base::Feature kPersonalizeFeedUnsignedUsers{
+    "PersonalizeFeedUnsignedUsers", base::FEATURE_ENABLED_BY_DEFAULT};
 
 }  // namespace feed

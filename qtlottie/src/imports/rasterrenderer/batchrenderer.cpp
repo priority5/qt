@@ -1,37 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the lottie-qt module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include "batchrenderer.h"
 
 #include <QImage>
 #include <QPainter>
 #include <QHash>
+#include <QMap>
 #include <QMutexLocker>
 #include <QLoggingCategory>
 #include <QThread>
@@ -41,6 +16,7 @@
 
 #include <QtBodymovin/private/bmconstants_p.h>
 #include <QtBodymovin/private/bmbase_p.h>
+#include <QtBodymovin/private/bmimagelayer_p.h>
 #include <QtBodymovin/private/bmlayer_p.h>
 
 #include "lottieanimation.h"
@@ -67,7 +43,11 @@ BatchRenderer::~BatchRenderer()
 {
     QMutexLocker mlocker(&m_mutex);
 
-    qDeleteAll(m_animData);
+    for (Entry *entry : qAsConst(m_animData)) {
+        qDeleteAll(entry->frameCache);
+        delete entry->bmTreeBlueprint;
+        delete entry;
+    }
 }
 
 BatchRenderer *BatchRenderer::instance()
@@ -92,6 +72,12 @@ void BatchRenderer::registerAnimator(LottieAnimation *animator)
                                        << static_cast<void*>(animator);
 
     Entry *&entry = m_animData[animator];
+    if (entry) {
+        qDeleteAll(entry->frameCache);
+        delete entry->bmTreeBlueprint;
+        delete entry;
+        entry = nullptr;
+    }
     Q_ASSERT(entry == nullptr);
     entry = new Entry;
     entry->animator = animator;
@@ -232,11 +218,27 @@ int BatchRenderer::parse(BMBase *rootElement, const QByteArray &jsonSource) cons
     if (rootObj.empty())
         return -1;
 
+    QMap<QString, QJsonObject> assets;
     QJsonArray jsonLayers = rootObj.value(QLatin1String("layers")).toArray();
+    QJsonArray jsonAssets = rootObj.value(QLatin1String("assets")).toArray();
+    QJsonArray::const_iterator jsonAssetsIt = jsonAssets.constBegin();
+    while (jsonAssetsIt != jsonAssets.constEnd()) {
+        QJsonObject jsonAsset = (*jsonAssetsIt).toObject();
+
+        jsonAsset.insert(QLatin1String("fileSource"), QJsonValue::fromVariant(m_animData.keys().last()->source()));
+        QString id = jsonAsset.value(QLatin1String("id")).toString();
+        assets.insert(id, jsonAsset);
+        jsonAssetsIt++;
+    }
+
     QJsonArray::const_iterator jsonLayerIt = jsonLayers.constEnd();
     while (jsonLayerIt != jsonLayers.constBegin()) {
         jsonLayerIt--;
         QJsonObject jsonLayer = (*jsonLayerIt).toObject();
+        if (jsonLayer.value("ty").toInt() == 2) {
+            QString refId = jsonLayer.value("refId").toString();
+            jsonLayer.insert("asset", assets.value(refId));
+        }
         BMLayer *layer = BMLayer::construct(jsonLayer);
         if (layer) {
             layer->setParent(rootElement);

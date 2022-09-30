@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QV4EXECUTABLECOMPILATIONUNIT_P_H
 #define QV4EXECUTABLECOMPILATIONUNIT_P_H
@@ -52,13 +16,15 @@
 //
 
 #include <private/qv4compileddata_p.h>
-#include <private/qv4identifier_p.h>
+#include <private/qv4identifierhash_p.h>
 #include <private/qqmlrefcount_p.h>
 #include <private/qintrusivelist_p.h>
 #include <private/qqmlpropertycachevector_p.h>
 #include <private/qqmltype_p.h>
 #include <private/qqmlnullablevalue_p.h>
 #include <private/qqmlmetatype_p.h>
+
+#include <memory>
 
 QT_BEGIN_NAMESPACE
 
@@ -87,16 +53,14 @@ struct InlineComponentData {
 namespace QV4 {
 
 // index is per-object binding index
-typedef QVector<QQmlPropertyData*> BindingPropertyData;
+typedef QVector<const QQmlPropertyData *> BindingPropertyData;
 
 class CompilationUnitMapper;
-struct ResolvedTypeReference;
+class ResolvedTypeReference;
 // map from name index
-// While this could be a hash, a map is chosen here to provide a stable
-// order, which is used to calculating a check-sum on dependent meta-objects.
-struct ResolvedTypeReferenceMap: public QMap<int, ResolvedTypeReference*>
+struct ResolvedTypeReferenceMap: public QHash<int, ResolvedTypeReference*>
 {
-    bool addToHash(QCryptographicHash *hash, QQmlEngine *engine) const;
+    bool addToHash(QCryptographicHash *hash, QHash<quintptr, QByteArray> *checksums) const;
 };
 
 class Q_QML_PRIVATE_EXPORT ExecutableCompilationUnit final: public CompiledData::CompilationUnit,
@@ -149,7 +113,7 @@ public:
 
     // QML specific fields
     QQmlPropertyCacheVector propertyCaches;
-    QQmlRefPointer<QQmlPropertyCache> rootPropertyCache() const { return propertyCaches.at(/*root object*/0); }
+    QQmlPropertyCache::ConstPtr rootPropertyCache() const { return propertyCaches.at(/*root object*/0); }
 
     QQmlRefPointer<QQmlTypeNameCache> typeNameCache;
 
@@ -182,17 +146,25 @@ public:
 
     CompositeMetaTypeIds typeIdsForComponent(int objectid = 0) const;
 
-    int metaTypeId = -1;
-    int listMetaTypeId = -1;
-    bool isRegisteredWithEngine = false;
+    CompositeMetaTypeIds typeIds;
+    bool isRegistered = false;
 
     QHash<int, InlineComponentData> inlineComponentData;
 
-    QScopedPointer<CompilationUnitMapper> backingFile;
+    std::unique_ptr<CompilationUnitMapper> backingFile;
 
     // --- interface for QQmlPropertyCacheCreator
     using CompiledObject = CompiledData::Object;
     using CompiledFunction = CompiledData::Function;
+    enum class ListPropertyAssignBehavior { Append, Replace, ReplaceIfNotDefault };
+    ListPropertyAssignBehavior listPropertyAssignBehavior() const
+    {
+        if (data->flags & CompiledData::Unit::ListPropertyAssignReplace)
+            return ListPropertyAssignBehavior::Replace;
+        if (data->flags & CompiledData::Unit::ListPropertyAssignReplaceIfNotDefault)
+            return ListPropertyAssignBehavior::ReplaceIfNotDefault;
+        return ListPropertyAssignBehavior::Append;
+    }
 
     int objectCount() const { return qmlData->nObjects; }
     const CompiledObject *objectAt(int index) const
@@ -279,17 +251,9 @@ public:
     bool saveToDisk(const QUrl &unitUrl, QString *errorString);
 
     QString bindingValueAsString(const CompiledData::Binding *binding) const;
-    QString bindingValueAsScriptString(const CompiledData::Binding *binding) const;
-    double bindingValueAsNumber(const CompiledData::Binding *binding) const
-    {
-        if (binding->type != CompiledData::Binding::Type_Number)
-            return 0.0;
-        return constants[binding->value.constantValueIndex].doubleValue();
-    }
 
     static bool verifyHeader(const CompiledData::Unit *unit, QDateTime expectedSourceTimeStamp,
                              QString *errorString);
-
 protected:
     quint32 totalStringCount() const
     { return data->stringTableSize; }
@@ -323,82 +287,12 @@ private:
             bool includeDefaultExport = true) const;
 };
 
-struct ResolvedTypeReference
-{
-public:
-    ResolvedTypeReference()
-        : m_compilationUnit(nullptr)
-        , m_stronglyReferencesCompilationUnit(true)
-        , majorVersion(0)
-        , minorVersion(0)
-        , isFullyDynamicType(false)
-    {}
-
-    ~ResolvedTypeReference()
-    {
-        if (m_stronglyReferencesCompilationUnit && m_compilationUnit)
-            m_compilationUnit->release();
-    }
-
-    QQmlRefPointer<QV4::ExecutableCompilationUnit> compilationUnit() { return m_compilationUnit; }
-    void setCompilationUnit(QQmlRefPointer<QV4::ExecutableCompilationUnit> unit)
-    {
-        if (m_compilationUnit == unit.data())
-            return;
-        if (m_stronglyReferencesCompilationUnit) {
-            if (m_compilationUnit)
-                m_compilationUnit->release();
-            m_compilationUnit = unit.take();
-        } else {
-            m_compilationUnit = unit.data();
-        }
-    }
-
-    bool referencesCompilationUnit() const { return m_stronglyReferencesCompilationUnit; }
-    void setReferencesCompilationUnit(bool doReference)
-    {
-        if (doReference == m_stronglyReferencesCompilationUnit)
-            return;
-        m_stronglyReferencesCompilationUnit = doReference;
-        if (!m_compilationUnit)
-            return;
-        if (doReference) {
-            m_compilationUnit->addref();
-        } else if (m_compilationUnit->count() == 1) {
-            m_compilationUnit->release();
-            m_compilationUnit = nullptr;
-        } else {
-            m_compilationUnit->release();
-        }
-    }
-
-    QQmlRefPointer<QQmlPropertyCache> propertyCache() const;
-    QQmlRefPointer<QQmlPropertyCache> createPropertyCache(QQmlEngine *);
-    bool addToHash(QCryptographicHash *hash, QQmlEngine *engine);
-
-    void doDynamicTypeCheck();
-
-    QQmlType type;
-    QQmlRefPointer<QQmlPropertyCache> typePropertyCache;
-private:
-    Q_DISABLE_COPY_MOVE(ResolvedTypeReference)
-
-    QV4::ExecutableCompilationUnit *m_compilationUnit;
-    bool m_stronglyReferencesCompilationUnit;
-
-public:
-    int majorVersion;
-    int minorVersion;
-    // Types such as QQmlPropertyMap can add properties dynamically at run-time and
-    // therefore cannot have a property cache installed when instantiated.
-    bool isFullyDynamicType;
-};
-
 IdentifierHash ExecutableCompilationUnit::namedObjectsPerComponent(int componentObjectIndex)
 {
     auto it = namedObjectsPerComponentCache.find(componentObjectIndex);
     if (Q_UNLIKELY(it == namedObjectsPerComponentCache.end()))
         return createNamedObjectsPerComponent(componentObjectIndex);
+    Q_ASSERT(!it->isEmpty());
     return *it;
 }
 

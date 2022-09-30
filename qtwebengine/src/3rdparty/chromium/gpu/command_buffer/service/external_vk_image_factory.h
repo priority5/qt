@@ -5,11 +5,12 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_EXTERNAL_VK_IMAGE_FACTORY_H_
 #define GPU_COMMAND_BUFFER_SERVICE_EXTERNAL_VK_IMAGE_FACTORY_H_
 
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 #include <memory>
 
 #include "gpu/command_buffer/service/external_vk_image_backing.h"
 #include "gpu/command_buffer/service/shared_image_backing_factory.h"
+#include "gpu/gpu_gles2_export.h"
 
 namespace gpu {
 class SharedContextState;
@@ -20,10 +21,15 @@ class VulkanCommandPool;
 // can be exported out of Vulkan and be used in GL. Synchronization between
 // Vulkan and GL is done using VkSemaphores that are created with special flags
 // that allow it to be exported out and shared with GL.
-class ExternalVkImageFactory : public SharedImageBackingFactory {
+class GPU_GLES2_EXPORT ExternalVkImageFactory
+    : public SharedImageBackingFactory {
  public:
   explicit ExternalVkImageFactory(
       scoped_refptr<SharedContextState> context_state);
+
+  ExternalVkImageFactory(const ExternalVkImageFactory&) = delete;
+  ExternalVkImageFactory& operator=(const ExternalVkImageFactory&) = delete;
+
   ~ExternalVkImageFactory() override;
 
   // SharedImageBackingFactory implementation.
@@ -51,14 +57,20 @@ class ExternalVkImageFactory : public SharedImageBackingFactory {
       int client_id,
       gfx::GpuMemoryBufferHandle handle,
       gfx::BufferFormat format,
+      gfx::BufferPlane plane,
       SurfaceHandle surface_handle,
       const gfx::Size& size,
       const gfx::ColorSpace& color_space,
       GrSurfaceOrigin surface_origin,
       SkAlphaType alpha_type,
       uint32_t usage) override;
-  bool CanImportGpuMemoryBuffer(
-      gfx::GpuMemoryBufferType memory_buffer_type) override;
+  bool IsSupported(uint32_t usage,
+                   viz::ResourceFormat format,
+                   bool thread_safe,
+                   gfx::GpuMemoryBufferType gmb_type,
+                   GrContextType gr_context_type,
+                   bool* allow_legacy_mailbox,
+                   bool is_pixel_used) override;
 
  private:
   VkResult CreateExternalVkImage(VkFormat format,
@@ -67,12 +79,12 @@ class ExternalVkImageFactory : public SharedImageBackingFactory {
 
   void TransitionToColorAttachment(VkImage image);
 
+  bool CanImportGpuMemoryBuffer(gfx::GpuMemoryBufferType memory_buffer_type);
+
   scoped_refptr<SharedContextState> context_state_;
   std::unique_ptr<VulkanCommandPool> command_pool_;
 
   const VulkanImageUsageCache image_usage_cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExternalVkImageFactory);
 };
 
 }  // namespace gpu

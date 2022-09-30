@@ -7,6 +7,26 @@ import("//build/config/jumbo.gni")
 
 assert(!is_ios, "Policy Throttle should not be referenced on iOS")
 
+jumbo_source_set("safe_sites_navigation_throttle") {
+  sources = [
+    "safe_search_service.cc",
+    "safe_search_service.h",
+    "safe_sites_navigation_throttle.cc",
+    "safe_sites_navigation_throttle.h",
+  ]
+
+  deps = [
+    "//base",
+    "//components/keyed_service/content:content",
+    "//components/policy/core/browser",
+    "//components/safe_search_api",
+    "//components/safe_search_api:safe_search_client",
+    "//components/url_matcher",
+    "//content/public/browser",
+    "//net",
+  ]
+}
+
 jumbo_source_set("content") {
   sources = [
     "policy_blocklist_navigation_throttle.cc",
@@ -16,15 +36,12 @@ jumbo_source_set("content") {
   ]
 
   deps = [
-    "//base",
+    ":safe_sites_navigation_throttle",
     "//components/keyed_service/content:content",
     "//components/policy/core/browser",
     "//components/prefs",
-    "//components/safe_search_api",
-    "//components/safe_search_api:safe_search_client",
     "//components/user_prefs:user_prefs",
     "//content/public/browser",
-    "//net",
   ]
 }
 
@@ -33,6 +50,7 @@ source_set("unit_tests") {
   sources = [ "policy_blocklist_navigation_throttle_unittest.cc" ]
   deps = [
     ":content",
+    ":safe_sites_navigation_throttle",
     "//base",
     "//components/keyed_service/content",
     "//components/policy/core/browser",

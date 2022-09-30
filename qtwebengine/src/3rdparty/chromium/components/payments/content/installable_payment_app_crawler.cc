@@ -4,6 +4,7 @@
 
 #include "components/payments/content/installable_payment_app_crawler.h"
 
+#include <limits>
 #include <utility>
 
 #include "base/bind.h"
@@ -25,7 +26,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
-#include "third_party/blink/public/common/manifest/manifest.h"
 #include "third_party/blink/public/common/manifest/manifest_icon_selector.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "ui/gfx/geometry/size.h"
@@ -46,9 +46,7 @@ InstallablePaymentAppCrawler::InstallablePaymentAppCrawler(
     : log_(content::WebContents::FromRenderFrameHost(
           initiator_render_frame_host)),
       merchant_origin_(merchant_origin),
-      initiator_frame_routing_id_(content::GlobalFrameRoutingId(
-          initiator_render_frame_host->GetProcess()->GetID(),
-          initiator_render_frame_host->GetRoutingID())),
+      initiator_frame_routing_id_(initiator_render_frame_host->GetGlobalId()),
       downloader_(downloader),
       parser_(parser),
       number_of_payment_method_manifest_to_download_(0),
@@ -165,8 +163,7 @@ void InstallablePaymentAppCrawler::OnPaymentMethodManifestParsed(
     return;
 
   content::PermissionController* permission_controller =
-      content::BrowserContext::GetPermissionController(
-          rfh->GetBrowserContext());
+      rfh->GetBrowserContext()->GetPermissionController();
   DCHECK(permission_controller);
 
   for (const auto& web_app_manifest_url : default_applications) {
@@ -188,10 +185,9 @@ void InstallablePaymentAppCrawler::OnPaymentMethodManifestParsed(
       continue;
     }
 
-    if (permission_controller->GetPermissionStatus(
+    if (permission_controller->GetPermissionStatusForOriginWithoutContext(
             content::PermissionType::PAYMENT_HANDLER,
-            web_app_manifest_url.GetOrigin(),
-            web_app_manifest_url.GetOrigin()) !=
+            url::Origin::Create(web_app_manifest_url)) !=
         blink::mojom::PermissionStatus::GRANTED) {
       // Do not download the web app manifest if it is blocked.
       continue;
@@ -215,7 +211,6 @@ void InstallablePaymentAppCrawler::OnPaymentMethodManifestParsed(
             weak_ptr_factory_.GetWeakPtr(), method_manifest_url,
             web_app_manifest_url));
   }
-
   FinishCrawlingPaymentAppsIfReady();
 }
 
@@ -408,7 +403,7 @@ bool InstallablePaymentAppCrawler::DownloadAndDecodeWebAppIcon(
     manifest_icon.src = icon_src;
     manifest_icon.type = base::UTF8ToUTF16(icon.type);
     manifest_icon.purpose.emplace_back(
-        blink::Manifest::ImageResource::Purpose::ANY);
+        blink::mojom::ManifestImageResource_Purpose::ANY);
     // TODO(crbug.com/782270): Parse icon sizes.
     manifest_icon.sizes.emplace_back(gfx::Size());
     manifest_icons.emplace_back(manifest_icon);
@@ -427,7 +422,10 @@ bool InstallablePaymentAppCrawler::DownloadAndDecodeWebAppIcon(
   // TODO(crbug.com/1058840): Move this sanity check to ManifestIconDownloader
   // after DownloadImage refactor is done.
   auto* rfh = content::RenderFrameHost::FromID(initiator_frame_routing_id_);
-  if (!rfh || !rfh->IsCurrent()) {
+  auto* web_contents = rfh && rfh->IsActive()
+                           ? content::WebContents::FromRenderFrameHost(rfh)
+                           : nullptr;
+  if (!web_contents) {
     log_.Warn(
         "Cannot download icons after the webpage has been closed (web app "
         "manifest \"" +
@@ -442,13 +440,12 @@ bool InstallablePaymentAppCrawler::DownloadAndDecodeWebAppIcon(
     return false;
   }
 
-  auto* web_contents = content::WebContents::FromRenderFrameHost(rfh);
   gfx::NativeView native_view = web_contents->GetNativeView();
   GURL best_icon_url = blink::ManifestIconSelector::FindBestMatchingIcon(
       manifest_icons, IconSizeCalculator::IdealIconHeight(native_view),
       IconSizeCalculator::MinimumIconHeight(),
       content::ManifestIconDownloader::kMaxWidthToHeightRatio,
-      blink::Manifest::ImageResource::Purpose::ANY);
+      blink::mojom::ManifestImageResource_Purpose::ANY);
   if (!best_icon_url.is_valid()) {
     log_.Warn("No suitable icon found in web app manifest \"" +
               web_app_manifest_url.spec() +
@@ -463,6 +460,7 @@ bool InstallablePaymentAppCrawler::DownloadAndDecodeWebAppIcon(
       web_contents, downloader_->FindTestServerURL(best_icon_url),
       IconSizeCalculator::IdealIconHeight(native_view),
       IconSizeCalculator::MinimumIconHeight(),
+      /* maximum_icon_size_in_px= */ std::numeric_limits<int>::max(),
       base::BindOnce(
           &InstallablePaymentAppCrawler::OnPaymentWebAppIconDownloadAndDecoded,
           weak_ptr_factory_.GetWeakPtr(), method_manifest_url,

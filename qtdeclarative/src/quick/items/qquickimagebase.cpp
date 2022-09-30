@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickimagebase_p.h"
 #include "qquickimagebase_p_p.h"
@@ -51,6 +15,17 @@
 
 QT_BEGIN_NAMESPACE
 
+bool isScalableImageFormat(const QUrl &url)
+{
+    if (url.scheme() == QLatin1String("image"))
+        return true;
+
+    const QString stringUrl = url.path(QUrl::PrettyDecoded);
+    return stringUrl.endsWith(QLatin1String("svg"))
+        || stringUrl.endsWith(QLatin1String("svgz"))
+        || stringUrl.endsWith(QLatin1String("pdf"));
+}
+
 // This function gives derived classes the chance set the devicePixelRatio
 // if they're not happy with our implementation of it.
 bool QQuickImageBasePrivate::updateDevicePixelRatio(qreal targetDevicePixelRatio)
@@ -58,17 +33,7 @@ bool QQuickImageBasePrivate::updateDevicePixelRatio(qreal targetDevicePixelRatio
     // QQuickImageProvider and SVG and PDF can generate a high resolution image when
     // sourceSize is set. If sourceSize is not set then the provider default size will
     // be used, as usual.
-    bool setDevicePixelRatio = false;
-    if (url.scheme() == QLatin1String("image")) {
-        setDevicePixelRatio = true;
-    } else {
-        QString stringUrl = url.path(QUrl::PrettyDecoded);
-        if (stringUrl.endsWith(QLatin1String("svg")) ||
-            stringUrl.endsWith(QLatin1String("svgz")) ||
-            stringUrl.endsWith(QLatin1String("pdf"))) {
-            setDevicePixelRatio = true;
-        }
-    }
+    const bool setDevicePixelRatio = isScalableImageFormat(url);
 
     if (setDevicePixelRatio)
         devicePixelRatio = targetDevicePixelRatio;
@@ -217,10 +182,10 @@ QImage QQuickImageBase::image() const
 void QQuickImageBase::setMirror(bool mirror)
 {
     Q_D(QQuickImageBase);
-    if (mirror == d->mirror)
+    if (mirror == d->mirrorHorizontally)
         return;
 
-    d->mirror = mirror;
+    d->mirrorHorizontally = mirror;
 
     if (isComponentComplete())
         update();
@@ -231,7 +196,27 @@ void QQuickImageBase::setMirror(bool mirror)
 bool QQuickImageBase::mirror() const
 {
     Q_D(const QQuickImageBase);
-    return d->mirror;
+    return d->mirrorHorizontally;
+}
+
+void QQuickImageBase::setMirrorVertically(bool mirror)
+{
+    Q_D(QQuickImageBase);
+    if (mirror == d->mirrorVertically)
+        return;
+
+    d->mirrorVertically = mirror;
+
+    if (isComponentComplete())
+        update();
+
+    emit mirrorVerticallyChanged();
+}
+
+bool QQuickImageBase::mirrorVertically() const
+{
+    Q_D(const QQuickImageBase);
+    return d->mirrorVertically;
 }
 
 void QQuickImageBase::setCurrentFrame(int frame)
@@ -298,21 +283,22 @@ void QQuickImageBase::loadPixmap(const QUrl &url, LoadPixmapOptions loadOptions)
         options |= QQuickPixmap::Cache;
     d->pix.clear(this);
     QUrl loadUrl = url;
-    QQmlEngine* engine = qmlEngine(this);
-    if (engine && engine->urlInterceptor())
-        loadUrl = engine->urlInterceptor()->intercept(loadUrl, QQmlAbstractUrlInterceptor::UrlString);
+    const QQmlContext *context = qmlContext(this);
+    if (context)
+        loadUrl = context->resolvedUrl(url);
 
     if (loadOptions & HandleDPR) {
         const qreal targetDevicePixelRatio = (window() ? window()->effectiveDevicePixelRatio() : qApp->devicePixelRatio());
         d->devicePixelRatio = 1.0;
         bool updatedDevicePixelRatio = false;
-        if (d->sourcesize.isValid())
+        if (d->sourcesize.isValid() || isScalableImageFormat(d->url))
             updatedDevicePixelRatio = d->updateDevicePixelRatio(targetDevicePixelRatio);
 
         if (!updatedDevicePixelRatio) {
             // (possible) local file: loadUrl and d->devicePixelRatio will be modified if
             // an "@2x" file is found.
-            resolve2xLocalFile(d->url, targetDevicePixelRatio, &loadUrl, &d->devicePixelRatio);
+            resolve2xLocalFile(context ? context->resolvedUrl(d->url) : d->url,
+                               targetDevicePixelRatio, &loadUrl, &d->devicePixelRatio);
         }
     }
 
@@ -322,7 +308,8 @@ void QQuickImageBase::loadPixmap(const QUrl &url, LoadPixmapOptions loadOptions)
                 (loadOptions & HandleDPR) ? d->sourcesize * d->devicePixelRatio : QSize(),
                 options,
                 (loadOptions & UseProviderOptions) ? d->providerOptions : QQuickImageProviderOptions(),
-                d->currentFrame, d->frameCount);
+                d->currentFrame, d->frameCount,
+                d->devicePixelRatio);
 
     if (d->pix.isLoading()) {
         if (d->progress != 0.0) {

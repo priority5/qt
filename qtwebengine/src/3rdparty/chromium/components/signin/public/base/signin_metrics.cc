@@ -12,6 +12,7 @@
 #include "base/metrics/user_metrics.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 
 namespace signin_metrics {
 
@@ -42,10 +43,6 @@ void RecordSigninUserActionForAccessPoint(AccessPoint access_point) {
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
       base::RecordAction(
           base::UserMetricsAction("Signin_Signin_FromExtensions"));
-      break;
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
-      base::RecordAction(
-          base::UserMetricsAction("Signin_Signin_FromAppsPageLink"));
       break;
     case AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE:
       base::RecordAction(
@@ -123,15 +120,30 @@ void RecordSigninUserActionForAccessPoint(AccessPoint access_point) {
       base::RecordAction(
           base::UserMetricsAction("Signin_Signin_FromGoogleServicesSettings"));
       break;
+    case AccessPoint::ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR:
+      base::RecordAction(
+          base::UserMetricsAction("Signin_Signin_FromEnterpriseSignoutSheet"));
+      break;
+    case AccessPoint::ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE:
+      base::RecordAction(base::UserMetricsAction(
+          "Signin_Signin_FromSigninInterceptFirstRunExperience"));
+      break;
+    case AccessPoint::ACCESS_POINT_KALEIDOSCOPE:
+      NOTREACHED() << "Access point " << static_cast<int>(access_point)
+                   << " is only used to trigger non-sync sign-in and this"
+                   << " action should only be triggered for sync-enabled"
+                   << " sign-ins.";
+      break;
     case AccessPoint::ACCESS_POINT_SYNC_ERROR_CARD:
     case AccessPoint::ACCESS_POINT_FORCED_SIGNIN:
     case AccessPoint::ACCESS_POINT_ACCOUNT_RENAMED:
     case AccessPoint::ACCESS_POINT_WEB_SIGNIN:
-    case AccessPoint::ACCESS_POINT_SAFETY_CHECK:
       NOTREACHED() << "Access point " << static_cast<int>(access_point)
-                   << " is only used on Android, where"
-                   << " RecordSigninUserActionForAccessPoint is not used"
-                   << " for logging user actions.";
+                   << " is not supposed to log signin user actions.";
+      break;
+    case AccessPoint::ACCESS_POINT_SAFETY_CHECK:
+      VLOG(1) << "Signin_Signin_From* user action is not recorded "
+              << "for access point " << static_cast<int>(access_point);
       break;
     case AccessPoint::ACCESS_POINT_MAX:
       NOTREACHED();
@@ -186,12 +198,12 @@ void RecordSigninWithDefaultUserActionForAccessPoint(
       base::RecordAction(base::UserMetricsAction(
           "Signin_SigninWithDefault_FromManageCardsBubble"));
       break;
+    case AccessPoint::ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR:
     case AccessPoint::ACCESS_POINT_START_PAGE:
     case AccessPoint::ACCESS_POINT_NTP_LINK:
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -207,6 +219,8 @@ void RecordSigninWithDefaultUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_ACCOUNT_RENAMED:
     case AccessPoint::ACCESS_POINT_WEB_SIGNIN:
     case AccessPoint::ACCESS_POINT_SAFETY_CHECK:
+    case AccessPoint::ACCESS_POINT_KALEIDOSCOPE:
+    case AccessPoint::ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE:
       NOTREACHED() << "Signin_SigninWithDefault_From* user actions"
                    << " are not recorded for access_point "
                    << static_cast<int>(access_point)
@@ -265,12 +279,12 @@ void RecordSigninNotDefaultUserActionForAccessPoint(
       base::RecordAction(base::UserMetricsAction(
           "Signin_SigninNotDefault_FromManageCardsBubble"));
       break;
+    case AccessPoint::ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR:
     case AccessPoint::ACCESS_POINT_START_PAGE:
     case AccessPoint::ACCESS_POINT_NTP_LINK:
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -286,6 +300,8 @@ void RecordSigninNotDefaultUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_ACCOUNT_RENAMED:
     case AccessPoint::ACCESS_POINT_WEB_SIGNIN:
     case AccessPoint::ACCESS_POINT_SAFETY_CHECK:
+    case AccessPoint::ACCESS_POINT_KALEIDOSCOPE:
+    case AccessPoint::ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE:
       NOTREACHED() << "Signin_SigninNotDefault_From* user actions"
                    << " are not recorded for access point "
                    << static_cast<int>(access_point)
@@ -348,12 +364,12 @@ void RecordSigninNewAccountNoExistingAccountUserActionForAccessPoint(
       base::RecordAction(base::UserMetricsAction(
           "Signin_SigninNewAccountNoExistingAccount_FromManageCardsBubble"));
       break;
+    case AccessPoint::ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR:
     case AccessPoint::ACCESS_POINT_START_PAGE:
     case AccessPoint::ACCESS_POINT_NTP_LINK:
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -369,6 +385,8 @@ void RecordSigninNewAccountNoExistingAccountUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_ACCOUNT_RENAMED:
     case AccessPoint::ACCESS_POINT_WEB_SIGNIN:
     case AccessPoint::ACCESS_POINT_SAFETY_CHECK:
+    case AccessPoint::ACCESS_POINT_KALEIDOSCOPE:
+    case AccessPoint::ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE:
       // These access points do not support personalized sign-in promos, so
       // |Signin_SigninNewAccountNoExistingAccount_From*| user actions should
       // not be recorded for them. Note: To avoid bloating the sign-in APIs, the
@@ -434,12 +452,12 @@ void RecordSigninNewAccountExistingAccountUserActionForAccessPoint(
       base::RecordAction(base::UserMetricsAction(
           "Signin_SigninNewAccountExistingAccount_FromManageCardsBubble"));
       break;
+    case AccessPoint::ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR:
     case AccessPoint::ACCESS_POINT_START_PAGE:
     case AccessPoint::ACCESS_POINT_NTP_LINK:
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -455,6 +473,8 @@ void RecordSigninNewAccountExistingAccountUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_ACCOUNT_RENAMED:
     case AccessPoint::ACCESS_POINT_WEB_SIGNIN:
     case AccessPoint::ACCESS_POINT_SAFETY_CHECK:
+    case AccessPoint::ACCESS_POINT_KALEIDOSCOPE:
+    case AccessPoint::ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE:
       // These access points do not support personalized sign-in promos, so
       // |Signin_SigninNewAccountExistingAccount_From*| user actions should not
       // be recorded for them. Note: To avoid bloating the sign-in APIs, the
@@ -510,16 +530,6 @@ void RecordSigninNewAccountExistingAccountUserActionForAccessPoint(
       UMA_HISTOGRAM_ENUMERATION(name "_OnChange", sample, boundary_value);     \
       break;                                                                   \
   }
-
-// Helper method to determine which |DifferentPrimaryAccounts| applies.
-DifferentPrimaryAccounts ComparePrimaryAccounts(bool primary_accounts_same,
-                                                int pre_count_gaia_cookies) {
-  if (primary_accounts_same)
-    return ACCOUNTS_SAME;
-  if (pre_count_gaia_cookies == 0)
-    return NO_COOKIE_PRESENT;
-  return COOKIE_AND_TOKEN_PRIMARIES_DIFFERENT;
-}
 
 void LogSigninAccessPointStarted(AccessPoint access_point,
                                  PromoAction promo_action) {
@@ -592,39 +602,7 @@ void LogSigninAccessPointCompleted(AccessPoint access_point,
 }
 
 void LogSigninReason(Reason reason) {
-  UMA_HISTOGRAM_ENUMERATION("Signin.SigninReason", static_cast<int>(reason),
-                            static_cast<int>(Reason::REASON_MAX));
-}
-
-void LogSigninAccountReconciliation(int total_number_accounts,
-                                    int count_added_to_cookie_jar,
-                                    int count_removed_from_cookie_jar,
-                                    bool primary_accounts_same,
-                                    bool is_first_reconcile,
-                                    int pre_count_gaia_cookies) {
-  RecordAccountsPerProfile(total_number_accounts);
-  // We want to include zeroes in the counts of added or removed accounts to
-  // easily capture _relatively_ how often we merge accounts.
-  if (is_first_reconcile) {
-    UMA_HISTOGRAM_COUNTS_100("Signin.Reconciler.AddedToCookieJar.FirstRun",
-                             count_added_to_cookie_jar);
-    UMA_HISTOGRAM_COUNTS_100("Signin.Reconciler.RemovedFromCookieJar.FirstRun",
-                             count_removed_from_cookie_jar);
-    UMA_HISTOGRAM_ENUMERATION(
-        "Signin.Reconciler.DifferentPrimaryAccounts.FirstRun",
-        ComparePrimaryAccounts(primary_accounts_same, pre_count_gaia_cookies),
-        NUM_DIFFERENT_PRIMARY_ACCOUNT_METRICS);
-  } else {
-    UMA_HISTOGRAM_COUNTS_100("Signin.Reconciler.AddedToCookieJar.SubsequentRun",
-                             count_added_to_cookie_jar);
-    UMA_HISTOGRAM_COUNTS_100(
-        "Signin.Reconciler.RemovedFromCookieJar.SubsequentRun",
-        count_removed_from_cookie_jar);
-    UMA_HISTOGRAM_ENUMERATION(
-        "Signin.Reconciler.DifferentPrimaryAccounts.SubsequentRun",
-        ComparePrimaryAccounts(primary_accounts_same, pre_count_gaia_cookies),
-        NUM_DIFFERENT_PRIMARY_ACCOUNT_METRICS);
-  }
+  UMA_HISTOGRAM_ENUMERATION("Signin.SigninReason", reason);
 }
 
 void RecordAccountsPerProfile(int total_number_accounts) {
@@ -636,22 +614,22 @@ void LogSigninAccountReconciliationDuration(base::TimeDelta duration,
                                             bool successful) {
   if (successful) {
     UMA_HISTOGRAM_CUSTOM_TIMES("Signin.Reconciler.Duration.UpTo3mins.Success",
-                               duration, base::TimeDelta::FromMilliseconds(1),
-                               base::TimeDelta::FromMinutes(3), 100);
+                               duration, base::Milliseconds(1),
+                               base::Minutes(3), 100);
   } else {
     UMA_HISTOGRAM_CUSTOM_TIMES("Signin.Reconciler.Duration.UpTo3mins.Failure",
-                               duration, base::TimeDelta::FromMilliseconds(1),
-                               base::TimeDelta::FromMinutes(3), 100);
+                               duration, base::Milliseconds(1),
+                               base::Minutes(3), 100);
   }
 }
 
 void LogSignout(ProfileSignout source_metric, SignoutDelete delete_metric) {
   UMA_HISTOGRAM_ENUMERATION("Signin.SignoutProfile", source_metric,
                             NUM_PROFILE_SIGNOUT_METRICS);
-  if (delete_metric != SignoutDelete::IGNORE_METRIC) {
+  if (delete_metric != SignoutDelete::kIgnoreMetric) {
     UMA_HISTOGRAM_BOOLEAN(
         "Signin.SignoutDeleteProfile",
-        delete_metric == SignoutDelete::DELETED ? true : false);
+        delete_metric == SignoutDelete::kDeleted ? true : false);
   }
 }
 
@@ -682,7 +660,7 @@ void LogAuthError(const GoogleServiceAuthError& auth_error) {
 
 void LogAccountReconcilorStateOnGaiaResponse(AccountReconcilorState state) {
   UMA_HISTOGRAM_ENUMERATION("Signin.AccountReconcilorState.OnGaiaResponse",
-                            state, ACCOUNT_RECONCILOR_HISTOGRAM_COUNT);
+                            state);
 }
 
 void LogAccountEquality(AccountEquality equality) {
@@ -696,8 +674,7 @@ void LogCookieJarStableAge(const base::TimeDelta stable_age,
   INVESTIGATOR_HISTOGRAM_CUSTOM_COUNTS(
       "Signin.CookieJar.StableAge", type,
       base::saturated_cast<int>(stable_age.InSeconds()), 1,
-      base::saturated_cast<int>(base::TimeDelta::FromDays(365).InSeconds()),
-      100);
+      base::saturated_cast<int>(base::Days(365).InSeconds()), 100);
 }
 
 void LogCookieJarCounts(const int signed_in,
@@ -768,6 +745,23 @@ void RecordRefreshTokenRevokedFromSource(
   UMA_HISTOGRAM_ENUMERATION("Signin.RefreshTokenRevoked.Source", source);
 }
 
+void RecordSigninAccountType(signin::ConsentLevel consent_level,
+                             bool is_managed_account) {
+  SigninAccountType account_type = is_managed_account
+                                       ? SigninAccountType::kManaged
+                                       : SigninAccountType::kRegular;
+  switch (consent_level) {
+    case signin::ConsentLevel::kSignin:
+      base::UmaHistogramEnumeration("Signin.AccountType.SigninConsent",
+                                    account_type);
+      break;
+    case signin::ConsentLevel::kSync:
+      base::UmaHistogramEnumeration("Signin.AccountType.SyncConsent",
+                                    account_type);
+      break;
+  }
+}
+
 // --------------------------------------------------------------
 // User actions
 // --------------------------------------------------------------
@@ -814,10 +808,6 @@ void RecordSigninImpressionUserActionForAccessPoint(AccessPoint access_point) {
     case AccessPoint::ACCESS_POINT_EXTENSION_INSTALL_BUBBLE:
       base::RecordAction(base::UserMetricsAction(
           "Signin_Impression_FromExtensionInstallBubble"));
-      break;
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
-      base::RecordAction(
-          base::UserMetricsAction("Signin_Impression_FromAppsPageLink"));
       break;
     case AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE:
       base::RecordAction(
@@ -879,10 +869,18 @@ void RecordSigninImpressionUserActionForAccessPoint(AccessPoint access_point) {
       base::RecordAction(base::UserMetricsAction(
           "Signin_Impression_FromGoogleServicesSettings"));
       break;
+    case AccessPoint::ACCESS_POINT_KALEIDOSCOPE:
+      base::RecordAction(
+          base::UserMetricsAction("Signin_Impression_FromKaleidoscope"));
+      break;
+    case AccessPoint::ACCESS_POINT_USER_MANAGER:
+      base::RecordAction(
+          base::UserMetricsAction("Signin_Impression_FromUserManager"));
+      break;
+    case AccessPoint::ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR:
     case AccessPoint::ACCESS_POINT_CONTENT_AREA:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
-    case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_UNKNOWN:
     case AccessPoint::ACCESS_POINT_MACHINE_LOGON:
     case AccessPoint::ACCESS_POINT_SYNC_ERROR_CARD:
@@ -890,6 +888,7 @@ void RecordSigninImpressionUserActionForAccessPoint(AccessPoint access_point) {
     case AccessPoint::ACCESS_POINT_ACCOUNT_RENAMED:
     case AccessPoint::ACCESS_POINT_WEB_SIGNIN:
     case AccessPoint::ACCESS_POINT_SAFETY_CHECK:
+    case AccessPoint::ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE:
       NOTREACHED() << "Signin_Impression_From* user actions"
                    << " are not recorded for access point "
                    << static_cast<int>(access_point);
@@ -1003,12 +1002,12 @@ void RecordSigninImpressionWithAccountUserActionForAccessPoint(
             "Signin_ImpressionWithNoAccount_FromManageCardsBubble"));
       }
       break;
+    case AccessPoint::ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR:
     case AccessPoint::ACCESS_POINT_START_PAGE:
     case AccessPoint::ACCESS_POINT_NTP_LINK:
     case AccessPoint::ACCESS_POINT_MENU:
     case AccessPoint::ACCESS_POINT_SUPERVISED_USER:
     case AccessPoint::ACCESS_POINT_EXTENSIONS:
-    case AccessPoint::ACCESS_POINT_APPS_PAGE_LINK:
     case AccessPoint::ACCESS_POINT_USER_MANAGER:
     case AccessPoint::ACCESS_POINT_DEVICES_PAGE:
     case AccessPoint::ACCESS_POINT_CLOUD_PRINT:
@@ -1024,6 +1023,8 @@ void RecordSigninImpressionWithAccountUserActionForAccessPoint(
     case AccessPoint::ACCESS_POINT_ACCOUNT_RENAMED:
     case AccessPoint::ACCESS_POINT_WEB_SIGNIN:
     case AccessPoint::ACCESS_POINT_SAFETY_CHECK:
+    case AccessPoint::ACCESS_POINT_KALEIDOSCOPE:
+    case AccessPoint::ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE:
       NOTREACHED() << "Signin_Impression{With|WithNo}Account_From* user actions"
                    << " are not recorded for access point "
                    << static_cast<int>(access_point)
@@ -1034,5 +1035,13 @@ void RecordSigninImpressionWithAccountUserActionForAccessPoint(
       break;
   }
 }
+
+#if BUILDFLAG(IS_IOS)
+void RecordConsistencyPromoUserAction(AccountConsistencyPromoAction action) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Signin.AccountConsistencyPromoAction", static_cast<int>(action),
+      static_cast<int>(AccountConsistencyPromoAction::MAX));
+}
+#endif  // BUILDFLAG(IS_IOS)
 
 }  // namespace signin_metrics

@@ -36,12 +36,6 @@
             "value": false,
             "type": "Boolean"
         },
-        "limitBoneWeights": {
-            "name": "Limit Bone Weights",
-            "description": "Limits the number of bones simultaneously affecting a single vertex to a maximum value (4).",
-            "value": true,
-            "type": "Boolean"
-        },
         "improveCacheLocality": {
             "name": "Improve Cache Locality",
             "description": "Reorders triangles for better vertex cache locality.",
@@ -93,6 +87,12 @@
         "optimizeGraph": {
             "name": "Optimize Graph",
             "description": "A postprocessing step to optimize the scene hierarchy.",
+            "value": false,
+            "type": "Boolean"
+        },
+        "useFloatJointIndices": {
+            "name": "Use Float Joint Indices",
+            "description": "Stores joint indices as floating point numbers for GLES 2.0.",
             "value": false,
             "type": "Boolean"
         },
@@ -168,6 +168,37 @@
             "description": "Set whether the fbx importer will preserve pivot points (as extra nodes)",
             "value": false,
             "type": "Boolean"
+        },
+        "generateMipMaps": {
+            "name": "Generate Mip Maps",
+            "description": "Force all imported texture components to generate mip maps for mip map texture filtering",
+            "value": true,
+            "type": "Boolean"
+        },
+        "useBinaryKeyframes": {
+            "name": "Use Binary Keyframes",
+            "description": "Record keyframe data as binary files",
+            "value": true,
+            "type": "Boolean"
+        },
+        "generateLightmapUV": {
+            "name": "Generate Lightmap UV Channel",
+            "description": "Unwrap mesh to generate lightmap UV channel",
+            "value": false,
+            "type": "Boolean"
+        },
+        "lightmapBaseResolution": {
+            "name": "Lightmap Base Resolution",
+            "description": "Approx. size (width and height) which lightmap images should target.",
+            "value": 1024,
+            "type": "Real",
+            "conditions": [
+                {
+                    "mode": "Equals",
+                    "property": "generateLightmapUV",
+                    "value": true
+                }
+            ]
         }
     },
     "groups": {
@@ -176,6 +207,13 @@
             "items": [
                 "globalScale",
                 "globalScaleValue"
+            ]
+        },
+        "generateLightmapUV": {
+            "name": "Lightmap",
+            "items": [
+                "generateLightmapUV",
+                "lightmapBaseResolution"
             ]
         },
         "removeComponents": {

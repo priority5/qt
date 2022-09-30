@@ -1,26 +1,16 @@
 import("//build/config/c++/c++.gni")
 import("//build/config/chrome_build.gni")
+import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/dcheck_always_on.gni")
 import("//buildtools/deps_revisions.gni")
 
 assert(use_custom_libcxx, "should only be used if use_custom_libcxx is set")
 
-declare_args() {
-  # lldb pretty printing only works when libc++ is built in the __1 (or __ndk1)
-  # namespaces.  For pretty printing to work out-of-the-box on Mac (where lldb
-  # is primarily used), this flag is set to false to build with the __1
-  # namespace (to maintain ABI compatibility, this implies building without
-  # _LIBCPP_ABI_UNSTABLE).  This is not necessary on non-component builds
-  # because we leave the ABI version set to __1 in that case because libc++
-  # symbols are not exported.
-  # TODO(thomasanderson): Set this to true by default once rL352899 is available
-  # in MacOS's lldb.
-  libcxx_abi_unstable = !(is_apple && is_debug && is_component_build)
-}
+libcxx_abi_unstable = true
 
 # TODO(xiaohuic): https://crbug/917533 Crashes on internal ChromeOS build.
 # Do unconditionally once the underlying problem is fixed.
-if (is_chromeos && is_chrome_branded) {
+if (is_chromeos_ash && is_chrome_branded) {
   libcxx_abi_unstable = false
 }
 
@@ -32,6 +22,7 @@ config("runtime_library") {
   cflags = []
   cflags_cc = []
   defines = []
+  include_dirs = []
   ldflags = []
   libs = []
 
@@ -60,6 +51,14 @@ config("runtime_library") {
   }
 
   defines += [ "_LIBCPP_ENABLE_NODISCARD" ]
+
+  include_dirs += [ "//buildtools/third_party/libc++" ]
+
+  # Work around a symbol conflict between GRPC and the Fuchsia SDK.
+  # TODO(crbug.com/1166970): Remove this when resolved.
+  if (is_fuchsia) {
+    defines += [ "_LIBCPP_NO_NATIVE_SEMAPHORES" ]
+  }
 
   # The Windows component build fails to link with libc++'s debug mode. See
   # https://crbug.com/923166#c33, https://crbug.com/923166#c44, and
@@ -107,7 +106,7 @@ config("runtime_library") {
     ]
     cflags_objcc = cflags_cc
 
-    defines += [ "CR_LIBCXX_REVISION=$libcxx_svn_revision" ]
+    defines += [ "CR_LIBCXX_REVISION=$libcxx_revision" ]
 
     # Make sure we don't link against the system libstdc++ or libc++.
     if (is_clang) {

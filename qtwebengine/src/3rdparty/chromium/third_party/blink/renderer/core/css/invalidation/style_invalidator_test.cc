@@ -16,7 +16,7 @@ namespace blink {
 class StyleInvalidatorTest : public testing::Test {
  protected:
   void SetUp() override {
-    dummy_page_holder_ = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+    dummy_page_holder_ = std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
   }
 
   Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
@@ -35,7 +35,7 @@ TEST_F(StyleInvalidatorTest, SkipDisplayNone) {
     </div>
   )HTML");
 
-  GetDocument().View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   PendingInvalidations pending;
   {
@@ -64,7 +64,7 @@ TEST_F(StyleInvalidatorTest, SkipDisplayNoneClearPendingNth) {
     </div>
   )HTML");
 
-  GetDocument().View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   PendingInvalidations pending;
   {

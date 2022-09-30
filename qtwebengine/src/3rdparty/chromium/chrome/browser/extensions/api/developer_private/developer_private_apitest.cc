@@ -4,7 +4,6 @@
 
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
-#include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api.h"
@@ -13,12 +12,11 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/storage_partition.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/service_worker_test_helpers.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
-#include "extensions/browser/service_worker/service_worker_test_utils.h"
+#include "extensions/browser/browsertest_util.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/test/result_catcher.h"
 
@@ -31,12 +29,13 @@ IN_PROC_BROWSER_TEST_F(DeveloperPrivateApiTest, Basics) {
   // setings in the API test.
   base::FilePath base_dir = test_data_dir_.AppendASCII("developer");
   EXPECT_TRUE(LoadExtension(base_dir.AppendASCII("hosted_app")));
-  EXPECT_TRUE(InstallExtension(
-      base_dir.AppendASCII("packaged_app"), 1, Manifest::INTERNAL));
+  EXPECT_TRUE(InstallExtension(base_dir.AppendASCII("packaged_app"), 1,
+                               mojom::ManifestLocation::kInternal));
   LoadExtension(base_dir.AppendASCII("simple_extension"));
 
-  ASSERT_TRUE(RunPlatformAppTestWithFlags("developer/test", kFlagNone,
-                                          kFlagLoadAsComponent));
+  ASSERT_TRUE(RunExtensionTest("developer/test",
+                               {.launch_as_platform_app = true},
+                               {.load_as_component = true}));
 }
 
 // Tests opening the developer tools for an app window.
@@ -138,41 +137,23 @@ IN_PROC_BROWSER_TEST_F(DeveloperPrivateApiTest, InspectEmbeddedOptionsPage) {
   EXPECT_TRUE(DevToolsWindow::GetInstanceForInspectedWebContents(wc));
 }
 
-// Crashes on Linux only.  http://crbug.com/1134506
-#if defined(OS_LINUX)
-#define MAYBE_InspectInactiveServiceWorkerBackground \
-  DISABLED_InspectInactiveServiceWorkerBackground
-#else
-#define MAYBE_InspectInactiveServiceWorkerBackground \
-  InspectInactiveServiceWorkerBackground
-#endif
-
 IN_PROC_BROWSER_TEST_F(DeveloperPrivateApiTest,
-                       MAYBE_InspectInactiveServiceWorkerBackground) {
+                       InspectInactiveServiceWorkerBackground) {
   ResultCatcher result_catcher;
-  // Load an extension that is service worker based.
+  // Load an extension that is service worker-based.
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("service_worker")
                         .AppendASCII("worker_based_background")
-                        .AppendASCII("inspect"));
+                        .AppendASCII("inspect"),
+                    // Wait for the registration to be stored since we'll stop
+                    // the worker.
+                    {.wait_for_registration_stored = true});
   ASSERT_TRUE(extension);
   ASSERT_TRUE(result_catcher.GetNextResult());
 
-  service_worker_test_utils::TestRegistrationObserver registration_observer(
-      browser()->profile());
-  registration_observer.WaitForRegistrationStored();
-
   // Stop the service worker.
-  {
-    base::RunLoop run_loop;
-    content::StoragePartition* storage_partition =
-        content::BrowserContext::GetDefaultStoragePartition(profile());
-    content::ServiceWorkerContext* context =
-        storage_partition->GetServiceWorkerContext();
-    content::StopServiceWorkerForScope(context, extension->url(),
-                                       run_loop.QuitClosure());
-    run_loop.Run();
-  }
+  browsertest_util::StopServiceWorkerForExtensionGlobalScope(profile(),
+                                                             extension->id());
 
   // Get the info about the extension, including the inspectable views.
   auto get_info_function =

@@ -31,7 +31,7 @@ PluginPlaceholderBase::PluginPlaceholderBase(
     const std::string& html_data)
     : content::RenderFrameObserver(render_frame),
       plugin_params_(params),
-      plugin_(WebViewPlugin::Create(render_frame->GetRenderView(),
+      plugin_(WebViewPlugin::Create(render_frame->GetWebFrame()->View(),
                                     this,
                                     render_frame
                                         ? render_frame->GetBlinkPreferences()
@@ -100,7 +100,7 @@ void PluginPlaceholderBase::HidePlugin() {
       parent = parent.ParentNode();
       if (!parent.IsElementNode())
         continue;
-      element = parent.ToConst<blink::WebElement>();
+      element = parent.To<blink::WebElement>();
       if (element.HasAttribute("style")) {
         std::string style_str = element.GetAttribute("style").Utf8();
         if (RE2::PartialMatch(style_str, width_str) &&

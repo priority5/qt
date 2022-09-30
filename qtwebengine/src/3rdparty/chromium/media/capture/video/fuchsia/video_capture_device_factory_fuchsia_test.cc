@@ -6,7 +6,7 @@
 
 #include "base/fuchsia/test_component_context_for_process.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "media/fuchsia/camera/fake_fuchsia_camera.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -57,6 +57,41 @@ TEST_F(VideoCaptureDeviceFactoryFuchsiaTest, EnumerateDevicesAfterDisconnect) {
   devices_info = GetDevicesInfo();
 
   EXPECT_EQ(devices_info.size(), 1U);
+}
+
+// Verify that device removal is handled correctly if device info requests are
+// still pending. See crbug.com/1185899 .
+TEST_F(VideoCaptureDeviceFactoryFuchsiaTest, RemoveWhileEnumerating) {
+  std::vector<VideoCaptureDeviceInfo> devices_info;
+
+  // Set handler for the default device's GetIdentifier() which stops the
+  // RunLoop but doesn't respond to GetIdentifier().
+  base::RunLoop get_identifier_run_loop;
+  fake_device_watcher_.devices().begin()->second->SetGetIdentifierHandler(
+      base::BindLambdaForTesting(
+          [&get_identifier_run_loop](
+              fuchsia::camera3::Device::GetIdentifierCallback callback) {
+            get_identifier_run_loop.Quit();
+          }));
+
+  base::RunLoop get_devices_run_loop;
+  device_factory_.GetDevicesInfo(base::BindLambdaForTesting(
+      [&get_devices_run_loop,
+       &devices_info](std::vector<VideoCaptureDeviceInfo> result) {
+        devices_info = std::move(result);
+        get_devices_run_loop.Quit();
+      }));
+
+  get_identifier_run_loop.Run();
+
+  // Remove the first device. This will unblock GetDevicesInfo() (blocked on
+  // GetIdentifier() for the device being removed). The result is not dropped
+  // immediately to ensure that the Device connection is not dropped.
+  auto stream_and_device = fake_device_watcher_.RemoveDevice(
+      fake_device_watcher_.devices().begin()->first);
+
+  get_devices_run_loop.Run();
+  EXPECT_TRUE(devices_info.empty());
 }
 
 }  // namespace media

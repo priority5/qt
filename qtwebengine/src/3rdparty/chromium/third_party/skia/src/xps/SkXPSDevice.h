@@ -67,10 +67,10 @@ public:
         const SkVector& unitsPerMeter,
         const SkVector& pixelsPerMeter,
         const SkSize& trimSize,
-        const SkRect* mediaBox = NULL,
-        const SkRect* bleedBox = NULL,
-        const SkRect* artBox = NULL,
-        const SkRect* cropBox = NULL);
+        const SkRect* mediaBox = nullptr,
+        const SkRect* bleedBox = nullptr,
+        const SkRect* artBox = nullptr,
+        const SkRect* cropBox = nullptr);
 
     bool endSheet();
     bool endPortfolio();
@@ -90,21 +90,21 @@ protected:
                   bool pathIsMutable = false) override;
     void drawImageRect(const SkImage*,
                        const SkRect* srcOrNull, const SkRect& dst,
-                       const SkPaint& paint,
+                       const SkSamplingOptions&, const SkPaint& paint,
                        SkCanvas::SrcRectConstraint) override;
-    void drawGlyphRunList(const SkGlyphRunList& glyphRunList) override;
-    void drawVertices(const SkVertices*, SkBlendMode, const SkPaint&) override;
-    void drawDevice(SkBaseDevice*, int x, int y,
-                    const SkPaint&) override;
+    void onDrawGlyphRunList(SkCanvas*, const SkGlyphRunList&, const SkPaint&) override;
+    void drawVertices(const SkVertices*, sk_sp<SkBlender>, const SkPaint&, bool) override;
+    void drawCustomMesh(SkCustomMesh, sk_sp<SkBlender>, const SkPaint&) override;
+    void drawDevice(SkBaseDevice*, const SkSamplingOptions&, const SkPaint&) override;
 
 private:
     class TypefaceUse {
     public:
-        TypefaceUse(SkFontID id, int index, std::unique_ptr<SkStream> data,
+        TypefaceUse(SkTypefaceID id, int index, std::unique_ptr<SkStream> data,
                     SkTScopedComPtr<IXpsOMFontResource> xps, size_t numGlyphs)
             : typefaceId(id), ttcIndex(index), fontData(std::move(data))
             , xpsFont(std::move(xps)), glyphsUsed(numGlyphs) {}
-        const SkFontID typefaceId;
+        const SkTypefaceID typefaceId;
         const int ttcIndex;
         const std::unique_ptr<SkStream> fontData;
         const SkTScopedComPtr<IXpsOMFontResource> xpsFont;
@@ -157,7 +157,7 @@ private:
     HRESULT createXpsBrush(
         const SkPaint& skPaint,
         IXpsOMBrush** xpsBrush,
-        const SkMatrix* parentTransform = NULL);
+        const SkMatrix* parentTransform = nullptr);
 
     HRESULT createXpsSolidColorBrush(
         const SkColor skColor, const SkAlpha alpha,

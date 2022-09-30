@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "itemviews_p.h"
 
@@ -52,7 +16,7 @@
 #endif
 #include <private/qwidget_p.h>
 
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
 
 QT_BEGIN_NAMESPACE
 
@@ -409,7 +373,27 @@ QAccessible::Role QAccessibleTable::role() const
 
 QAccessible::State QAccessibleTable::state() const
 {
-    return QAccessible::State();
+    QAccessible::State state;
+    const auto *w = view();
+
+    if (w->testAttribute(Qt::WA_WState_Visible) == false)
+        state.invisible = true;
+    if (w->focusPolicy() != Qt::NoFocus)
+        state.focusable = true;
+    if (w->hasFocus())
+        state.focused = true;
+    if (!w->isEnabled())
+        state.disabled = true;
+    if (w->isWindow()) {
+        if (w->windowFlags() & Qt::WindowSystemMenuHint)
+            state.movable = true;
+        if (w->minimumSize() != w->maximumSize())
+            state.sizeable = true;
+        if (w->isActiveWindow())
+            state.active = true;
+    }
+
+    return state;
 }
 
 QAccessibleInterface *QAccessibleTable::childAt(int x, int y) const
@@ -423,6 +407,15 @@ QAccessibleInterface *QAccessibleTable::childAt(int x, int y) const
         return child(logicalIndex(index));
     }
     return nullptr;
+}
+
+QAccessibleInterface *QAccessibleTable::focusChild() const
+{
+    QModelIndex index = view()->currentIndex();
+    if (!index.isValid())
+        return nullptr;
+
+    return child(logicalIndex(index));
 }
 
 int QAccessibleTable::childCount() const
@@ -681,6 +674,20 @@ QAccessibleInterface *QAccessibleTree::childAt(int x, int y) const
     QPoint indexPosition = view()->mapFromGlobal(QPoint(x, y) - viewportOffset);
 
     QModelIndex index = view()->indexAt(indexPosition);
+    if (!index.isValid())
+        return nullptr;
+
+    const QTreeView *treeView = qobject_cast<const QTreeView*>(view());
+    int row = treeView->d_func()->viewIndex(index) + (horizontalHeader() ? 1 : 0);
+    int column = index.column();
+
+    int i = row * view()->model()->columnCount() + column;
+    return child(i);
+}
+
+QAccessibleInterface *QAccessibleTree::focusChild() const
+{
+    QModelIndex index = view()->currentIndex();
     if (!index.isValid())
         return nullptr;
 
@@ -1248,4 +1255,4 @@ QHeaderView *QAccessibleTableHeaderCell::headerView() const
 
 QT_END_NAMESPACE
 
-#endif // QT_NO_ACCESSIBILITY
+#endif // QT_CONFIG(accessibility)

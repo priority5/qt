@@ -30,6 +30,8 @@
 
 #include "third_party/blink/renderer/core/layout/layout_ruby_run.h"
 
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
+#include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
 #include "third_party/blink/renderer/core/layout/layout_ruby_base.h"
 #include "third_party/blink/renderer/core/layout/layout_ruby_text.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
@@ -37,8 +39,8 @@
 
 namespace blink {
 
-LayoutRubyRun::LayoutRubyRun(Element* element) : LayoutBlockFlow(nullptr) {
-  DCHECK(!element);
+LayoutRubyRun::LayoutRubyRun(ContainerNode* node) : LayoutBlockFlow(nullptr) {
+  DCHECK(!node);
   SetInline(true);
   SetIsAtomicInlineLevel(true);
 }
@@ -158,7 +160,7 @@ void LayoutRubyRun::RemoveChild(LayoutObject* child) {
     LayoutObject* right_neighbour = NextSibling();
     if (base && right_neighbour && right_neighbour->IsRubyRun()) {
       // Ruby run without a base can happen only at the first run.
-      LayoutRubyRun* right_run = ToLayoutRubyRun(right_neighbour);
+      auto* right_run = To<LayoutRubyRun>(right_neighbour);
       if (right_run->HasRubyBase()) {
         LayoutRubyBase* right_base = right_run->RubyBaseSafe();
         // Collect all children in a single base, then swap the bases.
@@ -195,8 +197,8 @@ LayoutRubyBase* LayoutRubyRun::CreateRubyBase() const {
   LayoutRubyBase* layout_object =
       LayoutRubyBase::CreateAnonymous(&GetDocument(), *this);
   scoped_refptr<ComputedStyle> new_style =
-      ComputedStyle::CreateAnonymousStyleWithDisplay(StyleRef(),
-                                                     EDisplay::kBlock);
+      GetDocument().GetStyleResolver().CreateAnonymousStyleWithDisplay(
+          StyleRef(), EDisplay::kBlock);
   new_style->SetTextAlign(ETextAlign::kCenter);  // FIXME: use WEBKIT_CENTER?
   layout_object->SetStyle(std::move(new_style));
   return layout_object;
@@ -208,16 +210,17 @@ LayoutRubyRun* LayoutRubyRun::StaticCreateRubyRun(
   DCHECK(parent_ruby);
   DCHECK(parent_ruby->IsRuby());
   LayoutRubyRun* rr;
-  if (RuntimeEnabledFeatures::LayoutNGRubyEnabled() &&
-      containing_block.IsLayoutNGObject()) {
-    rr = new LayoutNGRubyRun();
+  if (containing_block.IsLayoutNGObject()) {
+    rr = MakeGarbageCollected<LayoutNGRubyRun>();
   } else {
-    rr = new LayoutRubyRun(nullptr);
+    rr = MakeGarbageCollected<LayoutRubyRun>(nullptr);
   }
   rr->SetDocumentForAnonymous(&parent_ruby->GetDocument());
   scoped_refptr<ComputedStyle> new_style =
-      ComputedStyle::CreateAnonymousStyleWithDisplay(parent_ruby->StyleRef(),
-                                                     EDisplay::kInlineBlock);
+      parent_ruby->GetDocument()
+          .GetStyleResolver()
+          .CreateAnonymousStyleWithDisplay(parent_ruby->StyleRef(),
+                                           EDisplay::kInlineBlock);
   rr->SetStyle(std::move(new_style));
   return rr;
 }
@@ -250,8 +253,7 @@ void LayoutRubyRun::UpdateLayout() {
   // the first line of the LayoutRubyBase.
   LayoutUnit last_line_ruby_text_bottom = rt->LogicalHeight();
   LayoutUnit first_line_ruby_text_top;
-  RootInlineBox* root_box = rt->LastRootBox();
-  if (root_box) {
+  if (RootInlineBox* root_box = rt->LastRootBox()) {
     // In order to align, we have to ignore negative leading.
     first_line_ruby_text_top = rt->FirstRootBox()->LogicalTopLayoutOverflow();
     last_line_ruby_text_bottom = root_box->LogicalBottomLayoutOverflow();
@@ -340,12 +342,12 @@ void LayoutRubyRun::GetOverhang(bool first_line,
   if (start_overhang)
     start_overhang = std::min<int>(
         start_overhang,
-        std::min<int>(ToLayoutText(start_layout_object)->MinLogicalWidth(),
+        std::min<int>(To<LayoutText>(start_layout_object)->MinLogicalWidth(),
                       half_width_of_font_size));
   if (end_overhang)
     end_overhang = std::min<int>(
         end_overhang,
-        std::min<int>(ToLayoutText(end_layout_object)->MinLogicalWidth(),
+        std::min<int>(To<LayoutText>(end_layout_object)->MinLogicalWidth(),
                       half_width_of_font_size));
 }
 

@@ -48,8 +48,7 @@ ScriptEvaluationResult ScriptEvaluationResult::FromClassicSuccess(
 ScriptEvaluationResult ScriptEvaluationResult::FromModuleSuccess(
     v8::Local<v8::Value> value) {
   DCHECK(!value.IsEmpty());
-  DCHECK(!base::FeatureList::IsEnabled(features::kTopLevelAwait) ||
-         value->IsPromise());
+  DCHECK(value->IsPromise());
 
   return ScriptEvaluationResult(mojom::blink::ScriptType::kModule,
                                 ResultType::kSuccess, value);
@@ -81,16 +80,16 @@ ScriptEvaluationResult ScriptEvaluationResult::FromModuleAborted() {
                                 ResultType::kAborted, {});
 }
 
-ScriptEvaluationResult& ScriptEvaluationResult::Escape(
-    ScriptState::EscapableScope* scope) {
-  value_ = scope->Escape(value_);
-  return *this;
-}
-
 v8::Local<v8::Value> ScriptEvaluationResult::GetSuccessValue() const {
   DCHECK_EQ(result_type_, ResultType::kSuccess);
   DCHECK(!value_.IsEmpty());
   return value_;
+}
+
+v8::Local<v8::Value> ScriptEvaluationResult::GetSuccessValueOrEmpty() const {
+  if (GetResultType() == ResultType::kSuccess)
+    return GetSuccessValue();
+  return v8::Local<v8::Value>();
 }
 
 v8::Local<v8::Value> ScriptEvaluationResult::GetExceptionForModule() const {
@@ -105,7 +104,6 @@ v8::Local<v8::Value> ScriptEvaluationResult::GetExceptionForModule() const {
 
 ScriptPromise ScriptEvaluationResult::GetPromise(
     ScriptState* script_state) const {
-  DCHECK(base::FeatureList::IsEnabled(features::kTopLevelAwait));
 #if DCHECK_IS_ON()
   DCHECK_EQ(script_type_, mojom::blink::ScriptType::kModule);
 #endif

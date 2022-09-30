@@ -13,8 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { debugError, helper, } from '../common/helper.js';
-
+import { helper, debugError, } from '../common/helper.js';
 export class PipeTransport {
     constructor(pipeWrite, pipeRead) {
         this._pipeWrite = pipeWrite;
@@ -59,3 +58,4 @@ export class PipeTransport {
         helper.removeEventListeners(this._eventListeners);
     }
 }
+//# sourceMappingURL=PipeTransport.js.map

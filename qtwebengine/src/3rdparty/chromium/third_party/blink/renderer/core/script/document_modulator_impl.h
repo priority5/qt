@@ -7,9 +7,6 @@
 
 #include "third_party/blink/renderer/core/script/modulator_impl_base.h"
 
-#include "third_party/blink/public/mojom/v8_cache_options.mojom-blink.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-
 namespace blink {
 
 class ModuleScriptFetcher;
@@ -26,12 +23,11 @@ class DocumentModulatorImpl final : public ModulatorImplBase {
   // Implements Modulator.
   ModuleScriptFetcher* CreateModuleScriptFetcher(
       ModuleScriptCustomFetchType,
-      util::PassKey<ModuleScriptLoader>) override;
+      base::PassKey<ModuleScriptLoader>) override;
 
  private:
   // Implements ModulatorImplBase.
   bool IsDynamicImportForbidden(String* reason) override;
-  mojom::blink::V8CacheOptions GetV8CacheOptions() const override;
 };
 
 }  // namespace blink

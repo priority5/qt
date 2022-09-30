@@ -9,9 +9,12 @@
 
 #include "base/process/process.h"
 #include "build/build_config.h"
-#include "sandbox/policy/sandbox_type.h"
 
 namespace sandbox {
+namespace mojom {
+enum class Sandbox;
+}  // namespace mojom
+
 class TargetPolicy;
 
 namespace policy {
@@ -20,11 +23,11 @@ class SandboxDelegate {
  public:
   virtual ~SandboxDelegate() {}
 
-  // Returns the SandboxType to enforce on the process, or
-  // SandboxType::kNoSandbox to run without a sandbox policy.
-  virtual SandboxType GetSandboxType() = 0;
+  // Returns the Sandbox to enforce on the process, or
+  // Sandbox::kNoSandbox to run without a sandbox policy.
+  virtual sandbox::mojom::Sandbox GetSandboxType() = 0;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Whether to disable the default policy specified in
   // AddPolicyForSandboxedProcess.
   virtual bool DisableDefaultPolicy() = 0;
@@ -38,7 +41,14 @@ class SandboxDelegate {
 
   // Called right after the process is launched, but before its thread is run.
   virtual void PostSpawnTarget(base::ProcessHandle process) = 0;
-#endif  // defined(OS_WIN)
+
+  // Whether this process should run inside a Job if running unsandboxed.
+  virtual bool ShouldUnsandboxedRunInJob() = 0;
+
+  // Whether this process will be compatible with Control-flow Enforcement
+  // Technology (CET) / Hardware-enforced Stack Protection.
+  virtual bool CetCompatible() = 0;
+#endif  // BUILDFLAG(IS_WIN)
 };
 
 }  // namespace policy

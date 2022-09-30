@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qdesigner_tabwidget_p.h"
 #include "qdesigner_command_p.h"
@@ -36,12 +11,13 @@
 
 #include <QtWidgets/qapplication.h>
 #include <QtWidgets/qtabbar.h>
-#include <QtWidgets/qaction.h>
-#include <QtGui/qevent.h>
-#include <QtGui/qdrag.h>
 #include <QtWidgets/qmenu.h>
 #include <QtWidgets/qlabel.h>
 #include <QtWidgets/qtabwidget.h>
+
+#include <QtGui/qaction.h>
+#include <QtGui/qevent.h>
+#include <QtGui/qdrag.h>
 
 #include <QtCore/qdebug.h>
 #include <QtCore/qmimedata.h>
@@ -128,7 +104,7 @@ QTabBar *QTabWidgetEventFilter::tabBar() const
 
 static bool canMove(const QPoint &pressPoint, const QMouseEvent *e)
 {
-    const QPoint pt = pressPoint - e->pos();
+    const QPoint pt = pressPoint - e->position().toPoint();
     return pt.manhattanLength() > QApplication::startDragDistance();
 }
 
@@ -170,7 +146,7 @@ bool QTabWidgetEventFilter::eventFilter(QObject *o, QEvent *e)
         }
         if (mev->button() & Qt::LeftButton) {
             m_mousePressed = true;
-            m_pressPoint = mev->pos();
+            m_pressPoint = mev->position().toPoint();
 
             QTabBar *tabbar = tabBar();
             const int count = tabbar->count();
@@ -249,7 +225,7 @@ bool QTabWidgetEventFilter::eventFilter(QObject *o, QEvent *e)
         }
 
         QRect rect;
-        const int index = pageFromPosition(de->pos(), rect);
+        const int index = pageFromPosition(de->position().toPoint(), rect);
 
         if (!m_dropIndicator) {
             m_dropIndicator = new QWidget(m_tabWidget);
@@ -276,7 +252,7 @@ bool QTabWidgetEventFilter::eventFilter(QObject *o, QEvent *e)
         de->accept();
 
         QRect rect;
-        const int newIndex = pageFromPosition(de->pos(), rect);
+        const int newIndex = pageFromPosition(de->position().toPoint(), rect);
 
         qdesigner_internal::MoveTabPageCommand *cmd = new qdesigner_internal::MoveTabPageCommand(fw);
         m_tabWidget->insertTab(m_dragIndex, m_dragPage, m_dragIcon, m_dragLabel);

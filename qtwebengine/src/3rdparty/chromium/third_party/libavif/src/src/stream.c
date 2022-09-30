@@ -3,6 +3,8 @@
 
 #include "avif/internal.h"
 
+#include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -14,15 +16,20 @@ const uint8_t * avifROStreamCurrent(avifROStream * stream)
     return stream->raw->data + stream->offset;
 }
 
-void avifROStreamStart(avifROStream * stream, avifROData * raw)
+void avifROStreamStart(avifROStream * stream, avifROData * raw, avifDiagnostics * diag, const char * diagContext)
 {
     stream->raw = raw;
     stream->offset = 0;
+    stream->diag = diag;
+    stream->diagContext = diagContext;
+
+    // If diag is non-NULL, diagContext must also be non-NULL
+    assert(!stream->diag || stream->diagContext);
 }
 
 avifBool avifROStreamHasBytesLeft(const avifROStream * stream, size_t byteCount)
 {
-    return (stream->offset + byteCount) <= stream->raw->size;
+    return byteCount <= (stream->raw->size - stream->offset);
 }
 
 size_t avifROStreamRemainingBytes(const avifROStream * stream)
@@ -46,6 +53,7 @@ void avifROStreamSetOffset(avifROStream * stream, size_t offset)
 avifBool avifROStreamSkip(avifROStream * stream, size_t byteCount)
 {
     if (!avifROStreamHasBytesLeft(stream, byteCount)) {
+        avifDiagnosticsPrintf(stream->diag, "%s: Failed to skip %zu bytes, truncated data?", stream->diagContext, byteCount);
         return AVIF_FALSE;
     }
     stream->offset += byteCount;
@@ -55,6 +63,7 @@ avifBool avifROStreamSkip(avifROStream * stream, size_t byteCount)
 avifBool avifROStreamRead(avifROStream * stream, uint8_t * data, size_t size)
 {
     if (!avifROStreamHasBytesLeft(stream, size)) {
+        avifDiagnosticsPrintf(stream->diag, "%s: Failed to read %zu bytes, truncated data?", stream->diagContext, size);
         return AVIF_FALSE;
     }
 
@@ -86,6 +95,7 @@ avifBool avifROStreamReadUX8(avifROStream * stream, uint64_t * v, uint64_t facto
         *v = tmp;
     } else {
         // Unsupported factor
+        avifDiagnosticsPrintf(stream->diag, "%s: Failed to read UX8 value; Unsupported UX8 factor [%" PRIu64 "]", stream->diagContext, factor);
         return AVIF_FALSE;
     }
     return AVIF_TRUE;
@@ -125,6 +135,7 @@ avifBool avifROStreamReadString(avifROStream * stream, char * output, size_t out
         }
     }
     if (!foundNullTerminator) {
+        avifDiagnosticsPrintf(stream->diag, "%s: Failed to find a NULL terminator when reading a string", stream->diagContext);
         return AVIF_FALSE;
     }
 
@@ -143,7 +154,7 @@ avifBool avifROStreamReadString(avifROStream * stream, char * output, size_t out
     return AVIF_TRUE;
 }
 
-avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header)
+avifBool avifROStreamReadBoxHeaderPartial(avifROStream * stream, avifBoxHeader * header)
 {
     size_t startOffset = stream->offset;
 
@@ -162,12 +173,18 @@ avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header
 
     size_t bytesRead = stream->offset - startOffset;
     if ((size < bytesRead) || ((size - bytesRead) > SIZE_MAX)) {
+        avifDiagnosticsPrintf(stream->diag, "%s: Header size overflow check failure", stream->diagContext);
         return AVIF_FALSE;
     }
     header->size = (size_t)(size - bytesRead);
+    return AVIF_TRUE;
+}
 
-    // Make the assumption here that this box's contents must fit in the remaining portion of the parent stream
+avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header)
+{
+    CHECK(avifROStreamReadBoxHeaderPartial(stream, header));
     if (header->size > avifROStreamRemainingBytes(stream)) {
+        avifDiagnosticsPrintf(stream->diag, "%s: Child box too large, possibly truncated data", stream->diagContext);
         return AVIF_FALSE;
     }
     return AVIF_TRUE;
@@ -190,7 +207,11 @@ avifBool avifROStreamReadAndEnforceVersion(avifROStream * stream, uint8_t enforc
 {
     uint8_t version;
     CHECK(avifROStreamReadVersionAndFlags(stream, &version, NULL));
-    return (version == enforcedVersion);
+    if (version != enforcedVersion) {
+        avifDiagnosticsPrintf(stream->diag, "%s: Expecting box version %u, got version %u", stream->diagContext, enforcedVersion, version);
+        return AVIF_FALSE;
+    }
+    return AVIF_TRUE;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,16 +307,15 @@ avifBoxMarker avifRWStreamWriteBox(avifRWStream * stream, const char * type, siz
 
 void avifRWStreamFinishBox(avifRWStream * stream, avifBoxMarker marker)
 {
-    uint32_t noSize = avifNTOHL((uint32_t)(stream->offset - marker));
+    uint32_t noSize = avifHTONL((uint32_t)(stream->offset - marker));
     memcpy(stream->raw->data + marker, &noSize, sizeof(uint32_t));
 }
 
 void avifRWStreamWriteU8(avifRWStream * stream, uint8_t v)
 {
-    size_t size = sizeof(uint8_t);
-    makeRoom(stream, size);
-    memcpy(stream->raw->data + stream->offset, &v, size);
-    stream->offset += size;
+    makeRoom(stream, 1);
+    stream->raw->data[stream->offset] = v;
+    stream->offset += 1;
 }
 
 void avifRWStreamWriteU16(avifRWStream * stream, uint16_t v)

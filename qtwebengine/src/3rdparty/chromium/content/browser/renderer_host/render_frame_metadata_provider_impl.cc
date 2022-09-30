@@ -5,6 +5,8 @@
 #include "content/browser/renderer_host/render_frame_metadata_provider_impl.h"
 
 #include "base/bind.h"
+#include "base/observer_list.h"
+#include "build/build_config.h"
 #include "content/browser/renderer_host/frame_token_message_queue.h"
 
 namespace content {
@@ -35,7 +37,10 @@ void RenderFrameMetadataProviderImpl::Bind(
   render_frame_metadata_observer_client_receiver_.Bind(
       std::move(client_receiver), task_runner_);
 
-#if defined(OS_ANDROID)
+  // Reset on disconnect so that pending state will be correctly stored and
+  // later forwarded in the case of a renderer crash.
+  render_frame_metadata_observer_remote_.reset_on_disconnect();
+#if BUILDFLAG(IS_ANDROID)
   if (pending_report_all_root_scrolls_.has_value()) {
     ReportAllRootScrolls(*pending_report_all_root_scrolls_);
     pending_report_all_root_scrolls_.reset();
@@ -48,7 +53,7 @@ void RenderFrameMetadataProviderImpl::Bind(
   }
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void RenderFrameMetadataProviderImpl::ReportAllRootScrolls(bool enabled) {
   if (!render_frame_metadata_observer_remote_) {
     pending_report_all_root_scrolls_ = enabled;
@@ -77,13 +82,15 @@ RenderFrameMetadataProviderImpl::LastRenderFrameMetadata() {
 
 void RenderFrameMetadataProviderImpl::
     OnRenderFrameMetadataChangedAfterActivation(
-        cc::RenderFrameMetadata metadata) {
+        cc::RenderFrameMetadata metadata,
+        base::TimeTicks activation_time) {
   last_render_frame_metadata_ = std::move(metadata);
   for (Observer& observer : observers_)
-    observer.OnRenderFrameMetadataChangedAfterActivation();
+    observer.OnRenderFrameMetadataChangedAfterActivation(activation_time);
 }
 
-void RenderFrameMetadataProviderImpl::OnFrameTokenFrameSubmissionForTesting() {
+void RenderFrameMetadataProviderImpl::OnFrameTokenFrameSubmissionForTesting(
+    base::TimeTicks activation_time) {
   for (Observer& observer : observers_)
     observer.OnRenderFrameSubmission();
 }
@@ -126,9 +133,9 @@ void RenderFrameMetadataProviderImpl::OnFrameSubmissionForTesting(
                                   weak_factory_.GetWeakPtr()));
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void RenderFrameMetadataProviderImpl::OnRootScrollOffsetChanged(
-    const gfx::Vector2dF& root_scroll_offset) {
+    const gfx::PointF& root_scroll_offset) {
   for (Observer& observer : observers_)
     observer.OnRootScrollOffsetChanged(root_scroll_offset);
 }

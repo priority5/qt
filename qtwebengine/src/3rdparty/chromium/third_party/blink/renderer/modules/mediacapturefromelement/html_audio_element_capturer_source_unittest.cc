@@ -6,6 +6,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
+#include "base/time/time.h"
 #include "media/audio/null_audio_sink.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/fake_audio_render_callback.h"
@@ -17,6 +18,7 @@
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/webaudiosourceprovider_impl.h"
 #include "third_party/blink/public/web/web_heap.h"
+#include "third_party/blink/renderer/modules/mediastream/mock_media_stream_audio_sink.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
@@ -30,19 +32,6 @@ static const int kAudioTrackSampleRate = 48000;
 static const int kAudioTrackSamplesPerBuffer =
     kAudioTrackSampleRate * kBufferDurationMs /
     base::Time::kMillisecondsPerSecond;
-
-class MockMediaStreamAudioSink final : public blink::WebMediaStreamAudioSink {
- public:
-  MockMediaStreamAudioSink() : blink::WebMediaStreamAudioSink() {}
-  ~MockMediaStreamAudioSink() override = default;
-
-  MOCK_METHOD1(OnSetFormat, void(const media::AudioParameters& params));
-  MOCK_METHOD2(OnData,
-               void(const media::AudioBus& audio_bus,
-                    base::TimeTicks estimated_capture_time));
-
-  DISALLOW_COPY_AND_ASSIGN(MockMediaStreamAudioSink);
-};
 
 // This test needs to bundle together plenty of objects, namely:
 // - a WebAudioSourceProviderImpl, which in turn needs an Audio Sink, in this
@@ -96,17 +85,15 @@ class HTMLAudioElementCapturerSourceTest : public testing::Test {
         kAudioTrackSamplesPerBuffer /* frames_per_buffer */);
     audio_source_->Initialize(params, &fake_callback_);
 
+    auto capture_source = std::make_unique<HtmlAudioElementCapturerSource>(
+        audio_source_, blink::scheduler::GetSingleThreadTaskRunnerForTesting());
     media_stream_source_ = MakeGarbageCollected<MediaStreamSource>(
         String::FromUTF8("audio_id"), MediaStreamSource::kTypeAudio,
-        String::FromUTF8("audio_track"), false /* remote */);
+        String::FromUTF8("audio_track"), false /* remote */,
+        std::move(capture_source));
     media_stream_component_ = MakeGarbageCollected<MediaStreamComponent>(
         media_stream_source_->Id(), media_stream_source_);
 
-    // |media_stream_source_| takes ownership of
-    // HtmlAudioElementCapturerSource.
-    auto capture_source = std::make_unique<HtmlAudioElementCapturerSource>(
-        audio_source_, blink::scheduler::GetSingleThreadTaskRunnerForTesting());
-    media_stream_source_->SetPlatformSource(std::move(capture_source));
     ASSERT_TRUE(source()->ConnectToTrack(media_stream_component_.Get()));
   }
 

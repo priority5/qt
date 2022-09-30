@@ -15,7 +15,9 @@
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
+#include "third_party/base/check.h"
 #include "third_party/base/containers/adapters.h"
+#include "third_party/base/numerics/safe_conversions.h"
 
 CPDF_PageContentManager::CPDF_PageContentManager(
     const CPDF_PageObjectHolder* obj_holder)
@@ -60,7 +62,7 @@ CPDF_Stream* CPDF_PageContentManager::GetStreamByIndex(size_t stream_index) {
   return nullptr;
 }
 
-size_t CPDF_PageContentManager::AddStream(std::ostringstream* buf) {
+size_t CPDF_PageContentManager::AddStream(fxcrt::ostringstream* buf) {
   CPDF_Stream* new_stream = doc_->NewIndirect<CPDF_Stream>();
   new_stream->SetDataFromStringstream(buf);
 
@@ -107,7 +109,7 @@ void CPDF_PageContentManager::ExecuteScheduledRemovals() {
   // updated.
   // Since this is only called by CPDF_PageContentGenerator::GenerateContent(),
   // which cleans up the dirty streams first, this should always be true.
-  ASSERT(!obj_holder_->HasDirtyStreams());
+  DCHECK(!obj_holder_->HasDirtyStreams());
 
   if (contents_stream_) {
     // Only stream that can be removed is 0.
@@ -131,14 +133,15 @@ void CPDF_PageContentManager::ExecuteScheduledRemovals() {
 
     // Create a mapping from the old to the new stream indexes, shifted due to
     // the deletion of the |streams_to_remove_|.
-    std::map<int32_t, size_t> stream_index_mapping;
+    std::map<size_t, size_t> stream_index_mapping;
     for (size_t i = 0; i < streams_left.size(); ++i)
       stream_index_mapping[streams_left[i]] = i;
 
     // Update the page objects' content stream indexes.
     for (const auto& obj : *obj_holder_) {
       int32_t old_stream_index = obj->GetContentStream();
-      size_t new_stream_index = stream_index_mapping[old_stream_index];
+      int32_t new_stream_index = pdfium::base::checked_cast<int32_t>(
+          stream_index_mapping[old_stream_index]);
       obj->SetContentStream(new_stream_index);
     }
 

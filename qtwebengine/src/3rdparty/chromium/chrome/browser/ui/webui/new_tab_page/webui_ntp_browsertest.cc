@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/search/ntp_features.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -28,9 +28,7 @@ void ExpectIsWebUiNtp(content::WebContents* tab) {
 
 class WebUiNtpBrowserTest : public InProcessBrowserTest {
  public:
-  WebUiNtpBrowserTest() {
-    feature_list_.InitAndEnableFeature(ntp_features::kWebUI);
-  }
+  WebUiNtpBrowserTest() = default;
 
   ~WebUiNtpBrowserTest() override = default;
 
@@ -51,7 +49,7 @@ class WebUiNtpBrowserTest : public InProcessBrowserTest {
 // Verify that the WebUI NTP commits in a SiteInstance with the WebUI URL.
 IN_PROC_BROWSER_TEST_F(WebUiNtpBrowserTest, VerifySiteInstance) {
   GURL ntp_url(chrome::kChromeUINewTabURL);
-  ui_test_utils::NavigateToURL(browser(), ntp_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), ntp_url));
 
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();

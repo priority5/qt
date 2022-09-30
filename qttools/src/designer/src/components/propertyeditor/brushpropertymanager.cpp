@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "brushpropertymanager.h"
 #include "qtpropertymanager.h"
@@ -159,7 +134,8 @@ void BrushPropertyManager::initializeProperty(QtVariantPropertyManager *vm, QtPr
     m_brushPropertyToStyleSubProperty.insert(property, styleSubProperty);
     m_brushStyleSubPropertyToProperty.insert(styleSubProperty, property);
     // color
-    QtVariantProperty *colorSubProperty = vm->addProperty(QVariant::Color, QCoreApplication::translate("BrushPropertyManager", "Color"));
+    QtVariantProperty *colorSubProperty =
+        vm->addProperty(QMetaType::QColor, QCoreApplication::translate("BrushPropertyManager", "Color"));
     property->addSubProperty(colorSubProperty);
     m_brushPropertyToColorSubProperty.insert(property, colorSubProperty);
     m_brushColorSubPropertyToProperty.insert(colorSubProperty, property);
@@ -207,8 +183,8 @@ void BrushPropertyManager::slotPropertyDestroyed(QtProperty *property)
 
 int BrushPropertyManager::valueChanged(QtVariantPropertyManager *vm, QtProperty *property, const QVariant &value)
 {
-    switch (value.type()) {
-    case QVariant::Int: // Style subproperty?
+    switch (value.metaType().id()) {
+    case QMetaType::Int: // Style subproperty?
         if (QtProperty *brushProperty = m_brushStyleSubPropertyToProperty.value(property, 0)) {
             const QBrush oldValue = m_brushValues.value(brushProperty);
             QBrush newBrush = oldValue;
@@ -220,7 +196,7 @@ int BrushPropertyManager::valueChanged(QtVariantPropertyManager *vm, QtProperty 
             return DesignerPropertyManager::Changed;
         }
         break;
-    case QVariant::Color: // Color  subproperty?
+    case QMetaType::QColor: // Color  subproperty?
         if (QtProperty *brushProperty = m_brushColorSubPropertyToProperty.value(property, 0)) {
             const QBrush oldValue = m_brushValues.value(brushProperty);
             QBrush newBrush = oldValue;
@@ -239,7 +215,7 @@ int BrushPropertyManager::valueChanged(QtVariantPropertyManager *vm, QtProperty 
 
 int BrushPropertyManager::setValue(QtVariantPropertyManager *vm, QtProperty *property, const QVariant &value)
 {
-    if (value.type() != QVariant::Brush)
+    if (value.metaType().id() != QMetaType::QBrush)
         return DesignerPropertyManager::NoMatch;
     const PropertyBrushMap::iterator brit = m_brushValues.find(property);
     if (brit == m_brushValues.end())

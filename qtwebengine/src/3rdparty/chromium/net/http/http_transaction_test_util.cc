@@ -9,11 +9,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
@@ -23,6 +23,7 @@
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_isolation_key.h"
+#include "net/base/schemeful_site.h"
 #include "net/cert/x509_certificate.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
@@ -32,7 +33,9 @@
 #include "net/log/net_log.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_with_source.h"
+#include "net/ssl/ssl_private_key.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace net {
 
@@ -44,7 +47,7 @@ static MockTransactionMap mock_transactions;
 
 TransportInfo DefaultTransportInfo() {
   return TransportInfo(TransportType::kDirect,
-                       IPEndPoint(IPAddress::IPv4Localhost(), 80));
+                       IPEndPoint(IPAddress::IPv4Localhost(), 80), "");
 }
 
 //-----------------------------------------------------------------------------
@@ -61,6 +64,7 @@ const MockTransaction kSimpleGET_Transaction = {
     "Cache-Control: max-age=10000\n",
     base::Time(),
     "<html><body>Google Blah Blah</body></html>",
+    {},
     TEST_MODE_NORMAL,
     nullptr,
     nullptr,
@@ -82,6 +86,7 @@ const MockTransaction kSimplePOST_Transaction = {
     "",
     base::Time(),
     "<html><body>Google Blah Blah</body></html>",
+    {},
     TEST_MODE_NORMAL,
     nullptr,
     nullptr,
@@ -104,6 +109,7 @@ const MockTransaction kTypicalGET_Transaction = {
     "Last-Modified: Wed, 28 Nov 2007 00:40:09 GMT\n",
     base::Time(),
     "<html><body>Google Blah Blah</body></html>",
+    {},
     TEST_MODE_NORMAL,
     nullptr,
     nullptr,
@@ -126,6 +132,7 @@ const MockTransaction kETagGET_Transaction = {
     "Etag: \"foopy\"\n",
     base::Time(),
     "<html><body>Google Blah Blah</body></html>",
+    {},
     TEST_MODE_NORMAL,
     nullptr,
     nullptr,
@@ -147,6 +154,7 @@ const MockTransaction kRangeGET_Transaction = {
     "Cache-Control: max-age=10000\n",
     base::Time(),
     "<html><body>Google Blah Blah</body></html>",
+    {},
     TEST_MODE_NORMAL,
     nullptr,
     nullptr,
@@ -172,7 +180,7 @@ const MockTransaction* FindMockTransaction(const GURL& url) {
     return it->second;
 
   // look for builtins:
-  for (size_t i = 0; i < base::size(kBuiltinMockTransactions); ++i) {
+  for (size_t i = 0; i < std::size(kBuiltinMockTransactions); ++i) {
     if (url == GURL(kBuiltinMockTransactions[i]->url))
       return kBuiltinMockTransactions[i];
   }
@@ -192,8 +200,8 @@ MockHttpRequest::MockHttpRequest(const MockTransaction& t) {
   method = t.method;
   extra_headers.AddHeadersFromString(t.request_headers);
   load_flags = t.load_flags;
-  url::Origin origin = url::Origin::Create(url);
-  network_isolation_key = NetworkIsolationKey(origin, origin);
+  SchemefulSite site(url);
+  network_isolation_key = NetworkIsolationKey(site, site);
 }
 
 std::string MockHttpRequest::CacheKey() {
@@ -208,7 +216,7 @@ int TestTransactionConsumer::quit_counter_ = 0;
 TestTransactionConsumer::TestTransactionConsumer(
     RequestPriority priority,
     HttpTransactionFactory* factory)
-    : state_(IDLE), error_(OK) {
+    : state_(State::kIdle), error_(OK) {
   // Disregard the error code.
   factory->CreateTransaction(priority, &trans_);
   ++quit_counter_;
@@ -218,7 +226,7 @@ TestTransactionConsumer::~TestTransactionConsumer() = default;
 
 void TestTransactionConsumer::Start(const HttpRequestInfo* request,
                                     const NetLogWithSource& net_log) {
-  state_ = STARTING;
+  state_ = State::kStarting;
   int result =
       trans_->Start(request,
                     base::BindOnce(&TestTransactionConsumer::OnIOComplete,
@@ -246,14 +254,14 @@ void TestTransactionConsumer::DidRead(int result) {
 }
 
 void TestTransactionConsumer::DidFinish(int result) {
-  state_ = DONE;
+  state_ = State::kDone;
   error_ = result;
   if (--quit_counter_ == 0)
     base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
 void TestTransactionConsumer::Read() {
-  state_ = READING;
+  state_ = State::kReading;
   read_buf_ = base::MakeRefCounted<IOBuffer>(1024);
   int result =
       trans_->Read(read_buf_.get(), 1024,
@@ -265,10 +273,10 @@ void TestTransactionConsumer::Read() {
 
 void TestTransactionConsumer::OnIOComplete(int result) {
   switch (state_) {
-    case STARTING:
+    case State::kStarting:
       DidStart(result);
       break;
-    case READING:
+    case State::kReading:
       DidRead(result);
       break;
     default:
@@ -503,6 +511,7 @@ int MockNetworkTransaction::StartInternal(const HttpRequestInfo* request,
 
   response_.was_cached = false;
   response_.network_accessed = true;
+  response_.remote_endpoint = t->transport_info.endpoint;
 
   response_.response_time = transaction_factory_->Now();
   if (!t->response_time.is_null())
@@ -513,6 +522,7 @@ int MockNetworkTransaction::StartInternal(const HttpRequestInfo* request,
   response_.ssl_info.cert = t->cert;
   response_.ssl_info.cert_status = t->cert_status;
   response_.ssl_info.connection_status = t->ssl_connection_status;
+  response_.dns_aliases = t->dns_aliases;
   data_ = resp_data;
   content_length_ = response_.headers->GetContentLength();
 
@@ -542,7 +552,7 @@ int MockNetworkTransaction::StartInternal(const HttpRequestInfo* request,
 
   int result = OK;
   if (!connected_callback_.is_null()) {
-    result = connected_callback_.Run(t->transport_info);
+    result = connected_callback_.Run(t->transport_info, base::DoNothing());
   }
 
   CallbackLater(std::move(callback), result);
@@ -565,9 +575,9 @@ int MockNetworkTransaction::ResumeNetworkStart() {
   return ERR_IO_PENDING;
 }
 
-void MockNetworkTransaction::GetConnectionAttempts(
-    ConnectionAttempts* out) const {
+ConnectionAttempts MockNetworkTransaction::GetConnectionAttempts() const {
   NOTIMPLEMENTED();
+  return {};
 }
 
 void MockNetworkTransaction::CloseConnectionOnDestruction() {
@@ -679,8 +689,14 @@ ConnectedHandler& ConnectedHandler::operator=(const ConnectedHandler&) =
 ConnectedHandler::ConnectedHandler(ConnectedHandler&&) = default;
 ConnectedHandler& ConnectedHandler::operator=(ConnectedHandler&&) = default;
 
-int ConnectedHandler::OnConnected(const TransportInfo& info) {
+int ConnectedHandler::OnConnected(const TransportInfo& info,
+                                  CompletionOnceCallback callback) {
   transports_.push_back(info);
+  if (run_callback_) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), result_));
+    return net::ERR_IO_PENDING;
+  }
   return result_;
 }
 

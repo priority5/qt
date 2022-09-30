@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtNetwork module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qnetworkcookie.h"
 #include "qnetworkcookie_p.h"
@@ -46,7 +10,7 @@
 #include "QtCore/qdebug.h"
 #include "QtCore/qlist.h"
 #include "QtCore/qlocale.h"
-#include <QtCore/qregexp.h>
+#include <QtCore/qregularexpression.h>
 #include "QtCore/qstring.h"
 #include "QtCore/qstringlist.h"
 #include "QtCore/qurl.h"
@@ -54,6 +18,10 @@
 #include "private/qobject_p.h"
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
+
+QT_IMPL_METATYPE_EXTERN(QNetworkCookie)
 
 /*!
     \class QNetworkCookie
@@ -220,6 +188,29 @@ bool QNetworkCookie::isSecure() const
 void QNetworkCookie::setSecure(bool enable)
 {
     d->secure = enable;
+}
+
+/*!
+    Returns the "SameSite" option if specified in the cookie
+    string, \c SameSite::Default if not present.
+
+    \since 6.1
+    \sa setSameSitePolicy()
+*/
+QNetworkCookie::SameSite QNetworkCookie::sameSitePolicy() const
+{
+    return d->sameSite;
+}
+
+/*!
+    Sets the "SameSite" option of this cookie to \a sameSite.
+
+    \since 6.1
+    \sa sameSitePolicy()
+*/
+void QNetworkCookie::setSameSitePolicy(QNetworkCookie::SameSite sameSite)
+{
+    d->sameSite = sameSite;
 }
 
 /*!
@@ -436,6 +427,49 @@ static QPair<QByteArray, QByteArray> nextField(const QByteArray &text, int &posi
 */
 
 /*!
+    \enum QNetworkCookie::SameSite
+    \since 6.1
+
+    \value Default  SameSite is not set. Can be interpreted as None or Lax by the browser.
+    \value None     Cookies can be sent in all contexts. This used to be default, but
+        recent browsers made Lax default, and will now require the cookie to be both secure and to set SameSite=None.
+    \value Lax      Cookies are sent on first party requests and GET requests initiated by third party website.
+        This is the default in modern browsers (since mid 2020).
+    \value Strict   Cookies will only be sent in a first-party context.
+
+    \sa setSameSitePolicy(), sameSitePolicy()
+*/
+
+namespace {
+QByteArray sameSiteToRawString(QNetworkCookie::SameSite samesite)
+{
+    switch (samesite) {
+    case QNetworkCookie::SameSite::None:
+        return QByteArrayLiteral("None");
+    case QNetworkCookie::SameSite::Lax:
+        return QByteArrayLiteral("Lax");
+    case QNetworkCookie::SameSite::Strict:
+        return QByteArrayLiteral("Strict");
+    case QNetworkCookie::SameSite::Default:
+        break;
+    }
+    return QByteArray();
+}
+
+QNetworkCookie::SameSite sameSiteFromRawString(QByteArray str)
+{
+    str = str.toLower();
+    if (str == QByteArrayLiteral("none"))
+        return QNetworkCookie::SameSite::None;
+    if (str == QByteArrayLiteral("lax"))
+        return QNetworkCookie::SameSite::Lax;
+    if (str == QByteArrayLiteral("strict"))
+        return QNetworkCookie::SameSite::Strict;
+    return QNetworkCookie::SameSite::Default;
+}
+} // namespace
+
+/*!
     Returns the raw form of this QNetworkCookie. The QByteArray
     returned by this function is suitable for an HTTP header, either
     in a server response (the Set-Cookie header) or the client request
@@ -460,18 +494,18 @@ QByteArray QNetworkCookie::toRawForm(RawForm form) const
             result += "; secure";
         if (isHttpOnly())
             result += "; HttpOnly";
-        if (!d->sameSite.isEmpty()) {
+        if (d->sameSite != SameSite::Default) {
             result += "; SameSite=";
-            result += d->sameSite;
+            result += sameSiteToRawString(d->sameSite);
         }
         if (!isSessionCookie()) {
             result += "; expires=";
             result += QLocale::c().toString(d->expirationDate.toUTC(),
-                                            QLatin1String("ddd, dd-MMM-yyyy hh:mm:ss 'GMT")).toLatin1();
+                                            "ddd, dd-MMM-yyyy hh:mm:ss 'GMT"_L1).toLatin1();
         }
         if (!d->domain.isEmpty()) {
             result += "; domain=";
-            if (d->domain.startsWith(QLatin1Char('.'))) {
+            if (d->domain.startsWith(u'.')) {
                 result += '.';
                 result += QUrl::toAce(d->domain.mid(1));
             } else {
@@ -598,7 +632,8 @@ static QDateTime parseDateString(const QByteArray &dateString)
     int zoneOffset = -1;
 
     // hour:minute:second.ms pm
-    QRegExp timeRx(QLatin1String("(\\d{1,2}):(\\d{1,2})(:(\\d{1,2})|)(\\.(\\d{1,3})|)((\\s{0,}(am|pm))|)"));
+    static const QRegularExpression timeRx(
+            u"(\\d\\d?):(\\d\\d?)(?::(\\d\\d?)(?:\\.(\\d{1,3}))?)?(?:\\s*(am|pm))?"_s);
 
     int at = 0;
     while (at < dateString.length()) {
@@ -678,21 +713,23 @@ static QDateTime parseDateString(const QByteArray &dateString)
             && (dateString[at + 2] == ':' || dateString[at + 1] == ':')) {
             // While the date can be found all over the string the format
             // for the time is set and a nice regexp can be used.
-            int pos = timeRx.indexIn(QLatin1String(dateString), at);
-            if (pos != -1) {
-                QStringList list = timeRx.capturedTexts();
-                int h = atoi(list.at(1).toLatin1().constData());
-                int m = atoi(list.at(2).toLatin1().constData());
-                int s = atoi(list.at(4).toLatin1().constData());
-                int ms = atoi(list.at(6).toLatin1().constData());
-                if (h < 12 && !list.at(9).isEmpty())
-                    if (list.at(9) == QLatin1String("pm"))
+            // This string needs to stay for as long as the QRegularExpressionMatch is used,
+            // or else we get use-after-free issues:
+            QString dateToString = QString::fromLatin1(dateString);
+            if (auto match = timeRx.match(dateToString, at); match.hasMatch()) {
+                int h = match.capturedView(1).toInt();
+                int m = match.capturedView(2).toInt();
+                int s = match.capturedView(3).toInt();
+                int ms = match.capturedView(4).toInt();
+                QStringView ampm = match.capturedView(5);
+                if (h < 12 && !ampm.isEmpty())
+                    if (ampm == "pm"_L1)
                         h += 12;
                 time = QTime(h, m, s, ms);
 #ifdef PARSEDATESTRINGDEBUG
-                qDebug() << "Time:" << list << timeRx.matchedLength();
+                qDebug() << "Time:" << match.capturedTexts() << match.capturedLength();
 #endif
-                at += timeRx.matchedLength();
+                at += match.capturedLength();
                 continue;
             }
         }
@@ -955,7 +992,7 @@ QList<QNetworkCookie> QNetworkCookiePrivate::parseSetCookieHeaderLine(const QByt
                     if (!rawDomain.isEmpty()) {
                         QString maybeLeadingDot;
                         if (rawDomain.startsWith('.')) {
-                            maybeLeadingDot = QLatin1Char('.');
+                            maybeLeadingDot = u'.';
                             rawDomain = rawDomain.mid(1);
                         }
 
@@ -997,7 +1034,7 @@ QList<QNetworkCookie> QNetworkCookiePrivate::parseSetCookieHeaderLine(const QByt
                 } else if (field.first == "httponly") {
                     cookie.setHttpOnly(true);
                 } else if (field.first == "samesite") {
-                    cookie.d->sameSite = field.second;
+                    cookie.setSameSitePolicy(sameSiteFromRawString(field.second));
                 } else {
                     // ignore unknown fields in the cookie (RFC6265 section 5.2, rule 6)
                 }
@@ -1023,9 +1060,9 @@ void QNetworkCookie::normalize(const QUrl &url)
     // don't do path checking. See QTBUG-5815
     if (d->path.isEmpty()) {
         QString pathAndFileName = url.path();
-        QString defaultPath = pathAndFileName.left(pathAndFileName.lastIndexOf(QLatin1Char('/'))+1);
+        QString defaultPath = pathAndFileName.left(pathAndFileName.lastIndexOf(u'/') + 1);
         if (defaultPath.isEmpty())
-            defaultPath = QLatin1Char('/');
+            defaultPath = u'/';
         d->path = defaultPath;
     }
 
@@ -1035,12 +1072,12 @@ void QNetworkCookie::normalize(const QUrl &url)
         QHostAddress hostAddress(d->domain);
         if (hostAddress.protocol() != QAbstractSocket::IPv4Protocol
                 && hostAddress.protocol() != QAbstractSocket::IPv6Protocol
-                && !d->domain.startsWith(QLatin1Char('.'))) {
+                && !d->domain.startsWith(u'.')) {
             // Ensure the domain starts with a dot if its field was not empty
             // in the HTTP header. There are some servers that forget the
             // leading dot and this is actually forbidden according to RFC 2109,
             // but all browsers accept it anyway so we do that as well.
-            d->domain.prepend(QLatin1Char('.'));
+            d->domain.prepend(u'.');
         }
     }
 }
@@ -1056,3 +1093,5 @@ QDebug operator<<(QDebug s, const QNetworkCookie &cookie)
 #endif
 
 QT_END_NAMESPACE
+
+#include "moc_qnetworkcookie.cpp"

@@ -12,13 +12,14 @@
 #include "cc/test/skia_common.h"
 #include "cc/test/test_paint_worklet_input.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 
 namespace cc {
 
 TEST(PaintImageTest, DecodesCorrectFrames) {
   std::vector<FrameMetadata> frames = {
-      FrameMetadata(true, base::TimeDelta::FromMilliseconds(2)),
-      FrameMetadata(true, base::TimeDelta::FromMilliseconds(3))};
+      FrameMetadata(true, base::Milliseconds(2)),
+      FrameMetadata(true, base::Milliseconds(3))};
   sk_sp<FakePaintImageGenerator> generator =
       sk_make_sp<FakePaintImageGenerator>(SkImageInfo::MakeN32Premul(10, 10),
                                           frames);
@@ -74,7 +75,8 @@ TEST(PaintImageTest, GetSkImageForFrameNotGeneratorBacked) {
 
 TEST(PaintImageTest, DecodeToYuv420NoAlpha) {
   const SkISize full_size = SkISize::Make(10, 10);
-  SkYUVAInfo yuva_info(full_size, SkYUVAInfo::PlanarConfig::kY_U_V_420,
+  SkYUVAInfo yuva_info(full_size, SkYUVAInfo::PlaneConfig::kY_U_V,
+                       SkYUVAInfo::Subsampling::k420,
                        kJPEG_Full_SkYUVColorSpace);
   SkYUVAPixmapInfo yuva_pixmap_info(yuva_info,
                                     SkYUVAPixmapInfo::DataType::kUnorm8,

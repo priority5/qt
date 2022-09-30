@@ -48,7 +48,7 @@ ScopedJavaLocalRef<jobject> JniPaymentApp::Create(
   ScopedJavaLocalRef<jobject> icon;
   if (app->payment_app_->icon_bitmap() &&
       !app->payment_app_->icon_bitmap()->drawsNothing()) {
-    icon = gfx::ConvertToJavaBitmap(app->payment_app_->icon_bitmap());
+    icon = gfx::ConvertToJavaBitmap(*app->payment_app_->icon_bitmap());
   }
 
   return Java_JniPaymentApp_Constructor(
@@ -111,7 +111,7 @@ ScopedJavaLocalRef<jstring> JniPaymentApp::GetCountryCode(JNIEnv* env) {
 }
 
 bool JniPaymentApp::CanMakePayment(JNIEnv* env) {
-  // PaymentRequestImpl.java uses this value to determine whether
+  // ChromePaymentRequestService.java uses this value to determine whether
   // PaymentRequest.hasEnrolledInstrument() should return true.
   return payment_app_->HasEnrolledInstrument();
 }
@@ -128,7 +128,7 @@ bool JniPaymentApp::IsUserGestureRequiredToSkipUi(JNIEnv* env) {
 void JniPaymentApp::InvokePaymentApp(JNIEnv* env,
                                      const JavaParamRef<jobject>& jcallback) {
   invoke_callback_ = jcallback;
-  payment_app_->InvokePaymentApp(/*delegate=*/this);
+  payment_app_->InvokePaymentApp(/*delegate=*/weak_ptr_factory_.GetWeakPtr());
 }
 
 void JniPaymentApp::UpdateWith(
@@ -156,18 +156,6 @@ void JniPaymentApp::AbortPaymentApp(JNIEnv* env,
       base::android::ScopedJavaGlobalRef<jobject>(env, jcallback)));
 }
 
-bool JniPaymentApp::IsReadyForMinimalUI(JNIEnv* env) {
-  return payment_app_->IsReadyForMinimalUI();
-}
-
-ScopedJavaLocalRef<jstring> JniPaymentApp::AccountBalance(JNIEnv* env) {
-  return ConvertUTF8ToJavaString(env, payment_app_->GetAccountBalance());
-}
-
-void JniPaymentApp::DisableShowingOwnUI(JNIEnv* env) {
-  payment_app_->DisableShowingOwnUI();
-}
-
 ScopedJavaLocalRef<jstring> JniPaymentApp::GetApplicationIdentifierToHide(
     JNIEnv* env) {
   return ConvertUTF8ToJavaString(
@@ -192,6 +180,20 @@ void JniPaymentApp::SetPaymentHandlerHost(
   payment_app_->SetPaymentHandlerHost(
       android::PaymentHandlerHost::FromJavaPaymentHandlerHost(
           env, jpayment_handler_host));
+}
+
+base::android::ScopedJavaLocalRef<jbyteArray>
+JniPaymentApp::SetAppSpecificResponseFields(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jpayment_response) {
+  mojom::PaymentResponsePtr response;
+  bool success =
+      android::DeserializeFromJavaByteBuffer(env, jpayment_response, &response);
+  DCHECK(success);
+  mojom::PaymentResponsePtr result =
+      payment_app_->SetAppSpecificResponseFields(std::move(response));
+  return base::android::ToJavaByteArray(
+      env, mojom::PaymentResponse::Serialize(&result));
 }
 
 void JniPaymentApp::FreeNativeObject(JNIEnv* env) {

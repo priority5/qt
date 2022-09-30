@@ -27,6 +27,8 @@ source_set("updater") {
     "request_queue_impl.h",
     "safe_manifest_parser.cc",
     "safe_manifest_parser.h",
+    "uninstall_ping_sender.cc",
+    "uninstall_ping_sender.h",
     "update_data_provider.cc",
     "update_data_provider.h",
     "update_service.cc",
@@ -35,16 +37,25 @@ source_set("updater") {
     "update_service_factory.h",
   ]
 
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
-  ]
-
   deps = [
+    ":keepalive",
+    "//base",
+    "//components/crx_file",
+    "//components/keyed_service/content",
     "//components/signin/public/identity_manager",
-    "//content/public/browser:browser",
+    "//components/update_client",
+    "//content/public/browser",
+    "//extensions/browser:browser_sources",
+    "//extensions/browser/install",
     "//extensions/common",
     "//extensions/strings",
     "//services/data_decoder/public/cpp",
+  ]
+}
+
+source_set("keepalive") {
+  sources = [
+    "scoped_extension_updater_keep_alive.cc",
+    "scoped_extension_updater_keep_alive.h",
   ]
 }

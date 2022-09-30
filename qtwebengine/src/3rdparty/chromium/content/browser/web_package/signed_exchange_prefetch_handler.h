@@ -8,9 +8,7 @@
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
-#include "base/optional.h"
-#include "base/time/time.h"
+#include "base/memory/raw_ptr.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -19,7 +17,9 @@
 #include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace network {
+class NetworkIsolationKey;
 class SharedURLLoaderFactory;
+struct ResourceRequest;
 }
 
 namespace blink {
@@ -54,9 +54,14 @@ class SignedExchangePrefetchHandler final
       scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory,
       URLLoaderThrottlesGetter loader_throttles_getter,
       network::mojom::URLLoaderClient* forwarding_client,
+      const net::NetworkIsolationKey& network_isolation_key,
       scoped_refptr<SignedExchangePrefetchMetricRecorder> metric_recorder,
       const std::string& accept_langs,
       bool keep_entry_for_prefetch_cache);
+
+  SignedExchangePrefetchHandler(const SignedExchangePrefetchHandler&) = delete;
+  SignedExchangePrefetchHandler& operator=(
+      const SignedExchangePrefetchHandler&) = delete;
 
   ~SignedExchangePrefetchHandler() override;
 
@@ -76,7 +81,9 @@ class SignedExchangePrefetchHandler final
 
  private:
   // network::mojom::URLLoaderClient overrides:
-  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head) override;
+  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head,
+                         mojo::ScopedDataPipeConsumerHandle body) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          network::mojom::URLResponseHeadPtr head) override;
   void OnUploadProgress(int64_t current_position,
@@ -92,9 +99,7 @@ class SignedExchangePrefetchHandler final
 
   std::unique_ptr<SignedExchangeLoader> signed_exchange_loader_;
 
-  network::mojom::URLLoaderClient* forwarding_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(SignedExchangePrefetchHandler);
+  raw_ptr<network::mojom::URLLoaderClient> forwarding_client_;
 };
 
 }  // namespace content

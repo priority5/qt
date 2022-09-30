@@ -1,34 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*
-  location.h
-*/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef LOCATION_H
 #define LOCATION_H
@@ -38,17 +9,15 @@
 
 QT_BEGIN_NAMESPACE
 
-class QRegExp;
+class QRegularExpression;
 
 class Location
 {
-    Q_DECLARE_TR_FUNCTIONS(QDoc::Location)
-
 public:
     Location();
-    Location(const QString &filePath);
+    explicit Location(const QString &filePath);
     Location(const Location &other);
-    ~Location() { delete stk; }
+    ~Location() { delete m_stk; }
 
     Location &operator=(const Location &other);
 
@@ -56,24 +25,25 @@ public:
     void advance(QChar ch);
     void advanceLines(int n)
     {
-        stkTop->lineNo += n;
-        stkTop->columnNo = 1;
+        m_stkTop->m_lineNo += n;
+        m_stkTop->m_columnNo = 1;
     }
 
     void push(const QString &filePath);
     void pop();
-    void setEtc(bool etc) { etcetera = etc; }
-    void setLineNo(int no) { stkTop->lineNo = no; }
-    void setColumnNo(int no) { stkTop->columnNo = no; }
+    void setEtc(bool etc) { m_etc = etc; }
+    void setLineNo(int no) { m_stkTop->m_lineNo = no; }
+    void setColumnNo(int no) { m_stkTop->m_columnNo = no; }
 
-    bool isEmpty() const { return stkDepth == 0; }
-    int depth() const { return stkDepth; }
-    const QString &filePath() const { return stkTop->filePath; }
-    QString fileName() const;
-    QString fileSuffix() const;
-    int lineNo() const { return stkTop->lineNo; }
-    int columnNo() const { return stkTop->columnNo; }
-    bool etc() const { return etcetera; }
+    [[nodiscard]] bool isEmpty() const { return m_stkDepth == 0; }
+    [[nodiscard]] int depth() const { return m_stkDepth; }
+    [[nodiscard]] const QString &filePath() const { return m_stkTop->m_filePath; }
+    [[nodiscard]] QString fileName() const;
+    [[nodiscard]] QString fileSuffix() const;
+    [[nodiscard]] int lineNo() const { return m_stkTop->m_lineNo; }
+    [[nodiscard]] int columnNo() const { return m_stkTop->m_columnNo; }
+    [[nodiscard]] bool etc() const { return m_etc; }
+    [[nodiscard]] QString toString() const;
     void warning(const QString &message, const QString &details = QString()) const;
     void error(const QString &message, const QString &details = QString()) const;
     void fatal(const QString &message, const QString &details = QString()) const;
@@ -84,7 +54,6 @@ public:
     static void terminate();
     static void information(const QString &message);
     static void internalError(const QString &hint);
-    static QString canonicalRelativePath(const QString &path);
     static int exitCode();
 
 private:
@@ -92,31 +61,30 @@ private:
 
     struct StackEntry
     {
-        QString filePath;
-        int lineNo;
-        int columnNo;
+        QString m_filePath {};
+        int m_lineNo {};
+        int m_columnNo {};
     };
     friend class QTypeInfo<StackEntry>;
 
     void emitMessage(MessageType type, const QString &message, const QString &details) const;
-    QString toString() const;
-    QString top() const;
+    [[nodiscard]] QString top() const;
 
 private:
-    StackEntry stkBottom;
-    QStack<StackEntry> *stk;
-    StackEntry *stkTop;
-    int stkDepth;
-    bool etcetera;
+    StackEntry m_stkBottom {};
+    QStack<StackEntry> *m_stk {};
+    StackEntry *m_stkTop {};
+    int m_stkDepth {};
+    bool m_etc {};
 
-    static int tabSize;
-    static int warningCount;
-    static int warningLimit;
-    static QString programName;
-    static QString project;
-    static QRegExp *spuriousRegExp;
+    static int s_tabSize;
+    static int s_warningCount;
+    static int s_warningLimit;
+    static QString s_programName;
+    static QString s_project;
+    static QRegularExpression *s_spuriousRegExp;
 };
-Q_DECLARE_TYPEINFO(Location::StackEntry, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(Location::StackEntry, Q_RELOCATABLE_TYPE);
 Q_DECLARE_TYPEINFO(Location, Q_COMPLEX_TYPE); // stkTop = &stkBottom
 
 QT_END_NAMESPACE

@@ -7,11 +7,14 @@
 
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
+namespace gfx {
+class Rect;
+}
+
 namespace blink {
 
 struct PaintInfo;
 struct PhysicalOffset;
-class IntRect;
 class NGPhysicalBoxFragment;
 
 class NGMathMLPainter {
@@ -23,11 +26,10 @@ class NGMathMLPainter {
   void Paint(const PaintInfo&, PhysicalOffset);
 
  private:
-  void PaintBar(const PaintInfo&, const IntRect&);
-  void PaintFractionBar(const PaintInfo&,
-                        PhysicalOffset);
-  void PaintRadicalSymbol(const PaintInfo&,
-                          PhysicalOffset);
+  void PaintBar(const PaintInfo&, const gfx::Rect&);
+  void PaintFractionBar(const PaintInfo&, PhysicalOffset);
+  void PaintOperator(const PaintInfo&, PhysicalOffset);
+  void PaintRadicalSymbol(const PaintInfo&, PhysicalOffset);
   void PaintStretchyOrLargeOperator(const PaintInfo&, PhysicalOffset);
 
   const NGPhysicalBoxFragment& box_fragment_;

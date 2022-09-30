@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtSensors module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <QDir>
 #include <QPluginLoader>
@@ -84,7 +48,7 @@ QSensorGesture::QSensorGesture(const QStringList &ids, QObject *parent) :
     QObject(parent)
 {
     d_ptr = new QSensorGesturePrivate();
-    Q_FOREACH (const QString &id, ids) {
+    for (const QString &id : ids) {
         QSensorGestureRecognizer * rec = QSensorGestureManager::sensorGestureRecognizer(id);
         if (rec != 0) {
             d_ptr->m_sensorRecognizers.append(rec);
@@ -101,8 +65,8 @@ QSensorGesture::QSensorGesture(const QStringList &ids, QObject *parent) :
     builder.setSuperClass(&QObject::staticMetaObject);
     builder.setClassName("QSensorGesture");
 
-    Q_FOREACH (QSensorGestureRecognizer *recognizer,  d_ptr->m_sensorRecognizers) {
-        Q_FOREACH (const QString &gesture, recognizer->gestureSignals()) {
+    for (QSensorGestureRecognizer *recognizer : d_ptr->m_sensorRecognizers) {
+        for (const QString &gesture : recognizer->gestureSignals()) {
             QMetaMethodBuilder b =  builder.addSignal(gesture.toLatin1());
             if (!d_ptr->localGestureSignals.contains(QLatin1String(b.signature())))
                 d_ptr->localGestureSignals.append(QLatin1String(b.signature()));
@@ -153,7 +117,7 @@ void QSensorGesture::startDetection()
     if (d_ptr->isActive)
         return;
 
-    Q_FOREACH (QSensorGestureRecognizer *recognizer,  d_ptr->m_sensorRecognizers) {
+    for (QSensorGestureRecognizer *recognizer : d_ptr->m_sensorRecognizers) {
 
         Q_ASSERT(recognizer !=0);
 
@@ -161,7 +125,7 @@ void QSensorGesture::startDetection()
                 this,SIGNAL(detected(QString)),Qt::UniqueConnection);
 
         //connect recognizer signals
-        Q_FOREACH (QString method, recognizer->gestureSignals()) {
+        for (QString method : recognizer->gestureSignals()) {
             method.prepend(QLatin1String("2"));
             connect(recognizer, method.toLatin1(),
                     this, method.toLatin1(), Qt::UniqueConnection);
@@ -183,11 +147,11 @@ void QSensorGesture::stopDetection()
     if (!d_ptr->isActive)
         return;
 
-    Q_FOREACH (QSensorGestureRecognizer *recognizer,  d_ptr->m_sensorRecognizers) {
+    for (QSensorGestureRecognizer *recognizer : d_ptr->m_sensorRecognizers) {
         disconnect(recognizer,SIGNAL(detected(QString)),
                    this,SIGNAL(detected(QString)));
         //disconnect recognizer signals
-        Q_FOREACH (QString method,recognizer->gestureSignals()) {
+        for (QString method : recognizer->gestureSignals()) {
             method.prepend(QLatin1String("2"));
             disconnect(recognizer, method.toLatin1(),
                        this, method.toLatin1());

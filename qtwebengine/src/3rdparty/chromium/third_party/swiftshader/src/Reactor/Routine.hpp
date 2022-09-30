@@ -15,6 +15,16 @@
 #ifndef rr_Routine_hpp
 #define rr_Routine_hpp
 
+// A Clang extension to determine compiler features.
+// We use it to detect Sanitizer builds (e.g. -fsanitize=memory).
+#ifndef __has_feature
+#	define __has_feature(x) 0
+#endif
+
+#if __has_feature(memory_sanitizer)
+#	include "sanitizer/msan_interface.h"
+#endif
+
 #include <memory>
 
 namespace rr {
@@ -28,7 +38,7 @@ public:
 	virtual const void *getEntry(int index = 0) const = 0;
 };
 
-// RoutineT is a type-safe wrapper around a Routine and its callable entry, returned by FunctionT
+// RoutineT is a type-safe wrapper around a Routine and its function entry, returned by FunctionT
 template<typename FunctionType>
 class RoutineT;
 
@@ -36,6 +46,8 @@ template<typename Return, typename... Arguments>
 class RoutineT<Return(Arguments...)>
 {
 public:
+	using FunctionType = Return (*)(Arguments...);
+
 	RoutineT() = default;
 
 	explicit RoutineT(const std::shared_ptr<Routine> &routine)
@@ -43,30 +55,34 @@ public:
 	{
 		if(routine)
 		{
-			callable = reinterpret_cast<CallableType>(const_cast<void *>(routine->getEntry(0)));
+			function = reinterpret_cast<FunctionType>(const_cast<void *>(routine->getEntry(0)));
 		}
 	}
 
 	operator bool() const
 	{
-		return callable != nullptr;
+		return function != nullptr;
 	}
 
 	template<typename... Args>
-	Return operator()(Args &&... args) const
+	Return operator()(Args... args) const
 	{
-		return callable(std::forward<Args>(args)...);
+#if __has_feature(memory_sanitizer)
+		// TODO(b/228253151): Fix support for detecting uninitialized parameters.
+		__msan_unpoison_param(sizeof...(args));
+#endif
+
+		return function(args...);
 	}
 
-	const void *getEntry() const
+	const FunctionType getEntry() const
 	{
-		return reinterpret_cast<void *>(callable);
+		return function;
 	}
 
 private:
 	std::shared_ptr<Routine> routine;
-	using CallableType = Return (*)(Arguments...);
-	CallableType callable = nullptr;
+	FunctionType function = nullptr;
 };
 
 }  // namespace rr

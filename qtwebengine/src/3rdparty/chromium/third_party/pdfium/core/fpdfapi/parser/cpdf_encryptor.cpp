@@ -7,10 +7,11 @@
 #include "core/fpdfapi/parser/cpdf_encryptor.h"
 
 #include "core/fpdfapi/parser/cpdf_crypto_handler.h"
+#include "third_party/base/check.h"
 
-CPDF_Encryptor::CPDF_Encryptor(CPDF_CryptoHandler* pHandler, int objnum)
+CPDF_Encryptor::CPDF_Encryptor(const CPDF_CryptoHandler* pHandler, int objnum)
     : m_pHandler(pHandler), m_ObjNum(objnum) {
-  ASSERT(m_pHandler);
+  DCHECK(m_pHandler);
 }
 
 std::vector<uint8_t, FxAllocAllocator<uint8_t>> CPDF_Encryptor::Encrypt(
@@ -19,7 +20,7 @@ std::vector<uint8_t, FxAllocAllocator<uint8_t>> CPDF_Encryptor::Encrypt(
     return std::vector<uint8_t, FxAllocAllocator<uint8_t>>();
 
   std::vector<uint8_t, FxAllocAllocator<uint8_t>> result;
-  uint32_t buf_size = m_pHandler->EncryptGetSize(src_data);
+  size_t buf_size = m_pHandler->EncryptGetSize(src_data);
   result.resize(buf_size);
   m_pHandler->EncryptContent(m_ObjNum, 0, src_data, result.data(),
                              buf_size);  // Updates |buf_size| with actual.

@@ -8,6 +8,7 @@
 #include "components/viz/common/quads/compositor_render_pass.h"
 #include "services/viz/public/cpp/compositing/compositor_render_pass_id_mojom_traits.h"
 #include "services/viz/public/cpp/compositing/shared_quad_state_mojom_traits.h"
+#include "services/viz/public/cpp/compositing/subtree_capture_id_mojom_traits.h"
 #include "services/viz/public/cpp/crash_keys.h"
 #include "ui/gfx/mojom/display_color_spaces_mojom_traits.h"
 
@@ -25,7 +26,10 @@ bool StructTraits<viz::mojom::CompositorRenderPassDataView,
       !data.ReadFilters(&(*out)->filters) ||
       !data.ReadBackdropFilters(&(*out)->backdrop_filters) ||
       !data.ReadBackdropFilterBounds(&(*out)->backdrop_filter_bounds) ||
+      !data.ReadSubtreeCaptureId(&(*out)->subtree_capture_id) ||
+      !data.ReadSubtreeSize(&(*out)->subtree_size) ||
       !data.ReadCopyRequests(&(*out)->copy_requests) ||
+      !data.ReadSharedElementResourceId(&(*out)->shared_element_resource_id) ||
       !data.ReadId(&(*out)->id)) {
     return false;
   }
@@ -34,7 +38,14 @@ bool StructTraits<viz::mojom::CompositorRenderPassDataView,
     viz::SetDeserializationCrashKeyString("Invalid render pass ID");
     return false;
   }
+  if ((*out)->subtree_size.width() > (*out)->output_rect.size().width() ||
+      (*out)->subtree_size.height() > (*out)->output_rect.size().height()) {
+    return false;
+  }
+
   (*out)->has_transparent_background = data.has_transparent_background();
+  (*out)->has_per_quad_damage = data.has_per_quad_damage();
+
   (*out)->cache_render_pass = data.cache_render_pass();
   (*out)->has_damage_from_contributing_content =
       data.has_damage_from_contributing_content();

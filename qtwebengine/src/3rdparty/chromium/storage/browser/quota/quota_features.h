@@ -14,15 +14,22 @@ namespace storage {
 namespace features {
 
 COMPONENT_EXPORT(STORAGE_BROWSER)
-extern const base::Feature kIncognitoDynamicQuota;
-extern const base::FeatureParam<double> kIncognitoQuotaRatioLowerBound;
-extern const base::FeatureParam<double> kIncognitoQuotaRatioUpperBound;
+extern const base::Feature kStoragePressureEvent;
 
 COMPONENT_EXPORT(STORAGE_BROWSER)
-extern const base::Feature kStoragePressureEvent;
+extern const base::Feature kStorageQuotaSettings;
+extern const base::FeatureParam<double> kMustRemainAvailableBytes;
+extern const base::FeatureParam<double> kMustRemainAvailableRatio;
+extern const base::FeatureParam<double> kPoolSizeBytes;
+extern const base::FeatureParam<double> kPoolSizeRatio;
+extern const base::FeatureParam<double> kShouldRemainAvailableBytes;
+extern const base::FeatureParam<double> kShouldRemainAvailableRatio;
+
+COMPONENT_EXPORT(STORAGE_BROWSER)
+extern const base::Feature kOnlySendStoragePolicyUpdatesForModifiedOrigins;
 
 }  // namespace features
 
 }  // namespace storage
 
-#endif  // STORAGE_QUOTA_QUOTA_FEATURES_H_
+#endif  // STORAGE_BROWSER_QUOTA_QUOTA_FEATURES_H_

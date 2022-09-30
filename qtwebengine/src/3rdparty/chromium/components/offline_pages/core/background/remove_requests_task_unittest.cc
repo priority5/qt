@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/offline_pages/core/background/request_queue_store.h"
@@ -24,15 +24,6 @@ const int64_t kRequestId3 = 44;
 
 const ClientId kClientId1("bookmark", "1234");
 const ClientId kClientId2("async", "5678");
-
-// TODO(https://crbug.com/1042727): Fix test GURL scoping and remove this getter
-// function.
-GURL Url1() {
-  return GURL("http://example.com");
-}
-GURL Url2() {
-  return GURL("http://another-example.com");
-}
 
 class RemoveRequestsTaskTest : public RequestQueueTaskTestBase {
  public:
@@ -60,12 +51,12 @@ void RemoveRequestsTaskTest::PumpLoop() {
 
 void RemoveRequestsTaskTest::AddRequestsToStore() {
   base::Time creation_time = OfflineTimeNow();
-  SavePageRequest request_1(kRequestId1, Url1(), kClientId1, creation_time,
-                            true);
+  SavePageRequest request_1(kRequestId1, GURL("http://example.com"), kClientId1,
+                            creation_time, true);
   store_.AddRequest(request_1, RequestQueue::AddOptions(),
                     base::BindOnce(&RemoveRequestsTaskTest::AddRequestDone));
-  SavePageRequest request_2(kRequestId2, Url2(), kClientId2, creation_time,
-                            true);
+  SavePageRequest request_2(kRequestId2, GURL("http://another-example.com"),
+                            kClientId2, creation_time, true);
   store_.AddRequest(request_2, RequestQueue::AddOptions(),
                     base::BindOnce(&RemoveRequestsTaskTest::AddRequestDone));
   PumpLoop();

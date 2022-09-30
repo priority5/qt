@@ -29,6 +29,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_FACTORY_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_FACTORY_H_
 
+#include <memory>
+
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -38,14 +40,12 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_open_db_request.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 class ExceptionState;
 class ScriptState;
-class IndexedDBDatabaseCallbacksImpl;
 class WebIDBCallbacks;
 
 class MODULES_EXPORT IDBFactory final : public ScriptWrappable {
@@ -70,12 +70,14 @@ class MODULES_EXPORT IDBFactory final : public ScriptWrappable {
               ExceptionState&);
 
   // These are not exposed to the web applications and only used by DevTools.
-  IDBRequest* GetDatabaseNames(ScriptState*, ExceptionState&);
   IDBOpenDBRequest* CloseConnectionsAndDeleteDatabase(ScriptState*,
                                                       const String& name,
                                                       ExceptionState&);
 
   ScriptPromise GetDatabaseInfo(ScriptState*, ExceptionState&);
+  // This method is exposed specifically for DevTools.
+  void GetDatabaseInfo(ScriptState*,
+                       std::unique_ptr<mojom::blink::IDBCallbacks> callbacks);
 
   void SetFactoryForTesting(mojo::Remote<mojom::blink::IDBFactory> factory);
 
@@ -98,9 +100,6 @@ class MODULES_EXPORT IDBFactory final : public ScriptWrappable {
 
   mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks> GetCallbacksProxy(
       std::unique_ptr<WebIDBCallbacks> callbacks);
-  mojo::PendingAssociatedRemote<mojom::blink::IDBDatabaseCallbacks>
-  GetDatabaseCallbacksProxy(
-      std::unique_ptr<IndexedDBDatabaseCallbacksImpl> callbacks);
   mojo::PendingRemote<mojom::blink::ObservedFeature> GetObservedFeature();
 
   mojo::Remote<mojom::blink::IDBFactory> factory_;

@@ -19,7 +19,6 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 
 using base::Time;
-using base::TimeDelta;
 using gaia::ListedAccount;
 using signin_metrics::AccountRelation;
 using signin_metrics::ReportingType;
@@ -37,37 +36,26 @@ bool AreSame(const CoreAccountInfo& info, const ListedAccount& account) {
 
 // Returns the extended info for the primary account (no consent required) if
 // available.
-base::Optional<AccountInfo> GetExtendedAccountInfo(
-    signin::IdentityManager* identity_manager) {
+AccountInfo GetExtendedAccountInfo(signin::IdentityManager* identity_manager) {
   CoreAccountId account_id =
-      identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kNotRequired);
+      identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kSignin);
   if (account_id.empty())
-    return base::nullopt;
-  return identity_manager
-      ->FindExtendedAccountInfoForAccountWithRefreshTokenByAccountId(
-          account_id);
+    return AccountInfo();
+  return identity_manager->FindExtendedAccountInfoByAccountId(account_id);
 }
 
 // Returns true if there is primary account (no consent required) but no
 // extended info, yet.
 bool WaitingForExtendedInfo(signin::IdentityManager* identity_manager) {
-  if (!identity_manager->HasPrimaryAccount(signin::ConsentLevel::kNotRequired))
+  if (!identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin))
     return false;
-  return !GetExtendedAccountInfo(identity_manager).has_value();
-}
-
-// Returns true if the account is managed.
-// TODO(crbug.com/1122496): Move this helper into AccountInfo to reduce code
-// duplication (replaces other instances of such a helper function as well).
-bool IsManaged(const AccountInfo& account_info) {
-  return !account_info.hosted_domain.empty() &&
-         account_info.hosted_domain != kNoHostedDomainFound;
+  return GetExtendedAccountInfo(identity_manager).IsEmpty();
 }
 
 }  // namespace
 
-const TimeDelta AccountInvestigator::kPeriodicReportingInterval =
-    TimeDelta::FromDays(1);
+const base::TimeDelta AccountInvestigator::kPeriodicReportingInterval =
+    base::Days(1);
 
 AccountInvestigator::AccountInvestigator(
     PrefService* pref_service,
@@ -85,7 +73,8 @@ void AccountInvestigator::RegisterPrefs(PrefRegistrySimple* registry) {
 
 void AccountInvestigator::Initialize() {
   identity_manager_->AddObserver(this);
-  previously_authenticated_ = identity_manager_->HasPrimaryAccount();
+  previously_authenticated_ =
+      identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync);
 
   // TODO(crbug.com/1121923): Refactor to use signin::PersistentRepeatingTimer
   // instead.
@@ -93,7 +82,7 @@ void AccountInvestigator::Initialize() {
       pref_service_->GetDouble(prefs::kGaiaCookiePeriodicReportTime));
   if (previous.is_null())
     previous = Time::Now();
-  const TimeDelta delay =
+  const base::TimeDelta delay =
       CalculatePeriodicDelay(previous, Time::Now(), kPeriodicReportingInterval);
   timer_.Start(FROM_HERE, delay, this, &AccountInvestigator::TryPeriodicReport);
 }
@@ -125,7 +114,8 @@ void AccountInvestigator::OnAccountsInCookieUpdated(
   const std::string old_hash(pref_service_->GetString(prefs::kGaiaCookieHash));
   const std::string new_hash(
       HashAccounts(signed_in_accounts, signed_out_accounts));
-  const bool currently_authenticated = identity_manager_->HasPrimaryAccount();
+  const bool currently_authenticated =
+      identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync);
   if (old_hash != new_hash) {
     SharedCookieJarReport(signed_in_accounts, signed_out_accounts, Time::Now(),
                           ReportingType::ON_CHANGE);
@@ -154,13 +144,14 @@ void AccountInvestigator::OnExtendedAccountInfoUpdated(
 }
 
 // static
-TimeDelta AccountInvestigator::CalculatePeriodicDelay(Time previous,
-                                                      Time now,
-                                                      TimeDelta interval) {
+base::TimeDelta AccountInvestigator::CalculatePeriodicDelay(
+    Time previous,
+    Time now,
+    base::TimeDelta interval) {
   // Don't allow negatives incase previous is in the future.
-  const TimeDelta age = std::max(now - previous, TimeDelta());
+  const base::TimeDelta age = std::max(now - previous, base::TimeDelta());
   // Don't allow negative intervals for very old things.
-  return std::max(interval - age, TimeDelta());
+  return std::max(interval - age, base::TimeDelta());
 }
 
 // static
@@ -247,14 +238,12 @@ void AccountInvestigator::DoPeriodicReport(
 
   // Report extra metrics only for signed-in accounts that are split by the
   // primary account type.
-  if (identity_manager_->HasPrimaryAccount(
-          signin::ConsentLevel::kNotRequired)) {
+  if (identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSignin)) {
     const bool is_syncing =
         identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync);
-    base::Optional<AccountInfo> info =
-        GetExtendedAccountInfo(identity_manager_);
+    AccountInfo info = GetExtendedAccountInfo(identity_manager_);
     signin_metrics::LogSignedInCookiesCountsPerPrimaryAccountType(
-        signed_in_accounts.size(), is_syncing, IsManaged(*info));
+        signed_in_accounts.size(), is_syncing, info.IsManaged());
   }
 
   periodic_pending_ = false;
@@ -271,9 +260,9 @@ void AccountInvestigator::SharedCookieJarReport(
     const ReportingType type) {
   const Time last_changed = Time::FromDoubleT(
       pref_service_->GetDouble(prefs::kGaiaCookieChangedTime));
-  TimeDelta stable_age;
+  base::TimeDelta stable_age;
   if (!last_changed.is_null())
-    stable_age = std::max(now - last_changed, TimeDelta());
+    stable_age = std::max(now - last_changed, base::TimeDelta());
   signin_metrics::LogCookieJarStableAge(stable_age, type);
 
   int signed_in_count = signed_in_accounts.size();
@@ -281,7 +270,7 @@ void AccountInvestigator::SharedCookieJarReport(
   signin_metrics::LogCookieJarCounts(signed_in_count, signed_out_count,
                                      signed_in_count + signed_out_count, type);
 
-  if (identity_manager_->HasPrimaryAccount()) {
+  if (identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync)) {
     SignedInAccountRelationReport(signed_in_accounts, signed_out_accounts,
                                   type);
   }
@@ -289,7 +278,7 @@ void AccountInvestigator::SharedCookieJarReport(
   // IsShared is defined as true if the local cookie jar contains at least one
   // signed out account and a stable age of less than one day.
   signin_metrics::LogIsShared(
-      signed_out_count >= 1 && stable_age < TimeDelta::FromDays(1), type);
+      signed_out_count >= 1 && stable_age < base::Days(1), type);
 }
 
 void AccountInvestigator::SignedInAccountRelationReport(
@@ -297,7 +286,8 @@ void AccountInvestigator::SignedInAccountRelationReport(
     const std::vector<ListedAccount>& signed_out_accounts,
     ReportingType type) {
   signin_metrics::LogAccountRelation(
-      DiscernRelation(identity_manager_->GetPrimaryAccountInfo(),
-                      signed_in_accounts, signed_out_accounts),
+      DiscernRelation(
+          identity_manager_->GetPrimaryAccountInfo(signin::ConsentLevel::kSync),
+          signed_in_accounts, signed_out_accounts),
       type);
 }

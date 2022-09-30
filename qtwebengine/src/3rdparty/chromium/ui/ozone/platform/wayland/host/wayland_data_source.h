@@ -9,12 +9,12 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/notreached.h"
 #include "ui/ozone/platform/wayland/common/wayland_object.h"
 
 struct wl_data_source;
 struct gtk_primary_selection_source;
+struct zwp_primary_selection_source_v1;
 
 namespace wl {
 template <typename T>
@@ -34,12 +34,12 @@ class WaylandConnection;
 // Implementation wise, these variants are share a single class template, with
 // specializations defined for each underlying supported extensions. Below are
 // the type aliases for the variants currently supported.
-//
-// TODO(crbug.com/1088132): Support standard primary selection extension.
 
 using WaylandDataSource = wl::DataSource<wl_data_source>;
 
 using GtkPrimarySelectionSource = wl::DataSource<gtk_primary_selection_source>;
+
+using ZwpPrimarySelectionSource = wl::DataSource<zwp_primary_selection_source_v1>;
 
 }  // namespace ui
 
@@ -71,7 +71,7 @@ class DataSource {
 
   void Initialize();
   void Offer(const std::vector<std::string>& mime_types);
-  void SetAction(int operation);
+  void SetDndActions(uint32_t dnd_actions);
 
   uint32_t dnd_action() const { return dnd_action_; }
   T* data_source() const { return data_source_.get(); }
@@ -94,7 +94,7 @@ class DataSource {
   Delegate* const delegate_;
 
   // Action selected by the compositor
-  uint32_t dnd_action_;
+  uint32_t dnd_action_ = 0;
 };
 
 }  // namespace wl

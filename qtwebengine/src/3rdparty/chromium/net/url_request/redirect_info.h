@@ -10,13 +10,13 @@
 #include "net/base/net_export.h"
 #include "net/cookies/site_for_cookies.h"
 #include "net/url_request/referrer_policy.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace net {
 
 // RedirectInfo captures information about a redirect and any fields in a
-// request that change. This struct must be kept in sync with
-// content/common/resource_messages.h.
+// request that change.
 struct NET_EXPORT RedirectInfo {
   // First-party URL redirect policy: During server redirects, the first-party
   // URL for cookies normally doesn't change. However, if the request is a
@@ -46,7 +46,7 @@ struct NET_EXPORT RedirectInfo {
       // The new location URL of the redirect response.
       const GURL& new_location,
       // Referrer-Policy header of the redirect response.
-      const base::Optional<std::string>& referrer_policy_header,
+      const absl::optional<std::string>& referrer_policy_header,
       // Whether the URL was upgraded to HTTPS due to upgrade-insecure-requests.
       bool insecure_scheme_was_upgraded,
       // This method copies the URL fragment of the original URL to the new URL

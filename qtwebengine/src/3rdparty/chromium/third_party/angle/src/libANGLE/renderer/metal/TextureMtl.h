@@ -15,9 +15,10 @@
 #include "common/PackedEnums.h"
 #include "libANGLE/renderer/TextureImpl.h"
 #include "libANGLE/renderer/metal/RenderTargetMtl.h"
+#include "libANGLE/renderer/metal/SurfaceMtl.h"
 #include "libANGLE/renderer/metal/mtl_command_buffer.h"
+#include "libANGLE/renderer/metal/mtl_context_device.h"
 #include "libANGLE/renderer/metal/mtl_resources.h"
-
 namespace rx
 {
 
@@ -32,6 +33,8 @@ class TextureMtl : public TextureImpl
 {
   public:
     TextureMtl(const gl::TextureState &state);
+    // Texture  view
+    TextureMtl(const TextureMtl &mtl, GLenum format);
     ~TextureMtl() override;
     void onDestroy(const gl::Context *context) override;
 
@@ -115,7 +118,8 @@ class TextureMtl : public TextureImpl
                                            gl::MemoryObject *memoryObject,
                                            GLuint64 offset,
                                            GLbitfield createFlags,
-                                           GLbitfield usageFlags) override;
+                                           GLbitfield usageFlags,
+                                           const void *imageCreateInfoPNext) override;
 
     angle::Result setEGLImageTarget(const gl::Context *context,
                                     gl::TextureType type,
@@ -162,10 +166,12 @@ class TextureMtl : public TextureImpl
     angle::Result bindToShader(const gl::Context *context,
                                mtl::RenderCommandEncoder *cmdEncoder,
                                gl::ShaderType shaderType,
+                               gl::Sampler *sampler, /** nullable */
                                int textureSlotIndex,
                                int samplerSlotIndex);
 
     const mtl::Format &getFormat() const { return mFormat; }
+    const mtl::TextureRef &getNativeTexture() const { return mNativeTexture; }
 
   private:
     void releaseTexture(bool releaseImages);
@@ -174,21 +180,24 @@ class TextureMtl : public TextureImpl
                                       gl::TextureType type,
                                       GLuint mips,
                                       const gl::Extents &size);
+    angle::Result onBaseMaxLevelsChanged(const gl::Context *context);
     angle::Result ensureSamplerStateCreated(const gl::Context *context);
     // Ensure image at given index is created:
     angle::Result ensureImageCreated(const gl::Context *context, const gl::ImageIndex &index);
     // Ensure all image views at all faces/levels are retained.
     void retainImageDefinitions();
-    mtl::TextureRef createImageViewFromNativeTexture(GLuint cubeFaceOrZero, GLuint nativeLevel);
+    mtl::TextureRef createImageViewFromNativeTexture(GLuint cubeFaceOrZero,
+                                                     const mtl::MipmapNativeLevel &nativeLevel);
     angle::Result ensureNativeLevelViewsCreated();
     angle::Result checkForEmulatedChannels(const gl::Context *context,
                                            const mtl::Format &mtlFormat,
                                            const mtl::TextureRef &texture);
-    int getNativeLevel(const gl::ImageIndex &imageIndex) const;
+    mtl::MipmapNativeLevel getNativeLevel(const gl::ImageIndex &imageIndex) const;
     mtl::TextureRef &getImage(const gl::ImageIndex &imageIndex);
     ImageDefinitionMtl &getImageDefinition(const gl::ImageIndex &imageIndex);
     RenderTargetMtl &getRenderTarget(const gl::ImageIndex &imageIndex);
     bool isIndexWithinMinMaxLevels(const gl::ImageIndex &imageIndex) const;
+    mtl::TextureRef &getImplicitMSTexture(const gl::ImageIndex &imageIndex);
 
     // If levels = 0, this function will create full mipmaps texture.
     angle::Result setStorageImpl(const gl::Context *context,
@@ -225,19 +234,22 @@ class TextureMtl : public TextureImpl
                                    const gl::Offset &destOffset,
                                    const gl::Rectangle &sourceArea,
                                    const gl::InternalFormat &internalFormat,
-                                   gl::Framebuffer *source);
+                                   const FramebufferMtl *source,
+                                   const RenderTargetMtl *sourceRtt);
     angle::Result copySubImageWithDraw(const gl::Context *context,
                                        const gl::ImageIndex &index,
                                        const gl::Offset &destOffset,
                                        const gl::Rectangle &sourceArea,
                                        const gl::InternalFormat &internalFormat,
-                                       gl::Framebuffer *source);
+                                       const FramebufferMtl *source,
+                                       const RenderTargetMtl *sourceRtt);
     angle::Result copySubImageCPU(const gl::Context *context,
                                   const gl::ImageIndex &index,
                                   const gl::Offset &destOffset,
                                   const gl::Rectangle &sourceArea,
                                   const gl::InternalFormat &internalFormat,
-                                  gl::Framebuffer *source);
+                                  const FramebufferMtl *source,
+                                  const RenderTargetMtl *sourceRtt);
 
     angle::Result copySubTextureImpl(const gl::Context *context,
                                      const gl::ImageIndex &index,
@@ -254,7 +266,7 @@ class TextureMtl : public TextureImpl
                                          const gl::ImageIndex &index,
                                          const gl::Offset &destOffset,
                                          const gl::InternalFormat &internalFormat,
-                                         uint32_t sourceNativeLevel,
+                                         const mtl::MipmapNativeLevel &sourceNativeLevel,
                                          const gl::Box &sourceBox,
                                          const angle::Format &sourceAngleFormat,
                                          bool unpackFlipY,
@@ -266,7 +278,7 @@ class TextureMtl : public TextureImpl
                                     const gl::ImageIndex &index,
                                     const gl::Offset &destOffset,
                                     const gl::InternalFormat &internalFormat,
-                                    uint32_t sourceNativeLevel,
+                                    const mtl::MipmapNativeLevel &sourceNativeLevel,
                                     const gl::Box &sourceBox,
                                     const angle::Format &sourceAngleFormat,
                                     bool unpackFlipY,
@@ -305,8 +317,9 @@ class TextureMtl : public TextureImpl
     angle::Result generateMipmapCPU(const gl::Context *context);
 
     mtl::Format mFormat;
+    SurfaceMtl *mBoundSurface = nil;
     // The real texture used by Metal draw calls.
-    mtl::TextureRef mNativeTexture;
+    mtl::TextureRef mNativeTexture         = nil;
     id<MTLSamplerState> mMetalSamplerState = nil;
 
     // Number of slices
@@ -316,23 +329,23 @@ class TextureMtl : public TextureImpl
     // Once the images array is complete, they will be transferred to real texture object.
     // NOTE:
     //  - The second dimension is indexed by configured base level + actual native level
-    //  - For Cube map, there will be at most 6 entries in the mTexImageDefs table, one for each
-    //  face. This is because the Cube map's image is defined per face & per level.
+    //  - For Cube map, there will be at most 6 entries in the map table, one for each face. This is
+    //  because the Cube map's image is defined per face & per level.
     //  - For other texture types, there will be only one entry in the map table. All other textures
     //  except Cube map has texture image defined per level (all slices included).
+    //  - These three variables' second dimension are indexed by image index (base level included).
     std::map<int, gl::TexLevelArray<ImageDefinitionMtl>> mTexImageDefs;
-
-    // Render Target per slice/depth/cube face.
-    // - For 2D texture: There will be one key entry in the map.
-    // - For Cube map: There will be at most 6 key entries.
-    // - For array/3D texture: There will be at most slices/depths number of key entries.
-    // - The second dimension is indexed by configured base level + actual native level
     std::map<int, gl::TexLevelArray<RenderTargetMtl>> mPerLayerRenderTargets;
+    std::map<int, gl::TexLevelArray<mtl::TextureRef>> mImplicitMSTextures;
 
     // Mipmap views are indexed by native level (ignored base level):
-    gl::TexLevelArray<mtl::TextureRef> mNativeLevelViews;
+    mtl::NativeTexLevelArray mNativeLevelViews;
 
-    bool mIsPow2 = false;
+    // The swizzled view used for shader sampling.
+    mtl::TextureRef mNativeSwizzleSamplingView;
+
+    GLuint mCurrentBaseLevel = 0;
+    GLuint mCurrentMaxLevel  = 1000;
 };
 
 }  // namespace rx

@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qdesigner_workbench.h"
 #include "qdesigner.h"
@@ -48,16 +23,6 @@
 #include <QtDesigner/private/formwindowbase_p.h>
 #include <QtDesigner/private/actioneditor_p.h>
 
-#include <QtCore/qdir.h>
-#include <QtCore/qfile.h>
-#include <QtCore/qurl.h>
-#include <QtCore/qtimer.h>
-#include <QtCore/qpluginloader.h>
-#include <QtCore/qdebug.h>
-
-#include <QtWidgets/qactiongroup.h>
-#include <QtGui/qevent.h>
-#include <QtGui/qscreen.h>
 #include <QtWidgets/qdockwidget.h>
 #include <QtWidgets/qmenu.h>
 #include <QtWidgets/qmenubar.h>
@@ -67,6 +32,18 @@
 #include <QtWidgets/qmdiarea.h>
 #include <QtWidgets/qmdisubwindow.h>
 #include <QtWidgets/qlayout.h>
+
+#include <QtGui/qactiongroup.h>
+#include <QtGui/qevent.h>
+#include <QtGui/qscreen.h>
+#include <QtGui/qwindow.h>
+
+#include <QtCore/qdir.h>
+#include <QtCore/qfile.h>
+#include <QtCore/qurl.h>
+#include <QtCore/qtimer.h>
+#include <QtCore/qpluginloader.h>
+#include <QtCore/qdebug.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -370,11 +347,20 @@ void QDesignerWorkbench::switchToNeutralMode()
     for (QDesignerToolWindow *tw : qAsConst(m_toolWindows)) {
         tw->setCloseEventPolicy(MainWindowBase::AcceptCloseEvents);
         tw->setParent(nullptr);
+        // Prevent unneeded native children when switching to docked
+        if (auto *handle = tw->windowHandle())
+            handle->destroy();
     }
+
+    if (m_dockedMainWindow != nullptr) // Prevent assert
+        m_dockedMainWindow->mdiArea()->setActiveSubWindow(nullptr);
 
     for (QDesignerFormWindow *fw : qAsConst(m_formWindows)) {
         fw->setParent(nullptr);
         fw->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+        // Prevent unneeded native children when switching to docked
+        if (auto *handle = fw->windowHandle())
+            handle->destroy();
     }
 
 #ifndef Q_OS_MACOS
@@ -536,7 +522,7 @@ QDesignerFormEditorInterface *QDesignerWorkbench::core() const
 
 int QDesignerWorkbench::toolWindowCount() const
 {
-    return m_toolWindows.count();
+    return m_toolWindows.size();
 }
 
 QDesignerToolWindow *QDesignerWorkbench::toolWindow(int index) const
@@ -546,7 +532,7 @@ QDesignerToolWindow *QDesignerWorkbench::toolWindow(int index) const
 
 int QDesignerWorkbench::formWindowCount() const
 {
-    return m_formWindows.count();
+    return m_formWindows.size();
 }
 
 QDesignerFormWindow *QDesignerWorkbench::formWindow(int index) const
@@ -687,7 +673,7 @@ QDesignerFormWindow *QDesignerWorkbench::findFormWindow(QWidget *widget) const
 bool QDesignerWorkbench::handleClose()
 {
     m_state = StateClosing;
-    QVector<QDesignerFormWindow *> dirtyForms;
+    QList<QDesignerFormWindow *> dirtyForms;
     for (QDesignerFormWindow *w : qAsConst(m_formWindows)) {
         if (w->editor()->isDirty())
             dirtyForms << w;
@@ -769,7 +755,7 @@ void QDesignerWorkbench::updateWindowMenu(QDesignerFormWindowInterface *fwi)
 
 void QDesignerWorkbench::formWindowActionTriggered(QAction *a)
 {
-    QDesignerFormWindow *fw = qobject_cast<QDesignerFormWindow *>(a->parentWidget());
+    QDesignerFormWindow *fw = qobject_cast<QDesignerFormWindow *>(a->parent());
     Q_ASSERT(fw);
 
     if (isFormWindowMinimized(fw))

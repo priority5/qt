@@ -9,19 +9,18 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/unguessable_token.h"
 #include "content/browser/web_package/prefetched_signed_exchange_cache.h"
-#include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe_drainer.h"
+#include "net/base/network_isolation_key.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
-#include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace network {
@@ -41,9 +40,9 @@ class SignedExchangePrefetchMetricRecorder;
 
 // A URLLoader for loading a prefetch request, including <link rel="prefetch">.
 // It basically just keeps draining the data.
-class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
-                                         public network::mojom::URLLoaderClient,
-                                         public mojo::DataPipeDrainer::Client {
+class PrefetchURLLoader : public network::mojom::URLLoader,
+                          public network::mojom::URLLoaderClient,
+                          public mojo::DataPipeDrainer::Client {
  public:
   using URLLoaderThrottlesGetter = base::RepeatingCallback<
       std::vector<std::unique_ptr<blink::URLLoaderThrottle>>()>;
@@ -51,15 +50,20 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
       base::OnceCallback<base::UnguessableToken(
           const network::ResourceRequest&)>;
 
+  // |network_isolation_key| must be the NetworkIsolationKey that will be used
+  // for the request (either matching |resource_request.trusted_params|'s
+  // IsolationInfo, if trusted_params| is non-null, or bound to
+  // |network_loader_factory|, otherwise).
+  //
   // |url_loader_throttles_getter| may be used when a prefetch handler needs to
   // additionally create a request (e.g. for fetching certificate if the
   // prefetch was for a signed exchange).
   PrefetchURLLoader(
-      int32_t routing_id,
       int32_t request_id,
       uint32_t options,
       int frame_tree_node_id,
       const network::ResourceRequest& resource_request,
+      const net::NetworkIsolationKey& network_isolation_key,
       mojo::PendingRemote<network::mojom::URLLoaderClient> client,
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
       scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory,
@@ -71,6 +75,10 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
           prefetched_signed_exchange_cache,
       const std::string& accept_langs,
       RecursivePrefetchTokenGenerator recursive_prefetch_token_generator);
+
+  PrefetchURLLoader(const PrefetchURLLoader&) = delete;
+  PrefetchURLLoader& operator=(const PrefetchURLLoader&) = delete;
+
   ~PrefetchURLLoader() override;
 
   // Sends an empty response's body to |forwarding_client_|. If failed to create
@@ -87,14 +95,16 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
       const std::vector<std::string>& removed_headers,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
-      const base::Optional<GURL>& new_url) override;
+      const absl::optional<GURL>& new_url) override;
   void SetPriority(net::RequestPriority priority,
                    int intra_priority_value) override;
   void PauseReadingBodyFromNet() override;
   void ResumeReadingBodyFromNet() override;
 
   // network::mojom::URLLoaderClient overrides:
-  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head) override;
+  void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head,
+                         mojo::ScopedDataPipeConsumerHandle body) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          network::mojom::URLResponseHeadPtr head) override;
   void OnUploadProgress(int64_t current_position,
@@ -117,6 +127,8 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
 
   // Set in the constructor and updated when redirected.
   network::ResourceRequest resource_request_;
+
+  const net::NetworkIsolationKey network_isolation_key_;
 
   scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory_;
 
@@ -149,8 +161,6 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
   // TODO(kinuko): This value can become stale if the preference is updated.
   // Make this listen to the changes if it becomes a real concern.
   bool is_signed_exchange_handling_enabled_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PrefetchURLLoader);
 };
 
 }  // namespace content

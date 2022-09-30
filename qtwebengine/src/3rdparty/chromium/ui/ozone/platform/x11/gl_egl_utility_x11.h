@@ -24,6 +24,12 @@ class GLEGLUtilityX11 : public PlatformGLEGLUtility {
   void ChooseEGLAlphaAndBufferSize(EGLint* alpha_size,
                                    EGLint* buffer_size) override;
   bool IsTransparentBackgroundSupported() const override;
+  void CollectGpuExtraInfo(bool enable_native_gpu_memory_buffers,
+                           gfx::GpuExtraInfo& gpu_extra_info) const override;
+  bool X11DoesVisualHaveAlphaForTest() const override;
+  bool HasVisualManager() override;
+  absl::optional<base::ScopedEnvironmentVariableOverride>
+  MaybeGetScopedDisplayUnsetForVulkan() override;
 };
 
 }  // namespace ui

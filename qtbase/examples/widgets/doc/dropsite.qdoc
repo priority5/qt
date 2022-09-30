@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \example draganddrop/dropsite
@@ -103,7 +79,7 @@
     \snippet draganddrop/dropsite/droparea.cpp dropEvent() function part1
 
     The \c mimeData object can contain one of the following objects: an image,
-    HTML text, plain text, or a list of URLs.
+    HTML text, Markdown text, plain text, or a list of URLs.
 
     \snippet draganddrop/dropsite/droparea.cpp dropEvent() function part2
 
@@ -113,6 +89,9 @@
         \li If \c mimeData contains HTML, we display it with
            \l{QLabel::setText()}{setText()} and set \c{DropArea}'s text format
            as Qt::RichText.
+        \li If \c mimeData contains Markdown, we display it with
+           \l{QLabel::setText()}{setText()} and set \c{DropArea}'s text format
+           as Qt::MarkdownText.
         \li If \c mimeData contains plain text, we display it with
            \l{QLabel::setText()}{setText()} and set \c{DropArea}'s text format
            as Qt::PlainText. In the event that \c mimeData contains URLs, we

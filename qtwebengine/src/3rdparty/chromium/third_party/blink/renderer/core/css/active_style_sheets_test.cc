@@ -18,7 +18,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -510,7 +510,6 @@ TEST_F(ApplyRulesetsTest, RemoveSheetFromShadowTree) {
   shadow_root.setInnerHTML("<style>::slotted(#dummy){color:pink}</style>");
   UpdateAllLifecyclePhasesForTest();
 
-  EXPECT_TRUE(GetStyleEngine().TreeBoundaryCrossingScopes().IsEmpty());
   ASSERT_EQ(1u, shadow_root.StyleSheets().length());
 
   StyleSheet* sheet = shadow_root.StyleSheets().item(0);
@@ -523,8 +522,6 @@ TEST_F(ApplyRulesetsTest, RemoveSheetFromShadowTree) {
       std::make_pair(css_sheet, &css_sheet->Contents()->GetRuleSet()));
   GetStyleEngine().ApplyRuleSetChanges(shadow_root, old_style_sheets,
                                        ActiveStyleSheetVector());
-
-  EXPECT_TRUE(GetStyleEngine().TreeBoundaryCrossingScopes().IsEmpty());
 }
 
 }  // namespace blink

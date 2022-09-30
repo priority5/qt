@@ -127,11 +127,6 @@ NET_ERROR(BLOCKED_BY_CSP, -30)
 // The request was blocked because of no H/2 or QUIC session.
 NET_ERROR(H2_OR_QUIC_REQUIRED, -31)
 
-// The request was blocked because it is a private network request coming from
-// an insecure context in a less private IP address space. This is used to
-// enforce CORS-RFC1918: https://wicg.github.io/cors-rfc1918.
-NET_ERROR(INSECURE_PRIVATE_NETWORK_REQUEST, -32)
-
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
 
@@ -185,12 +180,7 @@ NET_ERROR(SSL_RENEGOTIATION_REQUESTED, -114)
 // unsupported method.
 NET_ERROR(PROXY_AUTH_UNSUPPORTED, -115)
 
-// During SSL renegotiation (rehandshake), the server sent a certificate with
-// an error.
-//
-// Note: this error is not in the -2xx range so that it won't be handled as a
-// certificate error.
-NET_ERROR(CERT_ERROR_IN_SSL_RENEGOTIATION, -116)
+// Error -116 was removed (CERT_ERROR_IN_SSL_RENEGOTIATION)
 
 // The SSL handshake failed because of a bad or missing client certificate.
 NET_ERROR(BAD_SSL_CLIENT_AUTH_CERT, -117)
@@ -435,6 +425,17 @@ NET_ERROR(TLS13_DOWNGRADE_DETECTED, -180)
 // negotiated TLS key exchange method.
 NET_ERROR(SSL_KEY_USAGE_INCOMPATIBLE, -181)
 
+// The ECHConfigList fetched over DNS cannot be parsed.
+NET_ERROR(INVALID_ECH_CONFIG_LIST, -182)
+
+// ECH was enabled, but the server was unable to decrypt the encrypted
+// ClientHello.
+NET_ERROR(ECH_NOT_NEGOTIATED, -183)
+
+// ECH was enabled, the server was unable to decrypt the encrypted ClientHello,
+// and additionally did not present a certificate valid for the public name.
+NET_ERROR(ECH_FALLBACK_CERTIFICATE_INVALID, -184)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -553,8 +554,8 @@ NET_ERROR(CERT_SYMANTEC_LEGACY, -215)
 // the device owner.
 NET_ERROR(CERT_KNOWN_INTERCEPTION_BLOCKED, -217)
 
-// The connection uses an obsolete version of SSL/TLS.
-NET_ERROR(SSL_OBSOLETE_VERSION, -218)
+// -218 was SSL_OBSOLETE_VERSION which is not longer used. TLS 1.0/1.1 instead
+// cause SSL_VERSION_OR_CIPHER_MISMATCH now.
 
 // Add new certificate error codes here.
 //
@@ -805,6 +806,14 @@ NET_ERROR(QUIC_CERT_ROOT_NOT_KNOWN, -380)
 // processed and is therefore safe to retry on a different connection.
 NET_ERROR(QUIC_GOAWAY_REQUEST_CAN_BE_RETRIED, -381)
 
+// The ACCEPT_CH restart has been triggered too many times
+NET_ERROR(TOO_MANY_ACCEPT_CH_RESTARTS, -382)
+
+// The IP address space of the remote endpoint differed from the previous
+// observed value during the same request. Any cache entry for the affected
+// request should be invalidated.
+NET_ERROR(INCONSISTENT_IP_ADDRESS_SPACE, -383)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -879,9 +888,11 @@ NET_ERROR(INVALID_WEB_BUNDLE, -505)
 NET_ERROR(TRUST_TOKEN_OPERATION_FAILED, -506)
 
 // When handling a Trust Tokens protocol operation-executing request, the system
-// found that the request's desired Trust Tokens results were already present in
-// a local cache; as a result, the main request was cancelled.
-NET_ERROR(TRUST_TOKEN_OPERATION_CACHE_HIT, -507)
+// was able to execute the request's Trust Tokens operation without sending the
+// request to its destination: for instance, the results could have been present
+// in a local cache (for redemption) or the operation could have been diverted
+// to a local provider (for "platform-provided" issuance).
+NET_ERROR(TRUST_TOKEN_OPERATION_SUCCESS_WITHOUT_SENDING_REQUEST, -507)
 
 // *** Code -600 is reserved (was FTP_PASV_COMMAND_FAILED). ***
 
@@ -999,3 +1010,11 @@ NET_ERROR(DNS_SORT_ERROR, -806)
 
 // Failed to resolve the hostname of a DNS-over-HTTPS server.
 NET_ERROR(DNS_SECURE_RESOLVER_HOSTNAME_RESOLUTION_FAILED, -808)
+
+// DNS identified the request as disallowed for insecure connection (http/ws).
+// Error should be handled as if an HTTP redirect was received to redirect to
+// https or wss.
+NET_ERROR(DNS_NAME_HTTPS_ONLY, -809)
+
+// All DNS requests associated with this job have been cancelled.
+NET_ERROR(DNS_REQUEST_CANCELLED, -810)

@@ -1,33 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <QtCore/QUrl>
 #include <QtNetwork/QNetworkCookie>
 
@@ -44,6 +19,8 @@ private slots:
 
     void parseMultipleCookies_data();
     void parseMultipleCookies();
+
+    void sameSite();
 };
 
 void tst_QNetworkCookie::getterSetter()
@@ -683,5 +660,16 @@ void tst_QNetworkCookie::parseMultipleCookies()
     QCOMPARE(result, expectedCookies);
 }
 
+void tst_QNetworkCookie::sameSite()
+{
+    QList<QNetworkCookie> result = QNetworkCookie::parseCookies(QByteArrayLiteral("a=b;domain=qt-project.org"));
+    QCOMPARE(result.first().sameSitePolicy(), QNetworkCookie::SameSite::Default);
+    result = QNetworkCookie::parseCookies(QByteArrayLiteral("a=b;domain=qt-project.org;samesite=strict"));
+    QCOMPARE(result.first().sameSitePolicy(), QNetworkCookie::SameSite::Strict);
+    result = QNetworkCookie::parseCookies(QByteArrayLiteral("a=b;domain=qt-project.org;samesite=none;secure"));
+    QCOMPARE(result.first().sameSitePolicy(), QNetworkCookie::SameSite::None);
+    QCOMPARE(result.first().toRawForm(), QByteArrayLiteral("a=b; secure; SameSite=None; domain=qt-project.org"));
+
+}
 QTEST_MAIN(tst_QNetworkCookie)
 #include "tst_qnetworkcookie.moc"

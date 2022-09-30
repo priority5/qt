@@ -8,10 +8,10 @@
 #include <stdint.h>
 
 #include <limits>
+#include <string>
 
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/strings/string16.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/win/pe_image.h"
 
@@ -20,8 +20,7 @@
 
 namespace base {
 
-MemoryMappedFile::MemoryMappedFile() : data_(NULL), length_(0) {
-}
+MemoryMappedFile::MemoryMappedFile() : data_(nullptr), length_(0) {}
 
 bool MemoryMappedFile::MapImageToMemory(Access access) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
@@ -36,11 +35,11 @@ bool MemoryMappedFile::MapImageToMemory(Access access) {
   file_mapping_.Set(::CreateFileMapping(file_.GetPlatformFile(), nullptr,
                                         PAGE_READONLY | SEC_IMAGE_NO_EXECUTE, 0,
                                         0, NULL));
-  if (!file_mapping_.IsValid())
+  if (!file_mapping_.is_valid())
     return false;
 
   data_ = static_cast<uint8_t*>(
-      ::MapViewOfFile(file_mapping_.Get(), FILE_MAP_READ, 0, 0, 0));
+      ::MapViewOfFile(file_mapping_.get(), FILE_MAP_READ, 0, 0, 0));
   if (!data_)
     return false;
 
@@ -81,7 +80,7 @@ bool MemoryMappedFile::MapFileRegionToMemory(
 
   file_mapping_.Set(::CreateFileMapping(file_.GetPlatformFile(), NULL, flags,
                                         size.HighPart, size.LowPart, NULL));
-  if (!file_mapping_.IsValid())
+  if (!file_mapping_.is_valid())
     return false;
 
   LARGE_INTEGER map_start = {};
@@ -121,10 +120,10 @@ bool MemoryMappedFile::MapFileRegionToMemory(
   }
 
   data_ = static_cast<uint8_t*>(
-      ::MapViewOfFile(file_mapping_.Get(),
+      ::MapViewOfFile(file_mapping_.get(),
                       (flags & PAGE_READONLY) ? FILE_MAP_READ : FILE_MAP_WRITE,
                       map_start.HighPart, map_start.LowPart, map_size));
-  if (data_ == NULL)
+  if (data_ == nullptr)
     return false;
   data_ += data_offset;
   return true;
@@ -133,12 +132,12 @@ bool MemoryMappedFile::MapFileRegionToMemory(
 void MemoryMappedFile::CloseHandles() {
   if (data_)
     ::UnmapViewOfFile(data_);
-  if (file_mapping_.IsValid())
+  if (file_mapping_.is_valid())
     file_mapping_.Close();
   if (file_.IsValid())
     file_.Close();
 
-  data_ = NULL;
+  data_ = nullptr;
   length_ = 0;
 }
 

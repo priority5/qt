@@ -27,7 +27,7 @@ SettingsPrivateSetPrefFunction::~SettingsPrivateSetPrefFunction() {
 
 ExtensionFunction::ResponseAction SettingsPrivateSetPrefFunction::Run() {
   std::unique_ptr<api::settings_private::SetPref::Params> parameters =
-      api::settings_private::SetPref::Params::Create(*args_);
+      api::settings_private::SetPref::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters.get());
 
   SettingsPrivateDelegate* delegate =
@@ -38,10 +38,10 @@ ExtensionFunction::ResponseAction SettingsPrivateSetPrefFunction::Run() {
       delegate->SetPref(parameters->name, parameters->value.get());
   switch (result) {
     case settings_private::SetPrefResult::SUCCESS:
-      return RespondNow(OneArgument(std::make_unique<base::Value>(true)));
+      return RespondNow(OneArgument(base::Value(true)));
     case settings_private::SetPrefResult::PREF_NOT_MODIFIABLE:
       // Not an error, but return false to indicate setting the pref failed.
-      return RespondNow(OneArgument(std::make_unique<base::Value>(false)));
+      return RespondNow(OneArgument(base::Value(false)));
     case settings_private::SetPrefResult::PREF_NOT_FOUND:
       return RespondNow(Error("Pref not found: *", parameters->name));
     case settings_private::SetPrefResult::PREF_TYPE_MISMATCH:
@@ -52,7 +52,7 @@ ExtensionFunction::ResponseAction SettingsPrivateSetPrefFunction::Run() {
                               parameters->name));
   }
   NOTREACHED();
-  return RespondNow(OneArgument(std::make_unique<base::Value>(false)));
+  return RespondNow(OneArgument(base::Value(false)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -66,7 +66,8 @@ ExtensionFunction::ResponseAction SettingsPrivateGetAllPrefsFunction::Run() {
   SettingsPrivateDelegate* delegate =
       SettingsPrivateDelegateFactory::GetForBrowserContext(browser_context());
   DCHECK(delegate);
-  return RespondNow(OneArgument(delegate->GetAllPrefs()));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(delegate->GetAllPrefs())));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -78,7 +79,7 @@ SettingsPrivateGetPrefFunction::~SettingsPrivateGetPrefFunction() {
 
 ExtensionFunction::ResponseAction SettingsPrivateGetPrefFunction::Run() {
   std::unique_ptr<api::settings_private::GetPref::Params> parameters =
-      api::settings_private::GetPref::Params::Create(*args_);
+      api::settings_private::GetPref::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters.get());
 
   SettingsPrivateDelegate* delegate =
@@ -89,7 +90,8 @@ ExtensionFunction::ResponseAction SettingsPrivateGetPrefFunction::Run() {
   if (value->is_none())
     return RespondNow(Error("Pref * does not exist", parameters->name));
   else
-    return RespondNow(OneArgument(std::move(value)));
+    return RespondNow(
+        OneArgument(base::Value::FromUniquePtrValue(std::move(value))));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -105,7 +107,8 @@ ExtensionFunction::ResponseAction
   SettingsPrivateDelegate* delegate =
       SettingsPrivateDelegateFactory::GetForBrowserContext(browser_context());
   DCHECK(delegate);
-  return RespondNow(OneArgument(delegate->GetDefaultZoom()));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(delegate->GetDefaultZoom())));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -119,14 +122,14 @@ SettingsPrivateSetDefaultZoomFunction::
 ExtensionFunction::ResponseAction
     SettingsPrivateSetDefaultZoomFunction::Run() {
   std::unique_ptr<api::settings_private::SetDefaultZoom::Params> parameters =
-      api::settings_private::SetDefaultZoom::Params::Create(*args_);
+      api::settings_private::SetDefaultZoom::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters.get());
 
   SettingsPrivateDelegate* delegate =
       SettingsPrivateDelegateFactory::GetForBrowserContext(browser_context());
   DCHECK(delegate);
   delegate->SetDefaultZoom(parameters->zoom);
-  return RespondNow(OneArgument(std::make_unique<base::Value>(true)));
+  return RespondNow(OneArgument(base::Value(true)));
 }
 
 }  // namespace extensions

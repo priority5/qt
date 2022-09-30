@@ -1,3 +1,6 @@
-file://chrome/browser/resources/settings/chromeos/internet_page/OWNERS
-
-# COMPONENT: OS>Systems>Network
+azeemarshad@chromium.org
+chadduffin@chromium.org
+gordonseto@google.com
+jonmann@chromium.org
+khorimoto@chromium.org
+stevenjb@chromium.org

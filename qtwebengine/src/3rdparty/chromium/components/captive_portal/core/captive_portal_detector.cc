@@ -9,19 +9,23 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
+#include "build/chromeos_buildflags.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "url/gurl.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state_handler.h"
 #endif
 
 namespace {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 GURL GetProbeUrl(const GURL& default_url) {
   DCHECK_EQ(chromeos::NetworkHandler::Get()->task_runner(),
             base::ThreadTaskRunnerHandle::Get().get());
@@ -42,7 +46,7 @@ const char CaptivePortalDetector::kDefaultURL[] =
 CaptivePortalDetector::CaptivePortalDetector(
     network::mojom::URLLoaderFactory* loader_factory)
     : loader_factory_(loader_factory)
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
       ,
       weak_factory_(this)
 #endif
@@ -64,7 +68,7 @@ void CaptivePortalDetector::DetectCaptivePortal(
 
   detection_callback_ = std::move(detection_callback);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (chromeos::NetworkHandler::IsInitialized()) {
     base::PostTaskAndReplyWithResult(
         chromeos::NetworkHandler::Get()->task_runner(), FROM_HERE,
@@ -107,7 +111,7 @@ void CaptivePortalDetector::StartProbe(
 void CaptivePortalDetector::Cancel() {
   simple_loader_.reset();
   detection_callback_.Reset();
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Cancel any pending calls to StartProbe().
   weak_factory_.InvalidateWeakPtrs();
 #endif

@@ -10,6 +10,7 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 #include "media/gpu/vp9_decoder.h"
@@ -17,27 +18,41 @@
 namespace media {
 
 namespace {
-std::vector<uint32_t> GetSpatialLayerFrameSize(
-    const DecoderBuffer& decoder_buffer) {
-#if defined(ARCH_CPU_X86_FAMILY) && defined(OS_CHROMEOS)
+bool GetSpatialLayerFrameSize(const DecoderBuffer& decoder_buffer,
+                              std::vector<uint32_t>& frame_sizes) {
+  frame_sizes.clear();
+
   const uint32_t* cue_data =
       reinterpret_cast<const uint32_t*>(decoder_buffer.side_data());
-  if (!cue_data) {
-    return {};
-  }
-  if (!base::FeatureList::IsEnabled(media::kVp9kSVCHWDecoding)) {
-    DLOG(ERROR) << "Vp9Parser doesn't support parsing SVC stream";
-    return {};
+  if (!cue_data)
+    return true;
+
+  bool enable_vp9_ksvc =
+// On windows, currently only d3d11 supports decoding VP9 kSVC stream, we
+// shouldn't combine the switch kD3D11Vp9kSVCHWDecoding to kVp9kSVCHWDecoding
+// due to we want keep returning false to MediaCapability.
+#if BUILDFLAG(IS_WIN)
+      base::FeatureList::IsEnabled(media::kD3D11Vp9kSVCHWDecoding);
+#elif defined(IS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+      // V4L2 stateless API decoder is not capable of decoding VP9 k-SVC stream.
+      false;
+#else
+      base::FeatureList::IsEnabled(media::kVp9kSVCHWDecoding);
+#endif
+
+  if (!enable_vp9_ksvc) {
+    DLOG(ERROR) << "Vp9 k-SVC hardware decoding is disabled";
+    return false;
   }
 
   size_t num_of_layers = decoder_buffer.side_data_size() / sizeof(uint32_t);
   if (num_of_layers > 3u) {
     DLOG(WARNING) << "The maximum number of spatial layers in VP9 is three";
-    return {};
+    return false;
   }
-  return std::vector<uint32_t>(cue_data, cue_data + num_of_layers);
-#endif  // defined(ARCH_CPU_X86_FAMILY) && defined(OS_CHROMEOS)
-  return {};
+
+  frame_sizes = std::vector<uint32_t>(cue_data, cue_data + num_of_layers);
+  return true;
 }
 
 VideoCodecProfile VP9ProfileToVideoCodecProfile(uint8_t profile) {
@@ -55,11 +70,34 @@ VideoCodecProfile VP9ProfileToVideoCodecProfile(uint8_t profile) {
   }
 }
 
+bool IsValidBitDepth(uint8_t bit_depth, VideoCodecProfile profile) {
+  // Spec 7.2.
+  switch (profile) {
+    case VP9PROFILE_PROFILE0:
+    case VP9PROFILE_PROFILE1:
+      return bit_depth == 8u;
+    case VP9PROFILE_PROFILE2:
+    case VP9PROFILE_PROFILE3:
+      return bit_depth == 10u || bit_depth == 12u;
+    default:
+      NOTREACHED();
+      return false;
+  }
+}
+
+bool IsYUV420Sequence(const Vp9FrameHeader& frame_header) {
+  // Spec 7.2.2
+  return frame_header.subsampling_x == 1u && frame_header.subsampling_y == 1u;
+}
 }  // namespace
 
 VP9Decoder::VP9Accelerator::VP9Accelerator() {}
 
 VP9Decoder::VP9Accelerator::~VP9Accelerator() {}
+
+bool VP9Decoder::VP9Accelerator::SupportsContextProbabilityReadback() const {
+  return false;
+}
 
 VP9Decoder::VP9Decoder(std::unique_ptr<VP9Accelerator> accelerator,
                        VideoCodecProfile profile,
@@ -69,7 +107,8 @@ VP9Decoder::VP9Decoder(std::unique_ptr<VP9Accelerator> accelerator,
       // TODO(hiroh): Set profile to UNKNOWN.
       profile_(profile),
       accelerator_(std::move(accelerator)),
-      parser_(accelerator_->IsFrameContextRequired()) {}
+      parser_(accelerator_->NeedsCompressedHeaderParsed(),
+              accelerator_->SupportsContextProbabilityReadback()) {}
 
 VP9Decoder::~VP9Decoder() = default;
 
@@ -83,13 +122,14 @@ void VP9Decoder::SetStream(int32_t id, const DecoderBuffer& decoder_buffer) {
   DVLOG(4) << "New input stream id: " << id << " at: " << (void*)ptr
            << " size: " << size;
   stream_id_ = id;
-  if (decrypt_config) {
-    parser_.SetStream(ptr, size, GetSpatialLayerFrameSize(decoder_buffer),
-                      decrypt_config->Clone());
-  } else {
-    parser_.SetStream(ptr, size, GetSpatialLayerFrameSize(decoder_buffer),
-                      nullptr);
+  std::vector<uint32_t> frame_sizes;
+  if (!GetSpatialLayerFrameSize(decoder_buffer, frame_sizes)) {
+    SetError();
+    return;
   }
+
+  parser_.SetStream(ptr, size, frame_sizes,
+                    decrypt_config ? decrypt_config->Clone() : nullptr);
 }
 
 bool VP9Decoder::Flush() {
@@ -100,6 +140,8 @@ bool VP9Decoder::Flush() {
 
 void VP9Decoder::Reset() {
   curr_frame_hdr_ = nullptr;
+  decrypt_config_.reset();
+  pending_pic_.reset();
 
   ref_frames_.Clear();
 
@@ -111,14 +153,28 @@ void VP9Decoder::Reset() {
 }
 
 VP9Decoder::DecodeResult VP9Decoder::Decode() {
-  while (1) {
+  while (true) {
+    if (state_ == kError)
+      return kDecodeError;
+
+    // If we have a pending picture to decode, try that first.
+    if (pending_pic_) {
+      VP9Accelerator::Status status =
+          DecodeAndOutputPicture(std::move(pending_pic_));
+      if (status == VP9Accelerator::Status::kFail) {
+        SetError();
+        return kDecodeError;
+      }
+      if (status == VP9Accelerator::Status::kTryAgain)
+        return kTryAgain;
+    }
+
     // Read a new frame header if one is not awaiting decoding already.
-    std::unique_ptr<DecryptConfig> decrypt_config;
     if (!curr_frame_hdr_) {
       gfx::Size allocate_size;
       std::unique_ptr<Vp9FrameHeader> hdr(new Vp9FrameHeader());
       Vp9Parser::Result res =
-          parser_.ParseNextFrame(hdr.get(), &allocate_size, &decrypt_config);
+          parser_.ParseNextFrame(hdr.get(), &allocate_size, &decrypt_config_);
       switch (res) {
         case Vp9Parser::kOk:
           curr_frame_hdr_ = std::move(hdr);
@@ -150,6 +206,7 @@ VP9Decoder::DecodeResult VP9Decoder::Decode() {
         state_ = kDecoding;
       } else {
         curr_frame_hdr_.reset();
+        decrypt_config_.reset();
         continue;
       }
     }
@@ -182,6 +239,7 @@ VP9Decoder::DecodeResult VP9Decoder::Decode() {
       }
 
       curr_frame_hdr_.reset();
+      decrypt_config_.reset();
       continue;
     }
 
@@ -201,11 +259,24 @@ VP9Decoder::DecodeResult VP9Decoder::Decode() {
       VLOG(1) << "Invalid profile: " << curr_frame_hdr_->profile;
       return kDecodeError;
     }
+    if (!IsValidBitDepth(curr_frame_hdr_->bit_depth, new_profile)) {
+      DVLOG(1) << "Invalid bit depth="
+               << base::strict_cast<int>(curr_frame_hdr_->bit_depth)
+               << ", profile=" << GetProfileName(new_profile);
+      return kDecodeError;
+    }
+    if (!IsYUV420Sequence(*curr_frame_hdr_)) {
+      DVLOG(1) << "Only YUV 4:2:0 is supported";
+      return kDecodeError;
+    }
 
     DCHECK(!new_pic_size.IsEmpty());
-    if (new_pic_size != pic_size_ || new_profile != profile_) {
+    if (new_pic_size != pic_size_ || new_profile != profile_ ||
+        curr_frame_hdr_->bit_depth != bit_depth_) {
       DVLOG(1) << "New profile: " << GetProfileName(new_profile)
-               << ", New resolution: " << new_pic_size.ToString();
+               << ", New resolution: " << new_pic_size.ToString()
+               << ", New bit depth: "
+               << base::strict_cast<int>(curr_frame_hdr_->bit_depth);
 
       if (!curr_frame_hdr_->IsKeyframe() &&
           !(curr_frame_hdr_->IsIntra() && pic_size_.IsEmpty())) {
@@ -221,6 +292,7 @@ VP9Decoder::DecodeResult VP9Decoder::Decode() {
         }
 
         curr_frame_hdr_.reset();
+        decrypt_config_.reset();
         return kRanOutOfStreamData;
       }
 
@@ -233,6 +305,7 @@ VP9Decoder::DecodeResult VP9Decoder::Decode() {
       pic_size_ = new_pic_size;
       visible_rect_ = new_render_rect;
       profile_ = new_profile;
+      bit_depth_ = curr_frame_hdr_->bit_depth;
       size_change_failure_counter_ = 0;
       return kConfigChange;
     }
@@ -246,20 +319,23 @@ VP9Decoder::DecodeResult VP9Decoder::Decode() {
     pic->set_visible_rect(new_render_rect);
     pic->set_bitstream_id(stream_id_);
 
-    pic->set_decrypt_config(std::move(decrypt_config));
+    pic->set_decrypt_config(std::move(decrypt_config_));
 
     // For VP9, container color spaces override video stream color spaces.
-    if (container_color_space_.IsSpecified()) {
+    if (container_color_space_.IsSpecified())
       pic->set_colorspace(container_color_space_);
-    } else if (curr_frame_hdr_) {
+    else if (curr_frame_hdr_)
       pic->set_colorspace(curr_frame_hdr_->GetColorSpace());
-    }
+
     pic->frame_hdr = std::move(curr_frame_hdr_);
 
-    if (!DecodeAndOutputPicture(std::move(pic))) {
+    VP9Accelerator::Status status = DecodeAndOutputPicture(std::move(pic));
+    if (status == VP9Accelerator::Status::kFail) {
       SetError();
       return kDecodeError;
     }
+    if (status == VP9Accelerator::Status::kTryAgain)
+      return kTryAgain;
   }
 }
 
@@ -278,7 +354,8 @@ void VP9Decoder::UpdateFrameContext(
   std::move(context_refresh_cb).Run(frame_ctx);
 }
 
-bool VP9Decoder::DecodeAndOutputPicture(scoped_refptr<VP9Picture> pic) {
+VP9Decoder::VP9Accelerator::Status VP9Decoder::DecodeAndOutputPicture(
+    scoped_refptr<VP9Picture> pic) {
   DCHECK(!pic_size_.IsEmpty());
   DCHECK(pic->frame_hdr);
 
@@ -292,20 +369,22 @@ bool VP9Decoder::DecodeAndOutputPicture(scoped_refptr<VP9Picture> pic) {
   }
 
   const Vp9Parser::Context& context = parser_.context();
-  if (!accelerator_->SubmitDecode(pic, context.segmentation(),
-                                  context.loop_filter(), ref_frames_,
-                                  std::move(done_cb))) {
-    return false;
+  VP9Accelerator::Status status = accelerator_->SubmitDecode(
+      pic, context.segmentation(), context.loop_filter(), ref_frames_,
+      std::move(done_cb));
+  if (status != VP9Accelerator::Status::kOk) {
+    if (status == VP9Accelerator::Status::kTryAgain)
+      pending_pic_ = std::move(pic);
+    return status;
   }
 
   if (pic->frame_hdr->show_frame) {
-    if (!accelerator_->OutputPicture(pic)) {
-      return false;
-    }
+    if (!accelerator_->OutputPicture(pic))
+      return VP9Accelerator::Status::kFail;
   }
 
   ref_frames_.Refresh(std::move(pic));
-  return true;
+  return status;
 }
 
 void VP9Decoder::SetError() {
@@ -323,6 +402,10 @@ gfx::Rect VP9Decoder::GetVisibleRect() const {
 
 VideoCodecProfile VP9Decoder::GetProfile() const {
   return profile_;
+}
+
+uint8_t VP9Decoder::GetBitDepth() const {
+  return bit_depth_;
 }
 
 size_t VP9Decoder::GetRequiredNumOfPictures() const {

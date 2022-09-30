@@ -6,6 +6,7 @@
 
 #include "base/android/scoped_hardware_buffer_fence_sync.h"
 #include "base/android/scoped_hardware_buffer_handle.h"
+#include "base/memory/raw_ptr.h"
 #include "base/posix/eintr_wrapper.h"
 #include "components/viz/common/gpu/vulkan_context_provider.h"
 #include "components/viz/common/resources/resource_format_utils.h"
@@ -35,6 +36,48 @@
 #include "ui/gl/gl_image_ahardwarebuffer.h"
 
 namespace gpu {
+
+class SharedImageRepresentationOverlayScopedHardwareBufferFenceSync
+    : public SharedImageRepresentationOverlay {
+ public:
+  SharedImageRepresentationOverlayScopedHardwareBufferFenceSync(
+      SharedImageManager* manager,
+      SharedImageBacking* backing,
+      MemoryTypeTracker* tracker)
+      : SharedImageRepresentationOverlay(manager, backing, tracker) {}
+
+  ~SharedImageRepresentationOverlayScopedHardwareBufferFenceSync() override {
+    DCHECK(!hardware_buffer_);
+  }
+
+ private:
+  SharedImageBackingScopedHardwareBufferFenceSync* ahb_backing() {
+    return static_cast<SharedImageBackingScopedHardwareBufferFenceSync*>(
+        backing());
+  }
+
+  bool BeginReadAccess(std::vector<gfx::GpuFence>* acquire_fences) override {
+    gfx::GpuFenceHandle begin_read_handle;
+    hardware_buffer_ = ahb_backing()->BeginOverlayAccess(begin_read_handle);
+    if (!begin_read_handle.is_null())
+      acquire_fences->emplace_back(std::move(begin_read_handle));
+    return true;
+  }
+
+  void EndReadAccess(gfx::GpuFenceHandle release_fence) override {
+    ahb_backing()->EndOverlayAccess(std::move(release_fence));
+    hardware_buffer_ = nullptr;
+  }
+
+  AHardwareBuffer* GetAHardwareBuffer() override { return hardware_buffer_; }
+
+  gl::GLImage* GetGLImage() override {
+    NOTREACHED();
+    return nullptr;
+  }
+
+  raw_ptr<AHardwareBuffer> hardware_buffer_ = nullptr;
+};
 
 SharedImageBackingScopedHardwareBufferFenceSync::
     SharedImageBackingScopedHardwareBufferFenceSync(
@@ -132,6 +175,13 @@ class SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync
     DCHECK(texture_);
   }
 
+  SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync(
+      const SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync&) =
+      delete;
+  SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync& operator=(
+      const SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync&) =
+      delete;
+
   ~SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync() override {
     if (texture_)
       texture_->RemoveLightweightRef(has_context());
@@ -158,10 +208,64 @@ class SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync
     return ahb_backing;
   }
 
-  gles2::Texture* texture_;
+  raw_ptr<gles2::Texture> texture_;
+};
 
-  DISALLOW_COPY_AND_ASSIGN(
-      SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync);
+class SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync
+    : public SharedImageRepresentationGLTexturePassthrough {
+ public:
+  SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync(
+      SharedImageManager* manager,
+      SharedImageBackingScopedHardwareBufferFenceSync* backing,
+      MemoryTypeTracker* tracker,
+      scoped_refptr<gles2::TexturePassthrough> texture)
+      : SharedImageRepresentationGLTexturePassthrough(manager,
+                                                      backing,
+                                                      tracker),
+        texture_(std::move(texture)) {
+    // TODO(https://crbug.com/1172769): Remove this CHECK.
+    CHECK(texture_);
+  }
+
+  SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync(
+      const SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync&) =
+      delete;
+  SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync&
+  operator=(
+      const SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync&) =
+      delete;
+
+  ~SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync()
+      override {
+    if (!has_context())
+      texture_->MarkContextLost();
+  }
+
+  const scoped_refptr<gles2::TexturePassthrough>& GetTexturePassthrough()
+      override {
+    return texture_;
+  }
+
+  bool BeginAccess(GLenum mode) override {
+    // This representation only supports read access.
+    DCHECK_EQ(mode,
+              static_cast<GLenum>(GL_SHARED_IMAGE_ACCESS_MODE_READ_CHROMIUM));
+
+    return ahb_backing()->BeginGLReadAccess();
+  }
+
+  void EndAccess() override { ahb_backing()->EndGLReadAccess(); }
+
+ private:
+  SharedImageBackingScopedHardwareBufferFenceSync* ahb_backing() {
+    auto* ahb_backing =
+        static_cast<SharedImageBackingScopedHardwareBufferFenceSync*>(
+            backing());
+    DCHECK(ahb_backing);
+    return ahb_backing;
+  }
+
+  scoped_refptr<gles2::TexturePassthrough> texture_;
 };
 
 class SharedImageRepresentationSkiaVkScopedHardwareBufferFenceSync
@@ -231,8 +335,8 @@ std::unique_ptr<SharedImageRepresentationGLTexturePassthrough>
 SharedImageBackingScopedHardwareBufferFenceSync::ProduceGLTexturePassthrough(
     SharedImageManager* manager,
     MemoryTypeTracker* tracker) {
-  NOTREACHED();
-  return nullptr;
+  return GenGLTexturePassthroughRepresentation(manager, tracker);
+  ;
 }
 
 std::unique_ptr<SharedImageRepresentationSkia>
@@ -249,7 +353,8 @@ SharedImageBackingScopedHardwareBufferFenceSync::ProduceSkia(
         scoped_hardware_buffer_->buffer());
 
     auto vulkan_image = CreateVkImageFromAhbHandle(
-        std::move(ahb_handle), context_state.get(), size(), format());
+        std::move(ahb_handle), context_state.get(), size(), format(),
+        VK_QUEUE_FAMILY_FOREIGN_EXT);
     if (!vulkan_image)
       return nullptr;
 
@@ -262,7 +367,12 @@ SharedImageBackingScopedHardwareBufferFenceSync::ProduceSkia(
 
   DCHECK(context_state->GrContextIsGL());
 
-  auto gl_representation = GenGLTextureRepresentation(manager, tracker);
+  std::unique_ptr<SharedImageRepresentationGLTextureBase> gl_representation;
+  if (context_state->feature_info()->is_passthrough_cmd_decoder()) {
+    gl_representation = GenGLTexturePassthroughRepresentation(manager, tracker);
+  } else {
+    gl_representation = GenGLTextureRepresentation(manager, tracker);
+  }
   if (!gl_representation)
     return nullptr;
   return SharedImageRepresentationSkiaGL::Create(std::move(gl_representation),
@@ -282,6 +392,65 @@ SharedImageBackingScopedHardwareBufferFenceSync::GenGLTextureRepresentation(
   return std::make_unique<
       SharedImageRepresentationGLTextureScopedHardwareBufferFenceSync>(
       manager, this, tracker, texture);
+}
+
+std::unique_ptr<
+    SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync>
+SharedImageBackingScopedHardwareBufferFenceSync::
+    GenGLTexturePassthroughRepresentation(SharedImageManager* manager,
+                                          MemoryTypeTracker* tracker) {
+  auto texture = GenGLTexturePassthrough(
+      scoped_hardware_buffer_->buffer(), GL_TEXTURE_EXTERNAL_OES, color_space(),
+      size(), estimated_size(), ClearedRect());
+  if (!texture)
+    return nullptr;
+  return std::make_unique<
+      SharedImageRepresentationGLTexturePassthroughScopedHardwareBufferFenceSync>(
+      manager, this, tracker, std::move(texture));
+}
+
+AHardwareBuffer*
+SharedImageBackingScopedHardwareBufferFenceSync::BeginOverlayAccess(
+    gfx::GpuFenceHandle& begin_read_fence) {
+  AutoLock auto_lock(this);
+
+  DCHECK(!is_overlay_accessing_);
+
+  if (is_writing_) {
+    LOG(ERROR)
+        << "BeginOverlayAccess should only be called when there are no writers";
+    return nullptr;
+  }
+
+  if (ahb_read_fence_.is_valid()) {
+    base::ScopedFD fence_fd(HANDLE_EINTR(dup(ahb_read_fence_.get())));
+    begin_read_fence.owned_fd = std::move(fence_fd);
+  }
+
+  is_overlay_accessing_ = true;
+  return scoped_hardware_buffer_->buffer();
+}
+
+void SharedImageBackingScopedHardwareBufferFenceSync::EndOverlayAccess(
+    gfx::GpuFenceHandle release_fence) {
+  AutoLock auto_lock(this);
+
+  DCHECK(is_overlay_accessing_);
+  is_overlay_accessing_ = false;
+
+  if (!release_fence.is_null()) {
+    scoped_hardware_buffer_->SetReadFence(std::move(release_fence.owned_fd),
+                                          true);
+  }
+}
+
+std::unique_ptr<SharedImageRepresentationOverlay>
+SharedImageBackingScopedHardwareBufferFenceSync::ProduceOverlay(
+    SharedImageManager* manager,
+    MemoryTypeTracker* tracker) {
+  return std::make_unique<
+      SharedImageRepresentationOverlayScopedHardwareBufferFenceSync>(
+      manager, this, tracker);
 }
 
 }  // namespace gpu

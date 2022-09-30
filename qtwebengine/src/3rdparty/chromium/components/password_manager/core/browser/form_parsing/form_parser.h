@@ -9,10 +9,8 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
-#include "base/optional.h"
 #include "components/password_manager/core/browser/form_parsing/password_field_prediction.h"
-#include "components/password_manager/core/browser/password_form_forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace autofill {
@@ -21,12 +19,15 @@ struct FormData;
 
 namespace password_manager {
 
+struct PasswordForm;
+
 // The susbset of autocomplete flags related to passwords.
 enum class AutocompleteFlag {
   kNone,
   kUsername,
   kCurrentPassword,
   kNewPassword,
+  kWebAuthn,
   // Represents the whole family of cc-* flags + OTP flag.
   kNonPassword
 };
@@ -117,13 +118,18 @@ class FormDataParser {
 
   FormDataParser();
 
+  FormDataParser(const FormDataParser&) = delete;
+  FormDataParser& operator=(const FormDataParser&) = delete;
+
   ~FormDataParser();
 
   void set_predictions(FormPredictions predictions) {
     predictions_ = std::move(predictions);
   }
 
-  const base::Optional<FormPredictions>& predictions() { return predictions_; }
+  void reset_predictions() { predictions_.reset(); }
+
+  const absl::optional<FormPredictions>& predictions() { return predictions_; }
 
   ReadonlyPasswordFields readonly_status() { return readonly_status_; }
 
@@ -135,14 +141,12 @@ class FormDataParser {
  private:
   // Predictions are an optional source of server-side information about field
   // types.
-  base::Optional<FormPredictions> predictions_;
+  absl::optional<FormPredictions> predictions_;
 
   // Records whether readonly password fields were seen during the last call to
   // Parse().
   ReadonlyPasswordFields readonly_status_ =
       ReadonlyPasswordFields::kNoHeuristics;
-
-  DISALLOW_COPY_AND_ASSIGN(FormDataParser);
 };
 
 // Returns the value of PasswordForm::signon_realm for an HTML form with the
@@ -159,4 +163,4 @@ const autofill::FormFieldData* FindUsernameInPredictions(
 
 }  // namespace password_manager
 
-#endif  // COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_FORM_PARSING_IOS_FORM_PARSER_H_
+#endif  // COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_FORM_PARSING_FORM_PARSER_H_

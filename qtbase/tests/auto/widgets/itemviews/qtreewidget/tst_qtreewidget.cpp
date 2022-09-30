@@ -1,35 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
 #include <QApplication>
 #include <QHeaderView>
 #include <QLineEdit>
+#include <QScopeGuard>
 #include <QScrollBar>
 #include <QSignalSpy>
 #include <QStyledItemDelegate>
@@ -152,6 +128,8 @@ private slots:
     void testVisualItemRect();
     void reparentHiddenItem();
     void persistentChildIndex();
+    void createPersistentOnLayoutAboutToBeChanged();
+    void createPersistentOnLayoutAboutToBeChangedAutoSort();
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     void clearItemData();
 #endif
@@ -219,11 +197,11 @@ void tst_QTreeWidget::getSetCheck()
     QCOMPARE(obj1.currentItem(), nullptr);
 }
 
-using IntList = QVector<int>;
-using ListIntList = QVector<IntList>;
-using PersistentModelIndexVec = QVector<QPersistentModelIndex>;
+using IntList = QList<int>;
+using ListIntList = QList<IntList>;
+using PersistentModelIndexVec = QList<QPersistentModelIndex>;
 using TreeItem = QTreeWidgetItem;
-using TreeItemList = QVector<TreeItem*>;
+using TreeItemList = QList<TreeItem *>;
 
 Q_DECLARE_METATYPE(Qt::Orientation)
 Q_DECLARE_METATYPE(QTreeWidgetItem*)
@@ -345,6 +323,7 @@ void tst_QTreeWidget::addTopLevelItem()
     // invalid insert
     {
         tops.clear();
+        const auto sg = qScopeGuard([&] { qDeleteAll(std::exchange(tops, {})); });
         for (int i = 0; i < 10; ++i)
             tops << new TreeItem();
         int count = tree.topLevelItemCount();
@@ -866,15 +845,6 @@ void tst_QTreeWidget::selectedItems()
                 QVERIFY(sel.contains(child));
         }
     }
-
-#if QT_DEPRECATED_SINCE(5, 13)
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-    // Possible to select null without crashing?
-    testWidget->setItemSelected(nullptr, true);
-    QVERIFY(!testWidget->isItemSelected(nullptr));
-QT_WARNING_POP
-#endif
 
     // unselect
     for (const auto &itemPath : selectedItems) {
@@ -1476,19 +1446,15 @@ void tst_QTreeWidget::keyboardNavigation()
 
     fillTreeWidget(testWidget, rows);
 
-    const QVector<Qt::Key> keymoves {
-        Qt::Key_Down, Qt::Key_Right, Qt::Key_Left,
-        Qt::Key_Down, Qt::Key_Down, Qt::Key_Down, Qt::Key_Down,
-        Qt::Key_Right,
-        Qt::Key_Up, Qt::Key_Left, Qt::Key_Left,
-        Qt::Key_Up, Qt::Key_Down, Qt::Key_Up, Qt::Key_Up,
-        Qt::Key_Up, Qt::Key_Up, Qt::Key_Up, Qt::Key_Up,
-        Qt::Key_Down, Qt::Key_Right, Qt::Key_Down, Qt::Key_Down,
-        Qt::Key_Down, Qt::Key_Right, Qt::Key_Down, Qt::Key_Down,
-        Qt::Key_Left, Qt::Key_Left, Qt::Key_Up, Qt::Key_Down,
-        Qt::Key_Up, Qt::Key_Up, Qt::Key_Up, Qt::Key_Left,
-        Qt::Key_Down, Qt::Key_Right, Qt::Key_Right, Qt::Key_Right,
-        Qt::Key_Left, Qt::Key_Left, Qt::Key_Right, Qt::Key_Left
+    const QList<Qt::Key> keymoves {
+        Qt::Key_Down,  Qt::Key_Right, Qt::Key_Left,  Qt::Key_Down, Qt::Key_Down, Qt::Key_Down,
+        Qt::Key_Down,  Qt::Key_Right, Qt::Key_Up,    Qt::Key_Left, Qt::Key_Left, Qt::Key_Up,
+        Qt::Key_Down,  Qt::Key_Up,    Qt::Key_Up,    Qt::Key_Up,   Qt::Key_Up,   Qt::Key_Up,
+        Qt::Key_Up,    Qt::Key_Down,  Qt::Key_Right, Qt::Key_Down, Qt::Key_Down, Qt::Key_Down,
+        Qt::Key_Right, Qt::Key_Down,  Qt::Key_Down,  Qt::Key_Left, Qt::Key_Left, Qt::Key_Up,
+        Qt::Key_Down,  Qt::Key_Up,    Qt::Key_Up,    Qt::Key_Up,   Qt::Key_Left, Qt::Key_Down,
+        Qt::Key_Right, Qt::Key_Right, Qt::Key_Right, Qt::Key_Left, Qt::Key_Left, Qt::Key_Right,
+        Qt::Key_Left
     };
 
     int row = 0;
@@ -1553,7 +1519,7 @@ void tst_QTreeWidget::keyboardNavigation()
             }
             break;
         default:
-            QVERIFY(false);
+            QFAIL(qPrintable(QStringLiteral("Unexpected key: %1").arg(key)));
         }
 
         QTreeWidgetItem *current = testWidget->currentItem();
@@ -1790,7 +1756,10 @@ void tst_QTreeWidget::setData()
                     QCOMPARE(qvariant_cast<QTreeWidgetItem*>(args.at(0)), item);
                     QCOMPARE(qvariant_cast<int>(args.at(1)), j);
                     item->setIcon(j, icon);
-                    QCOMPARE(itemChangedSpy.count(), 0);
+                    QCOMPARE(itemChangedSpy.count(), 1);
+                    args = itemChangedSpy.takeFirst();
+                    QCOMPARE(qvariant_cast<QTreeWidgetItem*>(args.at(0)), item);
+                    QCOMPARE(qvariant_cast<int>(args.at(1)), j);
 
                     const QString toolTip = QLatin1String("toolTip ") + iS;
                     item->setToolTip(j, toolTip);
@@ -1949,13 +1918,13 @@ void tst_QTreeWidget::setData()
         // ### add more data types here
 
         item->setData(0, Qt::DisplayRole, 5);
-        QCOMPARE(item->data(0, Qt::DisplayRole).type(), QVariant::Int);
+        QCOMPARE(item->data(0, Qt::DisplayRole).userType(), QMetaType::Int);
 
         item->setData(0, Qt::DisplayRole, "test");
-        QCOMPARE(item->data(0, Qt::DisplayRole).type(), QVariant::String);
+        QCOMPARE(item->data(0, Qt::DisplayRole).userType(), QMetaType::QString);
 
         item->setData(0, Qt::DisplayRole, 0.4);
-        QCOMPARE(item->data(0, Qt::DisplayRole).type(), QVariant::Double);
+        QCOMPARE(item->data(0, Qt::DisplayRole).userType(), QMetaType::Double);
 
         delete item;
     }
@@ -1967,12 +1936,13 @@ class QTreeWidgetDataChanged : public QTreeWidget
 public:
     using QTreeWidget::QTreeWidget;
 
-    void dataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight, const QVector<int> &roles) override
+    void dataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight,
+                     const QList<int> &roles) override
     {
         QTreeWidget::dataChanged(topLeft, bottomRight, roles);
         currentRoles = roles;
     }
-    QVector<int> currentRoles;
+    QList<int> currentRoles;
 };
 
 void tst_QTreeWidget::itemData()
@@ -1982,12 +1952,12 @@ void tst_QTreeWidget::itemData()
     widget.setColumnCount(2);
     item.setFlags(item.flags() | Qt::ItemIsEditable);
     item.setData(0, Qt::DisplayRole,  QString("0"));
-    QCOMPARE(widget.currentRoles, QVector<int>({Qt::DisplayRole, Qt::EditRole}));
+    QCOMPARE(widget.currentRoles, QList<int>({ Qt::DisplayRole, Qt::EditRole }));
     item.setData(0, Qt::CheckStateRole, Qt::PartiallyChecked);
-    QCOMPARE(widget.currentRoles, QVector<int>{Qt::CheckStateRole});
+    QCOMPARE(widget.currentRoles, QList<int> { Qt::CheckStateRole });
     for (int i = 0; i < 4; ++i) {
         item.setData(0, Qt::UserRole + i, QString::number(i + 1));
-        QCOMPARE(widget.currentRoles, QVector<int>{Qt::UserRole + i});
+        QCOMPARE(widget.currentRoles, QList<int> { Qt::UserRole + i });
     }
     QMap<int, QVariant> flags = widget.model()->itemData(widget.model()->index(0, 0));
     QCOMPARE(flags.count(), 6);
@@ -2328,7 +2298,7 @@ void tst_QTreeWidget::insertExpandedItemsWithSorting()
     tree.setSortingEnabled(true);
 
     // insert expanded items in unsorted order
-    QVector<QTreeWidgetItem *> items;
+    QList<QTreeWidgetItem *> items;
     for (const QString &text : parentTexts) {
         QTreeWidgetItem *parent = new QTreeWidgetItem(&tree, {text});
         parent->setExpanded(true);
@@ -2735,7 +2705,7 @@ void tst_QTreeWidget::sortedIndexOfChild()
     QFETCH(const IntList, expectedIndexes);
 
     QTreeWidget tw;
-    QVector<QTreeWidgetItem *> itms;
+    QList<QTreeWidgetItem *> itms;
     auto *top = new QTreeWidgetItem(&tw, {"top"});
 
     for (const QString &str : itemTexts)
@@ -3008,7 +2978,7 @@ protected:
     }
 private:
     int timerId;
-    QVector<QTreeWidgetItem*> m_list;
+    QList<QTreeWidgetItem *> m_list;
 };
 
 void tst_QTreeWidget::sortAndSelect()
@@ -3337,9 +3307,9 @@ void tst_QTreeWidget::task239150_editorWidth()
     QTreeWidget tree;
 
     QStyleOptionFrame opt;
-    opt.init(&tree);
-    const int minWidth = tree.style()->sizeFromContents(QStyle::CT_LineEdit, &opt, QSize(0, 0).
-        expandedTo(QApplication::globalStrut()), nullptr).width();
+    opt.initFrom(&tree);
+    const int minWidth = tree.style()->sizeFromContents(QStyle::CT_LineEdit, &opt, QSize(0, 0)
+                                                        , nullptr).width();
 
     {
         QTreeWidgetItem item;
@@ -3497,9 +3467,8 @@ void tst_QTreeWidget::taskQTBUG_34717_collapseAtBottom()
 
 void tst_QTreeWidget::task20345_sortChildren()
 {
-    if (!QGuiApplication::platformName().compare(QLatin1String("wayland"), Qt::CaseInsensitive)
-        || !QGuiApplication::platformName().compare(QLatin1String("winrt"), Qt::CaseInsensitive))
-        QSKIP("Wayland/WinRT: This causes a crash triggered by setVisible(false)");
+    if (!QGuiApplication::platformName().compare(QLatin1String("wayland"), Qt::CaseInsensitive))
+        QSKIP("Wayland: This causes a crash triggered by setVisible(false)");
 
     // This test case is considered successful if it is executed (no crash in sorting)
     QTreeWidget tw;
@@ -3638,7 +3607,7 @@ void tst_QTreeWidget::clearItemData()
     QList<QVariant> dataChangeArgs = dataChangeSpy.takeFirst();
     QCOMPARE(dataChangeArgs.at(0).value<QModelIndex>(), parentIdx);
     QCOMPARE(dataChangeArgs.at(1).value<QModelIndex>(), parentIdx);
-    QVERIFY(dataChangeArgs.at(2).value<QVector<int>>().isEmpty());
+    QVERIFY(dataChangeArgs.at(2).value<QList<int>>().isEmpty());
     QVERIFY(model->clearItemData(parentIdx));
     QCOMPARE(dataChangeSpy.size(), 0);
     QVERIFY(model->clearItemData(childIdx));
@@ -3647,9 +3616,76 @@ void tst_QTreeWidget::clearItemData()
     dataChangeArgs = dataChangeSpy.takeFirst();
     QCOMPARE(dataChangeArgs.at(0).value<QModelIndex>(), childIdx);
     QCOMPARE(dataChangeArgs.at(1).value<QModelIndex>(), childIdx);
-    QVERIFY(dataChangeArgs.at(2).value<QVector<int>>().isEmpty());
+    QVERIFY(dataChangeArgs.at(2).value<QList<int>>().isEmpty());
 }
 #endif
+
+void tst_QTreeWidget::createPersistentOnLayoutAboutToBeChanged() // QTBUG-93466
+{
+    QTreeWidget widget;
+    QCOMPARE(widget.model()->columnCount(), 1);
+    widget.model()->insertRows(0, 3);
+    for (int row = 0; row < 3; ++row)
+        widget.model()->setData(widget.model()->index(row, 0), row);
+    QList<QPersistentModelIndex> idxList;
+    QSignalSpy layoutAboutToBeChangedSpy(widget.model(), &QAbstractItemModel::layoutAboutToBeChanged);
+    QSignalSpy layoutChangedSpy(widget.model(), &QAbstractItemModel::layoutChanged);
+    connect(widget.model(), &QAbstractItemModel::layoutAboutToBeChanged, this, [&idxList, &widget](){
+        idxList.clear();
+        for (int row = 0; row < 3; ++row)
+            idxList << QPersistentModelIndex(widget.model()->index(row, 0));
+    });
+    connect(widget.model(), &QAbstractItemModel::layoutChanged, this, [&idxList](){
+        QCOMPARE(idxList.size(), 3);
+        QCOMPARE(idxList.at(0).row(), 1);
+        QCOMPARE(idxList.at(0).column(), 0);
+        QCOMPARE(idxList.at(0).data().toInt(), 0);
+        QCOMPARE(idxList.at(1).row(), 0);
+        QCOMPARE(idxList.at(1).column(), 0);
+        QCOMPARE(idxList.at(1).data().toInt(), -1);
+        QCOMPARE(idxList.at(2).row(), 2);
+        QCOMPARE(idxList.at(2).column(), 0);
+        QCOMPARE(idxList.at(2).data().toInt(), 2);
+    });
+    widget.model()->setData(widget.model()->index(1, 0), -1);
+    widget.model()->sort(0);
+    QCOMPARE(layoutAboutToBeChangedSpy.size(), 1);
+    QCOMPARE(layoutChangedSpy.size(), 1);
+}
+
+void tst_QTreeWidget::createPersistentOnLayoutAboutToBeChangedAutoSort() // QTBUG-93466
+{
+    QTreeWidget widget;
+    QCOMPARE(widget.model()->columnCount(), 1);
+    widget.model()->insertRows(0, 3);
+    for (int row = 0; row < 3; ++row)
+        widget.model()->setData(widget.model()->index(row, 0), row);
+    widget.sortByColumn(0, Qt::AscendingOrder);
+    widget.setSortingEnabled(true);
+    QList<QPersistentModelIndex> idxList;
+    QSignalSpy layoutAboutToBeChangedSpy(widget.model(), &QAbstractItemModel::layoutAboutToBeChanged);
+    QSignalSpy layoutChangedSpy(widget.model(), &QAbstractItemModel::layoutChanged);
+    connect(widget.model(), &QAbstractItemModel::layoutAboutToBeChanged, this, [&idxList, &widget](){
+        idxList.clear();
+        for (int row = 0; row < 3; ++row)
+            idxList << QPersistentModelIndex(widget.model()->index(row, 0));
+    });
+    connect(widget.model(), &QAbstractItemModel::layoutChanged, this, [&idxList](){
+        QCOMPARE(idxList.size(), 3);
+        QCOMPARE(idxList.at(0).row(), 1);
+        QCOMPARE(idxList.at(0).column(), 0);
+        QCOMPARE(idxList.at(0).data().toInt(), 0);
+        QCOMPARE(idxList.at(1).row(), 0);
+        QCOMPARE(idxList.at(1).column(), 0);
+        QCOMPARE(idxList.at(1).data().toInt(), -1);
+        QCOMPARE(idxList.at(2).row(), 2);
+        QCOMPARE(idxList.at(2).column(), 0);
+        QCOMPARE(idxList.at(2).data().toInt(), 2);
+    });
+    widget.model()->setData(widget.model()->index(1, 0), -1);
+    QCOMPARE(layoutAboutToBeChangedSpy.size(), 1);
+    QCOMPARE(layoutChangedSpy.size(), 1);
+}
 
 QTEST_MAIN(tst_QTreeWidget)
 #include "tst_qtreewidget.moc"

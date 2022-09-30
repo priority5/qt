@@ -1,34 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
-
+#include <QTest>
+#include <QSignalSpy>
 
 #include "qpushbutton.h"
 #include <qapplication.h>
@@ -40,6 +15,9 @@
 #include <QGridLayout>
 #include <QStyleFactory>
 #include <QTabWidget>
+
+#include <private/qguiapplication_p.h>
+#include <qpa/qplatformtheme.h>
 
 class tst_QPushButton : public QObject
 {
@@ -53,22 +31,27 @@ private slots:
     void getSetCheck();
     void autoRepeat();
     void pressed();
+#if QT_CONFIG(shortcut)
     void setAccel();
+#endif
     void isCheckable();
     void setDown();
     void popupCrash();
     void isChecked();
-    void animateClick();
     void toggle();
     void clicked();
+    void touchTap();
     void toggled();
     void defaultAndAutoDefault();
     void sizeHint_data();
     void sizeHint();
+#if QT_CONFIG(shortcut)
     void taskQTBUG_20191_shortcutWithKeypadModifer();
+#endif
     void emitReleasedAfterChange();
     void hitButton();
     void iconOnlyStyleSheet();
+    void mousePressAndMove();
 
 protected slots:
     void resetCounters();
@@ -85,6 +68,7 @@ private:
     uint release_count;
 
     QPushButton *testWidget;
+    QPointingDevice *m_touchScreen = QTest::createTouchDevice();
 };
 
 // Testing get/set functions
@@ -127,8 +111,10 @@ void tst_QPushButton::init()
     testWidget->setDown( false );
     testWidget->setText("Test");
     testWidget->setEnabled( true );
+#if QT_CONFIG(shortcut)
     QKeySequence seq;
     testWidget->setShortcut( seq );
+#endif
 
     resetCounters();
 }
@@ -212,6 +198,13 @@ void tst_QPushButton::autoRepeat()
     // check that pressing ENTER has no effect
     resetCounters();
     testWidget->setDown( false );
+    // Skip after reset if ButtonPressKeys has Key_Enter
+    const auto buttonPressKeys = QGuiApplicationPrivate::platformTheme()
+                                         ->themeHint(QPlatformTheme::ButtonPressKeys)
+                                         .value<QList<Qt::Key>>();
+    if (buttonPressKeys.contains(Qt::Key_Enter)) {
+        return;
+    }
     testWidget->setAutoRepeat( false );
     QTest::keyPress( testWidget, Qt::Key_Enter );
 
@@ -246,6 +239,14 @@ void tst_QPushButton::pressed()
     QTest::keyRelease( testWidget, ' ' );
     QCOMPARE( press_count, (uint)1 );
     QCOMPARE( release_count, (uint)1 );
+
+    // Skip if ButtonPressKeys has Key_Enter
+    const auto buttonPressKeys = QGuiApplicationPrivate::platformTheme()
+                                         ->themeHint(QPlatformTheme::ButtonPressKeys)
+                                         .value<QList<Qt::Key>>();
+    if (buttonPressKeys.contains(Qt::Key_Enter)) {
+        return;
+    }
 
     QTest::keyPress( testWidget,Qt::Key_Enter );
     QCOMPARE( press_count, (uint)1 );
@@ -320,6 +321,8 @@ void tst_QPushButton::toggled()
     QVERIFY( click_count == 1 );
 }
 
+#if QT_CONFIG(shortcut)
+
 /*
     If we press an accelerator key we ONLY get a pressed signal and
     NOT a released or clicked signal.
@@ -327,11 +330,8 @@ void tst_QPushButton::toggled()
 
 void tst_QPushButton::setAccel()
 {
-    if (QGuiApplication::platformName().startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
-        QSKIP("Wayland: This fails. Figure out why.");
-
     testWidget->setText("&AccelTest");
-    QKeySequence seq( Qt::ALT + Qt::Key_A );
+    QKeySequence seq( Qt::ALT | Qt::Key_A );
     testWidget->setShortcut( seq );
 
     // The shortcut will not be activated unless the button is in a active
@@ -351,19 +351,7 @@ void tst_QPushButton::setAccel()
     QTRY_VERIFY( !testWidget->isDown() );
 }
 
-void tst_QPushButton::animateClick()
-{
-    QVERIFY( !testWidget->isDown() );
-    testWidget->animateClick();
-    QVERIFY( testWidget->isDown() );
-    QTest::qWait( 200 );
-    QVERIFY( !testWidget->isDown() );
-
-    QVERIFY( click_count == 1 );
-    QVERIFY( press_count == 1 );
-    QVERIFY( release_count == 1 );
-    QVERIFY( toggle_count == 0 );
-}
+#endif // QT_CONFIG(shortcut)
 
 void tst_QPushButton::clicked()
 {
@@ -382,6 +370,29 @@ void tst_QPushButton::clicked()
         QTest::mouseClick( testWidget, Qt::LeftButton );
     QCOMPARE( press_count, (uint)10 );
     QCOMPARE( release_count, (uint)10 );
+}
+
+void tst_QPushButton::touchTap()
+{
+    QTest::touchEvent(testWidget, m_touchScreen).press(0, QPoint(10, 10));
+    QVERIFY( press_count == 1 );
+    QVERIFY( release_count == 0 );
+    QTest::touchEvent(testWidget, m_touchScreen).release(0, QPoint(10, 10));
+    QCOMPARE( press_count, (uint)1 );
+    QCOMPARE( release_count, (uint)1 );
+    QCOMPARE( click_count, (uint)1 );
+
+    press_count = 0;
+    release_count = 0;
+    click_count = 0;
+    testWidget->setDown(false);
+    for (uint i = 0; i < 10; i++) {
+        QTest::touchEvent(testWidget, m_touchScreen).press(0, QPoint(10, 10));
+        QTest::touchEvent(testWidget, m_touchScreen).release(0, QPoint(10, 10));
+    }
+    QCOMPARE( press_count, (uint)10 );
+    QCOMPARE( release_count, (uint)10 );
+    QCOMPARE( click_count, (uint)10 );
 }
 
 QPushButton *pb = 0;
@@ -507,12 +518,12 @@ void tst_QPushButton::sizeHint_data()
     QTest::newRow("windows") << QString::fromLatin1("windows");
 #endif
 #if defined(Q_OS_MAC) && !defined(QT_NO_STYLE_MAC)
-    QTest::newRow("macintosh") << QString::fromLatin1("macintosh");
+    QTest::newRow("macos") << QString::fromLatin1("macos");
 #endif
 #if !defined(QT_NO_STYLE_FUSION)
     QTest::newRow("fusion") << QString::fromLatin1("fusion");
 #endif
-#if defined(Q_OS_WIN) && !defined(QT_NO_STYLE_WINDOWSVISTA) && !defined(Q_OS_WINRT)
+#if defined(Q_OS_WIN) && !defined(QT_NO_STYLE_WINDOWSVISTA)
     QTest::newRow("windowsvista") << QString::fromLatin1("windowsvista");
 #endif
 }
@@ -541,6 +552,8 @@ void tst_QPushButton::sizeHint()
         button->setDefault(false);
         QCOMPARE(button->sizeHint(), initSizeHint);
         delete button;
+
+        delete widget;
     }
 
 // Test 2
@@ -570,8 +583,12 @@ void tst_QPushButton::sizeHint()
         tabWidget->setCurrentWidget(tab1);
 
         QTRY_COMPARE(button1_2->size(), button2_2->size());
+
+        delete dialog;
     }
 }
+
+#if QT_CONFIG(shortcut)
 
 void tst_QPushButton::taskQTBUG_20191_shortcutWithKeypadModifer()
 {
@@ -599,7 +616,7 @@ void tst_QPushButton::taskQTBUG_20191_shortcutWithKeypadModifer()
     // add shortcut 'keypad 5' to button2
     spy1.clear();
     QSignalSpy spy2(button2, SIGNAL(clicked()));
-    button2->setShortcut(Qt::Key_5 + Qt::KeypadModifier);
+    button2->setShortcut(Qt::Key_5 | Qt::KeypadModifier);
     QTest::keyClick(&dialog, Qt::Key_5);
     QTest::qWait(300);
     QTest::keyClick(&dialog, Qt::Key_5, Qt::KeypadModifier);
@@ -618,6 +635,8 @@ void tst_QPushButton::taskQTBUG_20191_shortcutWithKeypadModifer()
     QCOMPARE(spy1.count(), 0);
     QCOMPARE(spy2.count(), 1);
 }
+
+#endif // QT_CONFIG(shortcut)
 
 void tst_QPushButton::emitReleasedAfterChange()
 {
@@ -711,6 +730,36 @@ void tst_QPushButton::iconOnlyStyleSheet()
     "}");
     pb.show();
     QVERIFY(QTest::qWaitForWindowExposed(&pb));
+}
+
+/*
+    Test that mouse has been pressed,the signal is sent when moving the mouse.
+    QTBUG-97937
+*/
+void tst_QPushButton::mousePressAndMove()
+{
+    QPushButton button;
+    button.setGeometry(0, 0, 20, 20);
+    QSignalSpy pressSpy(&button, &QAbstractButton::pressed);
+    QSignalSpy releaseSpy(&button, &QAbstractButton::released);
+
+    QTest::mousePress(&button, Qt::LeftButton);
+    QCOMPARE(pressSpy.count(), 1);
+    QCOMPARE(releaseSpy.count(), 0);
+
+    // mouse pressed and moving out
+    QTest::mouseMove(&button, QPoint(100, 100));
+
+    // should emit released signal when the mouse is dragged out of boundary
+    QCOMPARE(pressSpy.count(), 1);
+    QCOMPARE(releaseSpy.count(), 1);
+
+    // mouse pressed and moving into
+    QTest::mouseMove(&button, QPoint(10, 10));
+
+    // should emit pressed signal when the mouse is dragged into of boundary
+    QCOMPARE(pressSpy.count(), 2);
+    QCOMPARE(releaseSpy.count(), 1);
 }
 
 QTEST_MAIN(tst_QPushButton)

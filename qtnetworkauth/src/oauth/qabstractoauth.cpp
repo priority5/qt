@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Network Auth module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #ifndef QT_NO_HTTP
 
@@ -336,7 +310,7 @@ void QAbstractOAuthPrivate::addContentTypeHeaders(QNetworkRequest *request)
     }
 }
 
-QUrlQuery QAbstractOAuthPrivate::createQuery(const QVariantMap &parameters)
+QUrlQuery QAbstractOAuthPrivate::createQuery(const QMultiMap<QString, QVariant> &parameters)
 {
     QUrlQuery query;
     for (auto it = parameters.begin(), end = parameters.end(); it != end; ++it)
@@ -511,6 +485,7 @@ void QAbstractOAuth::setReplyHandler(QAbstractOAuthReplyHandler *handler)
 }
 
 /*!
+    \fn QAbstractOAuth::prepareRequest(QNetworkRequest *request, const QByteArray &verb, const QByteArray &body)
     \since 5.13
 
     Authorizes the given \a request by adding a header and \a body to
@@ -519,13 +494,6 @@ void QAbstractOAuth::setReplyHandler(QAbstractOAuthReplyHandler *handler)
     The \a verb must be a valid HTTP verb and the same as the one that will be
     used to send the \a request.
 */
-void QAbstractOAuth::prepareRequest(QNetworkRequest *request,
-                                    const QByteArray &verb,
-                                    const QByteArray &body)
-{
-    Q_D(QAbstractOAuth);
-    d->prepareRequestImpl(request, verb, body);
-}
 
 /*!
     Returns the current parameter-modification function.
@@ -606,7 +574,7 @@ QString QAbstractOAuth::callback() const
     URL.
     \sa authorizeWithBrowser()
 */
-void QAbstractOAuth::resourceOwnerAuthorization(const QUrl &url, const QVariantMap &parameters)
+void QAbstractOAuth::resourceOwnerAuthorization(const QUrl &url, const QMultiMap<QString, QVariant> &parameters)
 {
     QUrl u = url;
     u.setQuery(QAbstractOAuthPrivate::createQuery(parameters));

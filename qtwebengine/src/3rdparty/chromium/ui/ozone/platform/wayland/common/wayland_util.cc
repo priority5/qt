@@ -7,7 +7,11 @@
 #include <xdg-shell-client-protocol.h>
 #include <xdg-shell-unstable-v6-client-protocol.h>
 
+#include "third_party/skia/include/core/SkPath.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "ui/base/hit_test.h"
+#include "ui/gfx/geometry/skia_conversions.h"
+#include "ui/gfx/geometry/transform.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
 #include "ui/ozone/platform/wayland/host/wayland_shm_buffer.h"
 #include "ui/ozone/platform/wayland/host/wayland_surface.h"
@@ -131,7 +135,7 @@ bool DrawBitmap(const SkBitmap& bitmap, ui::WaylandShmBuffer* out_buffer) {
   // Clear to transparent in case |bitmap| is smaller than the canvas.
   auto* canvas = sk_surface->getCanvas();
   canvas->clear(SK_ColorTRANSPARENT);
-  canvas->drawBitmapRect(bitmap, damage, nullptr);
+  canvas->drawImageRect(bitmap.asImage(), damage, SkSamplingOptions());
   return true;
 }
 
@@ -146,6 +150,14 @@ void ReadDataFromFD(base::ScopedFD fd, std::vector<uint8_t>* contents) {
 gfx::Rect TranslateBoundsToParentCoordinates(const gfx::Rect& child_bounds,
                                              const gfx::Rect& parent_bounds) {
   return gfx::Rect(
+      (child_bounds.origin() - parent_bounds.origin().OffsetFromOrigin()),
+      child_bounds.size());
+}
+
+gfx::RectF TranslateBoundsToParentCoordinatesF(
+    const gfx::RectF& child_bounds,
+    const gfx::RectF& parent_bounds) {
+  return gfx::RectF(
       (child_bounds.origin() - parent_bounds.origin().OffsetFromOrigin()),
       child_bounds.size());
 }
@@ -176,6 +188,54 @@ wl_output_transform ToWaylandTransform(gfx::OverlayTransform transform) {
   }
   NOTREACHED();
   return WL_OUTPUT_TRANSFORM_NORMAL;
+}
+
+gfx::RectF ApplyWaylandTransform(const gfx::RectF& rect,
+                                 const gfx::SizeF& bounds,
+                                 wl_output_transform transform) {
+  gfx::RectF result = rect;
+  switch (transform) {
+    case WL_OUTPUT_TRANSFORM_NORMAL:
+      break;
+    case WL_OUTPUT_TRANSFORM_FLIPPED:
+      result.set_x(bounds.width() - rect.x() - rect.width());
+      break;
+    case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+      result.set_x(rect.y());
+      result.set_y(rect.x());
+      result.set_width(rect.height());
+      result.set_height(rect.width());
+      break;
+    case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+      result.set_y(bounds.height() - rect.y() - rect.height());
+      break;
+    case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+      result.set_x(bounds.height() - rect.y() - rect.height());
+      result.set_y(bounds.width() - rect.x() - rect.width());
+      result.set_width(rect.height());
+      result.set_height(rect.width());
+      break;
+    case WL_OUTPUT_TRANSFORM_90:
+      result.set_x(rect.y());
+      result.set_y(bounds.width() - rect.x() - rect.width());
+      result.set_width(rect.height());
+      result.set_height(rect.width());
+      break;
+    case WL_OUTPUT_TRANSFORM_180:
+      result.set_x(bounds.width() - rect.x() - rect.width());
+      result.set_y(bounds.height() - rect.y() - rect.height());
+      break;
+    case WL_OUTPUT_TRANSFORM_270:
+      result.set_x(bounds.height() - rect.y() - rect.height());
+      result.set_y(rect.x());
+      result.set_width(rect.height());
+      result.set_height(rect.width());
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+  return result;
 }
 
 gfx::Rect ApplyWaylandTransform(const gfx::Rect& rect,
@@ -226,9 +286,9 @@ gfx::Rect ApplyWaylandTransform(const gfx::Rect& rect,
   return result;
 }
 
-gfx::Size ApplyWaylandTransform(const gfx::Size& size,
-                                wl_output_transform transform) {
-  gfx::Size result = size;
+gfx::SizeF ApplyWaylandTransform(const gfx::SizeF& size,
+                                 wl_output_transform transform) {
+  gfx::SizeF result = size;
   switch (transform) {
     case WL_OUTPUT_TRANSFORM_NORMAL:
     case WL_OUTPUT_TRANSFORM_FLIPPED:
@@ -249,11 +309,6 @@ gfx::Size ApplyWaylandTransform(const gfx::Size& size,
   return result;
 }
 
-bool IsMenuType(ui::PlatformWindowType type) {
-  return type == ui::PlatformWindowType::kMenu ||
-         type == ui::PlatformWindowType::kPopup;
-}
-
 ui::WaylandWindow* RootWindowFromWlSurface(wl_surface* surface) {
   if (!surface)
     return nullptr;
@@ -268,12 +323,34 @@ gfx::Rect TranslateWindowBoundsToParentDIP(ui::WaylandWindow* window,
                                            ui::WaylandWindow* parent_window) {
   DCHECK(window);
   DCHECK(parent_window);
-  DCHECK_EQ(window->buffer_scale(), parent_window->buffer_scale());
+  DCHECK_EQ(window->window_scale(), parent_window->window_scale());
   DCHECK_EQ(window->ui_scale(), parent_window->ui_scale());
   return gfx::ScaleToRoundedRect(
       wl::TranslateBoundsToParentCoordinates(window->GetBounds(),
                                              parent_window->GetBounds()),
-      1.0 / window->buffer_scale());
+      1.0f / window->window_scale());
+}
+
+std::vector<gfx::Rect> CreateRectsFromSkPath(const SkPath& path) {
+  SkRegion clip_region;
+  clip_region.setRect(path.getBounds().round());
+  SkRegion region;
+  region.setPath(path, clip_region);
+
+  std::vector<gfx::Rect> rects;
+  for (SkRegion::Iterator it(region); !it.done(); it.next())
+    rects.push_back(gfx::SkIRectToRect(it.rect()));
+
+  return rects;
+}
+
+SkPath ConvertPathToDIP(const SkPath& path_in_pixels, float scale) {
+  SkScalar sk_scale = SkFloatToScalar(1.0f / scale);
+  gfx::Transform transform;
+  transform.Scale(sk_scale, sk_scale);
+  SkPath path_in_dips;
+  path_in_pixels.transform(transform.matrix().asM33(), &path_in_dips);
+  return path_in_dips;
 }
 
 }  // namespace wl

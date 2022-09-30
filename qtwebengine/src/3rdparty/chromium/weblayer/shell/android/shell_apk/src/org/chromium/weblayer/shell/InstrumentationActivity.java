@@ -6,6 +6,7 @@ package org.chromium.weblayer.shell;
 
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.StrictMode;
@@ -18,13 +19,15 @@ import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.fragment.app.Fragment;
-import androidx.fragment.app.FragmentActivity;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.components.strictmode.ThreadStrictModeInterceptor;
 import org.chromium.weblayer.Browser;
+import org.chromium.weblayer.BrowserFragmentCreateParams;
 import org.chromium.weblayer.FullscreenCallback;
 import org.chromium.weblayer.NewTabCallback;
 import org.chromium.weblayer.NewTabType;
@@ -42,22 +45,32 @@ import java.util.List;
 /**
  * Activity for running instrumentation tests.
  */
-public class InstrumentationActivity extends FragmentActivity {
+// This isn't part of Chrome, so using explicit colors/sizes is ok.
+@SuppressWarnings("checkstyle:SetTextColorAndSetTextSizeCheck")
+public class InstrumentationActivity extends AppCompatActivity {
     private static final String TAG = "WLInstrumentation";
     private static final String KEY_MAIN_VIEW_ID = "mainViewId";
 
     public static final String EXTRA_PERSISTENCE_ID = "EXTRA_PERSISTENCE_ID";
     public static final String EXTRA_PROFILE_NAME = "EXTRA_PROFILE_NAME";
     public static final String EXTRA_IS_INCOGNITO = "EXTRA_IS_INCOGNITO";
+    public static final String EXTRA_USE_VIEW_MODEL = "EXTRA_USE_VIEW_MODEL";
     private static final float DEFAULT_TEXT_SIZE = 15.0F;
 
     // Used in tests to specify whether WebLayer should be created automatically on launch.
     // True by default. If set to false, the test should call loadWebLayerSync.
     public static final String EXTRA_CREATE_WEBLAYER = "EXTRA_CREATE_WEBLAYER";
 
+    public static final String EXTRA_TOP_VIEW_MIN_HEIGHT = "EXTRA_TOP_VIEW_MIN_HEIGHT";
+    public static final String EXTRA_ONLY_EXPAND_CONTROLS_AT_TOP =
+            "EXTRA_ONLY_EXPAND_CONTROLS_AT_TOP";
+
     // Used in tests to specify whether WebLayer URL bar should set default click listeners
     // that show Page Info UI on its TextView.
     public static final String EXTRA_URLBAR_TEXT_CLICKABLE = "EXTRA_URLBAR_TEXT_CLICKABLE";
+
+    // Used in tests to specify whether WebLayer URL bar should show publisher url.
+    public static final String EXTRA_URLBAR_SHOW_PUBLISHER_URL = "EXTRA_URLBAR_SHOW_PUBLISHER_URL";
 
     private static OnCreatedCallback sOnCreatedCallback;
 
@@ -97,9 +110,9 @@ public class InstrumentationActivity extends FragmentActivity {
      * created.
      */
     public static interface OnCreatedCallback {
-        // Notification that a Browser was created.
+        // Notification that a Browser was created in |activity|.
         // This is called on the UI thread.
-        public void onCreated(Browser browser);
+        public void onCreated(Browser browser, InstrumentationActivity activity);
     }
 
     // Registers a callback that is notified on the UI thread when a Browser is created.
@@ -140,7 +153,7 @@ public class InstrumentationActivity extends FragmentActivity {
 
     /** Interface used to intercept intents for testing. */
     public static interface IntentInterceptor {
-        void interceptIntent(Fragment fragment, Intent intent, int requestCode, Bundle options);
+        void interceptIntent(Intent intent, int requestCode, Bundle options);
     }
 
     public void setIntentInterceptor(IntentInterceptor interceptor) {
@@ -151,7 +164,7 @@ public class InstrumentationActivity extends FragmentActivity {
     public void startActivityFromFragment(
             Fragment fragment, Intent intent, int requestCode, Bundle options) {
         if (mIntentInterceptor != null) {
-            mIntentInterceptor.interceptIntent(fragment, intent, requestCode, options);
+            mIntentInterceptor.interceptIntent(intent, requestCode, options);
             return;
         }
         super.startActivityFromFragment(fragment, intent, requestCode, options);
@@ -160,7 +173,7 @@ public class InstrumentationActivity extends FragmentActivity {
     @Override
     public void startActivity(Intent intent) {
         if (mIntentInterceptor != null) {
-            mIntentInterceptor.interceptIntent(null, intent, 0, null);
+            mIntentInterceptor.interceptIntent(intent, 0, null);
             return;
         }
         super.startActivity(intent);
@@ -169,10 +182,25 @@ public class InstrumentationActivity extends FragmentActivity {
     @Override
     public boolean startActivityIfNeeded(Intent intent, int requestCode) {
         if (mIntentInterceptor != null) {
-            mIntentInterceptor.interceptIntent(null, intent, requestCode, null);
+            mIntentInterceptor.interceptIntent(intent, requestCode, null);
             return true;
         }
         return super.startActivityIfNeeded(intent, requestCode);
+    }
+
+    @Override
+    public void startActivityForResult(Intent intent, int requestCode, Bundle options) {
+        if (mIntentInterceptor != null) {
+            mIntentInterceptor.interceptIntent(intent, requestCode, options);
+            return;
+        }
+        super.startActivityForResult(intent, requestCode, options);
+    }
+
+    @Override
+    public int checkPermission(String permission, int pid, int uid) {
+        // Tests can use a ContextWrapper for tha application context in order to hook this call.
+        return ContextUtils.getApplicationContext().checkPermission(permission, pid, uid);
     }
 
     public View getTopContentsContainer() {
@@ -183,8 +211,8 @@ public class InstrumentationActivity extends FragmentActivity {
     protected void onCreate(final Bundle savedInstanceState) {
         // JaCoCo injects code that does file access, which doesn't work well with strict mode.
         if (!isJaCoCoEnabled()) {
-            StrictMode.setThreadPolicy(
-                    new ThreadPolicy.Builder().detectAll().penaltyLog().penaltyDeath().build());
+            ThreadStrictModeInterceptor.buildWithDeathPenaltyAndKnownViolationExemptions().install(
+                    new ThreadPolicy.Builder().detectAll().build());
             // This doesn't use detectAll() as the untagged sockets policy is encountered in tests
             // using TestServer.
             StrictMode.setVmPolicy(new VmPolicy.Builder()
@@ -270,7 +298,13 @@ public class InstrumentationActivity extends FragmentActivity {
         mBrowser = Browser.fromFragment(mFragment);
         mProfile = mBrowser.getProfile();
 
-        mBrowser.setTopView(mTopContentsContainer);
+        final boolean onlyExpandControlsAtTop =
+                getIntent().getBooleanExtra(EXTRA_ONLY_EXPAND_CONTROLS_AT_TOP, false);
+        final int minTopViewHeight = getIntent().getIntExtra(EXTRA_TOP_VIEW_MIN_HEIGHT, -1);
+
+        mBrowser.setTopView(mTopContentsContainer, Math.max(0, minTopViewHeight),
+                onlyExpandControlsAtTop,
+                /* animate */ false);
 
         mRendererCrashListener = new TabCallback() {
             @Override
@@ -320,10 +354,19 @@ public class InstrumentationActivity extends FragmentActivity {
         }
 
         if (sOnCreatedCallback != null) {
-            sOnCreatedCallback.onCreated(mBrowser);
+            sOnCreatedCallback.onCreated(mBrowser, this);
             // Don't reset |sOnCreatedCallback| as it's needed for tests that exercise activity
             // recreation.
         }
+    }
+
+    /**
+     * Removes and adds back the TabListCallback. This is useful for tests that
+     * need to ensure their callback is run first.
+     */
+    public void reregisterTabListCallback() {
+        mBrowser.unregisterTabListCallback(mTabListCallback);
+        mBrowser.registerTabListCallback(mTabListCallback);
     }
 
     private void setTabCallbacks(Tab tab) {
@@ -375,6 +418,9 @@ public class InstrumentationActivity extends FragmentActivity {
         if (getIntent().getBooleanExtra(EXTRA_URLBAR_TEXT_CLICKABLE, true)) {
             optionsBuilder = optionsBuilder.showPageInfoWhenTextIsClicked();
         }
+        if (getIntent().getBooleanExtra(EXTRA_URLBAR_SHOW_PUBLISHER_URL, false)) {
+            optionsBuilder = optionsBuilder.showPublisherUrl();
+        }
 
         mUrlBarView = mBrowser.getUrlBarController().createUrlBarView(optionsBuilder.build());
 
@@ -425,7 +471,7 @@ public class InstrumentationActivity extends FragmentActivity {
                 }
                 if (sOnCreatedCallback != null) {
                     for (int i = 1; i < fragments.size(); ++i) {
-                        sOnCreatedCallback.onCreated(Browser.fromFragment(fragments.get(i)));
+                        sOnCreatedCallback.onCreated(Browser.fromFragment(fragments.get(i)), this);
                     }
                 }
                 return fragments.get(0);
@@ -442,6 +488,8 @@ public class InstrumentationActivity extends FragmentActivity {
     }
 
     public Fragment createBrowserFragment(int viewId, Intent intent) {
+        ViewGroup parentView = findViewById(viewId);
+        if (parentView != null) parentView.setBackgroundColor(Color.RED);
         FragmentManager fragmentManager = getSupportFragmentManager();
         String profileName = intent.hasExtra(EXTRA_PROFILE_NAME)
                 ? intent.getStringExtra(EXTRA_PROFILE_NAME)
@@ -452,9 +500,15 @@ public class InstrumentationActivity extends FragmentActivity {
         boolean incognito = intent.hasExtra(EXTRA_IS_INCOGNITO)
                 ? intent.getBooleanExtra(EXTRA_IS_INCOGNITO, false)
                 : (profileName == null);
-        Fragment fragment = incognito
-                ? WebLayer.createBrowserFragmentWithIncognitoProfile(profileName, persistenceId)
-                : WebLayer.createBrowserFragment(profileName, persistenceId);
+        boolean useViewModel = intent.hasExtra(EXTRA_USE_VIEW_MODEL)
+                && intent.getBooleanExtra(EXTRA_USE_VIEW_MODEL, false);
+        BrowserFragmentCreateParams createParams = (new BrowserFragmentCreateParams.Builder())
+                                                           .setProfileName(profileName)
+                                                           .setPersistenceId(persistenceId)
+                                                           .setIsIncognito(incognito)
+                                                           .setUseViewModel(useViewModel)
+                                                           .build();
+        Fragment fragment = WebLayer.createBrowserFragmentWithParams(createParams);
         FragmentTransaction transaction = fragmentManager.beginTransaction();
         transaction.add(viewId, fragment);
 
@@ -464,7 +518,7 @@ public class InstrumentationActivity extends FragmentActivity {
         transaction.commitNow();
 
         if (viewId != mMainViewId && sOnCreatedCallback != null) {
-            sOnCreatedCallback.onCreated(Browser.fromFragment(fragment));
+            sOnCreatedCallback.onCreated(Browser.fromFragment(fragment), this);
         }
 
         return fragment;

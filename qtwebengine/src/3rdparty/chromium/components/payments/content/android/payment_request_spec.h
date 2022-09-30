@@ -18,7 +18,7 @@ namespace android {
 //
 // Object ownership diagram:
 //
-// PaymentRequestImpl.java
+// ChromePaymentRequestService.java
 //       |
 //       v
 // PaymentRequestSpec.java
@@ -54,12 +54,18 @@ class PaymentRequestSpec {
   // Recomputes spec based on details.
   void RecomputeSpecForDetails(JNIEnv* env);
 
+  // Returns whether the secure-payment-confirmation method is requested.
+  bool IsSecurePaymentConfirmationRequested(JNIEnv* env);
+
   // Returns the selected shipping option error.
   base::android::ScopedJavaLocalRef<jstring> SelectedShippingOptionError(
       JNIEnv* env);
 
   // Returns the payment details.
   base::android::ScopedJavaLocalRef<jbyteArray> GetPaymentDetails(JNIEnv* env);
+
+  // Returns the payment options.
+  base::android::ScopedJavaLocalRef<jbyteArray> GetPaymentOptions(JNIEnv* env);
 
   // Returns the method data.
   base::android::ScopedJavaLocalRef<jobjectArray> GetMethodData(JNIEnv* env);

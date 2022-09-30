@@ -9,7 +9,7 @@
 #include <numeric>
 
 #include "base/task/test_task_traits_extension.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/gtest_util.h"
 #include "base/test/task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -49,8 +49,7 @@ TEST(PostJobTest, TaskIds) {
   size_t concurrent_array[kNumConcurrentThreads] = {0};
   std::atomic_size_t remaining_tasks{kNumTasksToRun};
   base::JobHandle handle = base::PostJob(
-      FROM_HERE, {base::ThreadPool()},
-      BindLambdaForTesting([&](base::JobDelegate* job) {
+      FROM_HERE, {}, BindLambdaForTesting([&](base::JobDelegate* job) {
         uint8_t id = job->GetTaskId();
         size_t& slot = concurrent_array[id];
         slot++;

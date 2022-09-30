@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
 \page qtquick-performance.html
@@ -115,7 +91,7 @@ multiple times:
 
 \qml
 // bad.qml
-import QtQuick 2.3
+import QtQuick
 
 Item {
     width: 400
@@ -148,7 +124,7 @@ We could instead resolve the common base just once in the block:
 
 \qml
 // good.qml
-import QtQuick 2.3
+import QtQuick
 
 Item {
     width: 400
@@ -185,7 +161,7 @@ property resolution out of the loop, as follows:
 
 \qml
 // better.qml
-import QtQuick 2.3
+import QtQuick
 
 Item {
     width: 400
@@ -232,7 +208,7 @@ The following contrived example illustrates this point:
 
 \qml
 // bad.qml
-import QtQuick 2.3
+import QtQuick
 
 Item {
     id: root
@@ -266,7 +242,7 @@ It could be rewritten as follows:
 
 \qml
 // good.qml
-import QtQuick 2.3
+import QtQuick
 
 Item {
     id: root
@@ -321,7 +297,7 @@ reference sequence is equivalent in cost to assigning a N-element copy sequence 
 reference sequence, so you're usually better off modifying a temporary copy sequence
 and then assigning the result to a reference sequence, during computation.
 
-Assume the existence (and prior registration into the "Qt.example 1.0" namespace) of the
+Assume the existence (and prior registration into the "Qt.example" namespace) of the
 following C++ type:
 
 \code
@@ -350,8 +326,8 @@ tight loop, resulting in bad performance:
 
 \qml
 // bad.qml
-import QtQuick 2.3
-import Qt.example 1.0
+import QtQuick
+import Qt.example
 
 SequenceTypeExample {
     id: root
@@ -378,8 +354,8 @@ something functionally equivalent but much faster would be:
 
 \qml
 // good.qml
-import QtQuick 2.3
-import Qt.example 1.0
+import QtQuick
+import Qt.example
 
 SequenceTypeExample {
     id: root
@@ -413,8 +389,8 @@ aware of, in case you find yourself doing something like this:
 
 \qml
 // bad.qml
-import QtQuick 2.3
-import Qt.example 1.0
+import QtQuick
+import Qt.example
 
 SequenceTypeExample {
     id: root
@@ -441,8 +417,8 @@ sometimes be beneficial:
 
 \qml
 // good.qml
-import QtQuick 2.3
-import Qt.example 1.0
+import QtQuick
+import Qt.example
 
 SequenceTypeExample {
     id: root
@@ -476,14 +452,9 @@ sub-properties of a value-type is usually far less than the number of elements
 in a sequence), any increase in the number of bindings being re-evaluated needlessly
 will have a negative impact on performance.
 
-\section2 Other JavaScript Objects
+\section1 General Performance Tips
 
-Different JavaScript engines provide different optimizations. The JavaScript engine
-which \l {Qt Quick}{Qt Quick 2} uses is optimized for object instantiation and property
-lookup, but the optimizations which it provides relies on certain criteria. If your
-application does not meet the criteria, the JavaScript engine falls back to a
-"slow-path" mode with much worse performance. As such, always try to ensure you
-meet the following criteria:
+General JavaScript performance considerations resulting from the language design are applicable also to QML. Most prominently:
 
 \list
 \li Avoid using eval() if at all possible
@@ -632,7 +603,6 @@ use-case it must fulfil, some general guidelines are as follows:
 \li Be as asynchronous as possible
 \li Do all processing in a (low priority) worker thread
 \li Batch up backend operations so that (potentially slow) I/O and IPC is minimized
-\li Use a sliding slice window to cache results, whose parameters are determined with the help of profiling
 \endlist
 
 It is important to note that using a low-priority worker thread is recommended to
@@ -881,13 +851,6 @@ There are some cases where manually invoking the garbage collector is acceptable
 this is explained in greater detail in an upcoming section), but in most cases, invoking
 the garbage collector is unnecessary and counter-productive.
 
-\section3 Avoid complex bindings
-
-Aside from the reduced performance of complex bindings (for example, due to having to
-enter the JavaScript execution context to perform evaluation), they also take up more
-memory both on the C++ heap and the JavaScript heap than bindings which can be
-evaluated by QML's optimized binding expression evaluator.
-
 \section3 Avoid defining multiple identical implicit types
 
 If a QML element has a custom property defined in QML, it becomes its own implicit type.
@@ -963,7 +926,7 @@ to be of the type explicitly defined by the component, rather than its own impli
 
 Consider the following example:
 \qml
-import QtQuick 2.3
+import QtQuick
 
 Item {
     id: root

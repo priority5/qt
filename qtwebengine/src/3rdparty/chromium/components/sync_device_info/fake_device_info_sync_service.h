@@ -6,7 +6,7 @@
 #define COMPONENTS_SYNC_DEVICE_INFO_FAKE_DEVICE_INFO_SYNC_SERVICE_H_
 
 #include "base/callback.h"
-#include "components/sync/model/fake_model_type_controller_delegate.h"
+#include "components/sync/test/model/fake_model_type_controller_delegate.h"
 #include "components/sync_device_info/device_info_sync_service.h"
 #include "components/sync_device_info/fake_device_info_tracker.h"
 #include "components/sync_device_info/fake_local_device_info_provider.h"
@@ -15,14 +15,14 @@ namespace syncer {
 
 class FakeDeviceInfoSyncService : public DeviceInfoSyncService {
  public:
-  FakeDeviceInfoSyncService();
+  explicit FakeDeviceInfoSyncService(bool skip_engine_connection = false);
   ~FakeDeviceInfoSyncService() override;
 
   // DeviceInfoSyncService implementation.
   FakeLocalDeviceInfoProvider* GetLocalDeviceInfoProvider() override;
   FakeDeviceInfoTracker* GetDeviceInfoTracker() override;
   base::WeakPtr<ModelTypeControllerDelegate> GetControllerDelegate() override;
-  void RefreshLocalDeviceInfo(base::OnceClosure callback) override;
+  void RefreshLocalDeviceInfo() override;
 
   // Returns number of times RefreshLocalDeviceInfo() has been called.
   int RefreshLocalDeviceInfoCount();

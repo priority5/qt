@@ -10,9 +10,8 @@
 
 #include "build/build_config.h"
 #include "third_party/base/allocator/partition_allocator/page_allocator_constants.h"
-#include "third_party/base/logging.h"
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
 #include <mach/vm_page_size.h>
 #endif
 
@@ -50,7 +49,7 @@ PAGE_ALLOCATOR_CONSTANTS_DECLARE_CONSTEXPR ALWAYS_INLINE int
 PartitionPageShift() {
   return 18;  // 256 KiB
 }
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 PAGE_ALLOCATOR_CONSTANTS_DECLARE_CONSTEXPR ALWAYS_INLINE int
 PartitionPageShift() {
   return vm_page_shift + 2;

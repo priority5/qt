@@ -24,6 +24,9 @@ class MessagePort {
                            const std::string& message_namespace,
                            const std::string& message) = 0;
     virtual void OnError(Error error) = 0;
+
+   protected:
+    virtual ~Client() = default;
   };
 
   virtual ~MessagePort() = default;

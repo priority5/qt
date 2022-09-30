@@ -21,7 +21,7 @@
 #include "third_party/blink/renderer/core/svg/svg_length_list.h"
 
 #include "third_party/blink/renderer/core/svg/svg_parser_utilities.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 
 namespace blink {
@@ -30,7 +30,7 @@ SVGLengthList::SVGLengthList(SVGLengthMode mode) : mode_(mode) {}
 
 SVGLengthList::~SVGLengthList() = default;
 
-SVGLengthList* SVGLengthList::Clone() {
+SVGLengthList* SVGLengthList::Clone() const {
   auto* ret = MakeGarbageCollected<SVGLengthList>(mode_);
   ret->DeepCopy(this);
   return ret;
@@ -75,7 +75,7 @@ SVGParsingError SVGLengthList::SetValueAsString(const String& value) {
     return SVGParseStatus::kNoError;
 
   return WTF::VisitCharacters(value, [&](const auto* chars, unsigned length) {
-    return this->ParseInternal(chars, chars + length);
+    return ParseInternal(chars, chars + length);
   });
 }
 

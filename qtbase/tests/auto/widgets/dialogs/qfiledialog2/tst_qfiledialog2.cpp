@@ -1,39 +1,16 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QTemporaryFile>
+#include <QSignalSpy>
+#include <QStandardPaths>
 
 #include <qcoreapplication.h>
 #include <qdebug.h>
 #include <qfiledialog.h>
 #include <qabstractitemdelegate.h>
-#include <qdirmodel.h>
 #include <qitemdelegate.h>
 #include <qlistview.h>
 #include <qcombobox.h>
@@ -50,7 +27,7 @@
 #include <qmenu.h>
 #include <qrandom.h>
 #include "../../../../../src/widgets/dialogs/qsidebar_p.h"
-#include "../../../../../src/widgets/dialogs/qfilesystemmodel_p.h"
+#include "../../../../../src/gui/itemmodels/qfilesystemmodel_p.h"
 #include "../../../../../src/widgets/dialogs/qfiledialog_p.h"
 
 #include <private/qguiapplication_p.h>
@@ -58,9 +35,7 @@
 #include <qpa/qplatformdialoghelper.h>
 #include <qpa/qplatformintegration.h>
 
-#if defined(Q_OS_WIN)
-#include "../../../network-settings.h"
-#endif
+#include "../../../../shared/filesystem.h"
 
 #if defined QT_BUILD_INTERNAL
 QT_BEGIN_NAMESPACE
@@ -131,6 +106,10 @@ private slots:
     void dontShowCompleterOnRoot();
     void nameFilterParsing_data();
     void nameFilterParsing();
+#if QT_CONFIG(settings)
+    void settingsCompatibility_data();
+    void settingsCompatibility();
+#endif
 
 private:
     void cleanupSettingsFile();
@@ -193,7 +172,7 @@ void tst_QFileDialog2::listRoot()
 
 void tst_QFileDialog2::heapCorruption()
 {
-    QVector<QFileDialog*> dialogs;
+    QList<QFileDialog *> dialogs;
     for (int i=0; i < 10; i++) {
         QFileDialog *f = new QFileDialog(NULL);
         dialogs << f;
@@ -277,9 +256,9 @@ void tst_QFileDialog2::showNameFilterDetails()
 
 void tst_QFileDialog2::unc()
 {
-#if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
+#if defined(Q_OS_WIN)
     // Only test UNC on Windows./
-    QString dir("\\\\"  + QtNetworkSettings::winServerName() + "\\testsharewritable");
+    QString dir("\\\\"  + QTest::uncServerName() + "\\testsharewritable");
 #else
     QString dir(QDir::currentPath());
 #endif
@@ -331,7 +310,7 @@ static bool openContextMenu(QFileDialog &fd)
     MenuCloser closer(&fd);
     QObject::connect(&timer, &QTimer::timeout, &closer, &MenuCloser::close);
     timer.start();
-    QContextMenuEvent cme(QContextMenuEvent::Mouse, QPoint(10, 10));
+    QContextMenuEvent cme(QContextMenuEvent::Mouse, QPoint(10, 10), list->viewport()->mapToGlobal(QPoint(10, 10)));
     qApp->sendEvent(list->viewport(), &cme); // blocks until menu is closed again.
     return true;
 }
@@ -423,9 +402,9 @@ void tst_QFileDialog2::task180459_lastDirectory_data()
     QTest::addColumn<bool>("isEnabled");
     QTest::addColumn<QString>("result");
 
-    QTest::newRow("path+file") << QDir::homePath() + QDir::separator() + "foo"
+    QTest::newRow("path+file") << QDir::homePath() + QDir::separator() + "Vugiu1co"
             << QDir::homePath()  << true
-            << QDir::homePath() + QDir::separator() + "foo"  ;
+            << QDir::homePath() + QDir::separator() + "Vugiu1co"  ;
     QTest::newRow("no path") << ""
             << tempDir.path() << false << QString();
     QTest::newRow("file") << "foo"
@@ -471,6 +450,44 @@ void tst_QFileDialog2::task180459_lastDirectory()
     delete dlg;
 }
 
+#if QT_CONFIG(settings)
+void tst_QFileDialog2::settingsCompatibility_data()
+{
+    QTest::addColumn<QString>("qtVersion");
+    QTest::addColumn<QDataStream::Version>("dsVersion");
+    QTest::newRow("6.2.3") << "6.2.3" << QDataStream::Qt_6_0;
+    QTest::newRow("6.5") << "6.5" << QDataStream::Qt_5_0;
+    QTest::newRow("15.5.2") << "5.15.2" << QDataStream::Qt_5_15;
+    QTest::newRow("15.5.9") << "5.15.9" << QDataStream::Qt_5_15;
+}
+
+void tst_QFileDialog2::settingsCompatibility()
+{
+    static const QByteArray ba32 = QByteArrayLiteral("\x00\x00\x00\xFF\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\xF7\x00\x00\x00\x04\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00""d\xFF\xFF\xFF\xFF\x00\x00\x00\x81\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x01\t\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00>\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00""B\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00n\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x03\xE8\x00\xFF\xFF\xFF\xFF\x00\x00\x00\x00");
+    static const QByteArray ba64 = QByteArrayLiteral("\x00\x00\x00\xFF\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\xF7\x00\x00\x00\x04\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00""d\xFF\xFF\xFF\xFF\x00\x00\x00\x81\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x01\t\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00>\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00""B\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00n\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x03\xE8\x00\xFF\xFF\xFF\xFF\x00\x00\x00\x00");
+    QFETCH(QString, qtVersion);
+    QFETCH(QDataStream::Version, dsVersion);
+    // Create a header view, convert template to target format and store it in settings
+    {
+        QSettings settings(QSettings::UserScope, "QtProject");
+        settings.beginGroup("FileDialog");
+        settings.setValue("sidebarWidth", 93); // random value
+        settings.setValue("shortcuts", QStringList({settings.fileName(), "/tmp"}));
+        settings.setValue("qtVersion", qtVersion);
+        settings.setValue("treeViewHeader", dsVersion < QDataStream::Qt_6_0 ? ba32 : ba64);
+        settings.endGroup();
+    }
+    // Create a file dialog, read settings write them back
+    {
+        QFileDialog fd;
+    }
+    // Read back settings and compare byte array
+    QSettings settings(QSettings::UserScope, "QtProject");
+    settings.beginGroup("FileDialog");
+    const QByteArray savedState = settings.value("treeViewHeader").toByteArray();
+    QCOMPARE(savedState, ba32);
+}
+#endif
 
 
 class FilterDirModel : public QSortFilterProxyModel
@@ -483,7 +500,7 @@ public:
       {};
 
 protected:
-      bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const
+      bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override
       {
             QModelIndex parentIndex;
             parentIndex = source_parent;
@@ -516,7 +533,7 @@ public:
         {
         }
 protected:
-        virtual bool lessThan(const QModelIndex &left, const QModelIndex &right) const
+        virtual bool lessThan(const QModelIndex &left, const QModelIndex &right) const override
         {
             QFileSystemModel * const model = qobject_cast<QFileSystemModel *>(sourceModel());
             const QFileInfo leftInfo(model->fileInfo(left));
@@ -639,7 +656,7 @@ void tst_QFileDialog2::task226366_lowerCaseHardDriveWindows()
     QLineEdit *edit = fd.findChild<QLineEdit*>("fileNameEdit");
     QToolButton *buttonParent = fd.findChild<QToolButton*>("toParentButton");
     QTest::qWait(200);
-    QTest::mouseClick(buttonParent, Qt::LeftButton,0,QPoint(0,0));
+    QTest::mouseClick(buttonParent, Qt::LeftButton, {}, QPoint(0, 0));
     QTest::qWait(2000);
     QTest::keyClick(edit, Qt::Key_C);
     QTest::qWait(200);
@@ -650,7 +667,7 @@ void tst_QFileDialog2::task226366_lowerCaseHardDriveWindows()
     //i clear my previous selection in the completer
     QTest::keyClick(edit->completer()->popup(), Qt::Key_Down);
     edit->clear();
-    QTest::keyClick(edit, (char)(Qt::Key_C | Qt::SHIFT));
+    QTest::keyClick(edit, Qt::Key_C, Qt::ShiftModifier);
     QTest::qWait(200);
     QTest::keyClick(edit->completer()->popup(), Qt::Key_Down);
     QCOMPARE(edit->text(), QString("C:/"));
@@ -694,6 +711,17 @@ void tst_QFileDialog2::completionOnLevelAfterRoot()
     }
     if (testDir.isEmpty())
         QSKIP("This test requires to have a unique directory of at least six ascii characters under c:/");
+#elif defined(Q_OS_ANDROID)
+    // Android 11 and above doesn't allow accessing root filesystem as before,
+    // so let's opt int for the app's home.
+    const auto homePaths = QStandardPaths::standardLocations(QStandardPaths::HomeLocation);
+    QVERIFY(!homePaths.isEmpty());
+    fd.setFilter(QDir::Hidden | QDir::AllDirs | QDir::Files | QDir::System);
+    fd.setDirectory(homePaths.first());
+    QDir(homePaths.first()).mkdir("etc");
+    auto cleanup = qScopeGuard([&]() {
+        QDir(homePaths.first()).rmdir("etc");
+    });
 #else
     fd.setFilter(QDir::Hidden | QDir::AllDirs | QDir::Files | QDir::System);
     fd.setDirectory("/");
@@ -823,7 +851,7 @@ void tst_QFileDialog2::task203703_returnProperSeparator()
     QVERIFY(button);
     QTest::keyClick(button, Qt::Key_Return);
     QString result = fd.selectedFiles().first();
-    QVERIFY(result.at(result.count() - 1) != '/');
+    QVERIFY(result.at(result.size() - 1) != '/');
     QVERIFY(!result.contains('\\'));
     current.rmdir("aaaaaaaaaaaaaaaaaa");
 }
@@ -919,7 +947,7 @@ void tst_QFileDialog2::task239706_editableFilterCombo()
     QVERIFY(QTest::qWaitForWindowExposed(&d));
 
     QList<QComboBox *> comboList = d.findChildren<QComboBox *>();
-    QComboBox *filterCombo = 0;
+    QComboBox *filterCombo = nullptr;
     foreach (QComboBox *combo, comboList) {
         if (combo->objectName() == QString("fileTypeCombo")) {
             filterCombo = combo;
@@ -992,7 +1020,7 @@ void tst_QFileDialog2::task251321_sideBarHiddenEntries()
 class MyQSideBar : public QSidebar
 {
 public :
-    MyQSideBar(QWidget *parent = 0) : QSidebar(parent)
+    MyQSideBar(QWidget *parent = nullptr) : QSidebar(parent)
     {}
 
     void removeSelection() {
@@ -1250,14 +1278,7 @@ void tst_QFileDialog2::QTBUG6558_showDirsOnly()
 
     fd.setOption(QFileDialog::ShowDirsOnly, true);
     QTRY_COMPARE(model->rowCount(model->index(dir.absolutePath())), 2);
-
-    fd.setFileMode(QFileDialog::DirectoryOnly);
-    QTRY_COMPARE(model->rowCount(model->index(dir.absolutePath())), 2);
     QTRY_COMPARE(bool(fd.options() & QFileDialog::ShowDirsOnly), true);
-
-    fd.setFileMode(QFileDialog::AnyFile);
-    QTRY_COMPARE(model->rowCount(model->index(dir.absolutePath())), 3);
-    QTRY_COMPARE(bool(fd.options() & QFileDialog::ShowDirsOnly), false);
 
     fd.setDirectory(QDir::homePath());
 

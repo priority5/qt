@@ -10,22 +10,25 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/util/type_safety/strong_alias.h"
+#include "base/types/strong_alias.h"
 #include "build/build_config.h"
+#include "components/autofill/core/common/language_code.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom.h"
+#include "components/autofill/core/common/password_generation_util.h"
+#include "components/autofill/core/common/unique_ids.h"
 #include "components/password_manager/core/browser/credentials_filter.h"
 #include "components/password_manager/core/browser/hsts_query.h"
 #include "components/password_manager/core/browser/http_auth_manager.h"
 #include "components/password_manager/core/browser/leak_detection_dialog_utils.h"
 #include "components/password_manager/core/browser/manage_passwords_referrer.h"
-#include "components/password_manager/core/browser/password_form_forward.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_reuse_detector.h"
-#include "components/password_manager/core/browser/password_store.h"
+#include "components/password_manager/core/browser/webauthn_credentials_delegate.h"
+#include "components/profile_metrics/browser_profile_type.h"
 #include "components/safe_browsing/buildflags.h"
+#include "components/sync/driver/sync_service.h"
 #include "net/cert/cert_status_flags.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 
@@ -59,42 +62,58 @@ class Origin;
 
 class GURL;
 
-#if defined(ON_FOCUS_PING_ENABLED)
 namespace safe_browsing {
 class PasswordProtectionService;
 }
-#endif
+
+namespace device_reauth {
+class BiometricAuthenticator;
+}
+
+namespace version_info {
+enum class Channel;
+}
 
 namespace password_manager {
 
 class FieldInfoManager;
 class PasswordFeatureManager;
-class BiometricAuthenticator;
 class PasswordFormManagerForUI;
 class PasswordManagerDriver;
 class PasswordManagerMetricsRecorder;
 class HttpAuthManager;
+class PasswordChangeSuccessTracker;
 class PasswordRequirementsService;
-class PasswordStore;
+class PasswordReuseManager;
+class PasswordScriptsFetcher;
+class PasswordStoreInterface;
+class WebAuthnCredentialsDelegate;
+struct PasswordForm;
 
-enum SyncState {
-  NOT_SYNCING,
-  SYNCING_NORMAL_ENCRYPTION,
-  SYNCING_WITH_CUSTOM_PASSPHRASE,
+enum class SyncState {
+  kNotSyncing,
+  kSyncingNormalEncryption,
+  kSyncingWithCustomPassphrase,
   // Sync is disabled but the user is signed in and opted in to passwords
   // account storage.
-  ACCOUNT_PASSWORDS_ACTIVE_NORMAL_ENCRYPTION
+  kAccountPasswordsActiveNormalEncryption
 };
 
 // An abstraction of operations that depend on the embedders (e.g. Chrome)
-// environment.
+// environment. PasswordManagerClient is instantiated once per WebContents.
+// Main frame w.r.t WebContents refers to the primary main frame so usages of
+// main frame here are also referring to the primary main frame.
 class PasswordManagerClient {
  public:
   using CredentialsCallback = base::OnceCallback<void(const PasswordForm*)>;
-  using ReauthSucceeded = util::StrongAlias<class ReauthSucceededTag, bool>;
+  using ReauthSucceeded = base::StrongAlias<class ReauthSucceededTag, bool>;
 
-  PasswordManagerClient() {}
-  virtual ~PasswordManagerClient() {}
+  PasswordManagerClient() = default;
+
+  PasswordManagerClient(const PasswordManagerClient&) = delete;
+  PasswordManagerClient& operator=(const PasswordManagerClient&) = delete;
+
+  virtual ~PasswordManagerClient() = default;
 
   // Is saving new data for password autofill and filling of saved data enabled
   // for the current profile and page? For example, saving is disabled in
@@ -155,6 +174,7 @@ class PasswordManagerClient {
   // same frame (e.g. tabbed from email to password field).
   virtual void FocusedInputChanged(
       PasswordManagerDriver* driver,
+      autofill::FieldRendererId focused_field_id,
       autofill::mojom::FocusedFieldType focused_field_type) = 0;
 
   // Informs the embedder of a password forms that the user should choose from.
@@ -166,20 +186,24 @@ class PasswordManagerClient {
       const url::Origin& origin,
       CredentialsCallback callback) = 0;
 
-  // Indicates if re-auth with the device is needed before filling passwords.
-  // Currently only used by iOS.
-  virtual bool RequiresReauthToFill();
-
   // Instructs the client to show the Touch To Fill UI.
-  virtual void ShowTouchToFill(PasswordManagerDriver* driver);
+  virtual void ShowTouchToFill(
+      PasswordManagerDriver* driver,
+      autofill::mojom::SubmissionReadinessState submission_readiness);
+
+  // Informs `PasswordReuseDetectionManager` about reused passwords selected
+  // from the AllPasswordsBottomSheet.
+  virtual void OnPasswordSelected(const std::u16string& text);
 
   // Returns a pointer to a BiometricAuthenticator. Might be null if
   // BiometricAuthentication is not available for a given platform.
-  virtual BiometricAuthenticator* GetBiometricAuthenticator();
+  virtual scoped_refptr<device_reauth::BiometricAuthenticator>
+  GetBiometricAuthenticator();
 
-  // Informs the embedder that the user has manually requested to generate a
+  // Informs the embedder that the user has requested to generate a
   // password in the focused password field.
-  virtual void GeneratePassword();
+  virtual void GeneratePassword(
+      autofill::password_generation::PasswordGenerationType type);
 
   // Informs the embedder that automatic signing in just happened. The form
   // returned to the site is |local_forms[0]|. |local_forms| contains all the
@@ -201,6 +225,24 @@ class PasswordManagerClient {
       std::unique_ptr<password_manager::PasswordFormManagerForUI>
           submitted_manager) = 0;
 
+  // Informs that a successful login has just happened.
+  // TODO(crbug.com/1299394): Remove when the TimeToSuccessfulLogin metric is
+  // deprecated.
+  virtual void NotifyOnSuccessfulLogin(
+      const std::u16string& submitted_username) {}
+
+  // Informs that a credential filled by Touch To Fill can be submitted.
+  // TODO(crbug.com/1299394): Remove when the TimeToSuccessfulLogin metric is
+  // deprecated.
+  virtual void StartSubmissionTrackingAfterTouchToFill(
+      const std::u16string& filled_username) {}
+
+  // Informs that a successful submission didn't happen after Touch To Fill
+  // (e.g. a submission failed, a user edited an input field manually).
+  // TODO(crbug.com/1299394): Remove when the TimeToSuccessfulLogin metric is
+  // deprecated.
+  virtual void ResetSubmissionTrackingAfterTouchToFill() {}
+
   // Inform the embedder that the site called 'store()'.
   virtual void NotifyStorePasswordCalled() = 0;
 
@@ -209,7 +251,7 @@ class PasswordManagerClient {
   virtual void UpdateCredentialCache(
       const url::Origin& origin,
       const std::vector<const PasswordForm*>& best_matches,
-      bool is_blacklisted);
+      bool is_blocklisted);
 
   // Called when a password is saved in an automated fashion. Embedder may
   // inform the user that this save has occurred.
@@ -234,11 +276,9 @@ class PasswordManagerClient {
                                 const PasswordFormManagerForUI* form_manager);
 
   // Informs the embedder that user credentials were leaked.
-  virtual void NotifyUserCredentialsWereLeaked(
-      CredentialLeakType leak_type,
-      CompromisedSitesCount saved_sites,
-      const GURL& origin,
-      const base::string16& username);
+  virtual void NotifyUserCredentialsWereLeaked(CredentialLeakType leak_type,
+                                               const GURL& origin,
+                                               const std::u16string& username);
 
   // Requests a reauth for the primary account with |access_point| representing
   // where the reauth was triggered.
@@ -255,26 +295,34 @@ class PasswordManagerClient {
   // Gets prefs associated with this embedder.
   virtual PrefService* GetPrefs() const = 0;
 
+  // Gets the sync service associated with this client.
+  virtual const syncer::SyncService* GetSyncService() const = 0;
+
   // Returns the profile PasswordStore associated with this instance.
-  virtual PasswordStore* GetProfilePasswordStore() const = 0;
+  virtual PasswordStoreInterface* GetProfilePasswordStore() const = 0;
 
   // Returns the account PasswordStore associated with this instance.
-  virtual PasswordStore* GetAccountPasswordStore() const = 0;
+  virtual PasswordStoreInterface* GetAccountPasswordStore() const = 0;
+
+  // Returns the PasswordReuseManager associated with this instance.
+  virtual PasswordReuseManager* GetPasswordReuseManager() const = 0;
+
+  // Returns the PasswordScriptsFetcher associated with this instance.
+  virtual PasswordScriptsFetcher* GetPasswordScriptsFetcher() = 0;
+
+  // Returns the PasswordChangeSuccessTracker associated with this instance.
+  virtual PasswordChangeSuccessTracker* GetPasswordChangeSuccessTracker() = 0;
 
   // Reports whether and how passwords are synced in the embedder. The default
-  // implementation always returns NOT_SYNCING.
+  // implementation always returns kNotSyncing.
   virtual SyncState GetPasswordSyncState() const;
 
   // Returns true if last navigation page had HTTP error i.e 5XX or 4XX
   virtual bool WasLastNavigationHTTPError() const;
 
-  // Returns true if a credential leak dialog was shown. Used by Autofill
-  // Assistance to verify a password change intent. TODO(b/151391231): At the
-  // moment, password change scripts don't need validation, but it may change.
-  // If it doesn't change, remove this method and related code.
-  virtual bool WasCredentialLeakDialogShown() const;
-
   // Obtains the cert status for the main frame.
+  // The WebContents only has a primary main frame, so MainFrame here refers to
+  // the primary main frame.
   virtual net::CertStatus GetMainFrameCertStatus() const;
 
   // Shows the dialog where the user can accept or decline the global autosignin
@@ -283,6 +331,9 @@ class PasswordManagerClient {
 
   // If this browsing session should not be persisted.
   virtual bool IsIncognito() const;
+
+  // Returns the profile type of the session.
+  virtual profile_metrics::BrowserProfileType GetProfileType() const;
 
   // Returns the PasswordManager associated with this client. The non-const
   // version calls the const one.
@@ -301,6 +352,8 @@ class PasswordManagerClient {
   virtual autofill::AutofillDownloadManager* GetAutofillDownloadManager();
 
   // Returns true if the main frame URL has a secure origin.
+  // The WebContents only has a primary main frame, so MainFrame here refers to
+  // the primary main frame.
   virtual bool IsCommittedMainFrameSecure() const;
 
   // Returns the committed main frame URL.
@@ -319,13 +372,11 @@ class PasswordManagerClient {
   virtual void AnnotateNavigationEntry(bool has_password_field);
 
   // Returns the current best guess as to the page's display language.
-  virtual std::string GetPageLanguage() const;
+  virtual autofill::LanguageCode GetPageLanguage() const;
 
-#if defined(ON_FOCUS_PING_ENABLED) || defined(PASSWORD_REUSE_DETECTION_ENABLED)
   // Return the PasswordProtectionService associated with this instance.
   virtual safe_browsing::PasswordProtectionService*
   GetPasswordProtectionService() const = 0;
-#endif
 
 #if defined(ON_FOCUS_PING_ENABLED)
   // Checks the safe browsing reputation of the webpage when the
@@ -335,7 +386,6 @@ class PasswordManagerClient {
                                            const GURL& frame_url) = 0;
 #endif
 
-#if defined(PASSWORD_REUSE_DETECTION_ENABLED)
   // Checks the safe browsing reputation of the webpage where password reuse
   // happens. This is called by the PasswordReuseDetectionManager when a
   // protected password is typed on the wrong domain. This may trigger a
@@ -348,12 +398,23 @@ class PasswordManagerClient {
       const std::string& username,
       const std::vector<MatchingReusedCredential>& matching_reused_credentials,
       bool password_field_exists) = 0;
-#endif
 
-#if defined(PASSWORD_REUSE_WARNING_ENABLED)
   // Records a Chrome Sync event that GAIA password reuse was detected.
   virtual void LogPasswordReuseDetectedEvent() = 0;
-#endif
+
+  // If the feature is enabled send an event to the enterprise reporting
+  // connector server indicating that the user signed in to a website.
+  virtual void MaybeReportEnterpriseLoginEvent(
+      const GURL& url,
+      bool is_federated,
+      const url::Origin& federated_origin,
+      const std::u16string& login_user_name) const {}
+
+  // If the feature is enabled send an event to the enterprise reporting
+  // connector server indicating that the user has some leaked credentials.
+  // |identities| contains the (url, username) pairs for each leaked identity.
+  virtual void MaybeReportEnterprisePasswordBreachEvent(
+      const std::vector<std::pair<GURL, std::u16string>>& identities) const {}
 
   // Gets a ukm::SourceId that is associated with the WebContents object
   // and its last committed main frame navigation.
@@ -387,11 +448,6 @@ class PasswordManagerClient {
   // the current profile.
   virtual network::mojom::NetworkContext* GetNetworkContext() const;
 
-  // Whether the primary account of the current profile is under Advanced
-  // Protection - a type of Google Account that helps protect our most at-risk
-  // users.
-  virtual bool IsUnderAdvancedProtection() const;
-
   // Causes all live PasswordFormManager objects to query the password store
   // again. Results in updating the fill information on the page.
   virtual void UpdateFormManagers() {}
@@ -408,11 +464,14 @@ class PasswordManagerClient {
   // Returns a FieldInfoManager associated with the current profile.
   virtual FieldInfoManager* GetFieldInfoManager() const = 0;
 
-  // Returns the currently set autofill-assistant mode.
-  virtual AutofillAssistantMode GetAutofillAssistantMode() const;
+  // Returns if the Autofill Assistant UI is shown.
+  virtual bool IsAutofillAssistantUIVisible() const = 0;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(PasswordManagerClient);
+  // Returns the WebAuthnCredentialsDelegate, if available.
+  virtual WebAuthnCredentialsDelegate* GetWebAuthnCredentialsDelegate();
+
+  // Returns the Chrome channel for the installation.
+  virtual version_info::Channel GetChannel() const;
 };
 
 }  // namespace password_manager

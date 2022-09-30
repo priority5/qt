@@ -63,12 +63,10 @@ void SliderThumbElement::SetPositionFromValue() {
   if (GetLayoutObject()) {
     GetLayoutObject()->SetNeedsLayoutAndFullPaintInvalidation(
         layout_invalidation_reason::kSliderValueChanged);
-    if (features::IsFormControlsRefreshEnabled()) {
-      HTMLInputElement* input(HostInput());
-      if (input && input->GetLayoutObject()) {
-        // the slider track selected value needs to be updated.
-        input->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
-      }
+    HTMLInputElement* input(HostInput());
+    if (input && input->GetLayoutObject()) {
+      // the slider track selected value needs to be updated.
+      input->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
     }
   }
 }
@@ -114,7 +112,7 @@ void SliderThumbElement::SetPositionFromPoint(const LayoutPoint& point) {
   LayoutUnit track_size;
   LayoutUnit position;
   LayoutUnit current_position;
-  const LayoutBox* input_box = ToLayoutBox(input_object);
+  const auto* input_box = To<LayoutBox>(input_object);
   PhysicalOffset thumb_offset =
       thumb_box->LocalToAncestorPoint(PhysicalOffset(), input_box) -
       track_box->LocalToAncestorPoint(PhysicalOffset(), input_box);
@@ -238,7 +236,7 @@ void SliderThumbElement::DefaultEventHandler(Event& event) {
   HTMLDivElement::DefaultEventHandler(event);
 }
 
-bool SliderThumbElement::WillRespondToMouseMoveEvents() {
+bool SliderThumbElement::WillRespondToMouseMoveEvents() const {
   const HTMLInputElement* input = HostInput();
   if (input && !input->IsDisabledFormControl() && in_drag_mode_)
     return true;
@@ -287,11 +285,13 @@ const AtomicString& SliderThumbElement::ShadowPseudoId() const {
   }
 }
 
-scoped_refptr<ComputedStyle> SliderThumbElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle> SliderThumbElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext& style_recalc_context) {
   Element* host = OwnerShadowHost();
   DCHECK(host);
   const ComputedStyle& host_style = host->ComputedStyleRef();
-  scoped_refptr<ComputedStyle> style = OriginalStyleForLayoutObject();
+  scoped_refptr<ComputedStyle> style =
+      OriginalStyleForLayoutObject(style_recalc_context);
 
   if (host_style.EffectiveAppearance() == kSliderVerticalPart)
     style->SetEffectiveAppearance(kSliderThumbVerticalPart);
@@ -406,7 +406,8 @@ bool SliderContainerElement::CanSlide() {
   int transform_size = transforms.size();
   if (transform_size > 0) {
     for (int i = 0; i < transform_size; ++i) {
-      if (transforms.at(i)->GetType() == TransformOperation::kRotate) {
+      if (transforms.at(i)->GetType() == TransformOperation::kRotate ||
+          transforms.at(i)->GetType() == TransformOperation::kRotateZ) {
         return true;
       }
     }

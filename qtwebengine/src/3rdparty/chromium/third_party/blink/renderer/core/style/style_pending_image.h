@@ -26,16 +26,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_STYLE_PENDING_IMAGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_STYLE_PENDING_IMAGE_H_
 
-#include "third_party/blink/renderer/core/css/css_image_generator_value.h"
-#include "third_party/blink/renderer/core/css/css_image_set_value.h"
-#include "third_party/blink/renderer/core/css/css_image_value.h"
-#include "third_party/blink/renderer/core/css/css_paint_value.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
+class CSSValue;
 class ImageResourceObserver;
 
 // StylePendingImage is a placeholder StyleImage that is entered into the
@@ -57,24 +57,11 @@ class StylePendingImage final : public StyleImage {
   CSSValue* ComputedCSSValue(const ComputedStyle& style,
                              bool allow_visited_style) const override;
 
-  CSSImageValue* CssImageValue() const {
-    return DynamicTo<CSSImageValue>(value_.Get());
-  }
-  CSSPaintValue* CssPaintValue() const {
-    return DynamicTo<CSSPaintValue>(value_.Get());
-  }
-  CSSImageGeneratorValue* CssImageGeneratorValue() const {
-    return DynamicTo<CSSImageGeneratorValue>(value_.Get());
-  }
-  CSSImageSetValue* CssImageSetValue() const {
-    return DynamicTo<CSSImageSetValue>(value_.Get());
-  }
-
-  FloatSize ImageSize(const Document&,
-                      float,
-                      const FloatSize&,
-                      RespectImageOrientationEnum) const override {
-    return FloatSize();
+  bool IsAccessAllowed(String&) const override { return true; }
+  gfx::SizeF ImageSize(float,
+                       const gfx::SizeF&,
+                       RespectImageOrientationEnum) const override {
+    return gfx::SizeF();
   }
   bool HasIntrinsicSize() const override { return true; }
   void AddClient(ImageResourceObserver*) override {}
@@ -82,7 +69,7 @@ class StylePendingImage final : public StyleImage {
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
                                 const Document&,
                                 const ComputedStyle&,
-                                const FloatSize& target_size) const override {
+                                const gfx::SizeF& target_size) const override {
     NOTREACHED();
     return nullptr;
   }
@@ -116,4 +103,4 @@ inline bool StylePendingImage::IsEqual(const StyleImage& other) const {
 }
 
 }  // namespace blink
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_STYLE_PENDING_IMAGE_H_

@@ -6,7 +6,6 @@
 
 #include "base/files/file.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "content/browser/webrtc/webrtc_internals.h"
 #include "mojo/public/cpp/base/file_mojom_traits.h"
@@ -52,7 +51,7 @@ void AecDumpManagerImpl::Add(
     mojo::PendingRemote<blink::mojom::AecDumpAgent> agent) {
   int id = ++id_counter_;
 
-  agents_.emplace(std::make_pair(id, mojo::Remote<blink::mojom::AecDumpAgent>(std::move(agent))));
+  agents_.emplace(std::make_pair(id, std::move(agent)));
 
   agents_[id].set_disconnect_handler(
       base::BindOnce(&AecDumpManagerImpl::OnAgentDisconnected,

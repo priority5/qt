@@ -1,41 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2018 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <qv4compiler_p.h>
 #include <qv4codegen_p.h>
@@ -47,6 +12,7 @@
 #include <private/qml_compile_hash_p.h>
 #include <private/qqmlirbuilder_p.h>
 #include <QCryptographicHash>
+#include <QtEndian>
 
 // Efficient implementation that takes advantage of powers of two.
 static inline size_t roundUpToMultipleOf(size_t divisor, size_t x)
@@ -108,19 +74,11 @@ void QV4::Compiler::StringTableGenerator::serialize(CompiledData::Unit *unit)
 
         QV4::CompiledData::String *s = reinterpret_cast<QV4::CompiledData::String *>(stringData);
         Q_ASSERT(reinterpret_cast<uintptr_t>(s) % alignof(QV4::CompiledData::String) == 0);
-        s->refcount = -1;
+        Q_ASSERT(qstr.length() >= 0);
         s->size = qstr.length();
-        s->allocAndCapacityReservedFlag = 0;
-        s->offsetOn32Bit = sizeof(QV4::CompiledData::String);
-        s->offsetOn64Bit = sizeof(QV4::CompiledData::String);
 
         ushort *uc = reinterpret_cast<ushort *>(reinterpret_cast<char *>(s) + sizeof(*s));
-#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-        memcpy(uc, qstr.constData(), s->size * sizeof(ushort));
-#else
-        for (int i = 0; i < s->size; ++i)
-            uc[i] = qToLittleEndian<ushort>(qstr.at(i).unicode());
-#endif
+        qToLittleEndian<ushort>(qstr.constData(), s->size, uc);
         uc[s->size] = 0;
 
         stringData += QV4::CompiledData::String::calculateSize(qstr);
@@ -136,7 +94,7 @@ void QV4::Compiler::JSUnitGenerator::generateUnitChecksum(QV4::CompiledData::Uni
             = offsetof(QV4::CompiledData::Unit, md5Checksum) + sizeof(unit->md5Checksum);
 
     const char *dataPtr = reinterpret_cast<const char *>(unit) + checksummableDataOffset;
-    hash.addData(dataPtr, unit->unitSize - checksummableDataOffset);
+    hash.addData({dataPtr, qsizetype(unit->unitSize - checksummableDataOffset)});
 
     QByteArray checksum = hash.result();
     Q_ASSERT(checksum.size() == sizeof(unit->md5Checksum));
@@ -160,10 +118,7 @@ int QV4::Compiler::JSUnitGenerator::registerGetterLookup(const QString &name)
 
 int QV4::Compiler::JSUnitGenerator::registerGetterLookup(int nameIndex)
 {
-    CompiledData::Lookup l;
-    l.type_and_flags = CompiledData::Lookup::Type_Getter;
-    l.nameIndex = nameIndex;
-    lookups << l;
+    lookups << CompiledData::Lookup(CompiledData::Lookup::Type_Getter, nameIndex);
     return lookups.size() - 1;
 }
 
@@ -174,49 +129,37 @@ int QV4::Compiler::JSUnitGenerator::registerSetterLookup(const QString &name)
 
 int QV4::Compiler::JSUnitGenerator::registerSetterLookup(int nameIndex)
 {
-    CompiledData::Lookup l;
-    l.type_and_flags = CompiledData::Lookup::Type_Setter;
-    l.nameIndex = nameIndex;
-    lookups << l;
+    lookups << CompiledData::Lookup(CompiledData::Lookup::Type_Setter, nameIndex);
     return lookups.size() - 1;
 }
 
 int QV4::Compiler::JSUnitGenerator::registerGlobalGetterLookup(int nameIndex)
 {
-    CompiledData::Lookup l;
-    l.type_and_flags = CompiledData::Lookup::Type_GlobalGetter;
-    l.nameIndex = nameIndex;
-    lookups << l;
+    lookups << CompiledData::Lookup(CompiledData::Lookup::Type_GlobalGetter, nameIndex);
     return lookups.size() - 1;
 }
 
 int QV4::Compiler::JSUnitGenerator::registerQmlContextPropertyGetterLookup(int nameIndex)
 {
-    CompiledData::Lookup l;
-    l.type_and_flags = CompiledData::Lookup::Type_QmlContextPropertyGetter;
-    l.nameIndex = nameIndex;
-    lookups << l;
+    lookups << CompiledData::Lookup(CompiledData::Lookup::Type_QmlContextPropertyGetter, nameIndex);
     return lookups.size() - 1;
 }
 
 int QV4::Compiler::JSUnitGenerator::registerRegExp(QQmlJS::AST::RegExpLiteral *regexp)
 {
-    CompiledData::RegExp re;
-    re.stringIndex = registerString(regexp->pattern.toString());
-
-    re.flags = 0;
+    quint32 flags = 0;
     if (regexp->flags & QQmlJS::Lexer::RegExp_Global)
-        re.flags |= CompiledData::RegExp::RegExp_Global;
+        flags |= CompiledData::RegExp::RegExp_Global;
     if (regexp->flags &  QQmlJS::Lexer::RegExp_IgnoreCase)
-        re.flags |= CompiledData::RegExp::RegExp_IgnoreCase;
+        flags |= CompiledData::RegExp::RegExp_IgnoreCase;
     if (regexp->flags &  QQmlJS::Lexer::RegExp_Multiline)
-        re.flags |= CompiledData::RegExp::RegExp_Multiline;
+        flags |= CompiledData::RegExp::RegExp_Multiline;
     if (regexp->flags &  QQmlJS::Lexer::RegExp_Unicode)
-        re.flags |= CompiledData::RegExp::RegExp_Unicode;
+        flags |= CompiledData::RegExp::RegExp_Unicode;
     if (regexp->flags &  QQmlJS::Lexer::RegExp_Sticky)
-        re.flags |= CompiledData::RegExp::RegExp_Sticky;
+        flags |= CompiledData::RegExp::RegExp_Sticky;
 
-    regexps.append(re);
+    regexps.append(CompiledData::RegExp(flags, registerString(regexp->pattern.toString())));
     return regexps.size() - 1;
 }
 
@@ -229,7 +172,7 @@ int QV4::Compiler::JSUnitGenerator::registerConstant(QV4::ReturnedValue v)
     return constants.size() - 1;
 }
 
-QV4::ReturnedValue QV4::Compiler::JSUnitGenerator::constant(int idx)
+QV4::ReturnedValue QV4::Compiler::JSUnitGenerator::constant(int idx) const
 {
     return constants.at(idx);
 }
@@ -249,8 +192,7 @@ int QV4::Compiler::JSUnitGenerator::registerJSClass(const QStringList &members)
     CompiledData::JSClassMember *member = reinterpret_cast<CompiledData::JSClassMember*>(jsClass + 1);
 
     for (const auto &name : members) {
-        member->nameOffset = registerString(name);
-        member->isAccessor = false;
+        member->set(registerString(name), false);
         ++member;
     }
 
@@ -438,9 +380,21 @@ void QV4::Compiler::JSUnitGenerator::writeFunction(char *f, QV4::Compiler::Conte
         function->flags |= CompiledData::Function::IsArrowFunction;
     if (irFunction->isGenerator)
         function->flags |= CompiledData::Function::IsGenerator;
-    function->nestedFunctionIndex =
-            irFunction->returnsClosure ? quint32(module->functions.indexOf(irFunction->nestedContexts.first()))
-                                       : std::numeric_limits<uint32_t>::max();
+    if (irFunction->returnsClosure)
+        function->flags |= CompiledData::Function::IsClosureWrapper;
+
+    if (!irFunction->returnsClosure
+            || irFunction->innerFunctionAccessesThis
+            || irFunction->innerFunctionAccessesNewTarget) {
+        // If the inner function does things with this and new.target we need to do some work in
+        // the outer function. Then we shouldn't directly access the nested function.
+        function->nestedFunctionIndex = std::numeric_limits<uint32_t>::max();
+    } else {
+        // Otherwise we can directly use the nested function.
+        function->nestedFunctionIndex
+                = quint32(module->functions.indexOf(irFunction->nestedContexts.first()));
+    }
+
     function->length = irFunction->formals ? irFunction->formals->length() : 0;
     function->nFormals = irFunction->arguments.size();
     function->formalsOffset = currentOffset;
@@ -468,8 +422,7 @@ void QV4::Compiler::JSUnitGenerator::writeFunction(char *f, QV4::Compiler::Conte
         currentOffset += function->nLabelInfos * sizeof(quint32);
     }
 
-    function->location.line = irFunction->line;
-    function->location.column = irFunction->column;
+    function->location.set(irFunction->line, irFunction->column);
 
     function->codeOffset = currentOffset;
     function->codeSize = irFunction->code.size();

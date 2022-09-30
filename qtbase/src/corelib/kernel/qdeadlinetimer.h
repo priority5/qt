@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QDEADLINETIMER_H
 #define QDEADLINETIMER_H
@@ -63,16 +27,16 @@ class Q_CORE_EXPORT QDeadlineTimer
 public:
     enum ForeverConstant { Forever };
 
-    Q_DECL_CONSTEXPR QDeadlineTimer(Qt::TimerType type_ = Qt::CoarseTimer) noexcept
+    constexpr QDeadlineTimer(Qt::TimerType type_ = Qt::CoarseTimer) noexcept
         : t1(0), t2(0), type(type_) {}
-    Q_DECL_CONSTEXPR QDeadlineTimer(ForeverConstant, Qt::TimerType type_ = Qt::CoarseTimer) noexcept
-        : t1(std::numeric_limits<qint64>::max()), t2(0), type(type_) {}
+    constexpr QDeadlineTimer(ForeverConstant, Qt::TimerType type_ = Qt::CoarseTimer) noexcept
+        : t1((std::numeric_limits<qint64>::max)()), t2(0), type(type_) {}
     explicit QDeadlineTimer(qint64 msecs, Qt::TimerType type = Qt::CoarseTimer) noexcept;
 
     void swap(QDeadlineTimer &other) noexcept
-    { qSwap(t1, other.t1); qSwap(t2, other.t2); qSwap(type, other.type); }
+    { std::swap(t1, other.t1); std::swap(t2, other.t2); std::swap(type, other.type); }
 
-    Q_DECL_CONSTEXPR bool isForever() const noexcept
+    constexpr bool isForever() const noexcept
     { return t1 == (std::numeric_limits<qint64>::max)(); }
     bool hasExpired() const noexcept;
 
@@ -192,10 +156,38 @@ public:
     QPair<qint64, unsigned> _q_data() const { return qMakePair(t1, t2); }
 };
 
+#if __has_include(<chrono>) && (defined(Q_OS_DARWIN) || defined(Q_OS_LINUX) || (defined(Q_CC_MSVC) && Q_CC_MSVC >= 1900))
+// We know for these OS/compilers that the std::chrono::steady_clock uses the same
+// reference time as QDeadlineTimer
+
+template <> inline std::chrono::steady_clock::time_point
+QDeadlineTimer::deadline<std::chrono::steady_clock, std::chrono::steady_clock::duration>() const
+{
+    return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(deadlineNSecs()));
+}
+
+template <> inline void
+QDeadlineTimer::setDeadline<std::chrono::steady_clock, std::chrono::steady_clock::duration>(std::chrono::steady_clock::time_point tp, Qt::TimerType type_)
+{
+    using namespace std::chrono;
+    if (tp == tp.max()) {
+        *this = Forever;
+        type = type_;
+    } else if (type_ != Qt::PreciseTimer) {
+        // if we aren't using PreciseTimer, then we need to convert
+        setPreciseRemainingTime(0, duration_cast<nanoseconds>(tp - steady_clock::now()).count(), type_);
+    } else {
+        setPreciseDeadline(0,
+                           duration_cast<nanoseconds>(tp.time_since_epoch()).count(),
+                           type_);
+    }
+}
+#endif
+
 Q_DECLARE_SHARED(QDeadlineTimer)
 
 QT_END_NAMESPACE
 
-Q_DECLARE_METATYPE(QDeadlineTimer)
+QT_DECL_METATYPE_EXTERN(QDeadlineTimer, Q_CORE_EXPORT)
 
 #endif // QDEADLINETIMER_H

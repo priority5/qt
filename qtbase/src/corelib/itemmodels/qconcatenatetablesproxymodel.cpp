@@ -1,45 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com, author David Faure <david.faure@kdab.com>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com, author David Faure <david.faure@kdab.com>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qconcatenatetablesproxymodel.h"
 #include <private/qabstractitemmodel_p.h>
 #include "qsize.h"
+#include "qmap.h"
 #include "qdebug.h"
 
 QT_BEGIN_NAMESPACE
@@ -69,7 +34,7 @@ public:
     void _q_slotColumnsInserted(const QModelIndex &parent, int, int);
     void _q_slotColumnsAboutToBeRemoved(const QModelIndex &parent, int start, int end);
     void _q_slotColumnsRemoved(const QModelIndex &parent, int, int);
-    void _q_slotDataChanged(const QModelIndex &from, const QModelIndex &to, const QVector<int> &roles);
+    void _q_slotDataChanged(const QModelIndex &from, const QModelIndex &to, const QList<int> &roles);
     void _q_slotSourceLayoutAboutToBeChanged(const QList<QPersistentModelIndex> &sourceParents, QAbstractItemModel::LayoutChangeHint hint);
     void _q_slotSourceLayoutChanged(const QList<QPersistentModelIndex> &sourceParents, QAbstractItemModel::LayoutChangeHint hint);
     void _q_slotModelAboutToBeReset();
@@ -80,7 +45,7 @@ public:
     bool mapDropCoordinatesToSource(int row, int column, const QModelIndex &parent,
                                     int *sourceRow, int *sourceColumn, QModelIndex *sourceParent, QAbstractItemModel **sourceModel) const;
 
-    QVector<QAbstractItemModel *> m_models;
+    QList<QAbstractItemModel *> m_models;
     int m_rowCount; // have to maintain it here since we can't compute during model destruction
     int m_columnCount;
 
@@ -88,8 +53,8 @@ public:
     int m_newColumnCount;
 
     // for layoutAboutToBeChanged/layoutChanged
-    QVector<QPersistentModelIndex> layoutChangePersistentIndexes;
-    QVector<QModelIndex> layoutChangeProxyIndexes;
+    QList<QPersistentModelIndex> layoutChangePersistentIndexes;
+    QList<QModelIndex> layoutChangeProxyIndexes;
 };
 
 QConcatenateTablesProxyModelPrivate::QConcatenateTablesProxyModelPrivate()
@@ -470,7 +435,7 @@ void QConcatenateTablesProxyModel::addSourceModel(QAbstractItemModel *sourceMode
     Q_D(QConcatenateTablesProxyModel);
     Q_ASSERT(sourceModel);
     Q_ASSERT(!d->m_models.contains(sourceModel));
-    connect(sourceModel, SIGNAL(dataChanged(QModelIndex,QModelIndex,QVector<int>)), this, SLOT(_q_slotDataChanged(QModelIndex,QModelIndex,QVector<int>)));
+    connect(sourceModel, SIGNAL(dataChanged(QModelIndex,QModelIndex,QList<int>)), this, SLOT(_q_slotDataChanged(QModelIndex,QModelIndex,QList<int>)));
     connect(sourceModel, SIGNAL(rowsInserted(QModelIndex,int,int)), this, SLOT(_q_slotRowsInserted(QModelIndex,int,int)));
     connect(sourceModel, SIGNAL(rowsRemoved(QModelIndex,int,int)), this, SLOT(_q_slotRowsRemoved(QModelIndex,int,int)));
     connect(sourceModel, SIGNAL(rowsAboutToBeInserted(QModelIndex,int,int)), this, SLOT(_q_slotRowsAboutToBeInserted(QModelIndex,int,int)));
@@ -617,7 +582,7 @@ void QConcatenateTablesProxyModelPrivate::_q_slotColumnsRemoved(const QModelInde
     }
 }
 
-void QConcatenateTablesProxyModelPrivate::_q_slotDataChanged(const QModelIndex &from, const QModelIndex &to, const QVector<int> &roles)
+void QConcatenateTablesProxyModelPrivate::_q_slotDataChanged(const QModelIndex &from, const QModelIndex &to, const QList<int> &roles)
 {
     Q_Q(QConcatenateTablesProxyModel);
     Q_ASSERT(from.isValid());

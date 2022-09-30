@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "user_resource_controller.h"
 
@@ -45,7 +9,6 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_frame_observer.h"
-#include "content/public/renderer/render_view_observer.h"
 #include "extensions/common/url_pattern.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -56,7 +19,6 @@
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 
-#include "common/qt_messages.h"
 #include "qtwebengine/userscript/user_script_data.h"
 #include "type_conversion.h"
 #include "user_script.h"
@@ -151,7 +113,7 @@ public:
 private:
     // RenderFrameObserver implementation.
     void DidCommitProvisionalLoad(ui::PageTransition transition) override;
-    void DidFinishDocumentLoad() override;
+    void DidDispatchDOMContentLoadedEvent() override;
     void DidFinishLoad() override;
     void WillDetach() override;
     void OnDestruct() override;
@@ -198,8 +160,8 @@ void UserResourceController::runScripts(QtWebEngineCore::UserScriptData::Injecti
         return;
     const bool isMainFrame = renderFrame->IsMainFrame();
 
-    QList<uint64_t> scriptsToRun = m_frameUserScriptMap.value(globalScriptsIndex).toList();
-    scriptsToRun.append(m_frameUserScriptMap.value(renderFrame).toList());
+    QList<uint64_t> scriptsToRun = m_frameUserScriptMap.value(globalScriptsIndex);
+    scriptsToRun.append(m_frameUserScriptMap.value(renderFrame));
 
     for (uint64_t id : qAsConst(scriptsToRun)) {
         const QtWebEngineCore::UserScriptData &script = m_scripts.value(id);
@@ -209,7 +171,7 @@ void UserResourceController::runScripts(QtWebEngineCore::UserScriptData::Injecti
             continue;
         blink::WebScriptSource source(blink::WebString::FromUTF8(script.source), script.url);
         if (script.worldId)
-            frame->ExecuteScriptInIsolatedWorld(script.worldId, source);
+            frame->ExecuteScriptInIsolatedWorld(script.worldId, source, blink::BackForwardCacheAware::kAllow); // FIXME, check
         else
             frame->ExecuteScript(source);
     }
@@ -253,7 +215,7 @@ void UserResourceController::RenderFrameObserverHelper::DidCommitProvisionalLoad
                            QtWebEngineCore::UserScriptData::DocumentElementCreation));
 }
 
-void UserResourceController::RenderFrameObserverHelper::DidFinishDocumentLoad()
+void UserResourceController::RenderFrameObserverHelper::DidDispatchDOMContentLoadedEvent()
 {
     // Don't run scripts if provisional load failed (DidFailProvisionalLoad
     // called instead of DidCommitProvisionalLoad).
@@ -262,7 +224,7 @@ void UserResourceController::RenderFrameObserverHelper::DidFinishDocumentLoad()
                 FROM_HERE,
                 base::BindOnce(&Runner::run, m_runner->AsWeakPtr(),
                                QtWebEngineCore::UserScriptData::AfterLoad),
-                base::TimeDelta::FromMilliseconds(afterLoadTimeout));
+                base::Milliseconds(afterLoadTimeout));
 }
 
 void UserResourceController::RenderFrameObserverHelper::DidFinishLoad()
@@ -346,7 +308,8 @@ void UserResourceController::addScriptForFrame(const QtWebEngineCore::UserScript
     if (it == m_frameUserScriptMap.end())
         it = m_frameUserScriptMap.insert(frame, UserScriptSet());
 
-    (*it).insert(script.scriptId);
+    if (!(*it).contains(script.scriptId))
+        (*it).append(script.scriptId);
     m_scripts.insert(script.scriptId, script);
 }
 
@@ -357,7 +320,7 @@ void UserResourceController::removeScriptForFrame(const QtWebEngineCore::UserScr
     if (it == m_frameUserScriptMap.end())
         return;
 
-    (*it).remove(script.scriptId);
+    (*it).removeOne(script.scriptId);
     m_scripts.remove(script.scriptId);
 }
 
@@ -391,7 +354,7 @@ void UserResourceController::RegisterMojoInterfaces(
         blink::AssociatedInterfaceRegistry *associated_interfaces)
 {
     associated_interfaces->AddInterface(
-            base::Bind(&UserResourceController::BindReceiver, base::Unretained(this)));
+            base::BindRepeating(&UserResourceController::BindReceiver, base::Unretained(this)));
 }
 
 void UserResourceController::UnregisterMojoInterfaces(

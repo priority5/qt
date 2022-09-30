@@ -13,9 +13,9 @@
 namespace cc {
 
 TransformNode::TransformNode()
-    : id(TransformTree::kInvalidNodeId),
-      parent_id(TransformTree::kInvalidNodeId),
-      parent_frame_id(TransformTree::kInvalidNodeId),
+    : id(kInvalidPropertyNodeId),
+      parent_id(kInvalidPropertyNodeId),
+      parent_frame_id(kInvalidPropertyNodeId),
       sticky_position_constraint_id(-1),
       sorting_context_id(0),
       needs_local_transform_update(true),
@@ -28,6 +28,7 @@ TransformNode::TransformNode()
       flattens_inherited_transform(true),
       node_and_ancestors_are_flat(true),
       scrolls(false),
+      is_fixed_to_viewport(false),
       should_be_snapped(false),
       moved_by_outer_viewport_bounds_delta_y(false),
       in_subtree_of_page_scale_layer(false),
@@ -35,10 +36,11 @@ TransformNode::TransformNode()
       delegates_to_parent_for_backface(false),
       will_change_transform(false),
       node_or_ancestors_will_change_transform(false),
-      maximum_animation_scale(kNotScaled),
-      starting_animation_scale(kNotScaled) {}
+      maximum_animation_scale(kInvalidScale) {}
 
 TransformNode::TransformNode(const TransformNode&) = default;
+
+TransformNode& TransformNode::operator=(const TransformNode&) = default;
 
 #if DCHECK_IS_ON()
 bool TransformNode::operator==(const TransformNode& other) const {
@@ -60,6 +62,7 @@ bool TransformNode::operator==(const TransformNode& other) const {
          flattens_inherited_transform == other.flattens_inherited_transform &&
          node_and_ancestors_are_flat == other.node_and_ancestors_are_flat &&
          scrolls == other.scrolls &&
+         is_fixed_to_viewport == other.is_fixed_to_viewport &&
          should_be_snapped == other.should_be_snapped &&
          moved_by_outer_viewport_bounds_delta_y ==
              other.moved_by_outer_viewport_bounds_delta_y &&
@@ -74,7 +77,6 @@ bool TransformNode::operator==(const TransformNode& other) const {
          scroll_offset == other.scroll_offset &&
          snap_amount == other.snap_amount &&
          maximum_animation_scale == other.maximum_animation_scale &&
-         starting_animation_scale == other.starting_animation_scale &&
          visible_frame_element_id == other.visible_frame_element_id;
 }
 #endif  // DCHECK_IS_ON()

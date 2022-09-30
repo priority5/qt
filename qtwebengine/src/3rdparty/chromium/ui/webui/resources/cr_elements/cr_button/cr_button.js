@@ -52,7 +52,6 @@ Polymer({
     keydown: 'onKeyDown_',
     keyup: 'onKeyUp_',
     pointerdown: 'onPointerDown_',
-    tap: 'onTap_',
   },
 
   /**
@@ -193,15 +192,6 @@ Polymer({
   },
 
   /**
-   * Need to handle tap events to enable tap events for where they are still
-   * used with |button.addEventListener('tap', handler)|.
-   * TODO(crbug.com/812035): Remove function and listener after Chrome OS no
-   *     longer uses tap event at least with addEventListener().
-   * @private
-   */
-  onTap_() {},
-
-  /**
    * Customize the element's ripple. Overriding the '_createRipple' function
    * from PaperRippleBehavior.
    * @return {PaperRippleElement}
@@ -217,3 +207,4 @@ Polymer({
     return ripple;
   },
 });
+/* #ignore */ console.warn('crbug/1173575, non-JS module files deprecated.');

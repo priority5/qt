@@ -30,9 +30,9 @@ namespace test {
 // should be destroyed in the opposite order of their Init*() methods being
 // called.
 //
-// ScopedFeatureList needs to be initialized (via one of Init*() methods)
-// before running code that inspects the state of features, such as in the
-// constructor of the test harness.
+// ScopedFeatureList needs to be initialized on the main thread (via one of
+// Init*() methods) before running code that inspects the state of features,
+// such as in the constructor of the test harness.
 //
 // WARNING: To be clear, in multithreaded test environments (such as browser
 // tests) there may background threads using FeatureList before the test body is
@@ -41,7 +41,15 @@ namespace test {
 // initialization in the test harness's constructor.
 class ScopedFeatureList final {
  public:
+  // Constructs the instance in a non-initialized state.
   ScopedFeatureList();
+
+  // Shorthand for immediately initializing with InitAndEnableFeature().
+  explicit ScopedFeatureList(const Feature& enable_feature);
+
+  ScopedFeatureList(const ScopedFeatureList&) = delete;
+  ScopedFeatureList& operator=(const ScopedFeatureList&) = delete;
+
   ~ScopedFeatureList();
 
   struct FeatureAndParams {
@@ -132,20 +140,11 @@ class ScopedFeatureList final {
       const std::vector<FeatureAndParams>& enabled_features_and_params,
       const std::vector<Feature>& disabled_features);
 
-  // Initializes and registers a FeatureList instance based on present
-  // FeatureList and overridden with single enabled feature and associated field
-  // trial override.
-  // |trial| is expected to outlive the ScopedFeatureList.
-  void InitAndEnableFeatureWithFieldTrialOverride(const Feature& feature,
-                                                  FieldTrial* trial);
-
   bool init_called_ = false;
   std::unique_ptr<FeatureList> original_feature_list_;
   base::FieldTrialList* original_field_trial_list_ = nullptr;
   std::string original_params_;
   std::unique_ptr<base::FieldTrialList> field_trial_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedFeatureList);
 };
 
 }  // namespace test

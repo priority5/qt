@@ -1,34 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
-
-/*
-  codechunk.h
-*/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef CODECHUNK_H
 #define CODECHUNK_H
@@ -42,26 +13,30 @@ QT_BEGIN_NAMESPACE
 class CodeChunk
 {
 public:
-    CodeChunk() : hotspot(-1) {}
-    CodeChunk(const QString &str) : s(str), hotspot(-1) {}
+    CodeChunk() : m_hotspot(-1) { }
 
     void append(const QString &lexeme);
     void appendHotspot()
     {
-        if (hotspot == -1)
-            hotspot = s.length();
+        if (m_hotspot == -1)
+            m_hotspot = m_str.length();
     }
 
-    bool isEmpty() const { return s.isEmpty(); }
-    void clear() { s.clear(); }
-    QString toString() const { return s; }
-    QStringList toPath() const;
-    QString left() const { return s.left(hotspot == -1 ? s.length() : hotspot); }
-    QString right() const { return s.mid(hotspot == -1 ? s.length() : hotspot); }
+    [[nodiscard]] bool isEmpty() const { return m_str.isEmpty(); }
+    void clear() { m_str.clear(); }
+    [[nodiscard]] QString toString() const { return m_str; }
+    [[nodiscard]] QString left() const
+    {
+        return m_str.left(m_hotspot == -1 ? m_str.length() : m_hotspot);
+    }
+    [[nodiscard]] QString right() const
+    {
+        return m_str.mid(m_hotspot == -1 ? m_str.length() : m_hotspot);
+    }
 
 private:
-    QString s;
-    int hotspot;
+    QString m_str {};
+    qsizetype m_hotspot {};
 };
 
 inline bool operator==(const CodeChunk &c, const CodeChunk &d)

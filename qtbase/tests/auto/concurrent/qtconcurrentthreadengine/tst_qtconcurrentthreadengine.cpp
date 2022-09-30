@@ -1,35 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <qtconcurrentthreadengine.h>
 #include <qexception.h>
 #include <QThread>
 #include <QElapsedTimer>
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QSet>
 
 using namespace QtConcurrent;
 
@@ -55,7 +31,8 @@ private slots:
 class PrintUser : public ThreadEngine<void>
 {
 public:
-    ThreadFunctionResult threadFunction()
+    PrintUser() : ThreadEngine(QThreadPool::globalInstance()) {}
+    ThreadFunctionResult threadFunction() override
     {
         QTest::qSleep(50);
         QTest::qSleep(100);
@@ -75,20 +52,21 @@ class StringResultUser : public ThreadEngine<QString>
 public:
     typedef QString ResultType;
     StringResultUser()
-    : done(false) { }
+    : ThreadEngine(QThreadPool::globalInstance())
+    , done(false) { }
 
-    bool shouldStartThread()
+    bool shouldStartThread() override
     {
         return !done;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         done = true;
         return ThreadFinished;
     }
 
-    QString *result()
+    QString *result() override
     {
         foo = "Foo";
         return &foo;
@@ -108,18 +86,20 @@ void tst_QtConcurrentThreadEngine::result()
 class VoidResultUser : public ThreadEngine<void>
 {
 public:
-    bool shouldStartThread()
+    VoidResultUser() : ThreadEngine(QThreadPool::globalInstance()) {}
+
+    bool shouldStartThread() override
     {
         return !done;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         done = true;
         return ThreadFinished;
     }
 
-    void *result()
+    void *result() override
     {
         return 0;
     }
@@ -136,12 +116,14 @@ void tst_QtConcurrentThreadEngine::runThroughStarter()
 class CancelUser : public ThreadEngine<void>
 {
 public:
-    void *result()
+    CancelUser() : ThreadEngine(QThreadPool::globalInstance()) {}
+
+    void *result() override
     {
         return 0;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         while (this->isCanceled() == false)
         {
@@ -173,17 +155,18 @@ class ThrottleAlwaysUser : public ThreadEngine<void>
 {
 public:
     ThrottleAlwaysUser()
+    : ThreadEngine(QThreadPool::globalInstance())
     {
         count.storeRelaxed(initialCount = 100);
         finishing = false;
     }
 
-    bool shouldStartThread()
+    bool shouldStartThread() override
     {
         return !finishing;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         forever {
             const int local = count.loadRelaxed();
@@ -221,17 +204,18 @@ class ThreadCountUser : public ThreadEngine<void>
 {
 public:
     ThreadCountUser(bool finishImmediately = false)
+    : ThreadEngine(QThreadPool::globalInstance())
     {
         threads.clear();
         finishing = finishImmediately;
     }
 
-    bool shouldStartThread()
+    bool shouldStartThread() override
     {
         return !finishing;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         {
             QMutexLocker lock(&mutex);
@@ -268,12 +252,13 @@ void tst_QtConcurrentThreadEngine::threadCount()
 class MultipleResultsUser : public ThreadEngine<int>
 {
 public:
-    bool shouldStartThread()
+    MultipleResultsUser() : ThreadEngine(QThreadPool::globalInstance()) {}
+    bool shouldStartThread() override
     {
         return false;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         for (int i = 0; i < 10; ++i)
             this->reportResult(&i);
@@ -297,17 +282,17 @@ void tst_QtConcurrentThreadEngine::multipleResults()
 class NoThreadsUser : public ThreadEngine<void>
 {
 public:
-    bool shouldStartThread()
+    bool shouldStartThread() override
     {
         return false;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         return ThreadFinished;
     }
 
-    void *result()
+    void *result() override
     {
         return 0;
     }
@@ -337,8 +322,9 @@ const int sleepTime = 20;
 class SlowUser : public ThreadEngine<void>
 {
 public:
-    bool shouldStartThread() { return false; }
-    ThreadFunctionResult threadFunction() { QTest::qSleep(sleepTime); return ThreadFinished; }
+    SlowUser() : ThreadEngine(QThreadPool::globalInstance()) {}
+    bool shouldStartThread() override { return false; }
+    ThreadFunctionResult threadFunction() override { QTest::qSleep(sleepTime); return ThreadFinished; }
 };
 
 void tst_QtConcurrentThreadEngine::cancelQueuedSlowUser()
@@ -367,12 +353,13 @@ void tst_QtConcurrentThreadEngine::cancelQueuedSlowUser()
 class QtConcurrentExceptionThrower : public ThreadEngine<void>
 {
 public:
-    QtConcurrentExceptionThrower(QThread *blockThread = 0)
+    QtConcurrentExceptionThrower(QThread *blockThread = nullptr)
+    : ThreadEngine(QThreadPool::globalInstance())
     {
         this->blockThread = blockThread;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         QTest::qSleep(50);
         throw QException();
@@ -381,15 +368,16 @@ public:
     QThread *blockThread;
 };
 
-class UnrelatedExceptionThrower : public ThreadEngine<void>
+class IntExceptionThrower : public ThreadEngine<void>
 {
 public:
-    UnrelatedExceptionThrower(QThread *blockThread = 0)
+    IntExceptionThrower(QThread *blockThread = nullptr)
+    : ThreadEngine(QThreadPool::globalInstance())
     {
         this->blockThread = blockThread;
     }
 
-    ThreadFunctionResult threadFunction()
+    ThreadFunctionResult threadFunction() override
     {
         QTest::qSleep(50);
         throw int();
@@ -415,11 +403,17 @@ void tst_QtConcurrentThreadEngine::exceptions()
     {
         bool caught = false;
         try  {
-            UnrelatedExceptionThrower *e = new UnrelatedExceptionThrower();
+            IntExceptionThrower *e = new IntExceptionThrower();
             QFuture<void> f = e->startAsynchronously();
             f.waitForFinished();
-        } catch (const QUnhandledException &) {
-            caught = true;
+        } catch (const QUnhandledException &ex) {
+            // Make sure the exception info is not lost
+            try {
+                if (ex.exception())
+                    std::rethrow_exception(ex.exception());
+            } catch (int) {
+                caught = true;
+            }
         }
         QVERIFY2(caught, "did not get exception");
     }

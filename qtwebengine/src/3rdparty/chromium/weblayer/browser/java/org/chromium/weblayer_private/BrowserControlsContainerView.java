@@ -7,6 +7,8 @@ package org.chromium.weblayer_private;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Rect;
+import android.view.DragEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
@@ -17,8 +19,8 @@ import org.chromium.base.MathUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
+import org.chromium.cc.input.BrowserControlsState;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.common.BrowserControlsState;
 import org.chromium.ui.base.EventOffsetHandler;
 import org.chromium.ui.resources.dynamics.ViewResourceAdapter;
 
@@ -161,6 +163,11 @@ class BrowserControlsContainerView extends FrameLayout {
          * Requests that the browser controls visibility state be changed.
          */
         void setAnimationConstraint(@BrowserControlsState int constraint);
+
+        /**
+         * Called when the offset of the controls changes.
+         */
+        void onOffsetsChanged(boolean isTop, int controlsOffset);
     }
 
     BrowserControlsContainerView(Context context, ContentViewRenderView contentViewRenderView,
@@ -364,14 +371,19 @@ class BrowserControlsContainerView extends FrameLayout {
         int width = right - left;
         int height = bottom - top;
         boolean heightChanged = height != mLastHeight;
-        if (!heightChanged && width == mLastWidth) return;
+        if (!heightChanged && width == mLastWidth && mViewResourceAdapter != null) return;
 
         int prevHeight = mLastHeight;
         mLastWidth = width;
         mLastHeight = height;
         if (mLastWidth > 0 && mLastHeight > 0 && mViewResourceAdapter == null) {
             createAdapterAndLayer();
-            if (mLastShownAmountWithView == DEFAULT_LAST_SHOWN_AMOUNT && mSavedState != null) {
+            if (mIsFullscreen) {
+                // This calls setControlsOffset() as onOffsetsChanged() does (mostly) nothing when
+                // fullscreen.
+                setControlsOffset(mIsTop ? -mLastHeight : mLastHeight, 0);
+            } else if (mLastShownAmountWithView == DEFAULT_LAST_SHOWN_AMOUNT
+                    && mSavedState != null) {
                 // If there wasn't a View before and we have non-empty saved state from a previous
                 // BrowserControlsContainerView instance, apply those saved offsets now. We can't
                 // rely on BrowserControlsOffsetManager to notify us of the correct location as we
@@ -419,6 +431,31 @@ class BrowserControlsContainerView extends FrameLayout {
         // Cancel the runnable when detached as calls to removeCallback() after this completes will
         // attempt to remove from the wrong handler.
         cancelDelayedFullscreenRunnable();
+    }
+
+    // Don't forward any events to the ContentView as the BrowserControlsContainerView should be
+    // considered opaque and shouldn't pass position based events to views below it. Website content
+    // has been moved to not overlap BrowserControlsContainerView anyway.
+    @Override
+    public boolean onDragEvent(DragEvent event) {
+        return onEventCommon();
+    }
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        return onEventCommon();
+    }
+    @Override
+    public boolean onHoverEvent(MotionEvent event) {
+        return onEventCommon();
+    }
+    @SuppressLint("ClickableViewAccessibility")
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        return onEventCommon();
+    }
+    private boolean onEventCommon() {
+        // "Opaque" to events (ie return true as handled) only if visible.
+        return mView != null && mView.getVisibility() == View.VISIBLE;
     }
 
     /* package */ State getState() {
@@ -498,6 +535,7 @@ class BrowserControlsContainerView extends FrameLayout {
             BrowserControlsContainerViewJni.get().setBottomControlsOffset(
                     mNativeBrowserControlsContainerView);
         }
+        mDelegate.onOffsetsChanged(mIsTop, mControlsOffset);
     }
 
     private void reportHeightChange() {

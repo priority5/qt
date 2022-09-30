@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "net/log/net_log.h"
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_util.h"
 #include "net/spdy/spdy_test_util_common.h"
@@ -22,16 +23,16 @@ namespace test {
 class HeaderCoalescerTest : public ::testing::Test {
  public:
   HeaderCoalescerTest()
-      : header_coalescer_(kMaxHeaderListSizeForTest, net_log_.bound()) {}
+      : header_coalescer_(kMaxHeaderListSizeForTest, net_log_with_source_) {}
 
   void ExpectEntry(base::StringPiece expected_header_name,
                    base::StringPiece expected_header_value,
                    base::StringPiece expected_error_message) {
-    auto entry_list = net_log_.GetEntries();
+    auto entry_list = net_log_observer_.GetEntries();
     ASSERT_EQ(1u, entry_list.size());
     EXPECT_EQ(entry_list[0].type,
               NetLogEventType::HTTP2_SESSION_RECV_INVALID_HEADER);
-    EXPECT_EQ(entry_list[0].source.id, net_log_.bound().source().id);
+    EXPECT_EQ(entry_list[0].source.id, net_log_with_source_.source().id);
     std::string value;
     EXPECT_EQ(expected_header_name,
               GetStringValueFromParams(entry_list[0], "header_name"));
@@ -42,7 +43,9 @@ class HeaderCoalescerTest : public ::testing::Test {
   }
 
  protected:
-  RecordingBoundTestNetLog net_log_;
+  NetLogWithSource net_log_with_source_{
+      NetLogWithSource::Make(NetLog::Get(), NetLogSourceType::NONE)};
+  RecordingNetLogObserver net_log_observer_;
   HeaderCoalescer header_coalescer_;
 };
 
@@ -51,7 +54,7 @@ TEST_F(HeaderCoalescerTest, CorrectHeaders) {
   header_coalescer_.OnHeader("baz", "qux");
   EXPECT_FALSE(header_coalescer_.error_seen());
 
-  spdy::SpdyHeaderBlock header_block = header_coalescer_.release_headers();
+  spdy::Http2HeaderBlock header_block = header_coalescer_.release_headers();
   EXPECT_THAT(header_block,
               ElementsAre(Pair(":foo", "bar"), Pair("baz", "qux")));
 }
@@ -90,7 +93,7 @@ TEST_F(HeaderCoalescerTest, Append) {
   header_coalescer_.OnHeader("cookie", "qux");
   EXPECT_FALSE(header_coalescer_.error_seen());
 
-  spdy::SpdyHeaderBlock header_block = header_coalescer_.release_headers();
+  spdy::Http2HeaderBlock header_block = header_coalescer_.release_headers();
   EXPECT_THAT(header_block,
               ElementsAre(Pair("foo", absl::string_view("bar\0quux", 8)),
                           Pair("cookie", "baz; qux")));
@@ -125,7 +128,7 @@ TEST_F(HeaderCoalescerTest, HeaderNameValid) {
       "^_`|~");
   header_coalescer_.OnHeader(header_name, "foo");
   EXPECT_FALSE(header_coalescer_.error_seen());
-  spdy::SpdyHeaderBlock header_block = header_coalescer_.release_headers();
+  spdy::Http2HeaderBlock header_block = header_coalescer_.release_headers();
   EXPECT_THAT(header_block, ElementsAre(Pair(header_name, "foo")));
 }
 

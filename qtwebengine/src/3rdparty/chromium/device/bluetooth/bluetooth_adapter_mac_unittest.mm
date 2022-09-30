@@ -10,13 +10,12 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/files/file_path_watcher.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner.h"
-#include "base/test/bind_test_util.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
 #include "build/build_config.h"
@@ -31,11 +30,11 @@
 #import "device/bluetooth/test/test_bluetooth_adapter_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 #import <CoreBluetooth/CoreBluetooth.h>
-#else  // !defined(OS_IOS)
+#else  // !BUILDFLAG(IS_IOS)
 #import <IOBluetooth/IOBluetooth.h>
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 
 // List of undocumented IOBluetooth APIs used for BluetoothAdapterMac.
 extern "C" {
@@ -166,7 +165,7 @@ class BluetoothAdapterMacTest : public testing::Test {
   NSDictionary* AdvertisementData() {
     NSDictionary* advertisement_data = @{
       CBAdvertisementDataIsConnectable : @(YES),
-      CBAdvertisementDataServiceDataKey : [NSDictionary dictionary],
+      CBAdvertisementDataServiceDataKey : @{},
     };
     return [advertisement_data retain];
   }
@@ -279,6 +278,7 @@ TEST_F(BluetoothAdapterMacTest, AddDiscoverySessionWithLowEnergyFilter) {
 
   adapter_mac_->StartDiscoverySessionWithFilter(
       std::move(discovery_filter),
+      /*client_name=*/std::string(),
       base::BindOnce(&BluetoothAdapterMacTest::OnStartDiscoverySessionSuccess,
                      base::Unretained(this)),
       base::BindOnce(&BluetoothAdapterMacTest::ErrorCallback,
@@ -310,6 +310,7 @@ TEST_F(BluetoothAdapterMacTest, AddSecondDiscoverySessionWithLowEnergyFilter) {
   discovery_filter->AddDeviceFilter(device_filter);
   adapter_mac_->StartDiscoverySessionWithFilter(
       std::move(discovery_filter),
+      /*client_name=*/std::string(),
       base::BindOnce(&BluetoothAdapterMacTest::OnStartDiscoverySessionSuccess,
                      base::Unretained(this)),
       base::BindOnce(&BluetoothAdapterMacTest::ErrorCallback,
@@ -326,6 +327,7 @@ TEST_F(BluetoothAdapterMacTest, AddSecondDiscoverySessionWithLowEnergyFilter) {
 
   adapter_mac_->StartDiscoverySessionWithFilter(
       std::move(discovery_filter2),
+      /*client_name=*/std::string(),
       base::BindOnce(&BluetoothAdapterMacTest::OnStartDiscoverySessionSuccess,
                      base::Unretained(this)),
       base::BindOnce(&BluetoothAdapterMacTest::ErrorCallback,
@@ -347,6 +349,7 @@ TEST_F(BluetoothAdapterMacTest, RemoveDiscoverySessionWithLowEnergyFilter) {
       new BluetoothDiscoveryFilter(BLUETOOTH_TRANSPORT_LE));
   adapter_mac_->StartDiscoverySessionWithFilter(
       std::move(discovery_filter),
+      /*client_name=*/std::string(),
       base::BindOnce(&BluetoothAdapterMacTest::OnStartDiscoverySessionSuccess,
                      base::Unretained(this)),
       base::BindOnce(&BluetoothAdapterMacTest::ErrorCallback,

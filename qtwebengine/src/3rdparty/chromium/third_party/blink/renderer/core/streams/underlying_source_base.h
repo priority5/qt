@@ -14,7 +14,6 @@
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
@@ -29,7 +28,7 @@ class CORE_EXPORT UnderlyingSourceBase
   void Trace(Visitor*) const override;
   ~UnderlyingSourceBase() override = default;
 
-  ScriptPromise startWrapper(ScriptState*, ScriptValue stream);
+  ScriptPromise startWrapper(ScriptState*, ScriptValue controller);
   virtual ScriptPromise Start(ScriptState*);
 
   virtual ScriptPromise pull(ScriptState*);
@@ -40,8 +39,10 @@ class CORE_EXPORT UnderlyingSourceBase
 
   ScriptValue type(ScriptState*) const;
 
-  // ExecutionContextLifecycleObserver
-  // TODO(ricea): Is this still useful?
+  // ExecutionContextLifecycleObserver implementation:
+
+  // This is needed to prevent stream operations being performed after the
+  // window or worker is destroyed.
   void ContextDestroyed() override;
 
  protected:

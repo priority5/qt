@@ -24,10 +24,10 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
-#include "third_party/blink/renderer/core/svg/properties/svg_property.h"
+#include "third_party/blink/renderer/core/svg/properties/svg_listable_property.h"
 #include "third_party/blink/renderer/core/svg/svg_length_context.h"
 #include "third_party/blink/renderer/core/svg/svg_parsing_error.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -36,7 +36,7 @@ class QualifiedName;
 
 class SVGLengthTearOff;
 
-class CORE_EXPORT SVGLength final : public SVGPropertyBase {
+class CORE_EXPORT SVGLength final : public SVGListablePropertyBase {
  public:
   typedef SVGLengthTearOff TearOffType;
 
@@ -91,9 +91,6 @@ class CORE_EXPORT SVGLength final : public SVGPropertyBase {
   // Resolves LengthTypePercentage into a normalized floating point number (full
   // value is 1.0).
   float ValueAsPercentage() const;
-
-  // Returns a number to be used as percentage (so full value is 100)
-  float ValueAsPercentage100() const;
 
   // Scale the input value by this SVGLength. Higher precision than input *
   // valueAsPercentage().

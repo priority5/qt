@@ -10,10 +10,11 @@
 #include <vector>
 
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_data_channel_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_peer_connection_dependency_factory.h"
+#include "third_party/blink/renderer/modules/peerconnection/mock_rtc_peer_connection_handler_platform.h"
 #include "third_party/blink/renderer/platform/peerconnection/webrtc_util.h"
 #include "third_party/webrtc/api/rtp_receiver_interface.h"
 #include "third_party/webrtc/rtc_base/ref_counted_object.h"
@@ -62,7 +63,9 @@ class MockStreamCollection : public webrtc::StreamCollectionInterface {
     }
     return nullptr;
   }
-  void AddStream(MediaStreamInterface* stream) { streams_.push_back(stream); }
+  void AddStream(MediaStreamInterface* stream) {
+    streams_.emplace_back(stream);
+  }
   void RemoveStream(MediaStreamInterface* stream) {
     auto it = streams_.begin();
     for (; it != streams_.end(); ++it) {
@@ -166,7 +169,8 @@ webrtc::RTCError FakeRtpSender::SetParameters(
 
 rtc::scoped_refptr<webrtc::DtmfSenderInterface> FakeRtpSender::GetDtmfSender()
     const {
-  return new rtc::RefCountedObject<MockDtmfSender>();
+  return rtc::scoped_refptr<webrtc::DtmfSenderInterface>(
+      new rtc::RefCountedObject<MockDtmfSender>());
 }
 
 FakeRtpReceiver::FakeRtpReceiver(
@@ -237,10 +241,10 @@ FakeRtpTransceiver::FakeRtpTransceiver(
     cricket::MediaType media_type,
     rtc::scoped_refptr<FakeRtpSender> sender,
     rtc::scoped_refptr<FakeRtpReceiver> receiver,
-    base::Optional<std::string> mid,
+    absl::optional<std::string> mid,
     bool stopped,
     webrtc::RtpTransceiverDirection direction,
-    base::Optional<webrtc::RtpTransceiverDirection> current_direction)
+    absl::optional<webrtc::RtpTransceiverDirection> current_direction)
     : media_type_(media_type),
       sender_(std::move(sender)),
       receiver_(std::move(receiver)),
@@ -283,6 +287,11 @@ bool FakeRtpTransceiver::stopped() const {
   return stopped_;
 }
 
+bool FakeRtpTransceiver::stopping() const {
+  NOTIMPLEMENTED();
+  return false;
+}
+
 webrtc::RtpTransceiverDirection FakeRtpTransceiver::direction() const {
   return direction_;
 }
@@ -295,10 +304,6 @@ void FakeRtpTransceiver::SetDirection(
 absl::optional<webrtc::RtpTransceiverDirection>
 FakeRtpTransceiver::current_direction() const {
   return current_direction_;
-}
-
-void FakeRtpTransceiver::Stop() {
-  NOTIMPLEMENTED();
 }
 
 void FakeRtpTransceiver::SetTransport(
@@ -324,8 +329,7 @@ const char MockPeerConnectionImpl::kDummyAnswer[] = "dummy answer";
 MockPeerConnectionImpl::MockPeerConnectionImpl(
     MockPeerConnectionDependencyFactory* factory,
     webrtc::PeerConnectionObserver* observer)
-    : dependency_factory_(factory),
-      remote_streams_(new rtc::RefCountedObject<MockStreamCollection>),
+    : remote_streams_(new rtc::RefCountedObject<MockStreamCollection>),
       hint_audio_(false),
       hint_video_(false),
       getstats_result_(true),
@@ -375,16 +379,21 @@ MockPeerConnectionImpl::AddTrack(
       local_stream_ids_.push_back(stream_id);
     }
   }
-  auto* sender = new rtc::RefCountedObject<FakeRtpSender>(track, stream_ids);
+  rtc::scoped_refptr<FakeRtpSender> sender(
+      new rtc::RefCountedObject<FakeRtpSender>(track, stream_ids));
   senders_.push_back(sender);
   return rtc::scoped_refptr<webrtc::RtpSenderInterface>(sender);
 }
 
-bool MockPeerConnectionImpl::RemoveTrack(webrtc::RtpSenderInterface* s) {
-  rtc::scoped_refptr<FakeRtpSender> sender = static_cast<FakeRtpSender*>(s);
+webrtc::RTCError MockPeerConnectionImpl::RemoveTrackOrError(
+    rtc::scoped_refptr<webrtc::RtpSenderInterface> s) {
+  rtc::scoped_refptr<FakeRtpSender> sender(
+      static_cast<FakeRtpSender*>(s.get()));
   auto it = std::find(senders_.begin(), senders_.end(), sender);
-  if (it == senders_.end())
-    return false;
+  if (it == senders_.end()) {
+    return webrtc::RTCError(webrtc::RTCErrorType::INVALID_PARAMETER,
+                            "Mock: sender not found in senders");
+  }
   senders_.erase(it);
   auto track = sender->track();
 
@@ -394,7 +403,7 @@ bool MockPeerConnectionImpl::RemoveTrack(webrtc::RtpSenderInterface* s) {
     if (local_stream_it != local_stream_ids_.end())
       local_stream_ids_.erase(local_stream_it);
   }
-  return true;
+  return webrtc::RTCError::OK();
 }
 
 std::vector<rtc::scoped_refptr<webrtc::RtpSenderInterface>>
@@ -410,11 +419,11 @@ MockPeerConnectionImpl::GetReceivers() const {
   std::vector<rtc::scoped_refptr<webrtc::RtpReceiverInterface>> receivers;
   for (size_t i = 0; i < remote_streams_->count(); ++i) {
     for (const auto& audio_track : remote_streams_->at(i)->GetAudioTracks()) {
-      receivers.push_back(
+      receivers.emplace_back(
           new rtc::RefCountedObject<FakeRtpReceiver>(audio_track));
     }
     for (const auto& video_track : remote_streams_->at(i)->GetVideoTracks()) {
-      receivers.push_back(
+      receivers.emplace_back(
           new rtc::RefCountedObject<FakeRtpReceiver>(video_track));
     }
   }
@@ -425,7 +434,8 @@ rtc::scoped_refptr<webrtc::DataChannelInterface>
 MockPeerConnectionImpl::CreateDataChannel(
     const std::string& label,
     const webrtc::DataChannelInit* config) {
-  return new rtc::RefCountedObject<blink::MockDataChannel>(label, config);
+  return rtc::scoped_refptr<webrtc::DataChannelInterface>(
+      new rtc::RefCountedObject<blink::MockDataChannel>(label, config));
 }
 
 bool MockPeerConnectionImpl::GetStats(webrtc::StatsObserver* observer,
@@ -503,18 +513,16 @@ void MockPeerConnectionImpl::CreateOffer(
     CreateSessionDescriptionObserver* observer,
     const RTCOfferAnswerOptions& options) {
   DCHECK(observer);
-  created_sessiondescription_.reset(
-      dependency_factory_->CreateSessionDescription("unknown", kDummyOffer,
-                                                    nullptr));
+  created_sessiondescription_ =
+      MockParsedSessionDescription("unknown", kDummyAnswer).release();
 }
 
 void MockPeerConnectionImpl::CreateAnswer(
     CreateSessionDescriptionObserver* observer,
     const RTCOfferAnswerOptions& options) {
   DCHECK(observer);
-  created_sessiondescription_.reset(
-      dependency_factory_->CreateSessionDescription("unknown", kDummyAnswer,
-                                                    nullptr));
+  created_sessiondescription_ =
+      MockParsedSessionDescription("unknown", kDummyAnswer).release();
 }
 
 void MockPeerConnectionImpl::SetLocalDescriptionWorker(

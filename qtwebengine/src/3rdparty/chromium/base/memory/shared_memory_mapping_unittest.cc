@@ -6,12 +6,12 @@
 
 #include <stdint.h>
 
-#include <algorithm>
 #include <limits>
 
 #include "base/containers/span.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/writable_shared_memory_region.h"
+#include "base/ranges/algorithm.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -67,7 +67,7 @@ TEST_F(SharedMemoryMappingTest, SpanWithAutoDeducedElementCount) {
   span<const uint32_t> read_span = read_mapping_.GetMemoryAsSpan<uint32_t>();
   ASSERT_EQ(2u, read_span.size());
 
-  std::fill(write_span.begin(), write_span.end(), 0);
+  ranges::fill(write_span, 0);
   EXPECT_EQ(0u, read_span[0]);
   EXPECT_EQ(0u, read_span[1]);
 
@@ -92,7 +92,7 @@ TEST_F(SharedMemoryMappingTest, SpanWithExplicitElementCount) {
   span<const uint32_t> read_span_2 = read_mapping_.GetMemoryAsSpan<uint32_t>(1);
   ASSERT_EQ(1u, read_span_2.size());
 
-  std::fill(write_span.begin(), write_span.end(), 0);
+  ranges::fill(write_span, 0);
   EXPECT_EQ(0u, read_span[0]);
   EXPECT_EQ(0u, read_span[1]);
   EXPECT_EQ(0u, read_span_2[0]);
@@ -103,7 +103,7 @@ TEST_F(SharedMemoryMappingTest, SpanWithExplicitElementCount) {
   EXPECT_EQ(0x08070605u, read_span[1]);
   EXPECT_EQ(0x04030201u, read_span_2[0]);
 
-  std::fill(write_span_2.begin(), write_span_2.end(), 0);
+  ranges::fill(write_span_2, 0);
   EXPECT_EQ(0u, read_span[0]);
   EXPECT_EQ(0x08070605u, read_span[1]);
   EXPECT_EQ(0u, read_span_2[0]);
@@ -150,14 +150,14 @@ TEST_F(SharedMemoryMappingTest, TooBigSpanWithExplicitElementCount) {
 // TODO(dcheng): This test is temporarily disabled on iOS. iOS devices allow
 // the creation of a 1GB shared memory region, but don't allow the region to be
 // mapped.
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 TEST_F(SharedMemoryMappingTest, TotalMappedSizeLimit) {
   // Nothing interesting to test if the address space isn't 64 bits, since
   // there's no real limit enforced on 32 bits other than complete address
   // space exhaustion.
   // Also exclude NaCl since pointers are 32 bits on all architectures:
   // https://bugs.chromium.org/p/nativeclient/issues/detail?id=1162
-#if defined(ARCH_CPU_64_BITS) && !defined(OS_NACL)
+#if defined(ARCH_CPU_64_BITS) && !BUILDFLAG(IS_NACL)
   base::HistogramTester histogram_tester;
   auto region = WritableSharedMemoryRegion::Create(1024 * 1024 * 1024);
   ASSERT_TRUE(region.IsValid());
@@ -175,6 +175,6 @@ TEST_F(SharedMemoryMappingTest, TotalMappedSizeLimit) {
       ::testing::ElementsAre(Bucket(0, 31), Bucket(1, 1)));
 #endif  // defined(ARCH_CPU_64_BITS)
 }
-#endif  // !defined(OS_IOS)
+#endif  // !BUILDFLAG(IS_IOS)
 
 }  // namespace base

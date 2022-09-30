@@ -17,25 +17,41 @@ import {produce} from 'immer';
 import * as m from 'mithril';
 
 import {Actions} from '../common/actions';
+import {featureFlags} from '../common/feature_flags';
 import {MeminfoCounters, VmstatCounters} from '../common/protos';
 import {
   AdbRecordingTarget,
   getBuiltinChromeCategoryList,
   getDefaultRecordingTargets,
+  hasActiveProbes,
   isAdbTarget,
   isAndroidP,
   isAndroidTarget,
   isChromeTarget,
-  RecordingTarget
+  isCrOSTarget,
+  isLinuxTarget,
+  LoadedConfig,
+  MAX_TIME,
+  RecordingTarget,
+  RecordMode
 } from '../common/state';
-import {MAX_TIME, RecordMode} from '../common/state';
 import {AdbOverWebUsb} from '../controller/adb';
+import {
+  createEmptyRecordConfig,
+  RecordConfig
+} from '../controller/record_config_types';
 
 import {globals} from './globals';
-import {createPage} from './pages';
-import {recordConfigStore} from './record_config';
+import {createPage, PageAttrs} from './pages';
 import {
+  autosaveConfigStore,
+  recordConfigStore,
+  recordTargetStore
+} from './record_config';
+import {
+  CategoriesCheckboxList,
   CodeSnippet,
+  CompactProbe,
   Dropdown,
   DropdownAttrs,
   Probe,
@@ -43,53 +59,58 @@ import {
   Slider,
   SliderAttrs,
   Textarea,
-  TextareaAttrs
+  TextareaAttrs,
+  Toggle,
+  ToggleAttrs
 } from './record_widgets';
-import {Router} from './router';
 
-const LOCAL_STORAGE_SHOW_CONFIG = 'showConfigs';
+const PERSIST_CONFIG_FLAG = featureFlags.register({
+  id: 'persistConfigsUI',
+  name: 'Config persistence UI',
+  description: 'Show experimental config persistence UI on the record page.',
+  defaultValue: true,
+});
 
 const POLL_INTERVAL_MS = [250, 500, 1000, 2500, 5000, 30000, 60000];
 
 const ATRACE_CATEGORIES = new Map<string, string>();
+ATRACE_CATEGORIES.set('adb', 'ADB');
+ATRACE_CATEGORIES.set('aidl', 'AIDL calls');
+ATRACE_CATEGORIES.set('am', 'Activity Manager');
+ATRACE_CATEGORIES.set('audio', 'Audio');
+ATRACE_CATEGORIES.set('binder_driver', 'Binder Kernel driver');
+ATRACE_CATEGORIES.set('binder_lock', 'Binder global lock trace');
+ATRACE_CATEGORIES.set('bionic', 'Bionic C library');
+ATRACE_CATEGORIES.set('camera', 'Camera');
+ATRACE_CATEGORIES.set('dalvik', 'ART & Dalvik');
+ATRACE_CATEGORIES.set('database', 'Database');
 ATRACE_CATEGORIES.set('gfx', 'Graphics');
+ATRACE_CATEGORIES.set('hal', 'Hardware Modules');
 ATRACE_CATEGORIES.set('input', 'Input');
+ATRACE_CATEGORIES.set('network', 'Network');
+ATRACE_CATEGORIES.set('nnapi', 'Neural Network API');
+ATRACE_CATEGORIES.set('pm', 'Package Manager');
+ATRACE_CATEGORIES.set('power', 'Power Management');
+ATRACE_CATEGORIES.set('res', 'Resource Loading');
+ATRACE_CATEGORIES.set('rro', 'Resource Overlay');
+ATRACE_CATEGORIES.set('rs', 'RenderScript');
+ATRACE_CATEGORIES.set('sm', 'Sync Manager');
+ATRACE_CATEGORIES.set('ss', 'System Server');
+ATRACE_CATEGORIES.set('vibrator', 'Vibrator');
+ATRACE_CATEGORIES.set('video', 'Video');
 ATRACE_CATEGORIES.set('view', 'View System');
 ATRACE_CATEGORIES.set('webview', 'WebView');
 ATRACE_CATEGORIES.set('wm', 'Window Manager');
-ATRACE_CATEGORIES.set('am', 'Activity Manager');
-ATRACE_CATEGORIES.set('sm', 'Sync Manager');
-ATRACE_CATEGORIES.set('audio', 'Audio');
-ATRACE_CATEGORIES.set('video', 'Video');
-ATRACE_CATEGORIES.set('camera', 'Camera');
-ATRACE_CATEGORIES.set('hal', 'Hardware Modules');
-ATRACE_CATEGORIES.set('res', 'Resource Loading');
-ATRACE_CATEGORIES.set('dalvik', 'ART & Dalvik');
-ATRACE_CATEGORIES.set('rs', 'RenderScript');
-ATRACE_CATEGORIES.set('bionic', 'Bionic C library');
-ATRACE_CATEGORIES.set('gfx', 'Graphics');
-ATRACE_CATEGORIES.set('power', 'Power Management');
-ATRACE_CATEGORIES.set('pm', 'Package Manager');
-ATRACE_CATEGORIES.set('ss', 'System Server');
-ATRACE_CATEGORIES.set('database', 'Database');
-ATRACE_CATEGORIES.set('network', 'Network');
-ATRACE_CATEGORIES.set('adb', 'ADB');
-ATRACE_CATEGORIES.set('vibrator', 'Vibrator');
-ATRACE_CATEGORIES.set('aidl', 'AIDL calls');
-ATRACE_CATEGORIES.set('nnapi', 'Neural Network API');
-ATRACE_CATEGORIES.set('rro', 'Resource Overlay');
-ATRACE_CATEGORIES.set('binder_driver', 'Binder Kernel driver');
-ATRACE_CATEGORIES.set('binder_lock', 'Binder global lock trace');
 
 const LOG_BUFFERS = new Map<string, string>();
-LOG_BUFFERS.set('LID_DEFAULT', 'Main');
-LOG_BUFFERS.set('LID_RADIO', 'Radio');
-LOG_BUFFERS.set('LID_EVENTS', 'Binary events');
-LOG_BUFFERS.set('LID_SYSTEM', 'System');
 LOG_BUFFERS.set('LID_CRASH', 'Crash');
-LOG_BUFFERS.set('LID_STATS', 'Stats');
-LOG_BUFFERS.set('LID_SECURITY', 'Security');
+LOG_BUFFERS.set('LID_DEFAULT', 'Main');
+LOG_BUFFERS.set('LID_EVENTS', 'Binary events');
 LOG_BUFFERS.set('LID_KERNEL', 'Kernel');
+LOG_BUFFERS.set('LID_RADIO', 'Radio');
+LOG_BUFFERS.set('LID_SECURITY', 'Security');
+LOG_BUFFERS.set('LID_STATS', 'Stats');
+LOG_BUFFERS.set('LID_SYSTEM', 'System');
 
 const FTRACE_CATEGORIES = new Map<string, string>();
 FTRACE_CATEGORIES.set('binder/*', 'binder');
@@ -110,6 +131,7 @@ FTRACE_CATEGORIES.set('sync/*', 'sync');
 FTRACE_CATEGORIES.set('task/*', 'task');
 FTRACE_CATEGORIES.set('task/*', 'task');
 FTRACE_CATEGORIES.set('vmscan/*', 'vmscan');
+FTRACE_CATEGORIES.set('fastrpc/*', 'fastrpc');
 
 function RecSettings(cssClass: string) {
   const S = (x: number) => x * 1000;
@@ -133,7 +155,7 @@ function RecSettings(cssClass: string) {
     return m(
         `label${cfg.mode === mode ? '.selected' : ''}`,
         m(`input[type=radio][name=rec_mode]`, checkboxArgs),
-        m(`img[src=assets/${img}]`),
+        m(`img[src=${globals.root}assets/${img}]`),
         m('span', title));
   };
 
@@ -184,14 +206,32 @@ function RecSettings(cssClass: string) {
 }
 
 function PowerSettings(cssClass: string) {
+  const DOC_URL = 'https://perfetto.dev/docs/data-sources/battery-counters';
+  const descr =
+      [m('div',
+         m('span', `Polls charge counters and instantaneous power draw from
+                    the battery power management IC and the power rails from
+                    the PowerStats HAL (`),
+         m('a', {href: DOC_URL, target: '_blank'}, 'see docs for more'),
+         m('span', ')'))];
+  if (globals.isInternalUser) {
+    descr.push(m(
+        'div',
+        m('span', 'Googlers: See '),
+        m('a',
+          {href: 'http://go/power-rails-internal-doc', target: '_blank'},
+          'this doc'),
+        m('span', ` for instructions on how to change the refault rail selection
+                  on internal devices.`),
+        ));
+  }
   return m(
       `.record-section${cssClass}`,
       m(Probe,
         {
-          title: 'Battery drain',
+          title: 'Battery drain & power rails',
           img: 'rec_battery_counters.png',
-          descr: `Polls charge counters and instantaneous power draw from
-                    the battery power management IC.`,
+          descr,
           setEnabled: (cfg, val) => cfg.batteryDrain = val,
           isEnabled: (cfg) => cfg.batteryDrain
         } as ProbeAttrs,
@@ -268,8 +308,9 @@ function CpuSettings(cssClass: string) {
       } as ProbeAttrs),
       m(Probe, {
         title: 'Syscalls',
-        img: null,
-        descr: `Tracks the enter and exit of all syscalls.`,
+        img: 'rec_syscalls.png',
+        descr: `Tracks the enter and exit of all syscalls. On Android
+                requires a userdebug or eng build.`,
         setEnabled: (cfg, val) => cfg.cpuSyscall = val,
         isEnabled: (cfg) => cfg.cpuSyscall
       } as ProbeAttrs));
@@ -368,8 +409,23 @@ function HeapSettings(cssClass: string) {
         min: 0,
         set: (cfg, val) => cfg.hpSharedMemoryBuffer = val,
         get: (cfg) => cfg.hpSharedMemoryBuffer
-      } as SliderAttrs)
-      // TODO(taylori): Add advanced options.
+      } as SliderAttrs),
+      m(Toggle, {
+        title: 'Block client',
+        cssClass: '.thin',
+        descr: `Slow down target application if profiler cannot keep up.`,
+        setEnabled: (cfg, val) => cfg.hpBlockClient = val,
+        isEnabled: (cfg) => cfg.hpBlockClient
+      } as ToggleAttrs),
+      m(Toggle, {
+        title: 'All custom allocators (Q+)',
+        cssClass: '.thin',
+        descr: `If the target application exposes custom allocators, also
+sample from those.`,
+        setEnabled: (cfg, val) => cfg.hpAllHeaps = val,
+        isEnabled: (cfg) => cfg.hpAllHeaps
+      } as ToggleAttrs)
+      // TODO(hjd): Add advanced options.
   );
 }
 
@@ -548,6 +604,21 @@ function MemorySettings(cssClass: string) {
         } as DropdownAttrs)));
 }
 
+function AtraceAppsList() {
+  if (globals.state.recordConfig.allAtraceApps) {
+    return m('div');
+  }
+
+  return m(Textarea, {
+    placeholder: 'Apps to profile, one per line, e.g.:\n' +
+        'com.android.phone\n' +
+        'lmkd\n' +
+        'com.android.nfc',
+    cssClass: '.atrace-apps-list',
+    set: (cfg, val) => cfg.atraceApps = val,
+    get: (cfg) => cfg.atraceApps,
+  } as TextareaAttrs);
+}
 
 function AndroidSettings(cssClass: string) {
   return m(
@@ -568,13 +639,13 @@ function AndroidSettings(cssClass: string) {
           set: (cfg, val) => cfg.atraceCats = val,
           get: (cfg) => cfg.atraceCats
         } as DropdownAttrs),
-        m(Textarea, {
-          placeholder: 'Extra apps to profile, one per line, e.g.:\n' +
-              'com.android.phone\n' +
-              'com.android.nfc',
-          set: (cfg, val) => cfg.atraceApps = val,
-          get: (cfg) => cfg.atraceApps
-        } as TextareaAttrs)),
+        m(Toggle, {
+          title: 'Record events from all Android apps and services',
+          descr: '',
+          setEnabled: (cfg, val) => cfg.allAtraceApps = val,
+          isEnabled: (cfg) => cfg.allAtraceApps,
+        } as ToggleAttrs),
+        AtraceAppsList()),
       m(Probe,
         {
           title: 'Event log (logcat)',
@@ -590,74 +661,61 @@ function AndroidSettings(cssClass: string) {
           options: LOG_BUFFERS,
           set: (cfg, val) => cfg.androidLogBuffers = val,
           get: (cfg) => cfg.androidLogBuffers
-        } as DropdownAttrs)));
+        } as DropdownAttrs)),
+      m(Probe, {
+        title: 'Frame timeline',
+        img: 'rec_frame_timeline.png',
+        descr: `Records expected/actual frame timings from surface_flinger.
+                    Requires Android 12 (S) or above.`,
+        setEnabled: (cfg, val) => cfg.androidFrameTimeline = val,
+        isEnabled: (cfg) => cfg.androidFrameTimeline
+      } as ProbeAttrs));
 }
 
 
 function ChromeSettings(cssClass: string) {
   return m(
       `.record-section${cssClass}`,
-      m(Probe, {
+      CompactProbe({
         title: 'Task scheduling',
-        img: null,
-        descr: `Records events about task scheduling and execution on all
-                  threads`,
         setEnabled: (cfg, val) => cfg.taskScheduling = val,
-        isEnabled: (cfg) => cfg.taskScheduling
-      } as ProbeAttrs),
-      m(Probe, {
+        isEnabled: (cfg) => cfg.taskScheduling,
+      }),
+      CompactProbe({
         title: 'IPC flows',
-        img: null,
-        descr: `Records flow events for passing of IPC messages between
-                processes.`,
         setEnabled: (cfg, val) => cfg.ipcFlows = val,
         isEnabled: (cfg) => cfg.ipcFlows
-      } as ProbeAttrs),
-      m(Probe, {
+      }),
+      CompactProbe({
         title: 'Javascript execution',
-        img: null,
-        descr: `Records events about Javascript execution in the renderer
-                    processes.`,
         setEnabled: (cfg, val) => cfg.jsExecution = val,
         isEnabled: (cfg) => cfg.jsExecution
-      } as ProbeAttrs),
-      m(Probe, {
-        title: 'Web content rendering',
-        img: null,
-        descr: `Records events about rendering, layout, and compositing of
-        web content in Blink.`,
+      }),
+      CompactProbe({
+        title: 'Web content rendering, layout and compositing',
         setEnabled: (cfg, val) => cfg.webContentRendering = val,
         isEnabled: (cfg) => cfg.webContentRendering
-      } as ProbeAttrs),
-      m(Probe, {
-        title: 'UI rendering & compositing',
-        img: null,
-        descr: `Records events about rendering of browser UI surfaces and
-        compositing of surfaces.`,
+      }),
+      CompactProbe({
+        title: 'UI rendering & surface compositing',
         setEnabled: (cfg, val) => cfg.uiRendering = val,
         isEnabled: (cfg) => cfg.uiRendering
-      } as ProbeAttrs),
-      m(Probe, {
+      }),
+      CompactProbe({
         title: 'Input events',
-        img: null,
-        descr: `Records input events and their flow between processes.`,
         setEnabled: (cfg, val) => cfg.inputEvents = val,
         isEnabled: (cfg) => cfg.inputEvents
-      } as ProbeAttrs),
-      m(Probe, {
+      }),
+      CompactProbe({
         title: 'Navigation & Loading',
-        img: null,
-        descr: `Records network events for navigations and resources.`,
         setEnabled: (cfg, val) => cfg.navigationAndLoading = val,
         isEnabled: (cfg) => cfg.navigationAndLoading
-      } as ProbeAttrs),
-      m(Probe, {
+      }),
+      CompactProbe({
         title: 'Chrome Logs',
-        img: null,
-        descr: `Records Chrome log messages`,
         setEnabled: (cfg, val) => cfg.chromeLogs = val,
         isEnabled: (cfg) => cfg.chromeLogs
-      } as ProbeAttrs),
+      }),
       ChromeCategoriesSelection());
 }
 
@@ -670,34 +728,34 @@ function ChromeCategoriesSelection() {
     categories = getBuiltinChromeCategoryList();
   }
 
-  // Show "disabled-by-default" categories last.
-  const categoriesMap = new Map<string, string>();
-  const disabledByDefaultCategories: string[] = [];
+  const defaultCategories = new Map<string, string>();
+  const disabledByDefaultCategories = new Map<string, string>();
   const disabledPrefix = 'disabled-by-default-';
   categories.forEach(cat => {
     if (cat.startsWith(disabledPrefix)) {
-      disabledByDefaultCategories.push(cat);
+      disabledByDefaultCategories.set(cat, cat.replace(disabledPrefix, ''));
     } else {
-      categoriesMap.set(cat, cat);
+      defaultCategories.set(cat, cat);
     }
   });
-  disabledByDefaultCategories.forEach(cat => {
-    categoriesMap.set(
-        cat, `${cat.replace(disabledPrefix, '')} (high overhead)`);
-  });
 
-  return m(Dropdown, {
-    title: 'Additional Chrome categories',
-    cssClass: '.multicolumn.two-columns',
-    options: categoriesMap,
-    set: (cfg, val) => cfg.chromeCategoriesSelected = val,
-    get: (cfg) => cfg.chromeCategoriesSelected
-  } as DropdownAttrs);
+  return m(
+      '.chrome-categories',
+      m(CategoriesCheckboxList, {
+        categories: defaultCategories,
+        title: 'Additional categories',
+        get: (cfg) => cfg.chromeCategoriesSelected,
+        set: (cfg, val) => cfg.chromeCategoriesSelected = val,
+      }),
+      m(CategoriesCheckboxList, {
+        categories: disabledByDefaultCategories,
+        title: 'High overhead categories',
+        get: (cfg) => cfg.chromeHighOverheadCategoriesSelected,
+        set: (cfg, val) => cfg.chromeHighOverheadCategoriesSelected = val,
+      }));
 }
 
 function AdvancedSettings(cssClass: string) {
-  const S = (x: number) => x * 1000;
-  const M = (x: number) => x * 1000 * 60;
   return m(
       `.record-section${cssClass}`,
       m(Probe,
@@ -710,6 +768,14 @@ function AdvancedSettings(cssClass: string) {
           setEnabled: (cfg, val) => cfg.ftrace = val,
           isEnabled: (cfg) => cfg.ftrace
         } as ProbeAttrs,
+        m(Toggle, {
+          title: 'Resolve kernel symbols',
+          cssClass: '.thin',
+          descr: `Enables lookup via /proc/kallsyms for workqueue,
+              sched_blocked_reason and other events (userdebug/eng builds only).`,
+          setEnabled: (cfg, val) => cfg.symbolizeKsyms = val,
+          isEnabled: (cfg) => cfg.symbolizeKsyms
+        } as ToggleAttrs),
         m(Slider, {
           title: 'Buf size',
           cssClass: '.thin',
@@ -739,27 +805,7 @@ function AdvancedSettings(cssClass: string) {
               'kmem/*',
           set: (cfg, val) => cfg.ftraceExtraEvents = val,
           get: (cfg) => cfg.ftraceExtraEvents
-        } as TextareaAttrs)),
-      globals.state.videoEnabled ?
-          m(Probe,
-            {
-              title: 'Screen recording',
-              img: null,
-              descr: `Records the screen along with running a trace. Max
-                  time of recording is 3 minutes (180 seconds).`,
-              setEnabled: (cfg, val) => cfg.screenRecord = val,
-              isEnabled: (cfg) => cfg.screenRecord,
-            } as ProbeAttrs,
-            m(Slider, {
-              title: 'Max duration',
-              icon: 'timer',
-              values: [S(10), S(15), S(30), S(60), M(2), M(3)],
-              isTime: true,
-              unit: 'm:s',
-              set: (cfg, val) => cfg.durationMs = val,
-              get: (cfg) => cfg.durationMs,
-            } as SliderAttrs)) :
-          null);
+        } as TextareaAttrs)));
 }
 
 function RecordHeader() {
@@ -831,18 +877,19 @@ function onTargetChange(target: string) {
       getDefaultRecordingTargets()[0];
 
   if (isChromeTarget(recordingTarget)) {
-    globals.dispatch(Actions.setUpdateChromeCategories({update: true}));
+    globals.dispatch(Actions.setFetchChromeCategories({fetch: true}));
   }
 
   globals.dispatch(Actions.setRecordingTarget({target: recordingTarget}));
+  recordTargetStore.save(target);
   globals.rafScheduler.scheduleFullRedraw();
 }
 
 function Instructions(cssClass: string) {
   return m(
       `.record-section.instructions${cssClass}`,
-      m('header', 'Instructions'),
-      localStorage.hasOwnProperty(LOCAL_STORAGE_SHOW_CONFIG) ?
+      m('header', 'Recording command'),
+      PERSIST_CONFIG_FLAG.get() ?
           m('button.permalinkconfig',
             {
               onclick: () => {
@@ -858,37 +905,88 @@ function Instructions(cssClass: string) {
       recordingLog());
 }
 
+function loadedConfigEqual(cfg1: LoadedConfig, cfg2: LoadedConfig): boolean {
+  return cfg1.type === 'NAMED' && cfg2.type === 'NAMED' ?
+      cfg1.name === cfg2.name :
+      cfg1.type === cfg2.type;
+}
+
+function loadConfigButton(
+    config: RecordConfig, configType: LoadedConfig): m.Vnode {
+  return m(
+      'button',
+      {
+        class: 'config-button',
+        title: 'Apply configuration settings',
+        disabled: loadedConfigEqual(configType, globals.state.lastLoadedConfig),
+        onclick: () => {
+          globals.dispatch(Actions.setRecordConfig({config, configType}));
+          globals.rafScheduler.scheduleFullRedraw();
+        }
+      },
+      m('i.material-icons', 'file_upload'));
+}
+
 function displayRecordConfigs() {
-  return recordConfigStore.recordConfigs.map((item) => {
-    return m('.config', [
+  const configs = [];
+  if (autosaveConfigStore.hasSavedConfig) {
+    configs.push(m('.config', [
+      m('span.title-config', m('strong', 'Latest started recording')),
+      loadConfigButton(autosaveConfigStore.get(), {type: 'AUTOMATIC'}),
+    ]));
+  }
+  for (const validated of recordConfigStore.recordConfigs) {
+    const item = validated.result;
+    configs.push(m('.config', [
       m('span.title-config', item.title),
+      loadConfigButton(item.config, {type: 'NAMED', name: item.title}),
       m('button',
         {
-          class: 'config-button load',
+          class: 'config-button',
+          title: 'Overwrite configuration with current settings',
           onclick: () => {
-            globals.dispatch(Actions.setRecordConfig({config: item.config}));
-            globals.rafScheduler.scheduleFullRedraw();
+            if (confirm(`Overwrite config "${
+                    item.title}" with current settings?`)) {
+              recordConfigStore.overwrite(globals.state.recordConfig, item.key);
+              globals.dispatch(Actions.setRecordConfig({
+                config: item.config,
+                configType: {type: 'NAMED', name: item.title}
+              }));
+              globals.rafScheduler.scheduleFullRedraw();
+            }
           }
         },
-        'load'),
+        m('i.material-icons', 'save')),
       m('button',
         {
-          class: 'config-button delete',
+          class: 'config-button',
+          title: 'Remove configuration',
           onclick: () => {
             recordConfigStore.delete(item.key);
             globals.rafScheduler.scheduleFullRedraw();
           }
         },
-        'delete'),
-    ]);
-  });
-}
+        m('i.material-icons', 'delete')),
+    ]));
 
-function getSavedConfigList() {
-  if (recordConfigStore.recordConfigs.length === 0) {
-    return [];
+    const errorItems = [];
+    for (const extraKey of validated.extraKeys) {
+      errorItems.push(m('li', `${extraKey} is unrecognised`));
+    }
+    for (const invalidKey of validated.invalidKeys) {
+      errorItems.push(m('li', `${invalidKey} contained an invalid value`));
+    }
+
+    if (errorItems.length > 0) {
+      configs.push(
+          m('.parsing-errors',
+            'One or more errors have been found while loading configuration "' +
+                item.title + '". Loading is possible, but make sure to check ' +
+                'the settings afterwards.',
+            m('ul', errorItems)));
+    }
   }
-  return displayRecordConfigs();
+  return configs;
 }
 
 export const ConfigTitleState = {
@@ -905,6 +1003,7 @@ export const ConfigTitleState = {
 };
 
 function Configurations(cssClass: string) {
+  const canSave = recordConfigStore.canSave(ConfigTitleState.getTitle());
   return m(
       `.record-section${cssClass}`,
       m('header', 'Save and load configurations'),
@@ -915,11 +1014,15 @@ function Configurations(cssClass: string) {
             placeholder: 'Title for config',
             oninput() {
               ConfigTitleState.setTitle(this.value);
+              globals.rafScheduler.scheduleFullRedraw();
             }
           }),
           m('button',
             {
-              class: 'config-button save',
+              class: 'config-button',
+              disabled: !canSave,
+              title: canSave ? 'Save current config' :
+                               'Duplicate name, saving disabled',
               onclick: () => {
                 recordConfigStore.save(
                     globals.state.recordConfig, ConfigTitleState.getTitle());
@@ -927,9 +1030,26 @@ function Configurations(cssClass: string) {
                 ConfigTitleState.clearTitle();
               }
             },
-            'Save current config')
+            m('i.material-icons', 'save')),
+          m('button',
+            {
+              class: 'config-button',
+              title: 'Clear current configuration',
+              onclick: () => {
+                if (confirm(
+                        'Current configuration will be cleared. ' +
+                        'Are you sure?')) {
+                  globals.dispatch(Actions.setRecordConfig({
+                    config: createEmptyRecordConfig(),
+                    configType: {type: 'NONE'}
+                  }));
+                  globals.rafScheduler.scheduleFullRedraw();
+                }
+              }
+            },
+            m('i.material-icons', 'delete_forever'))
         ]),
-      getSavedConfigList());
+      displayRecordConfigs());
 }
 
 function BufferUsageProgressBar() {
@@ -946,44 +1066,68 @@ function BufferUsageProgressBar() {
 }
 
 function RecordingNotes() {
-  const docUrl = '//docs.perfetto.dev/#/build-instructions?id=get-the-code';
+  const sideloadUrl =
+      'https://perfetto.dev/docs/contributing/build-instructions#get-the-code';
+  const linuxUrl = 'https://perfetto.dev/docs/quickstart/linux-tracing';
+  const cmdlineUrl =
+      'https://perfetto.dev/docs/quickstart/android-tracing#perfetto-cmdline';
   const extensionURL = `https://chrome.google.com/webstore/detail/
       perfetto-ui/lfmkphfpdbjijhpomgecfikhfohaoine`;
 
   const notes: m.Children = [];
-  const doc =
-      m('span', 'Follow the ', m('a', {href: docUrl}, 'instructions here.'));
 
   const msgFeatNotSupported =
-      m('div', `Some of the probes are only supported in the
-      last version of perfetto running on Android Q+`);
+      m('span', `Some probes are only supported in Perfetto versions running
+      on Android Q+. `);
 
   const msgPerfettoNotSupported =
-      m('div', `Perfetto is not supported natively before Android P.`);
-
-  const msgRecordingNotSupported =
-      m('div', `Recording Perfetto traces from the UI is not supported natively
-     before Android Q. If you are using a P device, please select 'Android P'
-     as the 'Target Platform' and collect the trace using ADB`);
+      m('span', `Perfetto is not supported natively before Android P. `);
 
   const msgSideload =
-      m('div',
-        `If you have a rooted device you can sideload the latest version of
-         perfetto. `,
-        doc);
+      m('span',
+        `If you have a rooted device you can `,
+        m('a',
+          {href: sideloadUrl, target: '_blank'},
+          `sideload the latest version of
+         Perfetto.`));
+
+  const msgRecordingNotSupported =
+      m('.note',
+        `Recording Perfetto traces from the UI is not supported natively
+     before Android Q. If you are using a P device, please select 'Android P'
+     as the 'Target Platform' and `,
+        m('a',
+          {href: cmdlineUrl, target: '_blank'},
+          `collect the trace using ADB.`));
 
   const msgChrome =
-      m('div',
+      m('.note',
         `To trace Chrome from the Perfetto UI, you need to install our `,
-        m('a', {href: extensionURL}, 'Chrome extension'),
+        m('a', {href: extensionURL, target: '_blank'}, 'Chrome extension'),
         ' and then reload this page.');
 
   const msgLinux =
-      m('div',
-        `In order to use perfetto on Linux you need to
-      compile it and run the following command from the build
-      output directory. `,
-        doc);
+      m('.note',
+        `Use this `,
+        m('a', {href: linuxUrl, target: '_blank'}, `quickstart guide`),
+        ` to get started with tracing on Linux.`);
+
+  const msgLongTraces = m(
+      '.note',
+      `Recording in long trace mode through the UI is not supported. Please copy
+    the command and `,
+      m('a',
+        {href: cmdlineUrl, target: '_blank'},
+        `collect the trace using ADB.`));
+
+  const msgZeroProbes =
+      m('.note',
+        'It looks like you didn\'t add any probes. ' +
+            'Please add at least one to get a non-empty trace.');
+
+  if (!hasActiveProbes(globals.state.recordConfig)) {
+    notes.push(msgZeroProbes);
+  }
 
   if (isAdbTarget(globals.state.recordingTarget)) {
     notes.push(msgRecordingNotSupported);
@@ -992,12 +1136,10 @@ function RecordingNotes() {
     case 'Q':
       break;
     case 'P':
-      notes.push(msgFeatNotSupported);
-      notes.push(msgSideload);
+      notes.push(m('.note', msgFeatNotSupported, msgSideload));
       break;
     case 'O':
-      notes.push(msgPerfettoNotSupported);
-      notes.push(msgSideload);
+      notes.push(m('.note', msgPerfettoNotSupported, msgSideload));
       break;
     case 'L':
       notes.push(msgLinux);
@@ -1005,10 +1147,16 @@ function RecordingNotes() {
     case 'C':
       if (!globals.state.extensionInstalled) notes.push(msgChrome);
       break;
+    case 'CrOS':
+      if (!globals.state.extensionInstalled) notes.push(msgChrome);
+      break;
     default:
   }
+  if (globals.state.recordConfig.mode === 'LONG_TRACE') {
+    notes.unshift(msgLongTraces);
+  }
 
-  return notes.length > 0 ? m('.note', notes) : [];
+  return notes.length > 0 ? m('div', notes) : [];
 }
 
 function RecordingSnippet() {
@@ -1041,12 +1189,6 @@ function getRecordCommand(target: RecordingTarget) {
   const pbBase64 = data ? data.pbBase64 : '';
   const pbtx = data ? data.pbtxt : '';
   let cmd = '';
-  if (cfg.screenRecord) {
-    // Half-second delay to ensure Perfetto starts tracing before screenrecord
-    // starts recording
-    cmd += `(sleep 0.5 && adb shell screenrecord --time-limit ${time}`;
-    cmd += ' "/sdcard/tracescr.mp4") &\\\n';
-  }
   if (isAndroidP(target)) {
     cmd += `echo '${pbBase64}' | \n`;
     cmd += 'base64 --decode | \n';
@@ -1079,7 +1221,8 @@ function recordingButtons() {
   const buttons: m.Children = [];
 
   if (isAndroidTarget(target)) {
-    if (!recInProgress && isAdbTarget(target)) {
+    if (!recInProgress && isAdbTarget(target) &&
+        globals.state.recordConfig.mode !== 'LONG_TRACE') {
       buttons.push(start);
     }
   } else if (isChromeTarget(target) && state.extensionInstalled) {
@@ -1105,8 +1248,9 @@ function StopCancelButtons() {
 }
 
 function onStartRecordingPressed() {
-  location.href = '#!/record?p=instructions';
+  location.href = '#!/record/instructions';
   globals.rafScheduler.scheduleFullRedraw();
+  autosaveConfigStore.save(globals.state.recordConfig);
 
   const target = globals.state.recordingTarget;
   if (isAndroidTarget(target) || isChromeTarget(target)) {
@@ -1222,12 +1366,64 @@ function selectAndroidDeviceIfAvailable(
 function recordMenu(routePage: string) {
   const target = globals.state.recordingTarget;
   const chromeProbe =
-      m('a[href="#!/record?p=chrome"]',
+      m('a[href="#!/record/chrome"]',
         m(`li${routePage === 'chrome' ? '.active' : ''}`,
           m('i.material-icons', 'laptop_chromebook'),
           m('.title', 'Chrome'),
           m('.sub', 'Chrome traces')));
+  const cpuProbe =
+      m('a[href="#!/record/cpu"]',
+        m(`li${routePage === 'cpu' ? '.active' : ''}`,
+          m('i.material-icons', 'subtitles'),
+          m('.title', 'CPU'),
+          m('.sub', 'CPU usage, scheduling, wakeups')));
+  const gpuProbe =
+      m('a[href="#!/record/gpu"]',
+        m(`li${routePage === 'gpu' ? '.active' : ''}`,
+          m('i.material-icons', 'aspect_ratio'),
+          m('.title', 'GPU'),
+          m('.sub', 'GPU frequency, memory')));
+  const powerProbe =
+      m('a[href="#!/record/power"]',
+        m(`li${routePage === 'power' ? '.active' : ''}`,
+          m('i.material-icons', 'battery_charging_full'),
+          m('.title', 'Power'),
+          m('.sub', 'Battery and other energy counters')));
+  const memoryProbe =
+      m('a[href="#!/record/memory"]',
+        m(`li${routePage === 'memory' ? '.active' : ''}`,
+          m('i.material-icons', 'memory'),
+          m('.title', 'Memory'),
+          m('.sub', 'Physical mem, VM, LMK')));
+  const androidProbe =
+      m('a[href="#!/record/android"]',
+        m(`li${routePage === 'android' ? '.active' : ''}`,
+          m('i.material-icons', 'android'),
+          m('.title', 'Android apps & svcs'),
+          m('.sub', 'atrace and logcat')));
+  const advancedProbe =
+      m('a[href="#!/record/advanced"]',
+        m(`li${routePage === 'advanced' ? '.active' : ''}`,
+          m('i.material-icons', 'settings'),
+          m('.title', 'Advanced settings'),
+          m('.sub', 'Complicated stuff for wizards')));
   const recInProgress = globals.state.recordingInProgress;
+
+  const probes = [];
+  if (isCrOSTarget(target) || isLinuxTarget(target)) {
+    probes.push(cpuProbe, powerProbe, memoryProbe, chromeProbe, advancedProbe);
+  } else if (isChromeTarget(target)) {
+    probes.push(chromeProbe);
+  } else {
+    probes.push(
+        cpuProbe,
+        gpuProbe,
+        powerProbe,
+        memoryProbe,
+        androidProbe,
+        chromeProbe,
+        advancedProbe);
+  }
 
   return m(
       '.record-menu',
@@ -1237,67 +1433,35 @@ function recordMenu(routePage: string) {
       },
       m('header', 'Trace config'),
       m('ul',
-        m('a[href="#!/record?p=buffers"]',
+        m('a[href="#!/record/buffers"]',
           m(`li${routePage === 'buffers' ? '.active' : ''}`,
             m('i.material-icons', 'tune'),
             m('.title', 'Recording settings'),
             m('.sub', 'Buffer mode, size and duration'))),
-        m('a[href="#!/record?p=instructions"]',
+        m('a[href="#!/record/instructions"]',
           m(`li${routePage === 'instructions' ? '.active' : ''}`,
             m('i.material-icons.rec', 'fiber_manual_record'),
-            m('.title', 'Instructions'),
-            m('.sub', 'Generate config and instructions'))),
-        localStorage.hasOwnProperty(LOCAL_STORAGE_SHOW_CONFIG) ?
-            m('a[href="#!/record?p=config"]',
+            m('.title', 'Recording command'),
+            m('.sub', 'Manually record trace'))),
+        PERSIST_CONFIG_FLAG.get() ?
+            m('a[href="#!/record/config"]',
               {
                 onclick: () => {
                   recordConfigStore.reloadFromLocalStorage();
                 }
               },
               m(`li${routePage === 'config' ? '.active' : ''}`,
-                m('i.material-icons', 'tune'),
+                m('i.material-icons', 'save'),
                 m('.title', 'Saved configs'),
                 m('.sub', 'Manage local configs'))) :
             null),
       m('header', 'Probes'),
-      m('ul', isChromeTarget(target) ? [chromeProbe] : [
-        m('a[href="#!/record?p=cpu"]',
-          m(`li${routePage === 'cpu' ? '.active' : ''}`,
-            m('i.material-icons', 'subtitles'),
-            m('.title', 'CPU'),
-            m('.sub', 'CPU usage, scheduling, wakeups'))),
-        m('a[href="#!/record?p=gpu"]',
-          m(`li${routePage === 'gpu' ? '.active' : ''}`,
-            m('i.material-icons', 'aspect_ratio'),
-            m('.title', 'GPU'),
-            m('.sub', 'GPU frequency, memory'))),
-        m('a[href="#!/record?p=power"]',
-          m(`li${routePage === 'power' ? '.active' : ''}`,
-            m('i.material-icons', 'battery_charging_full'),
-            m('.title', 'Power'),
-            m('.sub', 'Battery and other energy counters'))),
-        m('a[href="#!/record?p=memory"]',
-          m(`li${routePage === 'memory' ? '.active' : ''}`,
-            m('i.material-icons', 'memory'),
-            m('.title', 'Memory'),
-            m('.sub', 'Physical mem, VM, LMK'))),
-        m('a[href="#!/record?p=android"]',
-          m(`li${routePage === 'android' ? '.active' : ''}`,
-            m('i.material-icons', 'android'),
-            m('.title', 'Android apps & svcs'),
-            m('.sub', 'atrace and logcat'))),
-        chromeProbe,
-        m('a[href="#!/record?p=advanced"]',
-          m(`li${routePage === 'advanced' ? '.active' : ''}`,
-            m('i.material-icons', 'settings'),
-            m('.title', 'Advanced settings'),
-            m('.sub', 'Complicated stuff for wizards')))
-      ]));
+      m('ul', probes));
 }
 
 
 export const RecordPage = createPage({
-  view() {
+  view({attrs}: m.Vnode<PageAttrs>) {
     const SECTIONS: {[property: string]: (cssClass: string) => m.Child} = {
       buffers: RecSettings,
       instructions: Instructions,
@@ -1312,8 +1476,8 @@ export const RecordPage = createPage({
     };
 
     const pages: m.Children = [];
-    const routePageParam = Router.param('p');
-    let routePage = typeof routePageParam === 'string' ? routePageParam : '';
+    // we need to remove the `/` character from the route
+    let routePage = attrs.subpage ? attrs.subpage.substr(1) : '';
     if (!Object.keys(SECTIONS).includes(routePage)) {
       routePage = 'buffers';
     }

@@ -65,8 +65,8 @@ To extend a metric with annotations:
   * For example, for the [`android_startup`]() metric, we create a view named `android_startup_event`.
   * Note that the trailing `_event` suffix in the table name is important.
   * The schema required for this table is given below.
-
-2. Upload and land your change as normal.
+2. List your metric in the `initialiseHelperViews` method of `trace_controller.ts`.
+3. Upload and land your change as normal.
 
 The schema of the `<metric name>_event` table/view is as follows:
 
@@ -78,6 +78,7 @@ The schema of the `<metric name>_event` table/view is as follows:
 | `dur`        | `int64`  | Mandatory for slice, NULL for counter | The duration of the slice                                    |
 | `slice_name` | `string` | Mandatory for slice, NULL for counter | The name of the slice                                        |
 | `value`      | `double` | Mandatory for counter, NULL for slice | The value of the counter                                     |
+| `group_name` | `string` | Optional                              | Name of the track group under which the track appears. All tracks with the same `group_name` are placed under the same group by that name. Tracks that lack this field or have NULL value in this field are displayed without any grouping. |
 
 #### Known issues:
 

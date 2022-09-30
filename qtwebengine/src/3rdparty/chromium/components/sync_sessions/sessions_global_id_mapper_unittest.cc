@@ -5,6 +5,7 @@
 #include "components/sync_sessions/sessions_global_id_mapper.h"
 
 #include "base/test/mock_callback.h"
+#include "base/time/time.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -70,7 +71,7 @@ TEST(SessionsGlobalIdMapperTest, AddObserver) {
   mapper.TrackNavigationId(kTime1, /*unique_id=*/1);
 
   base::MockCallback<syncer::GlobalIdChange> mock_callback;
-  EXPECT_CALL(mock_callback, Run(_, _)).Times(0);
+  EXPECT_CALL(mock_callback, Run).Times(0);
 
   mapper.AddGlobalIdChangeObserver(mock_callback.Get());
 

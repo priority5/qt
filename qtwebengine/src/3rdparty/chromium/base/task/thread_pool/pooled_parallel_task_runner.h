@@ -9,9 +9,10 @@
 #include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/task/common/checked_lock.h"
+#include "base/task/task_runner.h"
 #include "base/task/task_traits.h"
-#include "base/task_runner.h"
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
 
@@ -28,6 +29,8 @@ class BASE_EXPORT PooledParallelTaskRunner : public TaskRunner {
   PooledParallelTaskRunner(
       const TaskTraits& traits,
       PooledTaskRunnerDelegate* pooled_task_runner_delegate);
+  PooledParallelTaskRunner(const PooledParallelTaskRunner&) = delete;
+  PooledParallelTaskRunner& operator=(const PooledParallelTaskRunner&) = delete;
 
   // TaskRunner:
   bool PostDelayedTask(const Location& from_here,
@@ -41,7 +44,7 @@ class BASE_EXPORT PooledParallelTaskRunner : public TaskRunner {
   ~PooledParallelTaskRunner() override;
 
   const TaskTraits traits_;
-  PooledTaskRunnerDelegate* const pooled_task_runner_delegate_;
+  const raw_ptr<PooledTaskRunnerDelegate> pooled_task_runner_delegate_;
 
   CheckedLock lock_;
 
@@ -49,8 +52,6 @@ class BASE_EXPORT PooledParallelTaskRunner : public TaskRunner {
   // Sequences are added when they are instantiated, and removed when they are
   // destroyed.
   base::flat_set<Sequence*> sequences_ GUARDED_BY(lock_);
-
-  DISALLOW_COPY_AND_ASSIGN(PooledParallelTaskRunner);
 };
 
 }  // namespace internal

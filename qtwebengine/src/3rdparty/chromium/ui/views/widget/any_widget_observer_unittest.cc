@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/test/native_widget_factory.h"
@@ -106,6 +106,14 @@ TEST_F(NamedWidgetShownWaiterTest, ShownBeforeWait) {
                                        "TestWidget");
   WidgetAutoclosePtr w0(CreateNamedWidget("TestWidget"));
   w0->Show();
+  EXPECT_EQ(waiter.WaitIfNeededAndGet(), w0.get());
+}
+
+TEST_F(NamedWidgetShownWaiterTest, ShownInactive) {
+  views::NamedWidgetShownWaiter waiter(views::test::AnyWidgetTestPasskey{},
+                                       "TestWidget");
+  WidgetAutoclosePtr w0(CreateNamedWidget("TestWidget"));
+  w0->ShowInactive();
   EXPECT_EQ(waiter.WaitIfNeededAndGet(), w0.get());
 }
 

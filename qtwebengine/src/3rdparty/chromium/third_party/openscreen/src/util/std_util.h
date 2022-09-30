@@ -5,6 +5,8 @@
 #ifndef UTIL_STD_UTIL_H_
 #define UTIL_STD_UTIL_H_
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <map>
 #include <string>
@@ -12,6 +14,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "util/stringprintf.h"
 
 namespace openscreen {
 
@@ -31,6 +34,9 @@ template <typename CharT, typename Traits, typename Allocator>
 CharT* data(std::basic_string<CharT, Traits, Allocator>& str) {
   return std::addressof(str[0]);
 }
+
+std::string Join(const std::vector<std::string>& strings,
+                 const char* delimiter);
 
 template <typename Key, typename Value>
 void RemoveValueFromMap(std::map<Key, Value*>* map, Value* value) {
@@ -81,6 +87,24 @@ std::vector<T> GetVectorWithCapacity(size_t size) {
   std::vector<T> results;
   results.reserve(size);
   return results;
+}
+
+// Returns true if an element equal to |element| is found in |container|.
+// C.begin() must return an iterator to the beginning of C and C.end() must
+// return an iterator to the end.
+template <typename C, typename E>
+bool Contains(const C& container, const E& element) {
+  return std::find(container.begin(), container.end(), element) !=
+         container.end();
+}
+
+// Returns true if any element in |container| returns true for |predicate|.
+// C.begin() must return an iterator to the beginning of C and C.end() must
+// return an iterator to the end.
+template <typename C, typename P>
+bool ContainsIf(const C& container, P predicate) {
+  return std::find_if(container.begin(), container.end(),
+                      std::move(predicate)) != container.end();
 }
 
 }  // namespace openscreen

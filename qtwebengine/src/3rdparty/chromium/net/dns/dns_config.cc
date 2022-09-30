@@ -7,11 +7,12 @@
 #include <utility>
 
 #include "base/values.h"
+#include "net/dns/public/dns_over_https_config.h"
 
 namespace net {
 
-// Default values are taken from glibc resolv.h except timeout which is set to
-// |kDnsDefaultTimeoutMs|.
+// Default values are taken from glibc resolv.h except |fallback_period| which
+// is set to |kDnsDefaultFallbackPeriod|.
 DnsConfig::DnsConfig() : DnsConfig(std::vector<IPEndPoint>()) {}
 
 DnsConfig::DnsConfig(const DnsConfig& other) = default;
@@ -21,11 +22,10 @@ DnsConfig::DnsConfig(DnsConfig&& other) = default;
 DnsConfig::DnsConfig(std::vector<IPEndPoint> nameservers)
     : nameservers(std::move(nameservers)),
       dns_over_tls_active(false),
-      dns_over_tls_hostname(std::string()),
       unhandled_options(false),
       append_to_multi_label_name(true),
       ndots(1),
-      timeout(kDnsDefaultTimeout),
+      fallback_period(kDnsDefaultFallbackPeriod),
       attempts(2),
       doh_attempts(1),
       rotate(false),
@@ -57,13 +57,12 @@ bool DnsConfig::EqualsIgnoreHosts(const DnsConfig& d) const {
          (dns_over_tls_hostname == d.dns_over_tls_hostname) &&
          (search == d.search) && (unhandled_options == d.unhandled_options) &&
          (append_to_multi_label_name == d.append_to_multi_label_name) &&
-         (ndots == d.ndots) && (timeout == d.timeout) &&
+         (ndots == d.ndots) && (fallback_period == d.fallback_period) &&
          (attempts == d.attempts) && (doh_attempts == d.doh_attempts) &&
          (rotate == d.rotate) && (use_local_ipv6 == d.use_local_ipv6) &&
-         (dns_over_https_servers == d.dns_over_https_servers) &&
+         (doh_config == d.doh_config) &&
          (secure_dns_mode == d.secure_dns_mode) &&
-         (allow_dns_over_https_upgrade == d.allow_dns_over_https_upgrade) &&
-         (disabled_upgrade_providers == d.disabled_upgrade_providers);
+         (allow_dns_over_https_upgrade == d.allow_dns_over_https_upgrade);
 }
 
 void DnsConfig::CopyIgnoreHosts(const DnsConfig& d) {
@@ -74,15 +73,14 @@ void DnsConfig::CopyIgnoreHosts(const DnsConfig& d) {
   unhandled_options = d.unhandled_options;
   append_to_multi_label_name = d.append_to_multi_label_name;
   ndots = d.ndots;
-  timeout = d.timeout;
+  fallback_period = d.fallback_period;
   attempts = d.attempts;
   doh_attempts = d.doh_attempts;
   rotate = d.rotate;
   use_local_ipv6 = d.use_local_ipv6;
-  dns_over_https_servers = d.dns_over_https_servers;
+  doh_config = d.doh_config;
   secure_dns_mode = d.secure_dns_mode;
   allow_dns_over_https_upgrade = d.allow_dns_over_https_upgrade;
-  disabled_upgrade_providers = d.disabled_upgrade_providers;
 }
 
 base::Value DnsConfig::ToValue() const {
@@ -103,27 +101,15 @@ base::Value DnsConfig::ToValue() const {
   dict.SetBoolKey("unhandled_options", unhandled_options);
   dict.SetBoolKey("append_to_multi_label_name", append_to_multi_label_name);
   dict.SetIntKey("ndots", ndots);
-  dict.SetDoubleKey("timeout", timeout.InSecondsF());
+  dict.SetDoubleKey("timeout", fallback_period.InSecondsF());
   dict.SetIntKey("attempts", attempts);
   dict.SetIntKey("doh_attempts", doh_attempts);
   dict.SetBoolKey("rotate", rotate);
   dict.SetBoolKey("use_local_ipv6", use_local_ipv6);
   dict.SetIntKey("num_hosts", hosts.size());
-  list = base::Value(base::Value::Type::LIST);
-  for (auto& server : dns_over_https_servers) {
-    base::Value val(base::Value::Type::DICTIONARY);
-    val.SetStringKey("server_template", server.server_template);
-    val.SetBoolKey("use_post", server.use_post);
-    list.Append(std::move(val));
-  }
-  dict.SetKey("doh_servers", std::move(list));
+  dict.SetKey("doh_config", doh_config.ToValue());
   dict.SetIntKey("secure_dns_mode", static_cast<int>(secure_dns_mode));
   dict.SetBoolKey("allow_dns_over_https_upgrade", allow_dns_over_https_upgrade);
-
-  list = base::Value(base::Value::Type::LIST);
-  for (const auto& provider : disabled_upgrade_providers)
-    list.Append(provider);
-  dict.SetKey("disabled_upgrade_providers", std::move(list));
 
   return dict;
 }

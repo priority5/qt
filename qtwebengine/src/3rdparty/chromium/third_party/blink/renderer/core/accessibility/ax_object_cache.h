@@ -27,25 +27,31 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ACCESSIBILITY_AX_OBJECT_CACHE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ACCESSIBILITY_AX_OBJECT_CACHE_H_
 
-#include <memory>
-
+#include "base/gtest_prod_util.h"
 #include "third_party/blink/renderer/core/accessibility/axid.h"
 #include "third_party/blink/renderer/core/accessibility/blink_ax_event_intent.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
 
+namespace gfx {
+class Point;
+}
+
+namespace ui {
+class AXMode;
+}
+
 namespace blink {
 
+class AXObject;
 class AbstractInlineTextBox;
 class AccessibleNode;
 class HTMLCanvasElement;
 class HTMLOptionElement;
 class HTMLFrameOwnerElement;
 class HTMLSelectElement;
-class IntPoint;
 class LayoutRect;
-class LineLayoutItem;
 class LocalFrameView;
 
 class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
@@ -54,7 +60,7 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
                                                 BlinkAXEventIntentHash,
                                                 BlinkAXEventIntentHashTraits>;
 
-  static AXObjectCache* Create(Document&);
+  static AXObjectCache* Create(Document&, const ui::AXMode&);
 
   AXObjectCache(const AXObjectCache&) = delete;
   AXObjectCache& operator=(const AXObjectCache&) = delete;
@@ -63,24 +69,31 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
 
   virtual void Dispose() = 0;
 
-  // Register/remove popups
-  virtual void InitializePopup(Document* document) = 0;
-  virtual void DisposePopup(Document* document) = 0;
+  virtual const ui::AXMode& GetAXMode() = 0;
+  virtual void SetAXMode(const ui::AXMode&) = 0;
+
+  // A Freeze() occurs during a serialization run.
+  // Used here as a hint for DCHECKS to enforce the following behavior:
+  // objects in the ax hierarchy should not be destroyed during serialization.
+  virtual void Freeze() = 0;
+  virtual void Thaw() = 0;
 
   virtual void SelectionChanged(Node*) = 0;
   virtual void ChildrenChanged(Node*) = 0;
   virtual void ChildrenChanged(const LayoutObject*) = 0;
   virtual void ChildrenChanged(AccessibleNode*) = 0;
+  virtual void SlotAssignmentWillChange(Node*) = 0;
   virtual void CheckedStateChanged(Node*) = 0;
   virtual void ListboxOptionStateChanged(HTMLOptionElement*) = 0;
   virtual void ListboxSelectedChildrenChanged(HTMLSelectElement*) = 0;
   virtual void ListboxActiveIndexChanged(HTMLSelectElement*) = 0;
   virtual void LocationChanged(const LayoutObject*) = 0;
-  virtual void RadiobuttonRemovedFromGroup(HTMLInputElement*) = 0;
   virtual void ImageLoaded(const LayoutObject*) = 0;
 
+  // Removes AXObject backed by passed-in object, if there is one.
   virtual void Remove(AccessibleNode*) = 0;
-  virtual void Remove(LayoutObject*) = 0;
+  // Returns true if the AXObject is removed.
+  virtual bool Remove(LayoutObject*) = 0;
   virtual void Remove(Node*) = 0;
   virtual void Remove(AbstractInlineTextBox*) = 0;
 
@@ -110,15 +123,19 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
   virtual void HandleTextMarkerDataAdded(Node* start, Node* end) = 0;
   virtual void HandleTextFormControlChanged(Node*) = 0;
   virtual void HandleValueChanged(Node*) = 0;
-  virtual void HandleUpdateActiveMenuOption(LayoutObject*,
-                                            int option_index) = 0;
+  virtual void HandleUpdateActiveMenuOption(Node*) = 0;
   virtual void DidShowMenuListPopup(LayoutObject*) = 0;
   virtual void DidHideMenuListPopup(LayoutObject*) = 0;
+  virtual void HandleLoadStart(Document*) = 0;
   virtual void HandleLoadComplete(Document*) = 0;
   virtual void HandleLayoutComplete(Document*) = 0;
   virtual void HandleClicked(Node*) = 0;
   virtual void HandleValidationMessageVisibilityChanged(
       const Node* form_control) = 0;
+  virtual void HandleEventListenerAdded(const Node& node,
+                                        const AtomicString& event_type) = 0;
+  virtual void HandleEventListenerRemoved(const Node& node,
+                                          const AtomicString& event_type) = 0;
 
   // Handle any notifications which arrived while layout was dirty.
   virtual void ProcessDeferredAccessibilityEvents(Document&) = 0;
@@ -135,7 +152,7 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
                                      Element*,
                                      const LayoutRect&) = 0;
 
-  virtual void InlineTextBoxesUpdated(LineLayoutItem) = 0;
+  virtual void InlineTextBoxesUpdated(LayoutObject*) = 0;
 
   // Called when the scroll offset changes.
   virtual void HandleScrollPositionChanged(LocalFrameView*) = 0;
@@ -153,12 +170,13 @@ class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
   virtual const AtomicString& ComputedRoleForNode(Node*) = 0;
   virtual String ComputedNameForNode(Node*) = 0;
 
-  virtual void OnTouchAccessibilityHover(const IntPoint&) = 0;
+  virtual void OnTouchAccessibilityHover(const gfx::Point&) = 0;
 
   virtual AXID GetAXID(Node*) = 0;
-  virtual Element* GetElementFromAXID(AXID) = 0;
+  virtual AXObject* ObjectFromAXID(AXID) const = 0;
 
-  typedef AXObjectCache* (*AXObjectCacheCreateFunction)(Document&);
+  typedef AXObjectCache* (*AXObjectCacheCreateFunction)(Document&,
+                                                        const ui::AXMode&);
   static void Init(AXObjectCacheCreateFunction);
 
   // Static helper functions.

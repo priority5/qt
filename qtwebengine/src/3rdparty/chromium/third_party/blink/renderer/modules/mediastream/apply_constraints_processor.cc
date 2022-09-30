@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream_track.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -152,6 +152,7 @@ void ApplyConstraintsProcessor::MaybeStopSourceForRestart(
     video_source_->ReconfigureTrack(GetCurrentVideoTrack(),
                                     settings.track_adapter_settings());
     ApplyConstraintsSucceeded();
+    GetCurrentVideoTrack()->NotifyConstraintsConfigurationComplete();
   } else {
     video_source_->StopForRestart(
         WTF::Bind(&ApplyConstraintsProcessor::MaybeSourceStoppedForRestart,
@@ -224,9 +225,14 @@ void ApplyConstraintsProcessor::FinalizeVideoRequest() {
   blink::VideoCaptureSettings settings = SelectVideoSettings({format});
 
   if (settings.HasValue()) {
+    if (settings.min_frame_rate().has_value()) {
+      GetCurrentVideoTrack()->SetMinimumFrameRate(
+          settings.min_frame_rate().value());
+    }
     video_source_->ReconfigureTrack(GetCurrentVideoTrack(),
                                     settings.track_adapter_settings());
     ApplyConstraintsSucceeded();
+    GetCurrentVideoTrack()->NotifyConstraintsConfigurationComplete();
   } else {
     ApplyConstraintsFailed(settings.failed_constraint_name());
   }
@@ -245,8 +251,10 @@ blink::VideoCaptureSettings ApplyConstraintsProcessor::SelectVideoSettings(
   device_capabilities.device_id = current_request_->Track()->Source()->Id();
   device_capabilities.group_id = current_request_->Track()->Source()->GroupId();
   device_capabilities.facing_mode =
-      GetCurrentVideoSource() ? GetCurrentVideoSource()->device().video_facing
-                              : media::MEDIA_VIDEO_FACING_NONE;
+      GetCurrentVideoSource()
+          ? static_cast<mojom::blink::FacingMode>(
+                GetCurrentVideoSource()->device().video_facing)
+          : mojom::blink::FacingMode::NONE;
   device_capabilities.formats = std::move(formats);
 
   blink::VideoDeviceCaptureCapabilities video_capabilities;
@@ -282,8 +290,8 @@ ApplyConstraintsProcessor::GetCurrentAudioSource() {
 blink::MediaStreamVideoTrack*
 ApplyConstraintsProcessor::GetCurrentVideoTrack() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  MediaStreamVideoTrack* track = MediaStreamVideoTrack::GetVideoTrack(
-      WebMediaStreamTrack(current_request_->Track()));
+  MediaStreamVideoTrack* track =
+      MediaStreamVideoTrack::From(current_request_->Track());
   DCHECK(track);
   return track;
 }

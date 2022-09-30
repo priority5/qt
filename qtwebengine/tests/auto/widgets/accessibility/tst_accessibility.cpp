@@ -18,7 +18,7 @@
 */
 
 #include <qtest.h>
-#include "../util.h"
+#include <widgetutil.h>
 
 #include <QHBoxLayout>
 #include <QMainWindow>
@@ -48,6 +48,8 @@ private Q_SLOTS:
     void value();
     void roles_data();
     void roles();
+    void objectName();
+    void crossTreeParent();
 };
 
 // This will be called before the first test function is executed.
@@ -77,11 +79,10 @@ void tst_Accessibility::noPage()
     QWebEngineView webView;
     webView.show();
 
-    QTest::qWait(1000);
-    QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
-    QVERIFY(view);
+    QAccessibleInterface *view = nullptr;
+    QTRY_VERIFY((view = QAccessible::queryAccessibleInterface(&webView)));
     QCOMPARE(view->role(), QAccessible::Client);
-    QCOMPARE(view->childCount(), 1);
+    QTRY_COMPARE(view->childCount(), 1);
     QAccessibleInterface *document = view->child(0);
     QCOMPARE(document->role(), QAccessible::WebDocument);
     QCOMPARE(document->parent(), view);
@@ -104,7 +105,7 @@ void tst_Accessibility::hierarchy()
     QCOMPARE(view->role(), QAccessible::Client);
     QCOMPARE(view->childCount(), 1);
     // Wait for accessibility to be fully initialized
-    QTRY_VERIFY(view->child(0)->childCount() == 1);
+    QTRY_COMPARE(view->child(0)->childCount(), 1);
     QAccessibleInterface *document = view->child(0);
     QCOMPARE(document->role(), QAccessible::WebDocument);
     QCOMPARE(document->parent(), view);
@@ -151,20 +152,17 @@ void tst_Accessibility::hierarchy()
 void tst_Accessibility::focusChild_data()
 {
     QTest::addColumn<QString>("interfaceName");
-    QTest::addColumn<QVector<QAccessible::Role>>("ancestorRoles");
+    QTest::addColumn<QList<QAccessible::Role>>("ancestorRoles");
 
-    QTest::newRow("QWebEngineView") << QString("QWebEngineView") << QVector<QAccessible::Role>({QAccessible::Client});
-    QTest::newRow("RenderWidgetHostViewQtDelegate") << QString("RenderWidgetHostViewQtDelegate") << QVector<QAccessible::Role>({QAccessible::Client});
-    QTest::newRow("QMainWindow") << QString("QMainWindow") << QVector<QAccessible::Role>({QAccessible::Window, QAccessible::Client /* central widget */, QAccessible::Client /* view */});
+    QTest::newRow("QWebEngineView") << QString("QWebEngineView") << QList<QAccessible::Role>({QAccessible::Client});
+    QTest::newRow("RenderWidgetHostViewQtDelegate") << QString("RenderWidgetHostViewQtDelegate") << QList<QAccessible::Role>({QAccessible::Client});
+    QTest::newRow("QMainWindow") << QString("QMainWindow") << QList<QAccessible::Role>({QAccessible::Window, QAccessible::Client /* central widget */, QAccessible::Client /* view */});
 }
 
 void tst_Accessibility::focusChild()
 {
-#if QT_VERSION < QT_VERSION_CHECK(5, 14, 1)
-    QSKIP("Requires newer base Qt");
-#endif
     auto traverseToWebDocumentAccessibleInterface = [](QAccessibleInterface *iface) -> QAccessibleInterface * {
-        QFETCH(QVector<QAccessible::Role>, ancestorRoles);
+        QFETCH(QList<QAccessible::Role>, ancestorRoles);
         for (int i = 0; i < ancestorRoles.size(); ++i) {
             if (iface->childCount() == 0 || iface->role() != ancestorRoles[i])
                 return nullptr;
@@ -242,7 +240,7 @@ void tst_Accessibility::text()
     QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
     // Wait for accessibility to be fully initialized
 
-    QTRY_VERIFY(view->child(0)->childCount() == 5);
+    QTRY_COMPARE(view->child(0)->childCount(), 5);
     QAccessibleInterface *document = view->child(0);
     QVERIFY(document);
 
@@ -342,7 +340,7 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kAbbr") << QString("<abbr>a</abbr>") << 1 << QAccessible::StaticText;
     QTest::newRow("ax::mojom::Role::kAlert") << QString("<div role='alert'>alert</div>") << 0 << QAccessible::AlertMessage;
     QTest::newRow("ax::mojom::Role::kAlertDialog") << QString("<div role='alertdialog'>alert</div>") << 0 << QAccessible::AlertMessage;
-    QTest::newRow("ax::mojom::Role::kAnchor") << QString("<a id='a'>Chapter a</a>") << 1 << QAccessible::Link;
+    QTest::newRow("ax::mojom::Role::kAnchor") << QString("<a id='a'>Chapter a</a>") << 1 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kApplication") << QString("<div role='application'>landmark</div>") << 0 << QAccessible::Document;
     QTest::newRow("ax::mojom::Role::kArticle") << QString("<article>a</article>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kAudio") << QString("<audio controls><source src='test.mp3' type='audio/mpeg'></audio>") << 1 << QAccessible::Sound;
@@ -404,8 +402,10 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kDocEpilogue") << QString("<div role='doc-epilogue'></div>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kDocErrata") << QString("<div role='doc-errata'></div>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kDocExample") << QString("<div role='doc-example'></div>") << 0 << QAccessible::Section;
+    QTest::newRow("ax::mojom::Role::kDocFooter") << QString("<section role='doc-pagefooter'>a</section>") << 0 << QAccessible::Footer;
     QTest::newRow("ax::mojom::Role::kDocForeword") << QString("<div role='doc-foreword'></div>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kDocGlossary") << QString("<div role='doc-glossary'></div>") << 0 << QAccessible::Section;
+    QTest::newRow("ax::mojom::Role::kDocHeader") << QString("<section role='doc-pageheader'>a</section>") << 0 << QAccessible::Heading;
     QTest::newRow("ax::mojom::Role::kDocIndex") << QString("<div role='doc-index'></div>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kDocIntroduction") << QString("<div role='doc-introduction'></div>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kDocNotice") << QString("<div role='doc-notice'></div>") << 0 << QAccessible::Section;
@@ -424,9 +424,9 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kFeed") << QString("<div role='feed'>a</div>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kFigcaption") << QString("<figcaption>a</figcaption>") << 0 << QAccessible::Heading;
     QTest::newRow("ax::mojom::Role::kFigure") << QString("<figure>a</figure>") << 0 << QAccessible::Section;
-    QTest::newRow("ax::mojom::Role::kFooter") << QString("<footer>a</footer>") << 0 << QAccessible::Footer;
+    QTest::newRow("ax::mojom::Role::kFooter") << QString("<footer>a</footer>") << 0 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kFooterAsNonLandmark") << QString("<article><footer>a</footer><article>") << 1 << QAccessible::Section;
-    QTest::newRow("ax::mojom::Role::kForm") << QString("<form></form>") << 0 << QAccessible::Form;
+    QTest::newRow("ax::mojom::Role::kForm") << QString("<form aria-label=Name></form>") << 0 << QAccessible::Form;
     QTest::newRow("ax::mojom::Role::kGraphicsDocument") << QString("<div role='graphics-document'></div>") << 0 << QAccessible::Document;
     QTest::newRow("ax::mojom::Role::kGraphicsObject") << QString("<div role='graphics-object'></div>") << 0 << QAccessible::Pane;
     QTest::newRow("ax::mojom::Role::kGraphicsSymbol") << QString("<div role='graphics-symbol'></div>") << 0 << QAccessible::Graphic;
@@ -464,10 +464,10 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kMath") << QString("<math>a</math>") << 1 << QAccessible::Equation;
     QTest::newRow("ax::mojom::Role::kMenu") << QString("<div role='menu'>a</div>") << 0 << QAccessible::PopupMenu;
     QTest::newRow("ax::mojom::Role::kMenuBar") << QString("<div role='menubar'>a</div>") << 0 << QAccessible::MenuBar;
-    QTest::newRow("ax::mojom::Role::kMenuItem") << QString("<menu role='menu'><input type='button' /></menu>") << 1 << QAccessible::MenuItem;
+    QTest::newRow("ax::mojom::Role::kMenuItem") << QString("<menu role='group'><div role='menuitem'>a</div></menu>") << 1 << QAccessible::MenuItem;
     QTest::newRow("ax::mojom::Role::kMenuItemCheckBox") << QString("<menu role='menu'><input type='checkbox'></input></menu>") << 1 << QAccessible::CheckBox;
     QTest::newRow("ax::mojom::Role::kMenuItemRadio") << QString("<menu role='menu'><input type='radio'></input></menu>") << 1 << QAccessible::RadioButton;
-    QTest::newRow("ax::mojom::Role::kMenuButton") << QString("<menu role='group'><div role='menuitem'>a</div></menu>") << 1 << QAccessible::MenuItem;
+    QTest::newRow("ax::mojom::Role::kMenuButton") << QString("<menu role='menu'><input type='button' /></menu>") << 1 << QAccessible::Button;
     QTest::newRow("ax::mojom::Role::kMenuListOption") << QString("<select role='menu'><option>a</option></select>") << 3 << QAccessible::MenuItem;
     QTest::newRow("ax::mojom::Role::kMenuListPopup") << QString("<select role='menu'><option>a</option></select>") << 2 << QAccessible::PopupMenu;
     QTest::newRow("ax::mojom::Role::kMeter") << QString("<meter>a</meter>") << 1 << QAccessible::Chart;
@@ -485,8 +485,8 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kRow") << QString("<table role=table><tr><td>a</td></tr></table>") << 1 << QAccessible::Row;
     QTest::newRow("ax::mojom::Role::kRowGroup") << QString("<table role=table><tbody role=rowgroup><tr><td>a</td></tr></tbody></table>") << 1 << QAccessible::Section;
     QTest::newRow("ax::mojom::Role::kRowHeader") << QString("<table role=table><tr><th>a</td><td>b</td></tr></table>") << 2 << QAccessible::RowHeader;
-    QTest::newRow("ax::mojom::Role::kRuby") << QString("<ruby>a</ruby>") << 1 << QAccessible::StaticText;
-    QTest::newRow("ax::mojom::Role::kRubyAnnotation") << QString("<ruby><rt>a</rt></ruby>") << 2 << QAccessible::StaticText;
+    QTest::newRow("ax::mojom::Role::kRuby") << QString("<ruby>a</ruby>") << 1 << QAccessible::Grouping;
+    //QTest::newRow("ax::mojom::Role::kRubyAnnotation") // No mapping to ARIA role (presents as property on enclosing ruby element)
     QTest::newRow("ax::mojom::Role::kScrollBar") << QString("<div role='scrollbar'>a</a>") << 0 << QAccessible::ScrollBar;
     //QTest::newRow("ax::mojom::Role::kScrollView"); // No mapping to ARIA role
     QTest::newRow("ax::mojom::Role::kSearch") << QString("<div role='search'>landmark</div>") << 0 << QAccessible::Section;
@@ -500,7 +500,7 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kStatus") << QString("<output>a</output>") << 1 << QAccessible::Indicator;
     QTest::newRow("ax::mojom::Role::kStrong") << QString("<strong>a</strong>") << 1 << QAccessible::StaticText;
     QTest::newRow("ax::mojom::Role::kSuggestion") << QString("<div role='suggestion'></div>") << 0 << QAccessible::Section;
-    QTest::newRow("ax::mojom::Role::kSvgRoot") << QString("<svg width='10' height='10'></svg>") << 1 << QAccessible::Graphic;
+    QTest::newRow("ax::mojom::Role::kSvgRoot") << QString("<svg width='10' height='10'><text font-size='10'>SVG</text></svg>") << 1 << QAccessible::WebDocument;
     QTest::newRow("ax::mojom::Role::kSwitch") << QString("<button aria-checked='false'>a</button>") << 1 << QAccessible::Button;
     QTest::newRow("ax::mojom::Role::kTable") << QString("<table role=table><td>a</td></table>") << 0 << QAccessible::Table;
     //QTest::newRow("ax::mojom::Role::kTableHeaderContainer"); // No mapping to ARIA role
@@ -529,10 +529,10 @@ void tst_Accessibility::roles()
     QFETCH(QAccessible::Role, role);
 
     QWebEngineView webView;
+    QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
     webView.setHtml("<html><body>" + html + "</body></html>");
     webView.show();
-    QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
-    QVERIFY(spyFinished.wait());
+    QTRY_COMPARE_WITH_TIMEOUT(spyFinished.count(), 1, 20000);
 
     QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
 
@@ -542,7 +542,7 @@ void tst_Accessibility::roles()
         return;
     }
 
-    QTRY_COMPARE(view->child(0)->childCount(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(view->child(0)->childCount(), 1, 20000);
     QAccessibleInterface *document = view->child(0);
     QAccessibleInterface *element = document->child(0);
 
@@ -552,6 +552,57 @@ void tst_Accessibility::roles()
     }
 
     QCOMPARE(element->role(), role);
+}
+
+void tst_Accessibility::objectName()
+{
+    QWebEngineView webView;
+    QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
+    webView.setHtml("<html><body><p id='my_id'></p></body></html>");
+    webView.show();
+    QVERIFY(spyFinished.wait());
+    QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
+    QAccessibleInterface *document = view->child(0);
+    QTRY_COMPARE(document->childCount(), 1);
+    QAccessibleInterface *p = document->child(0);
+    QVERIFY(p);
+    QVERIFY(p->object());
+    QCOMPARE(p->role(), QAccessible::Paragraph);
+    QCOMPARE(p->object()->objectName(), QStringLiteral("my_id"));
+}
+
+void tst_Accessibility::crossTreeParent()
+{
+    QWebEngineView webView;
+    QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
+    webView.setHtml("<html><body><iframe src='data:text/html,<html><body><p id=my_id></p></body></html>'>Fallback text</iframe></body></html>");
+    webView.show();
+    QVERIFY(spyFinished.wait());
+    QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
+    QAccessibleInterface *document = view->child(0);
+    QCOMPARE(document->role(), QAccessible::WebDocument);
+    QTRY_COMPARE(document->childCount(), 1);
+    QAccessibleInterface *p = document->child(0);
+    QVERIFY(p);
+    QCOMPARE(p->parent(), document);
+    p = p->child(0);
+    QVERIFY(p);
+    QCOMPARE(p->role(), QAccessible::WebDocument);
+    QCOMPARE(p->parent()->parent(), document);
+    QTRY_COMPARE(p->childCount(), 1);
+    p = p->child(0);
+    QVERIFY(p);
+    QAccessibleInterface *subdocument = p;
+    QCOMPARE(p->role(), QAccessible::WebDocument);
+    QCOMPARE(p->parent()->parent()->parent(), document);
+    p = p->child(0);
+    QVERIFY(p);
+    QVERIFY(p->object());
+    QCOMPARE(p->role(), QAccessible::Paragraph);
+    QCOMPARE(p->parent(), subdocument);
+    QCOMPARE(p->parent()->parent()->parent()->parent(), document);
+    QCOMPARE(p->parent()->parent()->parent()->parent()->parent(), view);
+    QCOMPARE(p->object()->objectName(), QStringLiteral("my_id"));
 }
 
 static QByteArrayList params = QByteArrayList()

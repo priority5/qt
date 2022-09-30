@@ -7,8 +7,11 @@
 #include <windows.h>
 #include <winternl.h>
 
+#include <vector>
+
 #include "base/check.h"
 #include "base/debug/alias.h"
+#include "base/memory/raw_ptr.h"
 #include "base/profiler/native_unwinder_win.h"
 #include "build/build_config.h"
 
@@ -29,29 +32,49 @@ struct TEB {
   // Rest of struct is ignored.
 };
 
+win::ScopedHandle GetCurrentThreadHandle() {
+  HANDLE thread;
+  CHECK(::DuplicateHandle(::GetCurrentProcess(), ::GetCurrentThread(),
+                          ::GetCurrentProcess(), &thread, 0, FALSE,
+                          DUPLICATE_SAME_ACCESS));
+  return win::ScopedHandle(thread);
+}
+
 win::ScopedHandle GetThreadHandle(PlatformThreadId thread_id) {
+  // TODO(https://crbug.com/947459): Move this logic to
+  // GetSamplingProfilerCurrentThreadToken() and pass the handle in
+  // SamplingProfilerThreadToken.
+  if (thread_id == ::GetCurrentThreadId())
+    return GetCurrentThreadHandle();
+
   // TODO(http://crbug.com/947459): Remove the test_handle* CHECKs once we
   // understand which flag is triggering the failure.
-
   DWORD flags = 0;
   base::debug::Alias(&flags);
 
   flags |= THREAD_GET_CONTEXT;
   win::ScopedHandle test_handle1(::OpenThread(flags, FALSE, thread_id));
-  CHECK(test_handle1.IsValid());
+  CHECK(test_handle1.is_valid());
 
   flags |= THREAD_QUERY_INFORMATION;
   win::ScopedHandle test_handle2(::OpenThread(flags, FALSE, thread_id));
-  CHECK(test_handle2.IsValid());
+  CHECK(test_handle2.is_valid());
 
   flags |= THREAD_SUSPEND_RESUME;
   win::ScopedHandle handle(::OpenThread(flags, FALSE, thread_id));
-  CHECK(handle.IsValid());
+  CHECK(handle.is_valid());
   return handle;
 }
 
 // Returns the thread environment block pointer for |thread_handle|.
-const TEB* GetThreadEnvironmentBlock(HANDLE thread_handle) {
+const TEB* GetThreadEnvironmentBlock(PlatformThreadId thread_id,
+                                     HANDLE thread_handle) {
+  // TODO(https://crbug.com/947459): Move this logic to
+  // GetSamplingProfilerCurrentThreadToken() and pass the TEB* in
+  // SamplingProfilerThreadToken.
+  if (thread_id == ::GetCurrentThreadId())
+    return reinterpret_cast<TEB*>(NtCurrentTeb());
+
   // Define the internal types we need to invoke NtQueryInformationThread.
   enum THREAD_INFORMATION_CLASS { ThreadBasicInformation };
 
@@ -62,7 +85,7 @@ const TEB* GetThreadEnvironmentBlock(HANDLE thread_handle) {
 
   struct THREAD_BASIC_INFORMATION {
     NTSTATUS ExitStatus;
-    TEB* Teb;
+    raw_ptr<TEB> Teb;
     CLIENT_ID ClientId;
     KAFFINITY AffinityMask;
     LONG Priority;
@@ -103,14 +126,17 @@ bool PointsToGuardPage(uintptr_t stack_pointer) {
 class ScopedDisablePriorityBoost {
  public:
   ScopedDisablePriorityBoost(HANDLE thread_handle);
+
+  ScopedDisablePriorityBoost(const ScopedDisablePriorityBoost&) = delete;
+  ScopedDisablePriorityBoost& operator=(const ScopedDisablePriorityBoost&) =
+      delete;
+
   ~ScopedDisablePriorityBoost();
 
  private:
   HANDLE thread_handle_;
   BOOL got_previous_boost_state_;
   BOOL boost_state_was_disabled_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedDisablePriorityBoost);
 };
 
 // NO HEAP ALLOCATIONS.
@@ -176,13 +202,14 @@ SuspendableThreadDelegateWin::SuspendableThreadDelegateWin(
     : thread_id_(thread_token.id),
       thread_handle_(GetThreadHandle(thread_token.id)),
       thread_stack_base_address_(reinterpret_cast<uintptr_t>(
-          GetThreadEnvironmentBlock(thread_handle_.Get())->Tib.StackBase)) {}
+          GetThreadEnvironmentBlock(thread_token.id, thread_handle_.get())
+              ->Tib.StackBase)) {}
 
 SuspendableThreadDelegateWin::~SuspendableThreadDelegateWin() = default;
 
 std::unique_ptr<SuspendableThreadDelegate::ScopedSuspendThread>
 SuspendableThreadDelegateWin::CreateScopedSuspendThread() {
-  return std::make_unique<ScopedSuspendThread>(thread_handle_.Get());
+  return std::make_unique<ScopedSuspendThread>(thread_handle_.get());
 }
 
 PlatformThreadId SuspendableThreadDelegateWin::GetThreadId() const {
@@ -193,7 +220,7 @@ PlatformThreadId SuspendableThreadDelegateWin::GetThreadId() const {
 bool SuspendableThreadDelegateWin::GetThreadContext(CONTEXT* thread_context) {
   *thread_context = {0};
   thread_context->ContextFlags = CONTEXT_FULL;
-  return ::GetThreadContext(thread_handle_.Get(), thread_context) != 0;
+  return ::GetThreadContext(thread_handle_.get(), thread_context) != 0;
 }
 
 // NO HEAP ALLOCATIONS.

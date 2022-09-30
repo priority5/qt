@@ -5,8 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_CSS_SCROLL_TIMELINE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_CSS_SCROLL_TIMELINE_H_
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/animation/scroll_timeline.h"
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/id_target_observer.h"
 
 namespace blink {
 
@@ -22,24 +24,41 @@ class CORE_EXPORT CSSScrollTimeline : public ScrollTimeline {
     STACK_ALLOCATED();
 
    public:
-    Options(Element*, StyleRuleScrollTimeline&);
-
-    // TODO(crbug.com/1097041): Support 'auto' value.
-    bool IsValid() const { return time_range_.has_value(); }
+    Options(Document&, StyleRuleScrollTimeline&);
 
    private:
     friend class CSSScrollTimeline;
 
-    Element* source_;
+    absl::optional<Element*> source_;
     ScrollTimeline::ScrollDirection direction_;
-    HeapVector<Member<ScrollTimelineOffset>>* offsets_;
-    base::Optional<double> time_range_;
+    HeapVector<Member<ScrollTimelineOffset>> offsets_;
+    StyleRuleScrollTimeline* rule_;
   };
 
-  CSSScrollTimeline(Document*, const Options&);
+  CSSScrollTimeline(Document*, Options&&);
+
+  const AtomicString& Name() const;
+
+  StyleRuleScrollTimeline* GetRule() const { return rule_; }
+
+  bool Matches(const Options&) const;
 
   // AnimationTimeline implementation.
   bool IsCSSScrollTimeline() const override { return true; }
+  void AnimationAttached(Animation*) override;
+  void AnimationDetached(Animation*) override;
+
+  // If a CSSScrollTimeline matching |options| already exists, return that
+  // timeline. Otherwise returns nullptr.
+  static CSSScrollTimeline* FindMatchingTimeline(const Options&);
+
+  void Trace(Visitor*) const override;
+
+ private:
+  void SetObservers(HeapVector<Member<IdTargetObserver>>);
+
+  Member<StyleRuleScrollTimeline> rule_;
+  HeapVector<Member<IdTargetObserver>> observers_;
 };
 
 template <>

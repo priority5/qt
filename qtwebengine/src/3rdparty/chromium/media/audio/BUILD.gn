@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//media/media_options.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
@@ -61,8 +62,6 @@ source_set("audio") {
     "audio_debug_recording_manager.cc",
     "audio_debug_recording_manager.h",
     "audio_debug_recording_session.h",
-    "audio_debug_recording_session_impl.cc",
-    "audio_debug_recording_session_impl.h",
     "audio_device_description.cc",
     "audio_device_description.h",
     "audio_device_name.cc",
@@ -102,11 +101,8 @@ source_set("audio") {
     "audio_output_resampler.h",
     "audio_output_stream_sink.cc",
     "audio_output_stream_sink.h",
-    "audio_pcm_encoder.cc",
-    "audio_pcm_encoder.h",
     "audio_sink_parameters.cc",
     "audio_sink_parameters.h",
-    "audio_source_diverter.h",
     "audio_source_parameters.cc",
     "audio_source_parameters.h",
     "audio_system.cc",
@@ -144,11 +140,13 @@ source_set("audio") {
   deps = [
     "//base",
     "//build:chromecast_buildflags",
+    "//build:chromeos_buildflags",
     "//media/base",
     "//third_party/opus:opus",
     "//url",
   ]
   libs = []
+  defines = []
   configs += [
     ":platform_config",
     "//media:subcomponent_config",
@@ -199,6 +197,8 @@ source_set("audio") {
       "win/core_audio_util_win.h",
       "win/device_enumeration_win.cc",
       "win/device_enumeration_win.h",
+      "win/volume_range_util.cc",
+      "win/volume_range_util.h",
       "win/waveout_output_win.cc",
       "win/waveout_output_win.h",
     ]
@@ -232,6 +232,13 @@ source_set("audio") {
       ":aaudio_stubs",
       "//media/base/android:media_jni_headers",
     ]
+
+    defines += [
+      # media/audio includes functions from NDK API levels beyond the one Chromium compiles
+      # with by default.
+      # Therefore relax the verification of functions <=> API level introduced with NDK 23.
+      "__ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__",
+    ]
   }
 
   if (is_linux || is_chromeos) {
@@ -264,16 +271,18 @@ source_set("audio") {
       "cras/cras_unified.h",
     ]
     configs += [ ":libcras" ]
-    if (is_chromeos) {
+    if (is_chromeos_ash) {
       sources += [
         "cras/audio_manager_chromeos.cc",
         "cras/audio_manager_chromeos.h",
       ]
-      deps += [ "//chromeos/audio" ]
-    } else if (is_linux) {
+      deps += [ "//ash/components/audio" ]
+    } else if (is_linux || is_chromeos_lacros) {
       sources += [
         "cras/audio_manager_cras.cc",
         "cras/audio_manager_cras.h",
+        "cras/cras_util.cc",
+        "cras/cras_util.h",
       ]
     }
   }
@@ -301,12 +310,16 @@ source_set("audio") {
 
   if (is_fuchsia) {
     sources += [
+      "fuchsia/audio_input_stream_fuchsia.cc",
+      "fuchsia/audio_input_stream_fuchsia.h",
       "fuchsia/audio_manager_fuchsia.cc",
       "fuchsia/audio_manager_fuchsia.h",
       "fuchsia/audio_output_stream_fuchsia.cc",
       "fuchsia/audio_output_stream_fuchsia.h",
     ]
     deps += [
+      "//media/fuchsia/audio",
+      "//media/fuchsia/common",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.media",
       "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
     ]
@@ -318,8 +331,6 @@ source_set("audio") {
       "audio_input_stream_data_interceptor.h",
     ]
   }
-
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 }
 
 if (use_cras) {
@@ -364,6 +375,7 @@ static_library("test_support") {
   deps = [
     "//base",
     "//base/test:test_support",
+    "//build:chromeos_buildflags",
 
     # Do not add any other //media deps except this; it will automatically pull
     # a dep on //media which is required to ensure test_support targets all use
@@ -387,7 +399,6 @@ source_set("unit_tests") {
     "audio_debug_file_writer_unittest.cc",
     "audio_debug_recording_helper_unittest.cc",
     "audio_debug_recording_manager_unittest.cc",
-    "audio_debug_recording_session_impl_unittest.cc",
     "audio_encoders_unittest.cc",
     "audio_input_device_unittest.cc",
     "audio_input_unittest.cc",
@@ -404,6 +415,7 @@ source_set("unit_tests") {
   deps = [
     "//base",
     "//base/test:test_support",
+    "//build:chromeos_buildflags",
     "//media:test_support",
     "//testing/gmock",
     "//testing/gtest",
@@ -413,7 +425,6 @@ source_set("unit_tests") {
 
   configs += [
     ":platform_config",
-    "//build/config/compiler:no_size_t_to_int_warning",
     "//media:media_config",
   ]
 
@@ -434,7 +445,7 @@ source_set("unit_tests") {
     ]
   }
 
-  if (is_chromeos || is_chromecast) {
+  if (is_chromeos_ash || is_chromecast) {
     sources += [
       "test_data.h",
       "wav_audio_handler_unittest.cc",
@@ -442,17 +453,22 @@ source_set("unit_tests") {
 
     if (!is_chromecast) {
       deps += [
-        "//chromeos/audio",
+        "//ash/components/audio",
         "//chromeos/dbus/audio",
       ]
     }
 
     if (use_cras) {
       sources += [
+        "cras/audio_manager_chromeos_unittest.cc",
         "cras/cras_input_unittest.cc",
         "cras/cras_unified_unittest.cc",
       ]
     }
+  }
+
+  if (is_chromeos_lacros && use_cras) {
+    sources += [ "cras/audio_manager_cras_unittest.cc" ]
   }
 
   if (is_win) {
@@ -464,7 +480,15 @@ source_set("unit_tests") {
       "win/audio_session_event_listener_win_unittest.cc",
       "win/core_audio_util_win_unittest.cc",
       "win/device_enumeration_win_unittest.cc",
+      "win/volume_range_util_unittest.cc",
     ]
+
+    deps += [ "//media/gpu:gpu" ]
+  }
+
+  if (is_fuchsia) {
+    sources += [ "fuchsia/audio_input_stream_fuchsia_test.cc" ]
+    deps += [ "//media/fuchsia/audio:test_support" ]
   }
 
   if (use_alsa) {

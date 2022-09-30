@@ -13,10 +13,9 @@
 #include "base/callback.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "storage/browser/file_system/file_system_file_util.h"
@@ -43,6 +42,11 @@ class LoggingRecursiveOperation : public RecursiveOperationDelegate {
       : RecursiveOperationDelegate(file_system_context),
         root_(root),
         callback_(std::move(callback)) {}
+
+  LoggingRecursiveOperation(const LoggingRecursiveOperation&) = delete;
+  LoggingRecursiveOperation& operator=(const LoggingRecursiveOperation&) =
+      delete;
+
   ~LoggingRecursiveOperation() override = default;
 
   const std::vector<LogEntry>& log_entries() const { return log_entries_; }
@@ -115,7 +119,6 @@ class LoggingRecursiveOperation : public RecursiveOperationDelegate {
   FileSystemURL error_url_;
 
   base::WeakPtrFactory<LoggingRecursiveOperation> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(LoggingRecursiveOperation);
 };
 
 void ReportStatus(base::File::Error* out_error, base::File::Error error) {
@@ -148,11 +151,10 @@ class RecursiveOperationDelegateTest : public testing::Test {
   void TearDown() override { sandbox_file_system_.TearDown(); }
 
   std::unique_ptr<FileSystemOperationContext> NewContext() {
-    FileSystemOperationContext* context =
-        sandbox_file_system_.NewOperationContext();
+    auto context = sandbox_file_system_.NewOperationContext();
     // Grant enough quota for all test cases.
     context->set_allowed_bytes_growth(1000000);
-    return base::WrapUnique(context);
+    return context;
   }
 
   FileSystemFileUtil* file_util() { return sandbox_file_system_.file_util(); }

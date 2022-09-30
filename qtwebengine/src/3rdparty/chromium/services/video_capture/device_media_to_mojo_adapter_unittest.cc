@@ -4,9 +4,11 @@
 
 #include "services/video_capture/device_media_to_mojo_adapter.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
+#include "build/chromeos_buildflags.h"
 #include "media/capture/video/mock_device.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/video_capture/public/cpp/mock_video_frame_handler.h"
@@ -29,14 +31,14 @@ class DeviceMediaToMojoAdapterTest : public ::testing::Test {
         video_frame_handler_.InitWithNewPipeAndPassReceiver());
     auto mock_device = std::make_unique<media::MockDevice>();
     mock_device_ptr_ = mock_device.get();
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     adapter_ = std::make_unique<DeviceMediaToMojoAdapter>(
         std::move(mock_device), base::DoNothing(),
         base::ThreadTaskRunnerHandle::Get());
 #else
     adapter_ = std::make_unique<DeviceMediaToMojoAdapter>(
         std::move(mock_device));
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   }
 
   void TearDown() override {
@@ -47,7 +49,7 @@ class DeviceMediaToMojoAdapterTest : public ::testing::Test {
   }
 
  protected:
-  media::MockDevice* mock_device_ptr_;
+  raw_ptr<media::MockDevice> mock_device_ptr_;
   std::unique_ptr<DeviceMediaToMojoAdapter> adapter_;
   std::unique_ptr<MockVideoFrameHandler> mock_video_frame_handler_;
   mojo::PendingRemote<mojom::VideoFrameHandler> video_frame_handler_;

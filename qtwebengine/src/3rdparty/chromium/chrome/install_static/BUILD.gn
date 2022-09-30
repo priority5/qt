@@ -20,18 +20,22 @@ if (is_win) {
   # Please don't add dependencies on other system libraries.
   static_library("install_static_util") {
     deps = [
-      ":buildflags",
-      "//build:branding_buildflags",
       "//components/nacl/common:buildflags",
       "//components/version_info:channel",
       "//components/version_info:generate_version_info",
     ]
 
-    public_deps = [ "//chrome/chrome_elf:nt_registry" ]
+    public_deps = [
+      ":buildflags",
+      "//build:branding_buildflags",
+      "//chrome/chrome_elf:nt_registry",
+    ]
 
     sources = [
       "../app/chrome_dll_resource.h",
-      "../chrome/common/chrome_icon_resources_win.h",
+      "../common/chrome_icon_resources_win.h",
+      "//base/compiler_specific.h",
+      "//base/win/windows_types.h",
       "install_constants.h",
       "install_details.cc",
       "install_details.h",
@@ -60,17 +64,13 @@ if (is_win) {
     }
 
     libs = [ "kernel32.lib" ]
-
-    configs += [
-      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-      "//build/config/compiler:no_size_t_to_int_warning",
-    ]
   }
 
   # A source set for use by the module in a process that creates the
   # process-wide InstallDetails instance (i.e., chrome_elf.dll).
   source_set("primary_module") {
     sources = [ "get_install_details_payload.cc" ]
+    deps = [ ":install_static_util" ]
   }
 
   # A source set for use by modules in a process that fetch the process-wide
@@ -102,6 +102,7 @@ if (is_win) {
       "//build:branding_buildflags",
       "//chrome/install_static:install_static_util",
       "//chrome/install_static/test:test_support",
+      "//components/version_info",
       "//testing/gmock",
       "//testing/gtest",
     ]

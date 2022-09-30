@@ -173,51 +173,6 @@ enum InProgressDBCountTypes {
   kMaxValue = kCacheMigrationFailedCount
 };
 
-// When parallel download is enabled, the download may fall back to a normal
-// download for various reasons. This enum counts the number of parallel
-// download and fallbacks. Also records the reasons why the download falls back
-// to a normal download. The reasons are not mutually exclusive.
-// Used in histogram "Download.ParallelDownload.CreationEvent" and should be
-// treated as append-only.
-enum class ParallelDownloadCreationEvent {
-  // The total number of downloads started as parallel download.
-  STARTED_PARALLEL_DOWNLOAD = 0,
-
-  // The total number of downloads fell back to normal download when parallel
-  // download is enabled.
-  FELL_BACK_TO_NORMAL_DOWNLOAD,
-
-  // No ETag or Last-Modified response header.
-  FALLBACK_REASON_STRONG_VALIDATORS,
-
-  // No Accept-Range response header.
-  FALLBACK_REASON_ACCEPT_RANGE_HEADER,
-
-  // No Content-Length response header.
-  FALLBACK_REASON_CONTENT_LENGTH_HEADER,
-
-  // File size is not complied to finch configuration.
-  FALLBACK_REASON_FILE_SIZE,
-
-  // The HTTP connection type does not meet the requirement.
-  FALLBACK_REASON_CONNECTION_TYPE,
-
-  // The remaining time does not meet the requirement.
-  FALLBACK_REASON_REMAINING_TIME,
-
-  // The http method or url scheme does not meet the requirement.
-  FALLBACK_REASON_HTTP_METHOD,
-
-  // Range support is unknown from the response.
-  FALLBACK_REASON_UNKNOWN_RANGE_SUPPORT,
-
-  // Resumed download doesn't have any slices.
-  FALLBACK_REASON_RESUMPTION_WITHOUT_SLICES,
-
-  // Last entry of the enum.
-  COUNT,
-};
-
 // Events for user scheduled downloads. Used in histograms, don't reuse or
 // remove items. Keep in sync with DownloadLaterEvent in enums.xml.
 enum class DownloadLaterEvent {
@@ -304,34 +259,6 @@ COMPONENTS_DOWNLOAD_EXPORT void RecordParallelizableDownloadCount(
 // including the initial request.
 COMPONENTS_DOWNLOAD_EXPORT void RecordParallelDownloadRequestCount(
     int request_count);
-
-// Records if each byte stream is successfully added to download sink.
-// |support_range_request| indicates whether the server strongly supports range
-// requests.
-COMPONENTS_DOWNLOAD_EXPORT void RecordParallelDownloadAddStreamSuccess(
-    bool success,
-    bool support_range_request);
-
-// Records the bandwidth for parallelizable download and estimates the saved
-// time at the file end. Does not count in any hash computation or file
-// open/close time.
-COMPONENTS_DOWNLOAD_EXPORT void RecordParallelizableDownloadStats(
-    size_t bytes_downloaded_with_parallel_streams,
-    base::TimeDelta time_with_parallel_streams,
-    size_t bytes_downloaded_without_parallel_streams,
-    base::TimeDelta time_without_parallel_streams,
-    bool uses_parallel_requests);
-
-// Records the average bandwidth, time, and file size for parallelizable
-// download.
-COMPONENTS_DOWNLOAD_EXPORT void RecordParallelizableDownloadAverageStats(
-    int64_t bytes_downloaded,
-    const base::TimeDelta& time_span);
-
-// Records the parallel download creation counts and the reasons why the
-// download falls back to non-parallel download.
-COMPONENTS_DOWNLOAD_EXPORT void RecordParallelDownloadCreationEvent(
-    ParallelDownloadCreationEvent event);
 
 // Record the result of a download file rename.
 COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadFileRenameResultAfterRetry(
@@ -443,7 +370,7 @@ COMPONENTS_DOWNLOAD_EXPORT void RecordParallelRequestCreationFailure(
 COMPONENTS_DOWNLOAD_EXPORT void RecordDownloadLaterEvent(
     DownloadLaterEvent event);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 enum class BackgroudTargetDeterminationResultTypes {
   // Target determination succeeded.
   kSuccess = 0,
@@ -461,12 +388,12 @@ enum class BackgroudTargetDeterminationResultTypes {
 // reduced mode.
 COMPONENTS_DOWNLOAD_EXPORT void RecordBackgroundTargetDeterminationResult(
     BackgroudTargetDeterminationResultTypes type);
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // Records the OS error code when moving a file on Windows.
 COMPONENTS_DOWNLOAD_EXPORT void RecordWinFileMoveError(int os_error);
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 }  // namespace download
 
 #endif  // COMPONENTS_DOWNLOAD_PUBLIC_COMMON_DOWNLOAD_STATS_H_

@@ -4,22 +4,23 @@
 
 #include "services/network/trust_tokens/trust_token_request_helper_factory.h"
 
-#include "base/optional.h"
+#include "base/no_destructor.h"
 #include "base/strings/strcat.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
 #include "net/base/isolation_info.h"
 #include "net/url_request/url_request.h"
 #include "services/network/public/cpp/optional_trust_token_params.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/trust_token_http_headers.h"
 #include "services/network/public/cpp/trust_token_parameterization.h"
 #include "services/network/public/mojom/trust_tokens.mojom.h"
+#include "services/network/test/trust_token_test_util.h"
 #include "services/network/trust_tokens/pending_trust_token_store.h"
-#include "services/network/trust_tokens/test/trust_token_test_util.h"
-#include "services/network/trust_tokens/trust_token_http_headers.h"
 #include "services/network/trust_tokens/trust_token_parameterization.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/origin.h"
 
 namespace network {
@@ -67,7 +68,6 @@ class TrustTokenRequestHelperFactoryTest : public ::testing::Test {
   const mojom::TrustTokenParams& suitable_signing_params() const {
     return *suitable_params_;
   }
-  const net::NetLog& net_log() const { return *maker_.net_log(); }
 
   std::unique_ptr<net::URLRequest> CreateSuitableRequest() {
     auto ret = maker_.MakeURLRequest("https://destination.example");
@@ -95,8 +95,11 @@ class TrustTokenRequestHelperFactoryTest : public ::testing::Test {
     store.OnStoreReady(TrustTokenStore::CreateForTesting());
     NoopTrustTokenKeyCommitmentGetter getter;
 
-    TrustTokenRequestHelperFactory(&store, &getter,
-                                   base::BindRepeating([]() { return true; }))
+    TrustTokenRequestHelperFactory(
+        &store, &getter,
+        base::BindRepeating(
+            []() -> mojom::NetworkContextClient* { return nullptr; }),
+        base::BindRepeating([]() { return true; }))
         .CreateTrustTokenHelperForRequest(
             request, params,
             base::BindLambdaForTesting(
@@ -167,7 +170,7 @@ TEST_F(TrustTokenRequestHelperFactoryTest, ForbiddenHeaders) {
   histogram_tester.ExpectUniqueSample(
       "Net.TrustTokens.RequestHelperFactoryOutcome.Signing",
       Outcome::kRequestRejectedDueToBearingAnInternalTrustTokensHeader,
-      base::size(TrustTokensRequestHeaders()));
+      std::size(TrustTokensRequestHeaders()));
 }
 
 TEST_F(TrustTokenRequestHelperFactoryTest,
@@ -269,8 +272,11 @@ TEST_F(TrustTokenRequestHelperFactoryTest, RespectsAuthorizer) {
   store.OnStoreReady(TrustTokenStore::CreateForTesting());
   NoopTrustTokenKeyCommitmentGetter getter;
 
-  TrustTokenRequestHelperFactory(&store, &getter,
-                                 base::BindRepeating([]() { return false; }))
+  TrustTokenRequestHelperFactory(
+      &store, &getter,
+      base::BindRepeating(
+          []() -> mojom::NetworkContextClient* { return nullptr; }),
+      base::BindRepeating([]() { return false; }))
       .CreateTrustTokenHelperForRequest(
           suitable_request(), suitable_signing_params(),
           base::BindLambdaForTesting(

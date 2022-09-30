@@ -16,7 +16,7 @@
 #include "src/shaders/SkColorFilterShader.h"
 
 #if SK_SUPPORT_GPU
-#include "src/gpu/GrFragmentProcessor.h"
+#include "src/gpu/ganesh/GrFragmentProcessor.h"
 #endif
 
 SkColorFilterShader::SkColorFilterShader(sk_sp<SkShader> shader,
@@ -65,12 +65,11 @@ bool SkColorFilterShader::onAppendStages(const SkStageRec& rec) const {
 skvm::Color SkColorFilterShader::onProgram(skvm::Builder* p,
                                            skvm::Coord device, skvm::Coord local, skvm::Color paint,
                                            const SkMatrixProvider& matrices, const SkMatrix* localM,
-                                           SkFilterQuality quality, const SkColorInfo& dst,
+                                           const SkColorInfo& dst,
                                            skvm::Uniforms* uniforms, SkArenaAlloc* alloc) const {
     // Run the shader.
     skvm::Color c = as_SB(fShader)->program(p, device,local, paint,
-                                            matrices,localM,
-                                            quality,dst,
+                                            matrices,localM, dst,
                                             uniforms,alloc);
     if (!c) {
         return {};
@@ -85,7 +84,7 @@ skvm::Color SkColorFilterShader::onProgram(skvm::Builder* p,
     }
 
     // Finally run that through the color filter.
-    return fFilter->program(p,c, dst.colorSpace(), uniforms,alloc);
+    return fFilter->program(p,c, dst, uniforms,alloc);
 }
 
 #if SK_SUPPORT_GPU
@@ -102,11 +101,11 @@ std::unique_ptr<GrFragmentProcessor> SkColorFilterShader::asFragmentProcessor(
     // TODO I guess, but it shouldn't come up as used today.
     SkASSERT(fAlpha == 1.0f);
 
-    auto t = fFilter->asFragmentProcessor(std::move(shaderFP), args.fContext,
-                                          *args.fDstColorInfo);
+    auto [success, fp] = fFilter->asFragmentProcessor(std::move(shaderFP), args.fContext,
+                                                      *args.fDstColorInfo);
     // If the filter FP could not be created, we still want to return the shader FP, so checking
     // success can be omitted here.
-    return std::get<1>(std::move(t));
+    return std::move(fp);
 }
 #endif
 

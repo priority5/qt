@@ -11,6 +11,7 @@
 #include "base/bits.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/display/util/display_util.h"
 #include "ui/display/util/edid_parser.h"
@@ -19,8 +20,8 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector3d_f.h"
 #include "ui/gfx/x/randr.h"
-#include "ui/gfx/x/x11.h"
 #include "ui/gfx/x/x11_atom_cache.h"
+#include "ui/gfx/x/xproto_util.h"
 
 namespace ui {
 
@@ -53,8 +54,8 @@ void ClipWorkArea(std::vector<display::Display>* displays,
                   float scale) {
   x11::Window x_root_window = ui::GetX11RootWindow();
 
-  std::vector<int> value;
-  if (!ui::GetIntArrayProperty(x_root_window, "_NET_WORKAREA", &value) ||
+  std::vector<int32_t> value;
+  if (!GetArrayProperty(x_root_window, x11::GetAtom("_NET_WORKAREA"), &value) ||
       value.size() < 4) {
     return;
   }
@@ -138,14 +139,10 @@ int DefaultBitsPerComponent() {
 // Get the EDID data from the |output| and stores to |edid|.
 std::vector<uint8_t> GetEDIDProperty(x11::RandR* randr,
                                      x11::RandR::Output output) {
-  auto future = randr->GetOutputProperty({
-      /*.output =*/ output,
-      /*.property =*/ gfx::GetAtom(kRandrEdidProperty),
-      x11::Atom{},
-      0,
-      /*.long_length =*/ 128,
-      0, 0
-  });
+  auto future = randr->GetOutputProperty(x11::RandR::GetOutputPropertyRequest{
+      .output = output,
+      .property = x11::GetAtom(kRandrEdidProperty),
+      .long_length = 128});
   auto response = future.Sync();
   std::vector<uint8_t> edid;
   if (response && response->format == 8 && response->type != x11::Atom::None)
@@ -203,7 +200,7 @@ std::vector<display::Display> BuildDisplaysFromXRandRInfo(
   DCHECK_GE(version, kMinVersionXrandr);
   auto* connection = x11::Connection::Get();
   auto& randr = connection->randr();
-  auto x_root_window = static_cast<x11::Window>(ui::GetX11RootWindow());
+  auto x_root_window = ui::GetX11RootWindow();
   std::vector<display::Display> displays;
   auto resources = randr.GetScreenResourcesCurrent({x_root_window}).Sync();
   if (!resources) {
@@ -252,7 +249,7 @@ std::vector<display::Display> BuildDisplaysFromXRandRInfo(
         GetEDIDProperty(&randr, static_cast<x11::RandR::Output>(output_id)));
     auto output_32 = static_cast<uint32_t>(output_id);
     int64_t display_id =
-        output_32 > 0xff ? 0 : edid_parser.GetDisplayId(output_32);
+        output_32 > 0xff ? 0 : edid_parser.GetIndexBasedDisplayId(output_32);
     // It isn't ideal, but if we can't parse the EDID data, fall back on the
     // display number.
     if (!display_id)
@@ -287,6 +284,10 @@ std::vector<display::Display> BuildDisplaysFromXRandRInfo(
 
     if (is_primary_display)
       explicit_primary_display_index = displays.size();
+
+    const std::string name(output_info->name.begin(), output_info->name.end());
+    if (base::StartsWith(name, "eDP") || base::StartsWith(name, "LVDS"))
+      display::Display::SetInternalDisplayId(display_id);
 
     auto monitor_iter =
         output_to_monitor.find(static_cast<x11::RandR::Output>(output_id));
@@ -333,10 +334,9 @@ std::vector<display::Display> BuildDisplaysFromXRandRInfo(
 }
 
 base::TimeDelta GetPrimaryDisplayRefreshIntervalFromXrandr() {
-  constexpr base::TimeDelta kDefaultInterval =
-      base::TimeDelta::FromSecondsD(1. / 60);
+  constexpr base::TimeDelta kDefaultInterval = base::Seconds(1. / 60);
   x11::RandR randr = x11::Connection::Get()->randr();
-  auto root = static_cast<x11::Window>(ui::GetX11RootWindow());
+  auto root = ui::GetX11RootWindow();
   auto resources = randr.GetScreenResourcesCurrent({root}).Sync();
   if (!resources)
     return kDefaultInterval;
@@ -377,7 +377,7 @@ base::TimeDelta GetPrimaryDisplayRefreshIntervalFromXrandr() {
     if (refresh_rate == 0)
       continue;
 
-    return base::TimeDelta::FromSecondsD(1. / refresh_rate);
+    return base::Seconds(1. / refresh_rate);
   }
   return kDefaultInterval;
 }

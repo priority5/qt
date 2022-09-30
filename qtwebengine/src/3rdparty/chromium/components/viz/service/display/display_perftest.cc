@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <limits>
 #include <vector>
 
 #include "base/bind.h"
@@ -57,24 +58,31 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
  public:
   RemoveOverdrawQuadPerfTest()
       : timer_(kWarmupRuns,
-               base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+               base::Milliseconds(kTimeLimitMillis),
                kTimeCheckInterval),
         task_runner_(base::MakeRefCounted<base::NullTaskRunner>()) {}
 
   std::unique_ptr<Display> CreateDisplay() {
     FrameSinkId frame_sink_id(3, 3);
 
-    auto scheduler = std::make_unique<DisplayScheduler>(&begin_frame_source_,
-                                                        task_runner_.get(), 1);
+    auto scheduler = std::make_unique<DisplayScheduler>(
+        &begin_frame_source_, task_runner_.get(), PendingSwapParams(1));
 
     std::unique_ptr<FakeOutputSurface> output_surface =
         FakeOutputSurface::Create3d();
 
     auto overlay_processor = std::make_unique<OverlayProcessorStub>();
+    // Normally display will need to take ownership of a
+    // gpu::GpuTaskschedulerhelper in order to keep it alive to share between
+    // the output surface and the overlay processor. In this case the overlay
+    // processor is a stub and the output surface is test only as well, so there
+    // is no need to pass in a real gpu::GpuTaskSchedulerHelper.
+    // TODO(weiliangc): Figure out a better way to set up test without passing
+    // in nullptr.
     auto display = std::make_unique<Display>(
         &bitmap_manager_, RendererSettings(), &debug_settings_, frame_sink_id,
-        std::move(output_surface), std::move(overlay_processor),
-        std::move(scheduler), task_runner_.get());
+        nullptr /* gpu::GpuTaskSchedulerHelper */, std::move(output_surface),
+        std::move(overlay_processor), std::move(scheduler), task_runner_.get());
     return display;
   }
 
@@ -82,7 +90,6 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
   SharedQuadState* CreateSharedQuadState(AggregatedRenderPass* render_pass,
                                          gfx::Rect rect) {
     gfx::Transform quad_transform = gfx::Transform();
-    bool is_clipped = false;
     bool are_contents_opaque = true;
     float opacity = 1.f;
     int sorting_context_id = 65536;
@@ -90,8 +97,9 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
 
     SharedQuadState* state = render_pass->CreateAndAppendSharedQuadState();
     state->SetAll(quad_transform, rect, rect,
-                  /*rounded_corner_bounds=*/gfx::RRectF(), rect, is_clipped,
-                  are_contents_opaque, opacity, blend_mode, sorting_context_id);
+                  /*mask_filter_info=*/gfx::MaskFilterInfo(),
+                  /*clip_rect=*/absl::nullopt, are_contents_opaque, opacity,
+                  blend_mode, sorting_context_id);
     return state;
   }
 
@@ -100,7 +108,7 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
                    int quad_height,
                    int quad_width) {
     bool needs_blending = false;
-    ResourceId resource_id = 1;
+    ResourceId resource_id(1);
     bool premultiplied_alpha = true;
     gfx::PointF uv_top_left(0, 0);
     gfx::PointF uv_bottom_right(1, 1);

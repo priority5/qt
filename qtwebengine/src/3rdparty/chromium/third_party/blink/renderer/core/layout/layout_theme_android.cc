@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/layout/layout_theme_android.h"
 
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "ui/base/ui_base_features.h"
 
 namespace blink {
@@ -19,17 +20,20 @@ LayoutTheme& LayoutTheme::NativeTheme() {
 
 LayoutThemeAndroid::~LayoutThemeAndroid() {}
 
-String LayoutThemeAndroid::ExtraDefaultStyleSheet() {
-  String extra_sheet = LayoutThemeMobile::ExtraDefaultStyleSheet();
-  if (features::IsFormControlsRefreshEnabled())
-    return extra_sheet;
+Color LayoutThemeAndroid::PlatformActiveSelectionBackgroundColor(
+    mojom::blink::ColorScheme color_scheme) const {
+  return color_scheme == mojom::blink::ColorScheme::kDark
+             ? 0xFF99C8FF
+             : LayoutThemeMobile::PlatformActiveSelectionBackgroundColor(
+                   color_scheme);
+}
 
-  // "32px" comes from
-  // 2 * -LayoutThemeDefault::SliderTickOffsetFromTrackCenter().
-  return extra_sheet + R"CSS(
-input[type="range" i]:-internal-has-datalist::-webkit-slider-container {
-    min-block-size: 32px;
-})CSS";
+Color LayoutThemeAndroid::PlatformActiveSelectionForegroundColor(
+    mojom::blink::ColorScheme color_scheme) const {
+  return color_scheme == mojom::blink::ColorScheme::kDark
+             ? 0xFF3B3B3B
+             : LayoutThemeMobile::PlatformActiveSelectionForegroundColor(
+                   color_scheme);
 }
 
 }  // namespace blink

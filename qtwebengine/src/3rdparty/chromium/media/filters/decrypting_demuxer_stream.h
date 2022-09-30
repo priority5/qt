@@ -6,9 +6,10 @@
 #define MEDIA_FILTERS_DECRYPTING_DEMUXER_STREAM_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequence_checker.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/callback_registry.h"
 #include "media/base/cdm_context.h"
@@ -17,9 +18,10 @@
 #include "media/base/pipeline_status.h"
 #include "media/base/video_decoder_config.h"
 #include "media/base/waiting.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
-class SingleThreadTaskRunner;
+class SequencedTaskRunner;
 }
 
 namespace media {
@@ -35,9 +37,12 @@ class MediaLog;
 class MEDIA_EXPORT DecryptingDemuxerStream : public DemuxerStream {
  public:
   DecryptingDemuxerStream(
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
       MediaLog* media_log,
       const WaitingCB& waiting_cb);
+
+  DecryptingDemuxerStream(const DecryptingDemuxerStream&) = delete;
+  DecryptingDemuxerStream& operator=(const DecryptingDemuxerStream&) = delete;
 
   // Cancels all pending operations immediately and fires all pending callbacks.
   ~DecryptingDemuxerStream() override;
@@ -61,9 +66,12 @@ class MEDIA_EXPORT DecryptingDemuxerStream : public DemuxerStream {
   AudioDecoderConfig audio_decoder_config() override;
   VideoDecoderConfig video_decoder_config() override;
   Type type() const override;
-  Liveness liveness() const override;
+  StreamLiveness liveness() const override;
   void EnableBitstreamConverter() override;
   bool SupportsConfigChanges() override;
+
+  // Returns whether the stream has clear lead.
+  bool HasClearLead() const;
 
  private:
   // See this link for a detailed state diagram: http://shortn/_1nXgoVIrps
@@ -143,8 +151,11 @@ class MEDIA_EXPORT DecryptingDemuxerStream : public DemuxerStream {
   void CompletePendingDecrypt(Decryptor::Status status);
   void CompleteWaitingForDecryptionKey();
 
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  MediaLog* const media_log_;
+  void LogMetadata();
+
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+  SEQUENCE_CHECKER(sequence_checker_);
+  const raw_ptr<MediaLog> media_log_;
   WaitingCB waiting_cb_;
 
   State state_ = kUninitialized;
@@ -154,12 +165,14 @@ class MEDIA_EXPORT DecryptingDemuxerStream : public DemuxerStream {
   base::OnceClosure reset_cb_;
 
   // Pointer to the input demuxer stream that will feed us encrypted buffers.
-  DemuxerStream* demuxer_stream_ = nullptr;
+  raw_ptr<DemuxerStream> demuxer_stream_ = nullptr;
 
   AudioDecoderConfig audio_config_;
   VideoDecoderConfig video_config_;
 
-  Decryptor* decryptor_ = nullptr;
+  raw_ptr<Decryptor> decryptor_ = nullptr;
+
+  absl::optional<bool> has_clear_lead_;
 
   // The buffer returned by the demuxer that needs to be decrypted.
   scoped_refptr<media::DecoderBuffer> pending_buffer_to_decrypt_;
@@ -174,8 +187,6 @@ class MEDIA_EXPORT DecryptingDemuxerStream : public DemuxerStream {
   std::unique_ptr<CallbackRegistration> event_cb_registration_;
 
   base::WeakPtrFactory<DecryptingDemuxerStream> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(DecryptingDemuxerStream);
 };
 
 }  // namespace media

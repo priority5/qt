@@ -4,6 +4,7 @@
 
 #include "content/web_test/browser/web_test_shell_platform_delegate.h"
 
+#include "base/containers/contains.h"
 #import "base/mac/foundation_util.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
 #include "content/public/browser/render_frame_host.h"
@@ -89,16 +90,16 @@ void WebTestShellPlatformDelegate::SetAddressBarURL(Shell* shell,
 }
 
 void WebTestShellPlatformDelegate::SetTitle(Shell* shell,
-                                            const base::string16& title) {
+                                            const std::u16string& title) {
   if (!IsHeadless()) {
     ShellPlatformDelegate::SetTitle(shell, title);
     return;
   }
 }
 
-void WebTestShellPlatformDelegate::RenderViewReady(Shell* shell) {
+void WebTestShellPlatformDelegate::MainFrameCreated(Shell* shell) {
   if (!IsHeadless()) {
-    ShellPlatformDelegate::RenderViewReady(shell);
+    ShellPlatformDelegate::MainFrameCreated(shell);
     return;
   }
 
@@ -164,25 +165,26 @@ void WebTestShellPlatformDelegate::ActivateContents(Shell* shell,
   for (Shell* window : Shell::windows()) {
     if (window != shell) {
       WebContents* other_top_contents = window->web_contents();
-      RenderWidgetHost* other_main_widget =
-          other_top_contents->GetMainFrame()->GetView()->GetRenderWidgetHost();
-      other_main_widget->Blur();
-      other_main_widget->SetActive(false);
+      auto* other_rwhv_mac = static_cast<RenderWidgetHostViewMac*>(
+          other_top_contents->GetMainFrame()->GetView());
+      other_rwhv_mac->OnFirstResponderChanged(false);
+      other_rwhv_mac->GetRenderWidgetHost()->SetActive(false);
     }
   }
 
-  RenderWidgetHost* main_widget =
-      top_contents->GetMainFrame()->GetView()->GetRenderWidgetHost();
-  main_widget->Focus();
-  main_widget->SetActive(true);
+  auto* top_rwhv_mac = static_cast<RenderWidgetHostViewMac*>(
+      top_contents->GetMainFrame()->GetView());
+  top_rwhv_mac->OnFirstResponderChanged(true);
+  top_rwhv_mac->GetRenderWidgetHost()->SetActive(true);
   activated_headless_shell_ = shell;
 }
 
-void WebTestShellPlatformDelegate::DidNavigateMainFramePostCommit(
+void WebTestShellPlatformDelegate::DidNavigatePrimaryMainFramePostCommit(
     Shell* shell,
     WebContents* contents) {
   if (!IsHeadless()) {
-    ShellPlatformDelegate::DidNavigateMainFramePostCommit(shell, contents);
+    ShellPlatformDelegate::DidNavigatePrimaryMainFramePostCommit(shell,
+                                                                 contents);
     return;
   }
 

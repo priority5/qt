@@ -5,10 +5,13 @@
 #include "base/mac/mac_util.h"
 
 #import <Cocoa/Cocoa.h>
+#include <CoreServices/CoreServices.h>
 #import <IOKit/IOKitLib.h>
 #include <errno.h>
 #include <stddef.h>
 #include <string.h>
+#include <sys/sysctl.h>
+#include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/xattr.h>
 
@@ -17,65 +20,96 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_logging.h"
-#include "base/mac/rosetta.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_ioobject.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
 
-namespace base {
-namespace mac {
+namespace base::mac {
 
 namespace {
 
-// Looks into Shared File Lists corresponding to Login Items for the item
-// representing the current application.  If such an item is found, returns a
-// retained reference to it. Caller is responsible for releasing the reference.
-LSSharedFileListItemRef GetLoginItemForApp() {
-  ScopedCFTypeRef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
-      NULL, kLSSharedFileListSessionLoginItems, NULL));
+class LoginItemsFileList {
+ public:
+  LoginItemsFileList() = default;
+  LoginItemsFileList(const LoginItemsFileList&) = delete;
+  LoginItemsFileList& operator=(const LoginItemsFileList&) = delete;
+  ~LoginItemsFileList() = default;
 
-  if (!login_items.get()) {
-    DLOG(ERROR) << "Couldn't get a Login Items list.";
-    return NULL;
+  [[nodiscard]] bool Initialize() {
+    DCHECK(!login_items_.get()) << __func__ << " called more than once.";
+    // The LSSharedFileList suite of functions has been deprecated. Instead,
+    // a LoginItems helper should be registered with SMLoginItemSetEnabled()
+    // https://crbug.com/1154377.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    login_items_.reset(LSSharedFileListCreate(
+        nullptr, kLSSharedFileListSessionLoginItems, nullptr));
+#pragma clang diagnostic pop
+    DLOG_IF(ERROR, !login_items_.get()) << "Couldn't get a Login Items list.";
+    return login_items_.get();
   }
 
-  base::scoped_nsobject<NSArray> login_items_array(
-      CFToNSCast(LSSharedFileListCopySnapshot(login_items, NULL)));
+  LSSharedFileListRef GetLoginFileList() {
+    DCHECK(login_items_.get()) << "Initialize() failed or not called.";
+    return login_items_;
+  }
 
-  NSURL* url = [NSURL fileURLWithPath:[base::mac::MainBundle() bundlePath]];
+  // Looks into Shared File Lists corresponding to Login Items for the item
+  // representing the specified bundle.  If such an item is found, returns a
+  // retained reference to it. Caller is responsible for releasing the
+  // reference.
+  ScopedCFTypeRef<LSSharedFileListItemRef> GetLoginItemForApp(NSURL* url) {
+    DCHECK(login_items_.get()) << "Initialize() failed or not called.";
 
-  for(NSUInteger i = 0; i < [login_items_array count]; ++i) {
-    LSSharedFileListItemRef item =
-        reinterpret_cast<LSSharedFileListItemRef>(login_items_array[i]);
-    base::ScopedCFTypeRef<CFErrorRef> error;
-    CFURLRef item_url_ref =
-        LSSharedFileListItemCopyResolvedURL(item, 0, error.InitializeInto());
+#pragma clang diagnostic push  // https://crbug.com/1154377
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    base::scoped_nsobject<NSArray> login_items_array(
+        CFToNSCast(LSSharedFileListCopySnapshot(login_items_, nullptr)));
+#pragma clang diagnostic pop
 
-    // This function previously used LSSharedFileListItemResolve(), which could
-    // return a NULL URL even when returning no error. This caused
-    // <https://crbug.com/760989>. It's not clear one way or the other whether
-    // LSSharedFileListItemCopyResolvedURL() shares this behavior, so this check
-    // remains in place.
-    if (!error && item_url_ref) {
-      ScopedCFTypeRef<CFURLRef> item_url(item_url_ref);
-      if (CFEqual(item_url, url)) {
-        CFRetain(item);
-        return item;
+    for (id login_item in login_items_array.get()) {
+      LSSharedFileListItemRef item =
+          reinterpret_cast<LSSharedFileListItemRef>(login_item);
+#pragma clang diagnostic push  // https://crbug.com/1154377
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+      // kLSSharedFileListDoNotMountVolumes is used so that we don't trigger
+      // mounting when it's not expected by a user. Just listing the login
+      // items should not cause any side-effects.
+      ScopedCFTypeRef<CFURLRef> item_url(LSSharedFileListItemCopyResolvedURL(
+          item, kLSSharedFileListDoNotMountVolumes, nullptr));
+#pragma clang diagnostic pop
+
+      if (item_url && CFEqual(item_url, url)) {
+        return ScopedCFTypeRef<LSSharedFileListItemRef>(
+            item, base::scoped_policy::RETAIN);
       }
     }
+
+    return ScopedCFTypeRef<LSSharedFileListItemRef>();
   }
 
-  return NULL;
-}
+  ScopedCFTypeRef<LSSharedFileListItemRef> GetLoginItemForMainApp() {
+    NSURL* url = [NSURL fileURLWithPath:[base::mac::MainBundle() bundlePath]];
+    return GetLoginItemForApp(url);
+  }
+
+ private:
+  ScopedCFTypeRef<LSSharedFileListRef> login_items_;
+};
 
 bool IsHiddenLoginItem(LSSharedFileListItemRef item) {
+#pragma clang diagnostic push  // https://crbug.com/1154377
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   ScopedCFTypeRef<CFBooleanRef> hidden(reinterpret_cast<CFBooleanRef>(
       LSSharedFileListItemCopyProperty(item,
           reinterpret_cast<CFStringRef>(kLSSharedFileListLoginItemHidden))));
+#pragma clang diagnostic pop
 
   return hidden && hidden == kCFBooleanTrue;
 }
@@ -120,30 +154,13 @@ CGColorSpaceRef GetSystemColorSpace() {
   return g_system_color_space;
 }
 
-bool GetFileBackupExclusion(const FilePath& file_path) {
-  return CSBackupIsItemExcluded(FilePathToCFURL(file_path), nullptr);
-}
-
-bool SetFileBackupExclusion(const FilePath& file_path) {
-  // When excludeByPath is true the application must be running with root
-  // privileges (admin for 10.6 and earlier) but the URL does not have to
-  // already exist. When excludeByPath is false the URL must already exist but
-  // can be used in non-root (or admin as above) mode. We use false so that
-  // non-root (or admin) users don't get their TimeMachine drive filled up with
-  // unnecessary backups.
-  OSStatus os_err = CSBackupSetItemExcluded(FilePathToCFURL(file_path),
-                                            /*exclude=*/TRUE,
-                                            /*excludeByPath=*/FALSE);
-  if (os_err != noErr) {
-    OSSTATUS_DLOG(WARNING, os_err)
-        << "Failed to set backup exclusion for file '"
-        << file_path.value().c_str() << "'";
-  }
-  return os_err == noErr;
-}
-
 bool CheckLoginItemStatus(bool* is_hidden) {
-  ScopedCFTypeRef<LSSharedFileListItemRef> item(GetLoginItemForApp());
+  LoginItemsFileList login_items;
+  if (!login_items.Initialize())
+    return false;
+
+  base::ScopedCFTypeRef<LSSharedFileListItemRef> item(
+      login_items.GetLoginItemForMainApp());
   if (!item.get())
     return false;
 
@@ -154,35 +171,43 @@ bool CheckLoginItemStatus(bool* is_hidden) {
 }
 
 void AddToLoginItems(bool hide_on_startup) {
-  ScopedCFTypeRef<LSSharedFileListItemRef> item(GetLoginItemForApp());
+  AddToLoginItems(base::mac::MainBundlePath(), hide_on_startup);
+}
+
+void AddToLoginItems(const FilePath& app_bundle_file_path,
+                     bool hide_on_startup) {
+  LoginItemsFileList login_items;
+  if (!login_items.Initialize())
+    return;
+
+  NSURL* app_bundle_url = base::mac::FilePathToNSURL(app_bundle_file_path);
+  base::ScopedCFTypeRef<LSSharedFileListItemRef> item(
+      login_items.GetLoginItemForApp(app_bundle_url));
+
   if (item.get() && (IsHiddenLoginItem(item) == hide_on_startup)) {
     return;  // Already is a login item with required hide flag.
   }
 
-  ScopedCFTypeRef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
-      NULL, kLSSharedFileListSessionLoginItems, NULL));
-
-  if (!login_items.get()) {
-    DLOG(ERROR) << "Couldn't get a Login Items list.";
-    return;
-  }
-
   // Remove the old item, it has wrong hide flag, we'll create a new one.
   if (item.get()) {
-    LSSharedFileListItemRemove(login_items, item);
+#pragma clang diagnostic push  // https://crbug.com/1154377
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LSSharedFileListItemRemove(login_items.GetLoginFileList(), item);
+#pragma clang diagnostic pop
   }
 
-  NSURL* url = [NSURL fileURLWithPath:[base::mac::MainBundle() bundlePath]];
-
+#pragma clang diagnostic push  // https://crbug.com/1154377
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   BOOL hide = hide_on_startup ? YES : NO;
   NSDictionary* properties =
       @{(NSString*)kLSSharedFileListLoginItemHidden : @(hide) };
 
-  ScopedCFTypeRef<LSSharedFileListItemRef> new_item;
-  new_item.reset(LSSharedFileListInsertItemURL(
-      login_items, kLSSharedFileListItemLast, NULL, NULL,
-      reinterpret_cast<CFURLRef>(url),
-      reinterpret_cast<CFDictionaryRef>(properties), NULL));
+  ScopedCFTypeRef<LSSharedFileListItemRef> new_item(
+      LSSharedFileListInsertItemURL(
+          login_items.GetLoginFileList(), kLSSharedFileListItemLast, nullptr,
+          nullptr, reinterpret_cast<CFURLRef>(app_bundle_url),
+          reinterpret_cast<CFDictionaryRef>(properties), nullptr));
+#pragma clang diagnostic pop
 
   if (!new_item.get()) {
     DLOG(ERROR) << "Couldn't insert current app into Login Items list.";
@@ -190,19 +215,24 @@ void AddToLoginItems(bool hide_on_startup) {
 }
 
 void RemoveFromLoginItems() {
-  ScopedCFTypeRef<LSSharedFileListItemRef> item(GetLoginItemForApp());
+  RemoveFromLoginItems(base::mac::MainBundlePath());
+}
+
+void RemoveFromLoginItems(const FilePath& app_bundle_file_path) {
+  LoginItemsFileList login_items;
+  if (!login_items.Initialize())
+    return;
+
+  NSURL* app_bundle_url = base::mac::FilePathToNSURL(app_bundle_file_path);
+  base::ScopedCFTypeRef<LSSharedFileListItemRef> item(
+      login_items.GetLoginItemForApp(app_bundle_url));
   if (!item.get())
     return;
 
-  ScopedCFTypeRef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
-      NULL, kLSSharedFileListSessionLoginItems, NULL));
-
-  if (!login_items.get()) {
-    DLOG(ERROR) << "Couldn't get a Login Items list.";
-    return;
-  }
-
-  LSSharedFileListItemRemove(login_items, item);
+#pragma clang diagnostic push  // https://crbug.com/1154377
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  LSSharedFileListItemRemove(login_items.GetLoginFileList(), item);
+#pragma clang diagnostic pop
 }
 
 bool WasLaunchedAsLoginOrResumeItem() {
@@ -257,7 +287,12 @@ bool WasLaunchedAsHiddenLoginItem() {
   if (!WasLaunchedAsLoginOrResumeItem())
     return false;
 
-  ScopedCFTypeRef<LSSharedFileListItemRef> item(GetLoginItemForApp());
+  LoginItemsFileList login_items;
+  if (!login_items.Initialize())
+    return false;
+
+  base::ScopedCFTypeRef<LSSharedFileListItemRef> item(
+      login_items.GetLoginItemForMainApp());
   if (!item.get()) {
     // OS X can launch items for the resume feature.
     return false;
@@ -334,9 +369,6 @@ int MacOSVersionInternal() {
   // correspondence between Darwin's major version numbers and macOS major
   // version numbers.
   int macos_major_version = darwin_major_version - 9;
-  DLOG_IF(WARNING, darwin_major_version > 20)
-      << "Assuming Darwin " << base::NumberToString(darwin_major_version)
-      << " is macOS " << base::NumberToString(macos_major_version);
 
   return macos_major_version * 100;
 }
@@ -351,6 +383,21 @@ int MacOSVersion() {
 }
 
 }  // namespace internal
+
+namespace {
+
+#if defined(ARCH_CPU_X86_64)
+// https://developer.apple.com/documentation/apple_silicon/about_the_rosetta_translation_environment#3616845
+bool ProcessIsTranslated() {
+  int ret = 0;
+  size_t size = sizeof(ret);
+  if (sysctlbyname("sysctl.proc_translated", &ret, &size, nullptr, 0) == -1)
+    return false;
+  return ret;
+}
+#endif  // ARCH_CPU_X86_64
+
+}  // namespace
 
 CPUType GetCPUType() {
 #if defined(ARCH_CPU_ARM64)
@@ -394,10 +441,10 @@ bool ParseModelIdentifier(const std::string& ident,
     return false;
   int32_t major_tmp, minor_tmp;
   std::string::const_iterator begin = ident.begin();
-  if (!StringToInt(
-          StringPiece(begin + number_loc, begin + comma_loc), &major_tmp) ||
-      !StringToInt(
-          StringPiece(begin + comma_loc + 1, ident.end()), &minor_tmp))
+  if (!StringToInt(MakeStringPiece(begin + number_loc, begin + comma_loc),
+                   &major_tmp) ||
+      !StringToInt(MakeStringPiece(begin + comma_loc + 1, ident.end()),
+                   &minor_tmp))
     return false;
   *type = ident.substr(0, number_loc);
   *major = major_tmp;
@@ -439,5 +486,4 @@ std::string GetPlatformSerialNumber() {
   return base::SysCFStringRefToUTF8(serial_number_cfstring);
 }
 
-}  // namespace mac
-}  // namespace base
+}  // namespace base::mac

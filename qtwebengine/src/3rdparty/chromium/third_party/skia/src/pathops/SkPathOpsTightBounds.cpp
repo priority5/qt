@@ -11,10 +11,7 @@
 bool TightBounds(const SkPath& path, SkRect* result) {
     SkRect moveBounds = { SK_ScalarMax, SK_ScalarMax, SK_ScalarMin, SK_ScalarMin };
     bool wellBehaved = true;
-    for (auto t : SkPathPriv::Iterate(path)) {
-        auto verb = std::get<0>(t);
-        auto pts = std::get<1>(t);
-        auto w = std::get<2>(t);
+    for (auto [verb, pts, w] : SkPathPriv::Iterate(path)) {
         switch (verb) {
             case SkPathVerb::kMove:
                 moveBounds.fLeft = std::min(moveBounds.fLeft, pts[0].fX);

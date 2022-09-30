@@ -4,7 +4,6 @@
 
 #include <stdint.h>
 
-#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/paint/paint_image.h"
@@ -20,7 +19,7 @@
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
 namespace cc {
 namespace {
@@ -58,7 +57,7 @@ SkColor kCSSTestColors[] = {
     0x00000000   // transparent
 };
 
-const int kCSSTestColorsCount = base::size(kCSSTestColors);
+const int kCSSTestColorsCount = std::size(kCSSTestColors);
 
 using RenderPassOptions = uint32_t;
 const uint32_t kUseMasks = 1 << 0;
@@ -123,7 +122,7 @@ class LayerTreeHostBlendingPixelTest
     gfx::Size bounds(width, height);
     backdrop_client_.set_bounds(bounds);
     backdrop_client_.add_draw_image(backing_store->makeImageSnapshot(),
-                                    gfx::Point(), PaintFlags());
+                                    gfx::Point());
     scoped_refptr<FakePictureLayer> layer =
         FakePictureLayer::Create(&backdrop_client_);
     layer->SetIsDrawable(true);
@@ -146,8 +145,7 @@ class LayerTreeHostBlendingPixelTest
         SkRect::MakeXYWH(1, 0, bounds.width() - 1, bounds.height()), paint);
 
     mask_client_.set_bounds(bounds);
-    mask_client_.add_draw_image(surface->makeImageSnapshot(), gfx::Point(),
-                                PaintFlags());
+    mask_client_.add_draw_image(surface->makeImageSnapshot(), gfx::Point());
 
     scoped_refptr<FakePictureLayer> mask =
         FakePictureLayer::Create(&mask_client_);
@@ -202,7 +200,7 @@ class LayerTreeHostBlendingPixelTest
 
     SkBitmap expected;
     expected.allocN32Pixels(width, height);
-    SkCanvas canvas(expected);
+    SkCanvas canvas(expected, SkSurfaceProps{});
     canvas.clear(SK_ColorWHITE);
     canvas.drawImage(surface->makeImageSnapshot(), 0, 0);
 
@@ -263,14 +261,16 @@ class LayerTreeHostBlendingPixelTest
 std::vector<RasterTestConfig> const kTestCases = {
     {viz::RendererType::kSoftware, TestRasterType::kBitmap},
 #if BUILDFLAG(ENABLE_GL_BACKEND_TESTS)
+#if BUILDFLAG(ENABLE_GL_RENDERER_TESTS)
     {viz::RendererType::kGL, TestRasterType::kZeroCopy},
+#endif  // BUILDFLAG(ENABLE_GL_RENDERER_TESTS)
     {viz::RendererType::kSkiaGL, TestRasterType::kGpu},
 #endif  // BUILDFLAG(ENABLE_GL_BACKEND_TESTS)
 #if BUILDFLAG(ENABLE_VULKAN_BACKEND_TESTS)
-    {viz::RendererType::kSkiaVk, TestRasterType::kOop},
+    {viz::RendererType::kSkiaVk, TestRasterType::kGpu},
 #endif  // BUILDFLAG(ENABLE_VULKAN_BACKEND_TESTS)
 #if BUILDFLAG(ENABLE_DAWN_BACKEND_TESTS)
-    {viz::RendererType::kSkiaDawn, TestRasterType::kOop},
+    {viz::RendererType::kSkiaDawn, TestRasterType::kGpu},
 #endif  // BUILDFLAG(ENABLE_DAWN_BACKEND_TESTS)
 };
 
@@ -306,7 +306,7 @@ TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithRoot) {
 
   SkBitmap expected;
   expected.allocN32Pixels(kRootWidth, kRootHeight);
-  SkCanvas canvas(expected);
+  SkCanvas canvas(expected, SkSurfaceProps{});
   canvas.drawColor(kCSSOrange);
   SkPaint paint;
   paint.setBlendMode(current_blend_mode());
@@ -337,7 +337,7 @@ TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithBackdropFilter) {
 
   SkBitmap expected;
   expected.allocN32Pixels(kRootWidth, kRootHeight);
-  SkCanvas canvas(expected);
+  SkCanvas canvas(expected, SkSurfaceProps{});
   SkiaPaintCanvas paint_canvas(&canvas);
   PaintFlags grayscale;
   grayscale.setColor(kCSSOrange);
@@ -379,7 +379,7 @@ TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithTransparent) {
 
   SkBitmap expected;
   expected.allocN32Pixels(kRootWidth, kRootHeight);
-  SkCanvas canvas(expected);
+  SkCanvas canvas(expected, SkSurfaceProps{});
   canvas.drawColor(kCSSOrange);
   SkPaint paint;
   paint.setBlendMode(current_blend_mode());
@@ -464,4 +464,4 @@ TEST_P(LayerTreeHostBlendingPixelTest,
 }  // namespace
 }  // namespace cc
 
-#endif  // OS_ANDROID
+#endif  // BUILDFLAG(IS_ANDROID)

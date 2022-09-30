@@ -4,12 +4,14 @@
 
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 
+#include <random>
+
 #include "base/check.h"
 #include "base/compiler_specific.h"
 #include "base/no_destructor.h"
-#include "base/optional.h"
-#include "base/rand_util.h"
 #include "base/synchronization/atomic_flag.h"
+#include "base/threading/sequence_local_storage_slot.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings_provider.h"
 
 namespace blink {
@@ -76,20 +78,10 @@ class ThreadsafeSettingsWrapper {
   }
 
  private:
-  base::Optional<IdentifiabilityStudySettings> initialized_settings_;
+  absl::optional<IdentifiabilityStudySettings> initialized_settings_;
   const IdentifiabilityStudySettings default_settings_;
   base::AtomicFlag initialized_;
 };
-
-bool DecideSample(int sample_rate) {
-  if (sample_rate == 0)
-    return false;
-
-  if (sample_rate == 1)
-    return true;
-
-  return base::RandGenerator(sample_rate) == 0;
-}
 
 }  // namespace
 
@@ -125,7 +117,13 @@ bool IdentifiabilityStudySettings::IsActive() const {
   return is_enabled_;
 }
 
-bool IdentifiabilityStudySettings::IsSurfaceAllowed(
+bool IdentifiabilityStudySettings::ShouldSampleWebFeature(
+    mojom::WebFeature feature) const {
+  return ShouldSampleSurface(IdentifiableSurface::FromTypeAndToken(
+      IdentifiableSurface::Type::kWebFeature, feature));
+}
+
+bool IdentifiabilityStudySettings::ShouldSampleSurface(
     IdentifiableSurface surface) const {
   if (LIKELY(!is_enabled_))
     return false;
@@ -136,7 +134,7 @@ bool IdentifiabilityStudySettings::IsSurfaceAllowed(
   return provider_->IsSurfaceAllowed(surface);
 }
 
-bool IdentifiabilityStudySettings::IsTypeAllowed(
+bool IdentifiabilityStudySettings::ShouldSampleType(
     IdentifiableSurface::Type type) const {
   if (LIKELY(!is_enabled_))
     return false;
@@ -145,34 +143,6 @@ bool IdentifiabilityStudySettings::IsTypeAllowed(
     return true;
 
   return provider_->IsTypeAllowed(type);
-}
-
-bool IdentifiabilityStudySettings::IsWebFeatureAllowed(
-    mojom::WebFeature feature) const {
-  if (LIKELY(!is_enabled_))
-    return false;
-
-  if (LIKELY(!is_any_surface_or_type_blocked_))
-    return true;
-
-  return provider_->IsSurfaceAllowed(IdentifiableSurface::FromTypeAndToken(
-      IdentifiableSurface::Type::kWebFeature, feature));
-}
-
-bool IdentifiabilityStudySettings::ShouldSample(
-    IdentifiableSurface surface) const {
-  if (LIKELY(!is_enabled_))
-    return false;
-
-  return DecideSample(provider_->SampleRate(surface));
-}
-
-bool IdentifiabilityStudySettings::ShouldSample(
-    IdentifiableSurface::Type type) const {
-  if (LIKELY(!is_enabled_))
-    return false;
-
-  return DecideSample(provider_->SampleRate(type));
 }
 
 }  // namespace blink

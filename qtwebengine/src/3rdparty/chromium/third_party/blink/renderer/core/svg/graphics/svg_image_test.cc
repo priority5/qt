@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
+#include "cc/paint/paint_flags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -21,14 +22,14 @@
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
+#include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
-#include "third_party/blink/renderer/platform/graphics/paint/paint_flags.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/utils/SkNullCanvas.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace blink {
 
@@ -58,11 +59,9 @@ class SVGImageTest : public testing::Test, private ScopedMockOverlayScrollbars {
     Image* image = image_.get();
     std::unique_ptr<SkCanvas> null_canvas = SkMakeNullCanvas();
     SkiaPaintCanvas canvas(null_canvas.get());
-    PaintFlags flags;
-    FloatRect dummy_rect(0, 0, 100, 100);
-    image->Draw(&canvas, flags, dummy_rect, dummy_rect,
-                kRespectImageOrientation, Image::kDoNotClampImageToSourceRect,
-                Image::kSyncDecode);
+    cc::PaintFlags flags;
+    gfx::RectF dummy_rect(0, 0, 100, 100);
+    image->Draw(&canvas, flags, dummy_rect, dummy_rect, ImageDrawOptions());
   }
 
  private:
@@ -114,28 +113,29 @@ TEST_F(SVGImageTest, TimelineSuspendAndResume) {
   const bool kShouldPause = true;
   Load(kAnimatedDocument, kShouldPause);
   SVGImageChromeClient& chrome_client = GetImage().ChromeClientForTesting();
-  TaskRunnerTimer<SVGImageChromeClient>* timer =
-      new TaskRunnerTimer<SVGImageChromeClient>(
+  DisallowNewWrapper<HeapTaskRunnerTimer<SVGImageChromeClient>>* timer =
+      MakeGarbageCollected<
+          DisallowNewWrapper<HeapTaskRunnerTimer<SVGImageChromeClient>>>(
           scheduler::GetSingleThreadTaskRunnerForTesting(), &chrome_client,
           &SVGImageChromeClient::AnimationTimerFired);
-  chrome_client.SetTimer(base::WrapUnique(timer));
+  chrome_client.SetTimerForTesting(timer);
 
   // Simulate a draw. Cause a frame (timer) to be scheduled.
   PumpFrame();
   EXPECT_TRUE(GetImage().MaybeAnimated());
-  EXPECT_TRUE(timer->IsActive());
+  EXPECT_TRUE(timer->Value().IsActive());
 
   // Fire the timer/trigger a frame update. Since the observer always returns
   // true for shouldPauseAnimation, this will result in the timeline being
   // suspended.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(1) +
-                        timer->NextFireInterval());
+  test::RunDelayedTasks(base::Milliseconds(1) +
+                        timer->Value().NextFireInterval());
   EXPECT_TRUE(chrome_client.IsSuspended());
-  EXPECT_FALSE(timer->IsActive());
+  EXPECT_FALSE(timer->Value().IsActive());
 
   // Simulate a draw. This should resume the animation again.
   PumpFrame();
-  EXPECT_TRUE(timer->IsActive());
+  EXPECT_TRUE(timer->Value().IsActive());
   EXPECT_FALSE(chrome_client.IsSuspended());
 }
 
@@ -143,34 +143,35 @@ TEST_F(SVGImageTest, ResetAnimation) {
   const bool kShouldPause = false;
   Load(kAnimatedDocument, kShouldPause);
   SVGImageChromeClient& chrome_client = GetImage().ChromeClientForTesting();
-  TaskRunnerTimer<SVGImageChromeClient>* timer =
-      new TaskRunnerTimer<SVGImageChromeClient>(
+  DisallowNewWrapper<HeapTaskRunnerTimer<SVGImageChromeClient>>* timer =
+      MakeGarbageCollected<
+          DisallowNewWrapper<HeapTaskRunnerTimer<SVGImageChromeClient>>>(
           scheduler::GetSingleThreadTaskRunnerForTesting(), &chrome_client,
           &SVGImageChromeClient::AnimationTimerFired);
-  chrome_client.SetTimer(base::WrapUnique(timer));
+  chrome_client.SetTimerForTesting(timer);
 
   // Simulate a draw. Cause a frame (timer) to be scheduled.
   PumpFrame();
   EXPECT_TRUE(GetImage().MaybeAnimated());
-  EXPECT_TRUE(timer->IsActive());
+  EXPECT_TRUE(timer->Value().IsActive());
 
   // Reset the animation. This will suspend the timeline but not cancel the
   // timer.
   GetImage().ResetAnimation();
   EXPECT_TRUE(chrome_client.IsSuspended());
-  EXPECT_TRUE(timer->IsActive());
+  EXPECT_TRUE(timer->Value().IsActive());
 
   // Fire the timer/trigger a frame update. The timeline will remain
   // suspended and no frame will be scheduled.
-  test::RunDelayedTasks(base::TimeDelta::FromMillisecondsD(1) +
-                        timer->NextFireInterval());
+  test::RunDelayedTasks(base::Milliseconds(1) +
+                        timer->Value().NextFireInterval());
   EXPECT_TRUE(chrome_client.IsSuspended());
-  EXPECT_FALSE(timer->IsActive());
+  EXPECT_FALSE(timer->Value().IsActive());
 
   // Simulate a draw. This should resume the animation again.
   PumpFrame();
   EXPECT_FALSE(chrome_client.IsSuspended());
-  EXPECT_TRUE(timer->IsActive());
+  EXPECT_TRUE(timer->Value().IsActive());
 }
 
 TEST_F(SVGImageTest, SupportsSubsequenceCaching) {
@@ -182,8 +183,9 @@ TEST_F(SVGImageTest, SupportsSubsequenceCaching) {
   EXPECT_TRUE(local_frame->GetDocument()->IsSVGDocument());
   LayoutObject* svg_root = local_frame->View()->GetLayoutView()->FirstChild();
   EXPECT_TRUE(svg_root->IsSVGRoot());
-  EXPECT_TRUE(
-      ToLayoutBoxModelObject(svg_root)->Layer()->SupportsSubsequenceCaching());
+  EXPECT_TRUE(To<LayoutBoxModelObject>(svg_root)
+                  ->Layer()
+                  ->SupportsSubsequenceCaching());
 }
 
 TEST_F(SVGImageTest, LayoutShiftTrackerDisabled) {
@@ -245,7 +247,8 @@ TEST_F(SVGImageTest, PaintFrameForCurrentFrameWithMQAndZoom) {
        kShouldPause);
 
   scoped_refptr<SVGImageForContainer> container = SVGImageForContainer::Create(
-      &GetImage(), FloatSize(100, 100), 2, NullURL());
+      &GetImage(), gfx::SizeF(100, 100), 2, NullURL(),
+      mojom::blink::PreferredColorScheme::kLight);
   SkBitmap bitmap =
       container->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
   ASSERT_EQ(bitmap.width(), 100);
@@ -254,6 +257,36 @@ TEST_F(SVGImageTest, PaintFrameForCurrentFrameWithMQAndZoom) {
   EXPECT_EQ(bitmap.getColor(90, 10), SK_ColorBLUE);
   EXPECT_EQ(bitmap.getColor(10, 90), SK_ColorBLUE);
   EXPECT_EQ(bitmap.getColor(90, 90), SK_ColorBLUE);
+}
+
+TEST_F(SVGImageTest, SVGWithSmilAnimationIsAnimated) {
+  const bool kShouldPause = true;
+  Load(R"SVG(
+         <svg xmlns="http://www.w3.org/2000/svg">
+           <rect width="10" height="10"/>
+           <animateTransform attributeName="transform" type="rotate"
+                             from="0 5 5" to="360 5 5" dur="1s"
+                             repeatCount="indefinite"/>
+         </svg>)SVG",
+       kShouldPause);
+
+  EXPECT_TRUE(GetImage().MaybeAnimated());
+}
+
+TEST_F(SVGImageTest, NestedSVGWithSmilAnimationIsAnimated) {
+  const bool kShouldPause = true;
+  Load(R"SVG(
+         <svg xmlns="http://www.w3.org/2000/svg">
+           <svg>
+             <rect width="10" height="10"/>
+             <animateTransform attributeName="transform" type="rotate"
+                               from="0 5 5" to="360 5 5" dur="1s"
+                               repeatCount="indefinite"/>
+           </svg>
+         </svg>)SVG",
+       kShouldPause);
+
+  EXPECT_TRUE(GetImage().MaybeAnimated());
 }
 
 class SVGImageSimTest : public SimTest, private ScopedMockOverlayScrollbars {};
@@ -281,12 +314,11 @@ TEST_F(SVGImageSimTest, PageVisibilityHiddenToVisible) {
   ASSERT_TRUE(IsA<SVGImage>(image));
   SVGImageChromeClient& svg_image_chrome_client =
       To<SVGImage>(*image).ChromeClientForTesting();
-  TimerBase* timer = svg_image_chrome_client.GetTimerForTesting();
+  TimerBase& timer = svg_image_chrome_client.GetTimerForTesting();
 
   // Wait for the next animation frame to be triggered, and then trigger a new
   // frame. The image animation timeline should be running.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(1) +
-                        timer->NextFireInterval());
+  test::RunDelayedTasks(base::Milliseconds(1) + timer.NextFireInterval());
   Compositor().BeginFrame();
 
   EXPECT_FALSE(svg_image_chrome_client.IsSuspended());
@@ -296,8 +328,7 @@ TEST_F(SVGImageSimTest, PageVisibilityHiddenToVisible) {
   // animation timeline.)
   WebView().SetVisibilityState(mojom::blink::PageVisibilityState::kHidden,
                                /*initial_state=*/false);
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(1) +
-                        timer->NextFireInterval());
+  test::RunDelayedTasks(base::Milliseconds(1) + timer.NextFireInterval());
 
   EXPECT_TRUE(svg_image_chrome_client.IsSuspended());
 
@@ -305,8 +336,7 @@ TEST_F(SVGImageSimTest, PageVisibilityHiddenToVisible) {
   // frame and resume the image animation.
   WebView().SetVisibilityState(mojom::blink::PageVisibilityState::kVisible,
                                /*initial_state=*/false);
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(1) +
-                        timer->NextFireInterval());
+  test::RunDelayedTasks(base::Milliseconds(1) + timer.NextFireInterval());
   Compositor().BeginFrame();
 
   EXPECT_FALSE(svg_image_chrome_client.IsSuspended());

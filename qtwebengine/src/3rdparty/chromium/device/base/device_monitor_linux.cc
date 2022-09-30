@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/observer_list.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "device/udev_linux/udev.h"
 
@@ -77,7 +78,7 @@ void DeviceMonitorLinux::RemoveObserver(Observer* observer) {
   DCHECK(thread_checker_.CalledOnValidThread());
   observers_.RemoveObserver(observer);
 
-  if (observers_.might_have_observers())
+  if (!observers_.empty())
     return;
 
   monitor_watch_controller_.reset();

@@ -13,8 +13,7 @@
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -55,7 +54,10 @@ std::string GetRequestBodyAsString(const network::ResourceRequest* request) {
     return "";
   }
   const network::DataElement& elem = request->request_body->elements()->at(0);
-  return std::string(elem.bytes(), elem.length());
+  if (elem.type() != network::DataElement::Tag::kBytes) {
+    return "";
+  }
+  return std::string(elem.As<network::DataElementBytes>().AsStringPiece());
 }
 
 }  // namespace
@@ -159,7 +161,7 @@ class MockGaiaConsumer : public GaiaAuthConsumer {
                void(GaiaAuthConsumer::ReAuthProofTokenStatus status));
 };
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_ErrorComparator DISABLED_ErrorComparator
 #else
 #define MAYBE_ErrorComparator ErrorComparator

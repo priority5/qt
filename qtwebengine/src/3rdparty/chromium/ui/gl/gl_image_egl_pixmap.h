@@ -7,9 +7,8 @@
 
 #include <stdint.h>
 
-#include "base/macros.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/x/x11_types.h"
+#include "ui/gfx/x/glx.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_image.h"
 
@@ -22,7 +21,10 @@ class GL_EXPORT GLImageEGLPixmap : public GLImage {
  public:
   GLImageEGLPixmap(const gfx::Size& size, gfx::BufferFormat format);
 
-  bool Initialize(XID pixmap);
+  GLImageEGLPixmap(const GLImageEGLPixmap&) = delete;
+  GLImageEGLPixmap& operator=(const GLImageEGLPixmap&) = delete;
+
+  bool Initialize(x11::Pixmap pixmap);
 
   // Overridden from GLImage:
   gfx::Size GetSize() override;
@@ -46,8 +48,6 @@ class GL_EXPORT GLImageEGLPixmap : public GLImage {
   const gfx::Size size_;
   gfx::BufferFormat format_;
   EGLDisplay display_;
-
-  DISALLOW_COPY_AND_ASSIGN(GLImageEGLPixmap);
 };
 
 }  // namespace gl

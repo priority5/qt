@@ -1,42 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2014 Robin Burchell <robin.burchell@viroteck.net>
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2014 Robin Burchell <robin.burchell@viroteck.net>
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qtuiohandler_p.h"
 
@@ -47,7 +11,7 @@
 
 #include <qpa/qwindowsysteminterface.h>
 
-#include <QTouchDevice>
+#include <QPointingDevice>
 #include <QWindow>
 #include <QGuiApplication>
 
@@ -68,7 +32,6 @@ Q_LOGGING_CATEGORY(lcTuioSet, "qt.qpa.tuio.set")
 static bool forceDelivery = qEnvironmentVariableIsSet("QT_TUIOTOUCH_DELIVER_WITHOUT_FOCUS");
 
 QTuioHandler::QTuioHandler(const QString &specification)
-    : m_device(new QTouchDevice) // not leaked, QTouchDevice cleans up registered devices itself
 {
     QStringList args = specification.split(':');
     int portNumber = 3333;
@@ -111,13 +74,17 @@ QTuioHandler::QTuioHandler(const QString &specification)
     if (inverty)
         m_transform *= QTransform::fromTranslate(0.5, 0.5).scale(1.0, -1.0).translate(-0.5, -0.5);
 
-    m_device->setName("TUIO"); // TODO: multiple based on SOURCE?
-    m_device->setType(QTouchDevice::TouchScreen);
-    m_device->setCapabilities(QTouchDevice::Position |
-                              QTouchDevice::Area |
-                              QTouchDevice::Velocity |
-                              QTouchDevice::NormalizedPosition);
-    QWindowSystemInterface::registerTouchDevice(m_device);
+    // not leaked, QPointingDevice cleans up registered devices itself
+    // TODO register each device based on SOURCE, not just an all-purpose generic touchscreen
+    // TODO define seats when multiple connections occur
+    m_device = new QPointingDevice(QLatin1String("TUIO"), 1, QInputDevice::DeviceType::TouchScreen,
+                                   QPointingDevice::PointerType::Finger,
+                                   QInputDevice::Capability::Position |
+                                   QInputDevice::Capability::Area |
+                                   QInputDevice::Capability::Velocity |
+                                   QInputDevice::Capability::NormalizedPosition,
+                                   16, 0);
+    QWindowSystemInterface::registerInputDevice(m_device);
 
     if (!m_socket.bind(QHostAddress::Any, portNumber)) {
         qCWarning(lcTuioHandler) << "Failed to bind TUIO socket: " << m_socket.errorString();
@@ -155,7 +122,7 @@ void QTuioHandler::processPackets()
         // messages. The FSEQ frame ID is incremented for each delivered bundle,
         // while redundant bundles can be marked using the frame sequence ID
         // -1."
-        QVector<QOscMessage> messages;
+        QList<QOscMessage> messages;
 
         QOscBundle bundle(datagram);
         if (bundle.isValid()) {
@@ -257,12 +224,12 @@ void QTuioHandler::process2DCurAlive(const QOscMessage &message)
         if (!oldActiveCursors.contains(cursorId)) {
             // newly active
             QTuioCursor cursor(cursorId);
-            cursor.setState(Qt::TouchPointPressed);
+            cursor.setState(QEventPoint::State::Pressed);
             newActiveCursors.insert(cursorId, cursor);
         } else {
             // we already know about it, remove it so it isn't marked as released
             QTuioCursor cursor = oldActiveCursors.value(cursorId);
-            cursor.setState(Qt::TouchPointStationary); // position change in SET will update if needed
+            cursor.setState(QEventPoint::State::Stationary); // position change in SET will update if needed
             newActiveCursors.insert(cursorId, cursor);
             oldActiveCursors.remove(cursorId);
         }
@@ -375,7 +342,7 @@ void QTuioHandler::process2DCurFseq(const QOscMessage &message)
 
     for (const QTuioCursor &tc : qAsConst(m_deadCursors)) {
         QWindowSystemInterface::TouchPoint tp = cursorToTouchPoint(tc, win);
-        tp.state = Qt::TouchPointReleased;
+        tp.state = QEventPoint::State::Released;
         tpl.append(tp);
     }
     QWindowSystemInterface::handleTouchEvent(win, m_device, tpl);
@@ -422,12 +389,12 @@ void QTuioHandler::process2DObjAlive(const QOscMessage &message)
         if (!oldActiveTokens.contains(sessionId)) {
             // newly active
             QTuioToken token(sessionId);
-            token.setState(Qt::TouchPointPressed);
+            token.setState(QEventPoint::State::Pressed);
             newActiveTokens.insert(sessionId, token);
         } else {
             // we already know about it, remove it so it isn't marked as released
             QTuioToken token = oldActiveTokens.value(sessionId);
-            token.setState(Qt::TouchPointStationary); // position change in SET will update if needed
+            token.setState(QEventPoint::State::Stationary); // position change in SET will update if needed
             newActiveTokens.insert(sessionId, token);
             oldActiveTokens.remove(sessionId);
         }
@@ -508,7 +475,6 @@ QWindowSystemInterface::TouchPoint QTuioHandler::tokenToTouchPoint(const QTuioTo
     QWindowSystemInterface::TouchPoint tp;
     tp.id = tc.id();
     tp.uniqueId = tc.classId(); // TODO TUIO 2.0: populate a QVariant, and register the mapping from int to arbitrary UID data
-    tp.flags = QTouchEvent::TouchPoint::Token;
     tp.pressure = 1.0f;
 
     tp.normalPosition = QPointF(tc.x(), tc.y());
@@ -549,7 +515,7 @@ void QTuioHandler::process2DObjFseq(const QOscMessage &message)
 
     for (const QTuioToken & t : qAsConst(m_deadTokens)) {
         QWindowSystemInterface::TouchPoint tp = tokenToTouchPoint(t, win);
-        tp.state = Qt::TouchPointReleased;
+        tp.state = QEventPoint::State::Released;
         tp.velocity = QVector2D();
         tpl.append(tp);
     }
@@ -559,4 +525,6 @@ void QTuioHandler::process2DObjFseq(const QOscMessage &message)
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qtuiohandler_p.cpp"
 

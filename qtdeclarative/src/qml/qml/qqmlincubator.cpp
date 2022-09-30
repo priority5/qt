@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qqmlincubator.h"
 #include "qqmlcomponent.h"
@@ -45,7 +9,8 @@
 #include "qqmlobjectcreator_p.h"
 #include <private/qqmlcomponent_p.h>
 
-void QQmlEnginePrivate::incubate(QQmlIncubator &i, QQmlContextData *forContext)
+void QQmlEnginePrivate::incubate(
+        QQmlIncubator &i, const QQmlRefPointer<QQmlContextData> &forContext)
 {
     QExplicitlySharedDataPointer<QQmlIncubatorPrivate> p(i.d);
 
@@ -59,13 +24,13 @@ void QQmlEnginePrivate::incubate(QQmlIncubator &i, QQmlContextData *forContext)
 
         // Need to find the first constructing context and see if it is asynchronous
         QExplicitlySharedDataPointer<QQmlIncubatorPrivate> parentIncubator;
-        QQmlContextData *cctxt = forContext;
+        QQmlRefPointer<QQmlContextData> cctxt = forContext;
         while (cctxt) {
-            if (!cctxt->hasExtraObject && cctxt->incubator) {
-                parentIncubator = cctxt->incubator;
+            if (QQmlIncubatorPrivate *incubator = cctxt->incubator()) {
+                parentIncubator = incubator;
                 break;
             }
-            cctxt = cctxt->parent;
+            cctxt = cctxt->parent();
         }
 
         if (parentIncubator && parentIncubator->isAsynchronous) {
@@ -139,7 +104,7 @@ QQmlIncubatorPrivate::~QQmlIncubatorPrivate()
 
 void QQmlIncubatorPrivate::clear()
 {
-    compilationUnit = nullptr;
+    compilationUnit.reset();
     if (next.isInList()) {
         next.remove();
         enginePriv->incubatorCount--;
@@ -149,9 +114,9 @@ void QQmlIncubatorPrivate::clear()
     }
     enginePriv = nullptr;
     if (!rootContext.isNull()) {
-        if (!rootContext->hasExtraObject)
-            rootContext->incubator = nullptr;
-        rootContext = nullptr;
+        if (rootContext->incubator())
+            rootContext->setIncubator(nullptr);
+        rootContext.setContextData({});
     }
 
     if (nextWaitingFor.isInList()) {
@@ -303,7 +268,8 @@ void QQmlIncubatorPrivate::incubate(QQmlInstantiationInterrupt &i)
            for (auto it = initialProperties.cbegin(); it != initialProperties.cend(); ++it) {
                auto component = tresult;
                auto name = it.key();
-               QQmlProperty prop = QQmlComponentPrivate::removePropertyFromRequired(component, name, requiredProperties);
+               QQmlProperty prop = QQmlComponentPrivate::removePropertyFromRequired(
+                           component, name, requiredProperties, QQmlEnginePrivate::get(enginePriv));
                if (!prop.isValid() || !prop.write(it.value())) {
                    QQmlError error{};
                    error.setUrl(compilationUnit->url());
@@ -360,10 +326,8 @@ void QQmlIncubatorPrivate::incubate(QQmlInstantiationInterrupt &i)
             if (watcher.hasRecursed())
                 return;
 
-            QQmlContextData *ctxt = nullptr;
-            ctxt = creator->finalize(i);
-            if (ctxt) {
-                rootContext = ctxt;
+            if (creator->finalize(i)) {
+                rootContext = creator->rootContext();
                 progress = QQmlIncubatorPrivate::Completed;
                 goto finishIncubate;
             }
@@ -409,26 +373,6 @@ void QQmlIncubationController::incubateFor(int msecs)
         static_cast<QQmlIncubatorPrivate*>(d->incubatorList.first())->incubate(i);
     } while (d && d->incubatorCount != 0 && !i.shouldInterrupt());
 }
-
-#if QT_DEPRECATED_SINCE(5, 15)
-/*!
-\obsolete
-
-\warning Do not use this function.
-Use the overload taking a \c{std::atomic<bool>} instead.
-*/
-void QQmlIncubationController::incubateWhile(volatile bool *flag, int msecs)
-{
-    if (!d || !d->incubatorCount)
-        return;
-
-    QQmlInstantiationInterrupt i(flag, msecs * Q_INT64_C(1000000));
-    i.reset();
-    do {
-        static_cast<QQmlIncubatorPrivate*>(d->incubatorList.first())->incubate(i);
-    } while (d && d->incubatorCount != 0 && !i.shouldInterrupt());
-}
-#endif
 
 /*!
 \since 5.15
@@ -716,9 +660,9 @@ RequiredProperties &QQmlIncubatorPrivate::requiredProperties()
     return creator->requiredProperties();
 }
 
-bool QQmlIncubatorPrivate::hadRequiredProperties() const
+bool QQmlIncubatorPrivate::hadTopLevelRequiredProperties() const
 {
-    return creator->componentHadRequiredProperties();
+    return creator->componentHadTopLevelRequiredProperties();
 }
 
 /*!

@@ -17,15 +17,13 @@ dist-hook: cleanup libxslt.spec
 	touch $(distdir)/doc/*.xml
 	touch $(distdir)/doc/EXSLT/*.xml
 	touch $(distdir)/libxslt/*.syms
-	(cd $(srcdir) ; tar -cf - --exclude CVS --exclude .svn win32 vms examples) | (cd $(distdir); tar xf -)
-
-CVS_EXTRA_DIST =
+	(cd $(srcdir) ; tar -cf - win32 vms examples) | (cd $(distdir); tar xf -)
 
 EXTRA_DIST = xsltConf.sh.in xslt-config.in libxslt.spec libxslt.spec.in \
              FEATURES TODO Copyright libxslt.m4 \
 	     win32/libxslt/libxslt.def win32/libxslt/libxslt.dsw \
 	     win32/libxslt/libxslt_so.dsp win32/libxslt/xsltproc.dsp \
-	     $(CVS_EXTRA_DIST)
+	     CMakeLists.txt config.h.cmake.in FindGcrypt.cmake libxslt-config.cmake.in libxslt-config.cmake.cmake.in
 
 ## We create xsltConf.sh here and not from configure because we want
 ## to get the paths expanded correctly.  Macros like srcdir are given
@@ -72,6 +70,9 @@ rpm: cleantar
 
 pkgconfigdir=$(libdir)/pkgconfig
 pkgconfig_DATA = libxslt.pc libexslt.pc
+
+cmakedir = $(libdir)/cmake/libxslt
+cmake_DATA = FindGcrypt.cmake libxslt-config.cmake
 
 m4datadir = $(datadir)/aclocal
 m4data_DATA = libxslt.m4

@@ -9,13 +9,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_export.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/data_decoder/public/mojom/ble_scan_parser.mojom-forward.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
 namespace device {
 
@@ -34,10 +35,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   using AdapterCallback =
       base::OnceCallback<void(scoped_refptr<BluetoothAdapter> adapter)>;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   using BleScanParserCallback = base::RepeatingCallback<
       mojo::PendingRemote<data_decoder::mojom::BleScanParser>()>;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
   BluetoothAdapterFactory();
   ~BluetoothAdapterFactory();
@@ -70,7 +71,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   // GetAdapter(), as the default adapter already supports Bluetooth classic.
   void GetClassicAdapter(AdapterCallback callback);
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Calls |BluetoothAdapter::Shutdown| on the adapter if
   // present.
   static void Shutdown();
@@ -85,19 +86,23 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   // adapter. Exposed for testing.
   static bool HasSharedInstanceForTesting();
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // Sets the mojo::Remote<BleScanParser> callback used in Get*() below.
   static void SetBleScanParserCallback(BleScanParserCallback callback);
   // Returns a reference to a parser for BLE advertisement packets.
   // This will be an empty callback until something calls Set*() above.
   static BleScanParserCallback GetBleScanParserCallback();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
   // ValuestForTesting holds the return values for BluetoothAdapterFactory's
   // functions that have been set for testing.
   class DEVICE_BLUETOOTH_EXPORT GlobalValuesForTesting {
    public:
     GlobalValuesForTesting();
+
+    GlobalValuesForTesting(const GlobalValuesForTesting&) = delete;
+    GlobalValuesForTesting& operator=(const GlobalValuesForTesting&) = delete;
+
     ~GlobalValuesForTesting();
 
     void SetLESupported(bool supported) { le_supported_ = supported; }
@@ -110,7 +115,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
     bool le_supported_ = false;
 
     base::WeakPtrFactory<GlobalValuesForTesting> weak_ptr_factory_{this};
-    DISALLOW_COPY_AND_ASSIGN(GlobalValuesForTesting);
   };
 
   // Returns an object that clients can use to control the return values
@@ -128,8 +132,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   std::unique_ptr<GlobalValuesForTesting> InitGlobalValuesForTesting();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(
+      SerialPortManagerImplTest,
+      BluetoothSerialDeviceEnumerator_DeleteBeforeAdapterInit);
+
   void AdapterInitialized();
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   void ClassicAdapterInitialized();
 #endif
 
@@ -143,7 +151,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   std::vector<AdapterCallback> adapter_callbacks_;
   base::WeakPtr<BluetoothAdapter> adapter_;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On Windows different implementations of BluetoothAdapter are used for
   // supporting Classic and Low Energy devices. The factory logic is duplicated.
   scoped_refptr<BluetoothAdapter> classic_adapter_under_initialization_;
@@ -151,9 +159,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   base::WeakPtr<BluetoothAdapter> classic_adapter_;
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   BleScanParserCallback ble_scan_parser_;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 };
 
 }  // namespace device

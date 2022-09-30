@@ -53,6 +53,11 @@ interface CompositorFrameSink {
   // For successful swaps, the implementation must call
   // DidReceiveCompositorFrameAck() asynchronously when the frame has been
   // processed in order to unthrottle the next frame.
+  //
+  // TODO(crbug.com/1141980): Investigate whether it's possible to alter the
+  // CompositorFrame structure to be less likely to exceed soft message size
+  // limits and remove [UnlimitedSize] here.
+  [UnlimitedSize]
   SubmitCompositorFrame(LocalSurfaceId local_surface_id,
                         CompositorFrame frame,
                         HitTestRegionList? hit_test_region_list,
@@ -88,6 +93,12 @@ interface CompositorFrameSink {
   // the value has been set to anything other than kUnspecified, subsequent calls
   // are silently ignored.
   InitializeCompositorFrameSinkType(CompositorFrameSinkType type);
+
+  // Informs the display compositor the IDs of the thread involved in frame
+  // production. This is used on Android PerformanceHint API to dynamically
+  // adjust performance to allow power saving.
+  [EnableIf=is_android]
+  SetThreadIds(array<int32> thread_ids);
 };
 
 interface CompositorFrameSinkClient {
@@ -112,4 +123,8 @@ interface CompositorFrameSinkClient {
 
   // Returns resources sent to SubmitCompositorFrame to be reused or freed.
   ReclaimResources(array<ReturnedResource> resources);
+
+  // Inform the client that a compositor frame transition directive was fully
+  // processed.
+  OnCompositorFrameTransitionDirectiveProcessed(uint32 sequence_id);
 };

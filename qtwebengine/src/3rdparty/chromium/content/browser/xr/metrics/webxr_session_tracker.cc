@@ -17,7 +17,8 @@ WebXRSessionTracker::~WebXRSessionTracker() = default;
 
 void WebXRSessionTracker::ReportRequestedFeatures(
     const device::mojom::XRSessionOptions& session_options,
-    const std::set<device::mojom::XRSessionFeature>& enabled_features) {
+    const std::unordered_set<device::mojom::XRSessionFeature>&
+        enabled_features) {
   using device::mojom::XRSessionFeature;
   using device::mojom::XRSessionFeatureRequestStatus;
 
@@ -36,7 +37,9 @@ void WebXRSessionTracker::ReportRequestedFeatures(
 
   // Record required feature requests
   for (auto feature : session_options.required_features) {
-    DCHECK(enabled_features.find(feature) != enabled_features.end());
+    DCHECK(enabled_features.find(feature) != enabled_features.end())
+        << ": could not find feature " << feature
+        << " in the collection of required features!";
     SetFeatureRequest(feature, XRSessionFeatureRequestStatus::kRequired);
   }
 
@@ -76,6 +79,9 @@ void WebXRSessionTracker::ReportFeatureUsed(
     case XRSessionFeature::CAMERA_ACCESS:
     case XRSessionFeature::PLANE_DETECTION:
     case XRSessionFeature::DEPTH:
+    case XRSessionFeature::IMAGE_TRACKING:
+    case XRSessionFeature::HAND_INPUT:
+    case XRSessionFeature::SECONDARY_VIEWS:
       // Not recording metrics for these features currently.
       // TODO(https://crbug.com/965729): Add metrics for the AR-related features
       // that are enabled by default.
@@ -116,6 +122,9 @@ void WebXRSessionTracker::SetFeatureRequest(
     case XRSessionFeature::CAMERA_ACCESS:
     case XRSessionFeature::PLANE_DETECTION:
     case XRSessionFeature::DEPTH:
+    case XRSessionFeature::IMAGE_TRACKING:
+    case XRSessionFeature::HAND_INPUT:
+    case XRSessionFeature::SECONDARY_VIEWS:
       // Not recording metrics for these features currently.
       // TODO(https://crbug.com/965729): Add metrics for the AR-related features
       // that are enabled by default.

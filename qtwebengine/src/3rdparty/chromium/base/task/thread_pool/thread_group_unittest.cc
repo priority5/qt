@@ -5,12 +5,15 @@
 #include "base/task/thread_pool/thread_group.h"
 
 #include <memory>
+#include <tuple>
+#include <utility>
 
 #include "base/barrier_closure.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
+#include "base/task/task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool/can_run_policy_test.h"
 #include "base/task/thread_pool/delayed_task_manager.h"
@@ -19,8 +22,7 @@
 #include "base/task/thread_pool/test_task_factory.h"
 #include "base/task/thread_pool/test_utils.h"
 #include "base/task/thread_pool/thread_group_impl.h"
-#include "base/task_runner.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/test_timeouts.h"
 #include "base/test/test_waitable_event.h"
 #include "base/threading/platform_thread.h"
@@ -32,11 +34,11 @@
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/task/thread_pool/thread_group_native_win.h"
 #include "base/win/com_init_check_hook.h"
 #include "base/win/com_init_util.h"
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
 #include "base/task/thread_pool/thread_group_native_mac.h"
 #endif
 
@@ -47,9 +49,9 @@ namespace {
 
 #if HAS_NATIVE_THREAD_POOL()
 using ThreadGroupNativeType =
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     ThreadGroupNativeWin;
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
     ThreadGroupNativeMac;
 #endif
 #endif
@@ -80,6 +82,8 @@ class ThreadPostingTasks : public SimpleThread {
                      execution_mode,
                      mock_pooled_task_runner_delegate_),
                  execution_mode) {}
+  ThreadPostingTasks(const ThreadPostingTasks&) = delete;
+  ThreadPostingTasks& operator=(const ThreadPostingTasks&) = delete;
 
   const test::TestTaskFactory* factory() const { return &factory_; }
 
@@ -92,15 +96,15 @@ class ThreadPostingTasks : public SimpleThread {
   const scoped_refptr<TaskRunner> task_runner_;
   const PostNestedTask post_nested_task_;
   test::TestTaskFactory factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadPostingTasks);
 };
 
 class ThreadGroupTestBase : public testing::Test, public ThreadGroup::Delegate {
+ public:
+  ThreadGroupTestBase(const ThreadGroupTestBase&) = delete;
+  ThreadGroupTestBase& operator=(const ThreadGroupTestBase&) = delete;
+
  protected:
-  ThreadGroupTestBase()
-      : service_thread_("ThreadPoolServiceThread"),
-        tracked_ref_factory_(this) {}
+  ThreadGroupTestBase() = default;
 
   void SetUp() override {
     service_thread_.Start();
@@ -117,16 +121,19 @@ class ThreadGroupTestBase : public testing::Test, public ThreadGroup::Delegate {
 
   void CreateThreadGroup() {
     ASSERT_FALSE(thread_group_);
-    switch (GetPoolType()) {
-      case test::PoolType::GENERIC:
+    switch (GetGroupType()) {
+      case test::GroupType::GENERIC:
         thread_group_ = std::make_unique<ThreadGroupImpl>(
             "TestThreadGroup", "A", ThreadPriority::NORMAL,
             task_tracker_.GetTrackedRef(),
             tracked_ref_factory_.GetTrackedRef());
         break;
 #if HAS_NATIVE_THREAD_POOL()
-      case test::PoolType::NATIVE:
+      case test::GroupType::NATIVE:
         thread_group_ = std::make_unique<ThreadGroupNativeType>(
+#if BUILDFLAG(IS_APPLE)
+            ThreadPriority::NORMAL,
+#endif
             task_tracker_.GetTrackedRef(),
             tracked_ref_factory_.GetTrackedRef());
         break;
@@ -140,8 +147,8 @@ class ThreadGroupTestBase : public testing::Test, public ThreadGroup::Delegate {
   void StartThreadGroup(ThreadGroup::WorkerEnvironment worker_environment =
                             ThreadGroup::WorkerEnvironment::NONE) {
     ASSERT_TRUE(thread_group_);
-    switch (GetPoolType()) {
-      case test::PoolType::GENERIC: {
+    switch (GetGroupType()) {
+      case test::GroupType::GENERIC: {
         ThreadGroupImpl* thread_group_impl =
             static_cast<ThreadGroupImpl*>(thread_group_.get());
         thread_group_impl->Start(
@@ -150,7 +157,7 @@ class ThreadGroupTestBase : public testing::Test, public ThreadGroup::Delegate {
         break;
       }
 #if HAS_NATIVE_THREAD_POOL()
-      case test::PoolType::NATIVE: {
+      case test::GroupType::NATIVE: {
         ThreadGroupNativeType* thread_group_native_impl =
             static_cast<ThreadGroupNativeType*>(thread_group_.get());
         thread_group_native_impl->Start(worker_environment);
@@ -160,10 +167,10 @@ class ThreadGroupTestBase : public testing::Test, public ThreadGroup::Delegate {
     }
   }
 
-  virtual test::PoolType GetPoolType() const = 0;
+  virtual test::GroupType GetGroupType() const = 0;
 
-  Thread service_thread_;
-  TaskTracker task_tracker_{"Test"};
+  Thread service_thread_{"ThreadPoolServiceThread"};
+  TaskTracker task_tracker_;
   DelayedTaskManager delayed_task_manager_;
   test::MockPooledTaskRunnerDelegate mock_pooled_task_runner_delegate_ = {
       task_tracker_.GetTrackedRef(), &delayed_task_manager_};
@@ -176,20 +183,17 @@ class ThreadGroupTestBase : public testing::Test, public ThreadGroup::Delegate {
     return thread_group_.get();
   }
 
-  TrackedRefFactory<ThreadGroup::Delegate> tracked_ref_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadGroupTestBase);
+  TrackedRefFactory<ThreadGroup::Delegate> tracked_ref_factory_{this};
 };
 
 class ThreadGroupTest : public ThreadGroupTestBase,
-                        public testing::WithParamInterface<test::PoolType> {
+                        public testing::WithParamInterface<test::GroupType> {
  public:
   ThreadGroupTest() = default;
+  ThreadGroupTest(const ThreadGroupTest&) = delete;
+  ThreadGroupTest& operator=(const ThreadGroupTest&) = delete;
 
-  test::PoolType GetPoolType() const override { return GetParam(); }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ThreadGroupTest);
+  test::GroupType GetGroupType() const override { return GetParam(); }
 };
 
 // TODO(etiennep): Audit tests that don't need TaskSourceExecutionMode
@@ -197,11 +201,15 @@ class ThreadGroupTest : public ThreadGroupTestBase,
 class ThreadGroupTestAllExecutionModes
     : public ThreadGroupTestBase,
       public testing::WithParamInterface<
-          std::tuple<test::PoolType, TaskSourceExecutionMode>> {
+          std::tuple<test::GroupType, TaskSourceExecutionMode>> {
  public:
   ThreadGroupTestAllExecutionModes() = default;
+  ThreadGroupTestAllExecutionModes(const ThreadGroupTestAllExecutionModes&) =
+      delete;
+  ThreadGroupTestAllExecutionModes& operator=(
+      const ThreadGroupTestAllExecutionModes&) = delete;
 
-  test::PoolType GetPoolType() const override {
+  test::GroupType GetGroupType() const override {
     return std::get<0>(GetParam());
   }
 
@@ -214,9 +222,6 @@ class ThreadGroupTestAllExecutionModes
     return test::CreatePooledTaskRunnerWithExecutionMode(
         execution_mode(), &mock_pooled_task_runner_delegate_, traits);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ThreadGroupTestAllExecutionModes);
 };
 
 void ShouldNotRun() {
@@ -509,7 +514,7 @@ TEST_P(ThreadGroupTestAllExecutionModes, ScopedBlockingCallTwice) {
   task_ran.Wait();
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 TEST_P(ThreadGroupTestAllExecutionModes, COMMTAWorkerEnvironment) {
   StartThreadGroup(ThreadGroup::WorkerEnvironment::COM_MTA);
   auto task_runner = test::CreatePooledTaskRunnerWithExecutionMode(
@@ -520,28 +525,6 @@ TEST_P(ThreadGroupTestAllExecutionModes, COMMTAWorkerEnvironment) {
       FROM_HERE, BindOnce(
                      [](TestWaitableEvent* task_ran) {
                        win::AssertComApartmentType(win::ComApartmentType::MTA);
-                       task_ran->Signal();
-                     },
-                     Unretained(&task_ran)));
-  task_ran.Wait();
-}
-
-TEST_P(ThreadGroupTestAllExecutionModes, COMSTAWorkerEnvironment) {
-  StartThreadGroup(ThreadGroup::WorkerEnvironment::COM_STA);
-  auto task_runner = test::CreatePooledTaskRunnerWithExecutionMode(
-      execution_mode(), &mock_pooled_task_runner_delegate_);
-
-  TestWaitableEvent task_ran;
-  task_runner->PostTask(
-      FROM_HERE, BindOnce(
-                     [](TestWaitableEvent* task_ran) {
-  // COM STA is ignored when defined(COM_INIT_CHECK_HOOK_ENABLED). See comment
-  // in ThreadGroup::GetScopedWindowsThreadEnvironment().
-#if defined(COM_INIT_CHECK_HOOK_ENABLED)
-                       win::AssertComApartmentType(win::ComApartmentType::NONE);
-#else
-                       win::AssertComApartmentType(win::ComApartmentType::STA);
-#endif
                        task_ran->Signal();
                      },
                      Unretained(&task_ran)));
@@ -925,41 +908,41 @@ TEST_P(ThreadGroupTest, JobTaskSourceUpdatePriority) {
 
 INSTANTIATE_TEST_SUITE_P(Generic,
                          ThreadGroupTest,
-                         ::testing::Values(test::PoolType::GENERIC));
+                         ::testing::Values(test::GroupType::GENERIC));
 INSTANTIATE_TEST_SUITE_P(
     GenericParallel,
     ThreadGroupTestAllExecutionModes,
-    ::testing::Combine(::testing::Values(test::PoolType::GENERIC),
+    ::testing::Combine(::testing::Values(test::GroupType::GENERIC),
                        ::testing::Values(TaskSourceExecutionMode::kParallel)));
 INSTANTIATE_TEST_SUITE_P(
     GenericSequenced,
     ThreadGroupTestAllExecutionModes,
-    ::testing::Combine(::testing::Values(test::PoolType::GENERIC),
+    ::testing::Combine(::testing::Values(test::GroupType::GENERIC),
                        ::testing::Values(TaskSourceExecutionMode::kSequenced)));
 INSTANTIATE_TEST_SUITE_P(
     GenericJob,
     ThreadGroupTestAllExecutionModes,
-    ::testing::Combine(::testing::Values(test::PoolType::GENERIC),
+    ::testing::Combine(::testing::Values(test::GroupType::GENERIC),
                        ::testing::Values(TaskSourceExecutionMode::kJob)));
 
 #if HAS_NATIVE_THREAD_POOL()
 INSTANTIATE_TEST_SUITE_P(Native,
                          ThreadGroupTest,
-                         ::testing::Values(test::PoolType::NATIVE));
+                         ::testing::Values(test::GroupType::NATIVE));
 INSTANTIATE_TEST_SUITE_P(
     NativeParallel,
     ThreadGroupTestAllExecutionModes,
-    ::testing::Combine(::testing::Values(test::PoolType::NATIVE),
+    ::testing::Combine(::testing::Values(test::GroupType::NATIVE),
                        ::testing::Values(TaskSourceExecutionMode::kParallel)));
 INSTANTIATE_TEST_SUITE_P(
     NativeSequenced,
     ThreadGroupTestAllExecutionModes,
-    ::testing::Combine(::testing::Values(test::PoolType::NATIVE),
+    ::testing::Combine(::testing::Values(test::GroupType::NATIVE),
                        ::testing::Values(TaskSourceExecutionMode::kSequenced)));
 INSTANTIATE_TEST_SUITE_P(
     NativeJob,
     ThreadGroupTestAllExecutionModes,
-    ::testing::Combine(::testing::Values(test::PoolType::NATIVE),
+    ::testing::Combine(::testing::Values(test::GroupType::NATIVE),
                        ::testing::Values(TaskSourceExecutionMode::kJob)));
 #endif
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,13 +15,10 @@ and wrapping text nodes, so we implement our own full custom XML pretty-printer.
 from __future__ import with_statement
 
 import argparse
-import logging
 import os
-import shutil
 import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'common'))
-import diff_util
 import etree_util
 import presubmit_util
 
@@ -182,7 +179,7 @@ def main():
     --diff: (Optional) Prints diff to stdout rather than modifying the file.
 
   Example usage:
-    pretty_print.py histograms_xml/Fingerprint/histograms.xml
+    pretty_print.py metadata/Fingerprint/histograms.xml
     pretty_print.py enums.xml
   """
   parser = argparse.ArgumentParser()

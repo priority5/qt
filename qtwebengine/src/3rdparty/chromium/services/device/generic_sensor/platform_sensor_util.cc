@@ -6,6 +6,8 @@
 
 #include <cmath>
 
+#include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading.h"
 
 namespace device {
@@ -51,6 +53,10 @@ void RoundGyroscopeReading(SensorReadingXYZ* reading) {
   reading->x = RoundToMultiple(reading->x, kGyroscopeRoundingMultiple);
   reading->y = RoundToMultiple(reading->y, kGyroscopeRoundingMultiple);
   reading->z = RoundToMultiple(reading->z, kGyroscopeRoundingMultiple);
+}
+
+void RoundIlluminanceReading(SensorReadingSingle* reading) {
+  reading->value = RoundToMultiple(reading->value, kAlsRoundingMultiple);
 }
 
 void RoundOrientationQuaternionReading(SensorReadingQuat* reading) {
@@ -101,24 +107,32 @@ void RoundOrientationEulerReading(SensorReadingXYZ* reading) {
 void RoundSensorReading(SensorReading* reading, mojom::SensorType sensor_type) {
   switch (sensor_type) {
     case mojom::SensorType::ACCELEROMETER:
-      FALLTHROUGH;
+    case mojom::SensorType::GRAVITY:
     case mojom::SensorType::LINEAR_ACCELERATION:
       RoundAccelerometerReading(&reading->accel);
       break;
+
     case mojom::SensorType::GYROSCOPE:
       RoundGyroscopeReading(&reading->gyro);
       break;
+
     case mojom::SensorType::ABSOLUTE_ORIENTATION_EULER_ANGLES:
-      FALLTHROUGH;
     case mojom::SensorType::RELATIVE_ORIENTATION_EULER_ANGLES:
       RoundOrientationEulerReading(&reading->orientation_euler);
       break;
+
     case mojom::SensorType::ABSOLUTE_ORIENTATION_QUATERNION:
-      FALLTHROUGH;
     case mojom::SensorType::RELATIVE_ORIENTATION_QUATERNION:
       RoundOrientationQuaternionReading(&reading->orientation_quat);
       break;
-    default:
+
+    case mojom::SensorType::AMBIENT_LIGHT:
+      RoundIlluminanceReading(&reading->als);
+      break;
+
+    case mojom::SensorType::MAGNETOMETER:
+    case mojom::SensorType::PRESSURE:
+    case mojom::SensorType::PROXIMITY:
       break;
   }
 }

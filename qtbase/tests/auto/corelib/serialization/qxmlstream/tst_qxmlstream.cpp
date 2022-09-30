@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
 #include <QDirIterator>
@@ -32,10 +7,12 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QtTest/QtTest>
+#include <QTest>
 #include <QUrl>
-#include <QXmlDefaultHandler>
 #include <QXmlStreamReader>
+#include <QBuffer>
+#include <QStack>
+#include <QtGui/private/qzipreader_p.h>
 
 #include "qc14n.h"
 
@@ -44,6 +21,11 @@ Q_DECLARE_METATYPE(QXmlStreamReader::ReadElementTextBehaviour)
 static const char *const catalogFile = "XML-Test-Suite/xmlconf/finalCatalog.xml";
 static const int expectedRunCount = 1646;
 static const int expectedSkipCount = 532;
+static const char *const xmlTestsuiteDir = "XML-Test-Suite";
+static const char *const xmlconfDir = "XML-Test-Suite/xmlconf/";
+static const char *const xmlDatasetName = "xmltest";
+static const char *const updateFilesDir = "xmltest_updates";
+static const char *const destinationFolder = "/valid/sa/out/";
 
 static inline int best(int a, int b)
 {
@@ -63,6 +45,28 @@ static inline int best(int a, int b, int c)
     if (c < 0)
         return best(a, b);
     return qMin(qMin(a, b), c);
+}
+
+// copied from tst_qmake.cpp
+static void copyDir(const QString &sourceDirPath, const QString &targetDirPath)
+{
+    QDir currentDir;
+    QDirIterator dit(sourceDirPath, QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
+    while (dit.hasNext()) {
+        dit.next();
+        const QString targetPath = targetDirPath + QLatin1Char('/') + dit.fileName();
+        currentDir.mkpath(targetPath);
+        copyDir(dit.filePath(), targetPath);
+    }
+
+    QDirIterator fit(sourceDirPath, QDir::Files | QDir::Hidden);
+    while (fit.hasNext()) {
+        fit.next();
+        const QString targetPath = targetDirPath + QLatin1Char('/') + fit.fileName();
+        QFile::remove(targetPath);  // allowed to fail
+        QFile src(fit.filePath());
+        QVERIFY2(src.copy(targetPath), qPrintable(src.errorString()));
+    }
 }
 
 template <typename C>
@@ -240,8 +244,8 @@ public:
      */
     class MissedBaseline
     {
-        friend class QVector<MissedBaseline>;
-        MissedBaseline() {} // for QVector, don't use
+        friend class QList<MissedBaseline>;
+        MissedBaseline() {} // for QList, don't use
     public:
         MissedBaseline(const QString &aId,
                        const QByteArray &aExpected,
@@ -265,8 +269,8 @@ public:
         QByteArray  output;
     };
 
-    QVector<GeneralFailure> failures;
-    QVector<MissedBaseline> missedBaselines;
+    QList<GeneralFailure> failures;
+    QList<MissedBaseline> missedBaselines;
 
     /**
      * The count of how many tests that were run.
@@ -529,7 +533,7 @@ class tst_QXmlStream: public QObject
 {
     Q_OBJECT
 public:
-    tst_QXmlStream() : m_handler(QUrl::fromLocalFile(QFINDTESTDATA(catalogFile)))
+    tst_QXmlStream() : m_handler(QUrl::fromLocalFile(m_tempDir.filePath(catalogFile)))
     {
     }
 
@@ -560,9 +564,7 @@ private slots:
     void crashInUTF16Codec() const;
     void hasAttributeSignature() const;
     void hasAttribute() const;
-    void writeWithCodec() const;
     void writeWithUtf8Codec() const;
-    void writeWithUtf16Codec() const;
     void writeWithStandalone() const;
     void entitiesAndWhitespace_1() const;
     void entitiesAndWhitespace_2() const;
@@ -573,7 +575,6 @@ private slots:
     void checkCommentIndentation() const;
     void checkCommentIndentation_data() const;
     void crashInXmlStreamReader() const;
-    void write8bitCodec() const;
     void invalidStringCharacters_data() const;
     void invalidStringCharacters() const;
     void hasError() const;
@@ -586,12 +587,41 @@ private slots:
 private:
     static QByteArray readFile(const QString &filename);
 
+    QTemporaryDir m_tempDir;
     TestSuiteHandler m_handler;
 };
 
 void tst_QXmlStream::initTestCase()
 {
-    QFile file(QFINDTESTDATA(catalogFile));
+    // Due to license restrictions, we need to distribute part of the test
+    // suit as a zip archive. So we need to unzip it before running the tests,
+    // and also update some files there.
+    // We also need to remove the unzipped data during cleanup.
+
+    // On Android, we cannot unzip at the resource location, so we copy
+    // everything to a temporary directory first.
+    const QString XML_Test_Suite_dir = QFINDTESTDATA(xmlTestsuiteDir);
+    const QString XML_Test_Suite_destDir = m_tempDir.filePath(xmlTestsuiteDir);
+    copyDir(XML_Test_Suite_dir, XML_Test_Suite_destDir);
+
+
+    const QString filesDir(m_tempDir.filePath(xmlconfDir));
+    const QString fileName = filesDir + xmlDatasetName + ".zip";
+    QVERIFY(QFile::exists(fileName));
+    QZipReader reader(fileName);
+    QVERIFY(reader.isReadable());
+    QVERIFY(reader.extractAll(filesDir));
+    // update files
+    const auto files =
+            QDir(filesDir + updateFilesDir).entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+    for (const auto &fileInfo : files) {
+        const QString destinationPath =
+                filesDir + xmlDatasetName + destinationFolder + fileInfo.fileName();
+        QFile::remove(destinationPath); // copy will fail if file exists
+        QVERIFY(QFile::copy(fileInfo.filePath(), destinationPath));
+    }
+
+    QFile file(m_tempDir.filePath(catalogFile));
     QVERIFY2(file.open(QIODevice::ReadOnly),
              qPrintable(QString::fromLatin1("Failed to open the test suite catalog; %1").arg(file.fileName())));
 
@@ -600,7 +630,6 @@ void tst_QXmlStream::initTestCase()
 
 void tst_QXmlStream::cleanupTestCase()
 {
-    QFile::remove(QLatin1String("test.xml"));
 }
 
 void tst_QXmlStream::reportFailures() const
@@ -701,7 +730,7 @@ QByteArray tst_QXmlStream::readFile(const QString &filename)
     QByteArray outarray;
     QTextStream writer(&outarray);
     // We always want UTF-8, and not what the system picks up.
-    writer.setCodec("UTF-8");
+    writer.setEncoding(QStringConverter::Utf8);
 
     while (!reader.atEnd()) {
         reader.readNext();
@@ -856,7 +885,7 @@ void tst_QXmlStream::addExtraNamespaceDeclarations()
 
 class EntityResolver : public QXmlStreamEntityResolver {
 public:
-    QString resolveUndeclaredEntity(const QString &name) {
+    QString resolveUndeclaredEntity(const QString &name) override {
         static int count = 0;
         return name.toUpper() + QString::number(++count);
     }
@@ -1258,64 +1287,14 @@ void tst_QXmlStream::hasAttribute() const
     QVERIFY(!reader.hasError());
 }
 
-
-void tst_QXmlStream::writeWithCodec() const
-{
-    QByteArray outarray;
-    QXmlStreamWriter writer(&outarray);
-    writer.setAutoFormatting(true);
-
-    QTextCodec *codec = QTextCodec::codecForName("ISO 8859-15");
-    QVERIFY(codec);
-    writer.setCodec(codec);
-
-    const char *latin2 = "h\xe9 h\xe9";
-    const QString string = codec->toUnicode(latin2);
-
-
-    writer.writeStartDocument("1.0");
-
-    writer.writeTextElement("foo", string);
-    writer.writeEndElement();
-    writer.writeEndDocument();
-
-    QVERIFY(outarray.contains(latin2));
-    QVERIFY(outarray.contains(codec->name()));
-}
-
 void tst_QXmlStream::writeWithUtf8Codec() const
 {
     QByteArray outarray;
     QXmlStreamWriter writer(&outarray);
 
-    QTextCodec *codec = QTextCodec::codecForMib(106); // utf-8
-    QVERIFY(codec);
-    writer.setCodec(codec);
-
     writer.writeStartDocument("1.0");
     static const char begin[] = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
     QVERIFY(outarray.startsWith(begin));
-}
-
-void tst_QXmlStream::writeWithUtf16Codec() const
-{
-    QByteArray outarray;
-    QXmlStreamWriter writer(&outarray);
-
-    QTextCodec *codec = QTextCodec::codecForMib(1014); // utf-16LE
-    QVERIFY(codec);
-    writer.setCodec(codec);
-
-    writer.writeStartDocument("1.0");
-    static const char begin[] = "<?xml version=\"1.0\" encoding=\"UTF-16";  // skip potential "LE" suffix
-    const int count = sizeof(begin) - 1;    // don't include 0 terminator
-    QByteArray begin_UTF16;
-    begin_UTF16.reserve(2*(count));
-    for (int i = 0; i < count; ++i) {
-        begin_UTF16.append(begin[i]);
-        begin_UTF16.append((char)'\0');
-    }
-    QVERIFY(outarray.startsWith(begin_UTF16));
 }
 
 void tst_QXmlStream::writeWithStandalone() const
@@ -1413,7 +1392,6 @@ void tst_QXmlStream::garbageInXMLPrologUTF8Explicitly() const
     QVERIFY(out.open(QIODevice::ReadWrite));
 
     QXmlStreamWriter writer (&out);
-    writer.setCodec("UTF-8");
     writer.writeStartDocument();
     writer.writeEmptyElement("Foo");
     writer.writeEndDocument();
@@ -1521,7 +1499,7 @@ void tst_QXmlStream::crashInXmlStreamReader() const
 class FakeBuffer : public QBuffer
 {
 protected:
-    qint64 writeData(const char *c, qint64 i)
+    qint64 writeData(const char *c, qint64 i) override
     {
         qint64 ai = qMin(m_capacity, i);
         m_capacity -= ai;
@@ -1600,43 +1578,6 @@ void tst_QXmlStream::hasError() const
         QCOMPARE(fb.data(), QByteArray("<?xml vers"));
     }
 
-}
-
-void tst_QXmlStream::write8bitCodec() const
-{
-    QBuffer outBuffer;
-    QVERIFY(outBuffer.open(QIODevice::WriteOnly));
-    QXmlStreamWriter writer(&outBuffer);
-    writer.setAutoFormatting(false);
-
-    QTextCodec *codec = QTextCodec::codecForName("IBM500");
-    if (!codec) {
-        QSKIP("Encoding IBM500 not available.");
-    }
-    writer.setCodec(codec);
-
-    writer.writeStartDocument();
-    writer.writeStartElement("root");
-    writer.writeAttribute("attrib", "1");
-    writer.writeEndElement();
-    writer.writeEndDocument();
-    outBuffer.close();
-
-    // test 8 bit encoding
-    QByteArray values = outBuffer.data();
-    QVERIFY(values.size() > 1);
-    // check '<'
-    QCOMPARE(values[0] & 0x00FF, 0x4c);
-    // check '?'
-    QCOMPARE(values[1] & 0x00FF, 0x6F);
-
-    // convert the start of the XML
-    const QString expected = ("<?xml version=\"1.0\" encoding=\"IBM500\"?>");
-    QTextDecoder *decoder = codec->makeDecoder();
-    QVERIFY(decoder);
-    QString decodedText = decoder->toUnicode(values);
-    delete decoder;
-    QVERIFY(decodedText.startsWith(expected));
 }
 
 void tst_QXmlStream::invalidStringCharacters() const

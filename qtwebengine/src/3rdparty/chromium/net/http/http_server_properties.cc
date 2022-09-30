@@ -6,13 +6,14 @@
 
 #include "base/bind.h"
 #include "base/check_op.h"
+#include "base/containers/adapters.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
@@ -31,7 +32,7 @@ namespace {
 // Time to wait before starting an update the preferences from the
 // http_server_properties_impl_ cache. Scheduling another update during this
 // period will be a no-op.
-constexpr base::TimeDelta kUpdatePrefsDelay = base::TimeDelta::FromSeconds(60);
+constexpr base::TimeDelta kUpdatePrefsDelay = base::Seconds(60);
 
 url::SchemeHostPort NormalizeSchemeHostPort(
     const url::SchemeHostPort& scheme_host_port) {
@@ -114,7 +115,7 @@ bool HttpServerProperties::QuicServerInfoMapKey::operator==(
 }
 
 HttpServerProperties::ServerInfoMap::ServerInfoMap()
-    : base::MRUCache<ServerInfoMapKey, ServerInfo>(kMaxServerInfoEntries) {}
+    : base::LRUCache<ServerInfoMapKey, ServerInfo>(kMaxServerInfoEntries) {}
 
 HttpServerProperties::ServerInfoMap::iterator
 HttpServerProperties::ServerInfoMap::GetOrPut(const ServerInfoMapKey& key) {
@@ -375,16 +376,14 @@ void HttpServerProperties::OnDefaultNetworkChanged() {
     MaybeQueueWriteProperties();
 }
 
-std::unique_ptr<base::Value>
-HttpServerProperties::GetAlternativeServiceInfoAsValue() const {
+base::Value HttpServerProperties::GetAlternativeServiceInfoAsValue() const {
   const base::Time now = clock_->Now();
   const base::TimeTicks now_ticks = tick_clock_->NowTicks();
-  std::unique_ptr<base::ListValue> dict_list(new base::ListValue);
+  base::Value dict_list(base::Value::Type::LIST);
   for (const auto& server_info : server_info_map_) {
     if (!server_info.second.alternative_services.has_value())
       continue;
-    std::unique_ptr<base::ListValue> alternative_service_list(
-        new base::ListValue);
+    base::Value alternative_service_list(base::Value::Type::LIST);
     const ServerInfoMapKey& key = server_info.first;
     for (const AlternativeServiceInfo& alternative_service_info :
          server_info.second.alternative_services.value()) {
@@ -415,19 +414,18 @@ HttpServerProperties::GetAlternativeServiceInfoAsValue() const {
             ")";
         alternative_service_string.append(broken_info_string);
       }
-      alternative_service_list->AppendString(alternative_service_string);
+      alternative_service_list.Append(std::move(alternative_service_string));
     }
-    if (alternative_service_list->empty())
+    if (alternative_service_list.GetListDeprecated().empty())
       continue;
-    std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-    dict->SetString("server", key.server.Serialize());
-    dict->SetString("network_isolation_key",
-                    key.network_isolation_key.ToDebugString());
-    dict->Set("alternative_service", std::unique_ptr<base::Value>(
-                                         std::move(alternative_service_list)));
-    dict_list->Append(std::move(dict));
+    base::Value dict(base::Value::Type::DICTIONARY);
+    dict.SetStringKey("server", key.server.Serialize());
+    dict.SetStringKey("network_isolation_key",
+                      key.network_isolation_key.ToDebugString());
+    dict.SetKey("alternative_service", std::move(alternative_service_list));
+    dict_list.Append(std::move(dict));
   }
-  return std::move(dict_list);
+  return dict_list;
 }
 
 bool HttpServerProperties::WasLastLocalAddressWhenQuicWorked(
@@ -547,17 +545,16 @@ void HttpServerProperties::SetMaxServerConfigsStoredInProperties(
   max_server_configs_stored_in_properties_ =
       max_server_configs_stored_in_properties;
 
-  // MRUCache doesn't allow the capacity of the cache to be changed. Thus create
+  // LRUCache doesn't allow the capacity of the cache to be changed. Thus create
   // a new map with the new size and add current elements and swap the new map.
   quic_server_info_map_.ShrinkToSize(max_server_configs_stored_in_properties_);
   QuicServerInfoMap temp_map(max_server_configs_stored_in_properties_);
   // Update the |canonical_server_info_map_| as well, so it stays in sync with
   // |quic_server_info_map_|.
   canonical_server_info_map_ = QuicCanonicalMap();
-  for (auto it = quic_server_info_map_.rbegin();
-       it != quic_server_info_map_.rend(); ++it) {
-    temp_map.Put(it->first, it->second);
-    UpdateCanonicalServerInfoMap(it->first);
+  for (const auto& [key, server_info] : base::Reversed(quic_server_info_map_)) {
+    temp_map.Put(key, server_info);
+    UpdateCanonicalServerInfoMap(key);
   }
 
   quic_server_info_map_.Swap(temp_map);
@@ -565,6 +562,13 @@ void HttpServerProperties::SetMaxServerConfigsStoredInProperties(
     properties_manager_->set_max_server_configs_stored_in_properties(
         max_server_configs_stored_in_properties);
   }
+}
+
+void HttpServerProperties::SetBrokenAlternativeServicesDelayParams(
+    absl::optional<base::TimeDelta> initial_delay,
+    absl::optional<bool> exponential_backoff_on_initial_delay) {
+  broken_alternative_services_.SetDelayParams(
+      initial_delay, exponential_backoff_on_initial_delay);
 }
 
 bool HttpServerProperties::IsInitialized() const {
@@ -1122,28 +1126,27 @@ void HttpServerProperties::OnServerInfoLoaded(
   server_info_map_.Swap(*server_info_map);
 
   // Add the entries from the memory cache.
-  for (auto it = server_info_map->rbegin(); it != server_info_map->rend();
-       ++it) {
+  for (auto& [key, server_info] : base::Reversed(*server_info_map)) {
     // If there's no corresponding old entry, add the new entry directly.
-    auto old_entry = server_info_map_.Get(it->first);
+    auto old_entry = server_info_map_.Get(key);
     if (old_entry == server_info_map_.end()) {
-      server_info_map_.Put(it->first, std::move(it->second));
+      server_info_map_.Put(key, std::move(server_info));
       continue;
     }
 
     // Otherwise, merge the old and new entries. Prefer values from older
     // entries.
     if (!old_entry->second.supports_spdy.has_value())
-      old_entry->second.supports_spdy = it->second.supports_spdy;
+      old_entry->second.supports_spdy = server_info.supports_spdy;
     if (!old_entry->second.alternative_services.has_value())
-      old_entry->second.alternative_services = it->second.alternative_services;
+      old_entry->second.alternative_services = server_info.alternative_services;
     if (!old_entry->second.server_network_stats.has_value())
-      old_entry->second.server_network_stats = it->second.server_network_stats;
+      old_entry->second.server_network_stats = server_info.server_network_stats;
 
     // |requires_http11| isn't saved to prefs, so the loaded entry should not
     // have it set. Unconditionally copy it from the new entry.
     DCHECK(!old_entry->second.requires_http11.has_value());
-    old_entry->second.requires_http11 = it->second.requires_http11;
+    old_entry->second.requires_http11 = server_info.requires_http11;
   }
 
   // Attempt to find canonical servers. Canonical suffix only apply to HTTPS.
@@ -1164,9 +1167,9 @@ void HttpServerProperties::OnServerInfoLoaded(
         it->first.network_isolation_key);
     // If we already have a valid canonical server, we're done.
     if (base::Contains(canonical_alt_svc_map_, key)) {
-      auto it = server_info_map_.Peek(key);
-      if (it != server_info_map_.end() &&
-          it->second.alternative_services.has_value()) {
+      auto key_it = server_info_map_.Peek(key);
+      if (key_it != server_info_map_.end() &&
+          key_it->second.alternative_services.has_value()) {
         continue;
       }
     }
@@ -1187,19 +1190,17 @@ void HttpServerProperties::OnQuicServerInfoMapLoaded(
   quic_server_info_map_.Swap(*quic_server_info_map);
 
   // Add the entries from the memory cache.
-  for (auto it = quic_server_info_map->rbegin();
-       it != quic_server_info_map->rend(); ++it) {
-    if (quic_server_info_map_.Get(it->first) == quic_server_info_map_.end()) {
-      quic_server_info_map_.Put(it->first, it->second);
+  for (const auto& [key, server_info] : base::Reversed(*quic_server_info_map)) {
+    if (quic_server_info_map_.Get(key) == quic_server_info_map_.end()) {
+      quic_server_info_map_.Put(key, server_info);
     }
   }
 
   // Repopulate |canonical_server_info_map_| to stay in sync with
   // |quic_server_info_map_|.
   canonical_server_info_map_.clear();
-  for (auto it = quic_server_info_map_.rbegin();
-       it != quic_server_info_map_.rend(); ++it) {
-    UpdateCanonicalServerInfoMap(it->first);
+  for (const auto& [key, server_info] : base::Reversed(quic_server_info_map_)) {
+    UpdateCanonicalServerInfoMap(key);
   }
 }
 

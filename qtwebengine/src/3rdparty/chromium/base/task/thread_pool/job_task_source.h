@@ -9,11 +9,12 @@
 
 #include <atomic>
 #include <limits>
+#include <memory>
+#include <utility>
 
 #include "base/base_export.h"
 #include "base/callback.h"
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/task/common/checked_lock.h"
 #include "base/task/post_job.h"
@@ -37,6 +38,8 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
                 RepeatingCallback<void(JobDelegate*)> worker_task,
                 MaxConcurrencyCallback max_concurrency_callback,
                 PooledTaskRunnerDelegate* delegate);
+  JobTaskSource(const JobTaskSource&) = delete;
+  JobTaskSource& operator=(const JobTaskSource&) = delete;
 
   static JobHandle CreateJobHandle(
       scoped_refptr<internal::JobTaskSource> task_source) {
@@ -68,9 +71,10 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
   // TaskSource:
   ExecutionEnvironment GetExecutionEnvironment() override;
   size_t GetRemainingConcurrency() const override;
-  TaskSourceSortKey GetSortKey() const override;
+  TaskSourceSortKey GetSortKey(
+      bool disable_fair_scheduling = false) const override;
 
-  bool IsCompleted() const;
+  bool IsActive() const;
   size_t GetWorkerCount() const;
 
   // Returns the maximum number of tasks from this TaskSource that can run
@@ -93,9 +97,10 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
   // ever modified under a lock or read atomically (optimistic read).
   class State {
    public:
-    static constexpr size_t kCanceledMask = 1;
-    static constexpr size_t kWorkerCountBitOffset = 1;
-    static constexpr size_t kWorkerCountIncrement = 1 << kWorkerCountBitOffset;
+    static constexpr uint32_t kCanceledMask = 1;
+    static constexpr int kWorkerCountBitOffset = 1;
+    static constexpr uint32_t kWorkerCountIncrement = 1
+                                                      << kWorkerCountBitOffset;
 
     struct Value {
       size_t worker_count() const { return value >> kWorkerCountBitOffset; }
@@ -147,6 +152,9 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
       return value_.load(std::memory_order_relaxed) != kNotWaiting;
     }
 
+    // Resets the status as kNotWaiting  using std::memory_order_relaxed.
+    void Reset();
+
     // Sets the status as kWaitingForWorkerToYield using
     // std::memory_order_relaxed.
     void SetWaiting();
@@ -188,7 +196,7 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
   mutable CheckedLock worker_lock_{UniversalSuccessor()};
 
   // Current atomic state (atomic despite the lock to allow optimistic reads
-  // without the lock).
+  // and cancellation without the lock).
   State state_ GUARDED_BY(worker_lock_);
   // Normally, |join_flag_| is protected by |lock_|, except in ShouldYield()
   // hence the use of atomics.
@@ -208,9 +216,7 @@ class BASE_EXPORT JobTaskSource : public TaskSource {
   RepeatingClosure primary_task_;
 
   const TimeTicks ready_time_;
-  PooledTaskRunnerDelegate* delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(JobTaskSource);
+  raw_ptr<PooledTaskRunnerDelegate> delegate_;
 };
 
 }  // namespace internal

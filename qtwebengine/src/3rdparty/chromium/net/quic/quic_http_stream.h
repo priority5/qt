@@ -8,13 +8,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <list>
+#include <set>
 #include <string>
-#include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_piece.h"
+#include "base/time/time.h"
 #include "net/base/completion_once_callback.h"
+#include "net/base/idempotency.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_export.h"
@@ -24,8 +26,8 @@
 #include "net/quic/quic_chromium_client_session.h"
 #include "net/quic/quic_chromium_client_stream.h"
 #include "net/spdy/multiplexed_http_stream.h"
-#include "net/third_party/quiche/src/quic/core/http/quic_client_push_promise_index.h"
-#include "net/third_party/quiche/src/quic/core/quic_packets.h"
+#include "net/third_party/quiche/src/quiche/quic/core/http/quic_client_push_promise_index.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
 
 namespace net {
 
@@ -34,18 +36,23 @@ class QuicHttpStreamPeer;
 }  // namespace test
 
 // The QuicHttpStream is a QUIC-specific HttpStream subclass.  It holds a
-// non-owning pointer to a QuicChromiumClientStream which it uses to
-// send and receive data.
+// handle of QuicChromiumClientStream which it uses to send and receive data.
+// The handle hides the details of the underlying stream's lifetime and can be
+// used even after the underlying stream is destroyed.
 class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
  public:
   explicit QuicHttpStream(
-      std::unique_ptr<QuicChromiumClientSession::Handle> session);
+      std::unique_ptr<QuicChromiumClientSession::Handle> session,
+      std::set<std::string> dns_aliases);
+
+  QuicHttpStream(const QuicHttpStream&) = delete;
+  QuicHttpStream& operator=(const QuicHttpStream&) = delete;
 
   ~QuicHttpStream() override;
 
   // HttpStream implementation.
-  int InitializeStream(const HttpRequestInfo* request_info,
-                       bool can_send_early,
+  void RegisterRequest(const HttpRequestInfo* request_info) override;
+  int InitializeStream(bool can_send_early,
                        RequestPriority priority,
                        const NetLogWithSource& net_log,
                        CompletionOnceCallback callback) override;
@@ -66,6 +73,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
       AlternativeService* alternative_service) const override;
   void PopulateNetErrorDetails(NetErrorDetails* details) override;
   void SetPriority(RequestPriority priority) override;
+  void SetRequestIdempotency(Idempotency idempotency) override;
+  const std::set<std::string>& GetDnsAliases() const override;
+  base::StringPiece GetAcceptChViaAlps() const override;
 
   static HttpResponseInfo::ConnectionInfo ConnectionInfoFromQuicVersion(
       quic::ParsedQuicVersion quic_version);
@@ -106,7 +116,7 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
   int DoSendBodyComplete(int rv);
 
   void OnReadResponseHeadersComplete(int rv);
-  int ProcessResponseHeaders(const spdy::SpdyHeaderBlock& headers);
+  int ProcessResponseHeaders(const spdy::Http2HeaderBlock& headers);
   void ReadTrailingHeaders();
   void OnReadTrailingHeadersComplete(int rv);
 
@@ -150,20 +160,20 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
 
   // The request to send.
   // Only valid before the response body is read.
-  const HttpRequestInfo* request_info_;
+  raw_ptr<const HttpRequestInfo> request_info_;
 
   // Whether this request can be sent without confirmation.
   bool can_send_early_;
 
   // The request body to send, if any, owned by the caller.
-  UploadDataStream* request_body_stream_;
+  raw_ptr<UploadDataStream> request_body_stream_;
   // Time the request was issued.
   base::Time request_time_;
   // The priority of the request.
   RequestPriority priority_;
   // |response_info_| is the HTTP response data object which is filled in
   // when a the response headers are read.  It is not owned by this stream.
-  HttpResponseInfo* response_info_;
+  raw_ptr<HttpResponseInfo> response_info_;
   bool has_response_status_;  // true if response_status_ as been set.
   // Because response data is buffered, also buffer the response status if the
   // stream is explicitly closed via OnError or OnClose with an error.
@@ -172,12 +182,12 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
   int response_status_;
 
   // Serialized request headers.
-  spdy::SpdyHeaderBlock request_headers_;
+  spdy::Http2HeaderBlock request_headers_;
 
-  spdy::SpdyHeaderBlock response_header_block_;
+  spdy::Http2HeaderBlock response_header_block_;
   bool response_headers_received_;
 
-  spdy::SpdyHeaderBlock trailing_header_block_;
+  spdy::Http2HeaderBlock trailing_header_block_;
   bool trailing_headers_received_;
 
   // Number of bytes received by the headers stream on behalf of this stream.
@@ -218,9 +228,13 @@ class NET_EXPORT_PRIVATE QuicHttpStream : public MultiplexedHttpStream {
   // Session connect timing info.
   LoadTimingInfo::ConnectTiming connect_timing_;
 
-  base::WeakPtrFactory<QuicHttpStream> weak_factory_{this};
+  // Stores any DNS aliases for the remote endpoint. Includes all known
+  // aliases, e.g. from A, AAAA, or HTTPS, not just from the address used for
+  // the connection, in no particular order. These are stored in the stream
+  // instead of the session due to complications related to IP-pooling.
+  std::set<std::string> dns_aliases_;
 
-  DISALLOW_COPY_AND_ASSIGN(QuicHttpStream);
+  base::WeakPtrFactory<QuicHttpStream> weak_factory_{this};
 };
 
 }  // namespace net

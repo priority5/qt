@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "permission_manager_qt.h"
 
@@ -69,8 +33,8 @@ static ProfileAdapter::PermissionType toQt(content::PermissionType type)
         return ProfileAdapter::NotificationPermission;
     case content::PermissionType::ACCESSIBILITY_EVENTS:
     case content::PermissionType::CAMERA_PAN_TILT_ZOOM:
+    case content::PermissionType::WINDOW_PLACEMENT:
         return ProfileAdapter::UnsupportedPermission;
-    case content::PermissionType::FLASH:
     case content::PermissionType::MIDI_SYSEX:
     case content::PermissionType::PROTECTED_MEDIA_IDENTIFIER:
     case content::PermissionType::MIDI:
@@ -87,8 +51,8 @@ static ProfileAdapter::PermissionType toQt(content::PermissionType type)
     case content::PermissionType::AR:
     case content::PermissionType::VR:
     case content::PermissionType::STORAGE_ACCESS_GRANT:
-    case content::PermissionType::WINDOW_PLACEMENT:
-    case content::PermissionType::FONT_ACCESS:
+    case content::PermissionType::LOCAL_FONTS:
+    case content::PermissionType::DISPLAY_CAPTURE:
     case content::PermissionType::NUM:
         LOG(INFO) << "Unexpected unsupported permission type: " << static_cast<int>(type);
         break;
@@ -131,8 +95,8 @@ PermissionManagerQt::~PermissionManagerQt()
 
 void PermissionManagerQt::permissionRequestReply(const QUrl &url, ProfileAdapter::PermissionType type, ProfileAdapter::PermissionState reply)
 {
-    // Normalize the QUrl to GURL origin form.
-    const GURL gorigin = toGurl(url).GetOrigin();
+    // Normalize the QUrl to Chromium origin form.
+    const GURL gorigin = toGurl(url).DeprecatedGetOriginAsURL();
     const QUrl origin = gorigin.is_empty() ? url : toQt(gorigin);
     if (origin.isEmpty())
         return;
@@ -199,7 +163,7 @@ bool PermissionManagerQt::checkPermission(const QUrl &origin, ProfileAdapter::Pe
     return m_permissions.contains(key) && m_permissions[key];
 }
 
-int PermissionManagerQt::RequestPermission(content::PermissionType permission,
+void PermissionManagerQt::RequestPermission(content::PermissionType permission,
                                             content::RenderFrameHost *frameHost,
                                             const GURL& requesting_origin,
                                             bool /*user_gesture*/,
@@ -207,7 +171,7 @@ int PermissionManagerQt::RequestPermission(content::PermissionType permission,
 {
     if (requesting_origin.is_empty()) {
         std::move(callback).Run(blink::mojom::PermissionStatus::DENIED);
-        return content::PermissionController::kNoPendingOperation;
+        return;
     }
 
     WebContentsDelegateQt *contentsDelegate = static_cast<WebContentsDelegateQt *>(
@@ -217,33 +181,32 @@ int PermissionManagerQt::RequestPermission(content::PermissionType permission,
     ProfileAdapter::PermissionType permissionType = toQt(permission);
     if (permissionType == ProfileAdapter::ClipboardRead) {
         WebEngineSettings *settings = contentsDelegate->webEngineSettings();
-        if (settings->testAttribute(WebEngineSettings::JavascriptCanAccessClipboard)
-            && settings->testAttribute(WebEngineSettings::JavascriptCanPaste))
+        if (settings->testAttribute(QWebEngineSettings::JavascriptCanAccessClipboard)
+            && settings->testAttribute(QWebEngineSettings::JavascriptCanPaste))
             std::move(callback).Run(blink::mojom::PermissionStatus::GRANTED);
         else
             std::move(callback).Run(blink::mojom::PermissionStatus::DENIED);
-        return content::PermissionController::kNoPendingOperation;
+        return;
     } else if (!canRequestPermissionFor(permissionType)) {
         std::move(callback).Run(blink::mojom::PermissionStatus::DENIED);
-        return content::PermissionController::kNoPendingOperation;
+        return;
     }
 
     int request_id = ++m_requestIdCount;
     auto requestOrigin = toQt(requesting_origin);
     m_requests.push_back({ request_id, permissionType, requestOrigin, std::move(callback) });
     contentsDelegate->requestFeaturePermission(permissionType, requestOrigin);
-    return request_id;
 }
 
-int PermissionManagerQt::RequestPermissions(const std::vector<content::PermissionType>& permissions,
-                                            content::RenderFrameHost* frameHost,
-                                            const GURL& requesting_origin,
-                                            bool /*user_gesture*/,
-                                            base::OnceCallback<void(const std::vector<blink::mojom::PermissionStatus>&)> callback)
+void PermissionManagerQt::RequestPermissions(const std::vector<content::PermissionType> &permissions,
+                                             content::RenderFrameHost *frameHost,
+                                             const GURL &requesting_origin,
+                                             bool /*user_gesture*/,
+                                             base::OnceCallback<void(const std::vector<blink::mojom::PermissionStatus> &)> callback)
 {
     if (requesting_origin.is_empty()) {
         std::move(callback).Run(std::vector<blink::mojom::PermissionStatus>(permissions.size(), blink::mojom::PermissionStatus::DENIED));
-        return content::PermissionController::kNoPendingOperation;
+        return;
     }
 
     WebContentsDelegateQt *contentsDelegate = static_cast<WebContentsDelegateQt *>(
@@ -259,8 +222,8 @@ int PermissionManagerQt::RequestPermissions(const std::vector<content::Permissio
             result.push_back(blink::mojom::PermissionStatus::DENIED);
         else if (permissionType == ProfileAdapter::ClipboardRead) {
             WebEngineSettings *settings = contentsDelegate->webEngineSettings();
-            if (settings->testAttribute(WebEngineSettings::JavascriptCanAccessClipboard)
-                && settings->testAttribute(WebEngineSettings::JavascriptCanPaste))
+            if (settings->testAttribute(QWebEngineSettings::JavascriptCanAccessClipboard)
+                && settings->testAttribute(QWebEngineSettings::JavascriptCanPaste))
                 result.push_back(blink::mojom::PermissionStatus::GRANTED);
             else
                 result.push_back(blink::mojom::PermissionStatus::DENIED);
@@ -271,7 +234,7 @@ int PermissionManagerQt::RequestPermissions(const std::vector<content::Permissio
     }
     if (answerable) {
         std::move(callback).Run(result);
-        return content::PermissionController::kNoPendingOperation;
+        return;
     }
 
     int request_id = ++m_requestIdCount;
@@ -282,7 +245,6 @@ int PermissionManagerQt::RequestPermissions(const std::vector<content::Permissio
         if (canRequestPermissionFor(permissionType))
             contentsDelegate->requestFeaturePermission(permissionType, requestOrigin);
     }
-    return request_id;
 }
 
 blink::mojom::PermissionStatus PermissionManagerQt::GetPermissionStatus(
@@ -311,10 +273,12 @@ blink::mojom::PermissionStatus PermissionManagerQt::GetPermissionStatusForFrame(
             permission == content::PermissionType::CLIPBOARD_SANITIZED_WRITE) {
         WebContentsDelegateQt *delegate = static_cast<WebContentsDelegateQt *>(
                 content::WebContents::FromRenderFrameHost(render_frame_host)->GetDelegate());
-        if (!delegate->webEngineSettings()->testAttribute(WebEngineSettings::JavascriptCanAccessClipboard))
+        if (!delegate->webEngineSettings()->testAttribute(
+                    QWebEngineSettings::JavascriptCanAccessClipboard))
             return blink::mojom::PermissionStatus::DENIED;
-        if (permission == content::PermissionType::CLIPBOARD_READ_WRITE &&
-                !delegate->webEngineSettings()->testAttribute(WebEngineSettings::JavascriptCanPaste))
+        if (permission == content::PermissionType::CLIPBOARD_READ_WRITE
+            && !delegate->webEngineSettings()->testAttribute(
+                    QWebEngineSettings::JavascriptCanPaste))
             return blink::mojom::PermissionStatus::DENIED;
         return blink::mojom::PermissionStatus::GRANTED;
     }
@@ -322,7 +286,25 @@ blink::mojom::PermissionStatus PermissionManagerQt::GetPermissionStatusForFrame(
     return GetPermissionStatus(
                 permission,
                 requesting_origin,
-                content::WebContents::FromRenderFrameHost(render_frame_host)->GetLastCommittedURL().GetOrigin());
+                render_frame_host->GetLastCommittedOrigin().GetURL());
+}
+
+blink::mojom::PermissionStatus PermissionManagerQt::GetPermissionStatusForCurrentDocument(
+        content::PermissionType permission,
+        content::RenderFrameHost *render_frame_host)
+{
+    return GetPermissionStatusForFrame(
+                permission,
+                render_frame_host,
+                render_frame_host->GetLastCommittedOrigin().GetURL());
+}
+
+blink::mojom::PermissionStatus PermissionManagerQt::GetPermissionStatusForWorker(
+        content::PermissionType permission,
+        content::RenderProcessHost *render_process_host,
+        const GURL &url)
+{
+    return GetPermissionStatus(permission, url, url);
 }
 
 void PermissionManagerQt::ResetPermission(
@@ -340,6 +322,7 @@ void PermissionManagerQt::ResetPermission(
 
 content::PermissionControllerDelegate::SubscriptionId PermissionManagerQt::SubscribePermissionStatusChange(
     content::PermissionType permission,
+    content::RenderProcessHost * /*render_process_host*/,
     content::RenderFrameHost * /* render_frame_host */,
     const GURL& requesting_origin,
     base::RepeatingCallback<void(blink::mojom::PermissionStatus)> callback)

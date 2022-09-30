@@ -13,9 +13,11 @@ std::string ElideGoAwayDebugDataForNetLogAsString(
     NetLogCaptureMode capture_mode,
     base::StringPiece debug_data) {
   auto value = ElideGoAwayDebugDataForNetLog(capture_mode, debug_data);
-  std::string str;
-  EXPECT_TRUE(value.GetAsString(&str));
-  return str;
+  if (!value.is_string()) {
+    ADD_FAILURE() << "'value' should be string.";
+    return std::string();
+  }
+  return value.GetString();
 }
 
 TEST(SpdyLogUtilTest, ElideGoAwayDebugDataForNetLog) {
@@ -30,43 +32,44 @@ TEST(SpdyLogUtilTest, ElideGoAwayDebugDataForNetLog) {
                 NetLogCaptureMode::kIncludeSensitive, "\xfe\xff\x00"));
 }
 
-TEST(SpdyLogUtilTest, ElideSpdyHeaderBlockForNetLog) {
-  spdy::SpdyHeaderBlock headers;
+TEST(SpdyLogUtilTest, ElideHttp2HeaderBlockForNetLog) {
+  spdy::Http2HeaderBlock headers;
   headers["foo"] = "bar";
   headers["cookie"] = "name=value";
 
   base::ListValue list =
-      ElideSpdyHeaderBlockForNetLog(headers, NetLogCaptureMode::kDefault);
+      ElideHttp2HeaderBlockForNetLog(headers, NetLogCaptureMode::kDefault);
 
   ASSERT_FALSE(list.is_none());
-  ASSERT_EQ(2u, list.GetList().size());
+  ASSERT_EQ(2u, list.GetListDeprecated().size());
 
-  ASSERT_TRUE(list.GetList()[0].is_string());
-  EXPECT_EQ("foo: bar", list.GetList()[0].GetString());
+  ASSERT_TRUE(list.GetListDeprecated()[0].is_string());
+  EXPECT_EQ("foo: bar", list.GetListDeprecated()[0].GetString());
 
-  ASSERT_TRUE(list.GetList()[1].is_string());
-  EXPECT_EQ("cookie: [10 bytes were stripped]", list.GetList()[1].GetString());
+  ASSERT_TRUE(list.GetListDeprecated()[1].is_string());
+  EXPECT_EQ("cookie: [10 bytes were stripped]",
+            list.GetListDeprecated()[1].GetString());
 
-  list = ElideSpdyHeaderBlockForNetLog(headers,
-                                       NetLogCaptureMode::kIncludeSensitive);
+  list = ElideHttp2HeaderBlockForNetLog(headers,
+                                        NetLogCaptureMode::kIncludeSensitive);
 
   ASSERT_FALSE(list.is_none());
-  ASSERT_EQ(2u, list.GetList().size());
+  ASSERT_EQ(2u, list.GetListDeprecated().size());
 
-  ASSERT_TRUE(list.GetList()[0].is_string());
-  EXPECT_EQ("foo: bar", list.GetList()[0].GetString());
+  ASSERT_TRUE(list.GetListDeprecated()[0].is_string());
+  EXPECT_EQ("foo: bar", list.GetListDeprecated()[0].GetString());
 
-  ASSERT_TRUE(list.GetList()[1].is_string());
-  EXPECT_EQ("cookie: name=value", list.GetList()[1].GetString());
+  ASSERT_TRUE(list.GetListDeprecated()[1].is_string());
+  EXPECT_EQ("cookie: name=value", list.GetListDeprecated()[1].GetString());
 }
 
-TEST(SpdyLogUtilTest, SpdyHeaderBlockNetLogParams) {
-  spdy::SpdyHeaderBlock headers;
+TEST(SpdyLogUtilTest, Http2HeaderBlockNetLogParams) {
+  spdy::Http2HeaderBlock headers;
   headers["foo"] = "bar";
   headers["cookie"] = "name=value";
 
   std::unique_ptr<base::Value> dict = base::Value::ToUniquePtrValue(
-      SpdyHeaderBlockNetLogParams(&headers, NetLogCaptureMode::kDefault));
+      Http2HeaderBlockNetLogParams(&headers, NetLogCaptureMode::kDefault));
 
   ASSERT_TRUE(dict);
   ASSERT_TRUE(dict->is_dict());
@@ -75,16 +78,16 @@ TEST(SpdyLogUtilTest, SpdyHeaderBlockNetLogParams) {
   auto* header_list = dict->FindKey("headers");
   ASSERT_TRUE(header_list);
   ASSERT_TRUE(header_list->is_list());
-  ASSERT_EQ(2u, header_list->GetList().size());
+  ASSERT_EQ(2u, header_list->GetListDeprecated().size());
 
-  ASSERT_TRUE(header_list->GetList()[0].is_string());
-  EXPECT_EQ("foo: bar", header_list->GetList()[0].GetString());
+  ASSERT_TRUE(header_list->GetListDeprecated()[0].is_string());
+  EXPECT_EQ("foo: bar", header_list->GetListDeprecated()[0].GetString());
 
-  ASSERT_TRUE(header_list->GetList()[1].is_string());
+  ASSERT_TRUE(header_list->GetListDeprecated()[1].is_string());
   EXPECT_EQ("cookie: [10 bytes were stripped]",
-            header_list->GetList()[1].GetString());
+            header_list->GetListDeprecated()[1].GetString());
 
-  dict = base::Value::ToUniquePtrValue(SpdyHeaderBlockNetLogParams(
+  dict = base::Value::ToUniquePtrValue(Http2HeaderBlockNetLogParams(
       &headers, NetLogCaptureMode::kIncludeSensitive));
 
   ASSERT_TRUE(dict);
@@ -94,33 +97,34 @@ TEST(SpdyLogUtilTest, SpdyHeaderBlockNetLogParams) {
   header_list = dict->FindKey("headers");
   ASSERT_TRUE(header_list);
   ASSERT_TRUE(header_list->is_list());
-  ASSERT_EQ(2u, header_list->GetList().size());
+  ASSERT_EQ(2u, header_list->GetListDeprecated().size());
 
-  ASSERT_TRUE(header_list->GetList()[0].is_string());
-  EXPECT_EQ("foo: bar", header_list->GetList()[0].GetString());
+  ASSERT_TRUE(header_list->GetListDeprecated()[0].is_string());
+  EXPECT_EQ("foo: bar", header_list->GetListDeprecated()[0].GetString());
 
-  ASSERT_TRUE(header_list->GetList()[1].is_string());
-  EXPECT_EQ("cookie: name=value", header_list->GetList()[1].GetString());
+  ASSERT_TRUE(header_list->GetListDeprecated()[1].is_string());
+  EXPECT_EQ("cookie: name=value",
+            header_list->GetListDeprecated()[1].GetString());
 }
 
 // Regression test for https://crbug.com/800282.
-TEST(SpdyLogUtilTest, ElideSpdyHeaderBlockForNetLogWithNonUTF8Characters) {
-  spdy::SpdyHeaderBlock headers;
+TEST(SpdyLogUtilTest, ElideHttp2HeaderBlockForNetLogWithNonUTF8Characters) {
+  spdy::Http2HeaderBlock headers;
   headers["foo"] = "bar\x81";
   headers["O\xe2"] = "bar";
   headers["\xde\xad"] = "\xbe\xef";
 
   base::ListValue list =
-      ElideSpdyHeaderBlockForNetLog(headers, NetLogCaptureMode::kDefault);
+      ElideHttp2HeaderBlockForNetLog(headers, NetLogCaptureMode::kDefault);
 
-  ASSERT_EQ(3u, list.GetSize());
-  std::string field;
-  EXPECT_TRUE(list.GetString(0, &field));
-  EXPECT_EQ("%ESCAPED:\xE2\x80\x8B foo: bar%81", field);
-  EXPECT_TRUE(list.GetString(1, &field));
-  EXPECT_EQ("%ESCAPED:\xE2\x80\x8B O%E2: bar", field);
-  EXPECT_TRUE(list.GetString(2, &field));
-  EXPECT_EQ("%ESCAPED:\xE2\x80\x8B %DE%AD: %BE%EF", field);
+  base::Value::ConstListView list_view = list.GetListDeprecated();
+  ASSERT_EQ(3u, list_view.size());
+  ASSERT_TRUE(list_view[0].is_string());
+  EXPECT_EQ("%ESCAPED:\xE2\x80\x8B foo: bar%81", list_view[0].GetString());
+  ASSERT_TRUE(list_view[1].is_string());
+  EXPECT_EQ("%ESCAPED:\xE2\x80\x8B O%E2: bar", list_view[1].GetString());
+  ASSERT_TRUE(list_view[2].is_string());
+  EXPECT_EQ("%ESCAPED:\xE2\x80\x8B %DE%AD: %BE%EF", list_view[2].GetString());
 }
 
 }  // namespace net

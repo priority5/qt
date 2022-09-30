@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/lap_timer.h"
 #include "components/viz/common/quads/compositor_render_pass.h"
@@ -24,6 +25,10 @@ static const int kTimeCheckInterval = 10;
 constexpr char kMetricPrefixDrawQuad[] = "DrawQuad.";
 constexpr char kMetricIterateResourcesRunsPerS[] = "iterate_resources";
 
+ResourceId NextId(ResourceId id) {
+  return ResourceId(id.GetUnsafeValue() + 1);
+}
+
 perf_test::PerfResultReporter SetUpDrawQuadReporter(const std::string& story) {
   perf_test::PerfResultReporter reporter(kMetricPrefixDrawQuad, story);
   reporter.RegisterImportantMetric(kMetricIterateResourcesRunsPerS, "runs/s");
@@ -34,17 +39,15 @@ SharedQuadState* CreateSharedQuadState(CompositorRenderPass* render_pass) {
   gfx::Transform quad_transform = gfx::Transform(1.0, 0.0, 0.5, 1.0, 0.5, 0.0);
   gfx::Rect content_rect(26, 28);
   gfx::Rect visible_layer_rect(10, 12, 14, 16);
-  gfx::Rect clip_rect(19, 21, 23, 25);
-  bool is_clipped = false;
   bool are_contents_opaque = false;
   float opacity = 1.f;
   int sorting_context_id = 65536;
   SkBlendMode blend_mode = SkBlendMode::kSrcOver;
 
   SharedQuadState* state = render_pass->CreateAndAppendSharedQuadState();
-  state->SetAll(quad_transform, content_rect, visible_layer_rect, gfx::RRectF(),
-                clip_rect, is_clipped, are_contents_opaque, opacity, blend_mode,
-                sorting_context_id);
+  state->SetAll(quad_transform, content_rect, visible_layer_rect,
+                gfx::MaskFilterInfo(), /*clip_rect=*/absl::nullopt,
+                are_contents_opaque, opacity, blend_mode, sorting_context_id);
   return state;
 }
 
@@ -52,7 +55,7 @@ class DrawQuadPerfTest : public testing::Test {
  public:
   DrawQuadPerfTest()
       : timer_(kWarmupRuns,
-               base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+               base::Milliseconds(kTimeLimitMillis),
                kTimeCheckInterval) {}
 
   void CreateRenderPass() {
@@ -73,7 +76,7 @@ class DrawQuadPerfTest : public testing::Test {
       auto* quad = render_pass_->CreateAndAppendDrawQuad<TextureDrawQuad>();
       gfx::Rect rect(0, 0, 100, 100);
       bool needs_blending = false;
-      ResourceId resource_id = 1;
+      ResourceId resource_id{1};
       bool premultiplied_alpha = true;
       gfx::PointF uv_top_left(0, 0);
       gfx::PointF uv_bottom_right(1, 1);
@@ -100,7 +103,7 @@ class DrawQuadPerfTest : public testing::Test {
     do {
       for (auto* quad : quads) {
         for (ResourceId& resource_id : quad->resources)
-          ++resource_id;
+          resource_id = NextId(resource_id);
       }
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
@@ -112,7 +115,7 @@ class DrawQuadPerfTest : public testing::Test {
 
  private:
   std::unique_ptr<CompositorRenderPass> render_pass_;
-  SharedQuadState* shared_state_;
+  raw_ptr<SharedQuadState> shared_state_;
   base::LapTimer timer_;
 };
 

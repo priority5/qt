@@ -21,19 +21,35 @@ namespace {
 // switch away after a large number of frames not needing DC layers have
 // been produced.
 constexpr int kNumberOfFramesBeforeDisablingDCLayers = 60;
+
+bool ContainsMediaFoundationVideoContent(
+    const AggregatedRenderPassList& render_passes) {
+  for (size_t i = 0; i < render_passes.size(); ++i) {
+    const QuadList& quad_list = render_passes[i]->quad_list;
+    for (size_t j = 0; j < quad_list.size(); ++j) {
+      if (quad_list.ElementAt(j)->material ==
+          DrawQuad::Material::kStreamVideoContent)
+        return true;
+    }
+  }
+
+  return false;
+}
+
 }  // anonymous namespace
 
 OverlayProcessorWin::OverlayProcessorWin(
     OutputSurface* output_surface,
     std::unique_ptr<DCLayerOverlayProcessor> dc_layer_overlay_processor)
     : output_surface_(output_surface),
-      supports_dc_layers_(output_surface->capabilities().supports_dc_layers),
-      dc_layer_overlay_processor_(std::move(dc_layer_overlay_processor)) {}
+      dc_layer_overlay_processor_(std::move(dc_layer_overlay_processor)) {
+  DCHECK(output_surface_->capabilities().supports_dc_layers);
+}
 
 OverlayProcessorWin::~OverlayProcessorWin() = default;
 
 bool OverlayProcessorWin::IsOverlaySupported() const {
-  return supports_dc_layers_;
+  return true;
 }
 
 gfx::Rect OverlayProcessorWin::GetPreviousFrameOverlaysBoundingRect() const {
@@ -49,10 +65,11 @@ gfx::Rect OverlayProcessorWin::GetAndResetOverlayDamage() {
 void OverlayProcessorWin::ProcessForOverlays(
     DisplayResourceProvider* resource_provider,
     AggregatedRenderPassList* render_passes,
-    const SkMatrix44& output_color_matrix,
+    const SkM44& output_color_matrix,
     const OverlayProcessorInterface::FilterOperationsMap& render_pass_filters,
     const OverlayProcessorInterface::FilterOperationsMap&
         render_pass_backdrop_filters,
+    SurfaceDamageRectList surface_damage_rect_list,
     OutputSurfaceOverlayPlane* output_surface_plane,
     CandidateList* candidates,
     gfx::Rect* damage_rect,
@@ -60,10 +77,13 @@ void OverlayProcessorWin::ProcessForOverlays(
   TRACE_EVENT0("viz", "OverlayProcessorWin::ProcessForOverlays");
 
   auto* root_render_pass = render_passes->back().get();
-  // Skip overlay processing if we have copy request.
-  if (!root_render_pass->copy_requests.empty()) {
-    damage_rect->Union(dc_layer_overlay_processor_
-                           ->previous_frame_overlay_damage_contribution());
+
+  // Skip overlay processing if we have copy request or video capture is
+  // enabled. When video capture is enabled, some frames might not have copy
+  // request.
+  if (!root_render_pass->copy_requests.empty() || is_video_capture_enabled_) {
+    damage_rect->Union(
+        dc_layer_overlay_processor_->PreviousFrameOverlayDamageContribution());
     // Update damage rect before calling ClearOverlayState, otherwise
     // previous_frame_overlay_rect_union will be empty.
     dc_layer_overlay_processor_->ClearOverlayState();
@@ -77,19 +97,18 @@ void OverlayProcessorWin::ProcessForOverlays(
   // supporting RGB10 format. Let overlay deal with HDR content in this
   // situation.
   bool supports_rgb10a2_overlay =
-      (gl::GetOverlaySupportFlags(DXGI_FORMAT_R10G10B10A2_UNORM) != 0 ||
-       output_surface_->capabilities().forces_rgb10a2_overlay_support_flags);
+      gl::GetOverlaySupportFlags(DXGI_FORMAT_R10G10B10A2_UNORM) != 0;
   if (root_render_pass->content_color_usage == gfx::ContentColorUsage::kHDR &&
       !supports_rgb10a2_overlay) {
-    return;
+    // Media Foundation always uses overlays to render video, so do not skip.
+    if (!ContainsMediaFoundationVideoContent(*render_passes))
+      return;
   }
-
-  if (!supports_dc_layers_)
-    return;
 
   dc_layer_overlay_processor_->Process(
       resource_provider, gfx::RectF(root_render_pass->output_rect),
-      render_passes, damage_rect, candidates);
+      render_pass_filters, render_pass_backdrop_filters, render_passes,
+      damage_rect, std::move(surface_damage_rect_list), candidates);
 
   bool was_using_dc_layers = using_dc_layers_;
   if (!candidates->empty()) {
@@ -109,8 +128,12 @@ void OverlayProcessorWin::ProcessForOverlays(
   }
 }
 
-bool OverlayProcessorWin::NeedsSurfaceOccludingDamageRect() const {
+bool OverlayProcessorWin::NeedsSurfaceDamageRectList() const {
   return true;
+}
+
+void OverlayProcessorWin::SetIsVideoCaptureEnabled(bool enabled) {
+  is_video_capture_enabled_ = enabled;
 }
 
 }  // namespace viz

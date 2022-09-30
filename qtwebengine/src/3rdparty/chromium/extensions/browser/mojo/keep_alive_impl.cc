@@ -30,8 +30,8 @@ KeepAliveImpl::KeepAliveImpl(content::BrowserContext* context,
       extension_, Activity::MOJO, std::string());
   receiver_.set_disconnect_handler(
       base::BindOnce(&KeepAliveImpl::OnDisconnected, base::Unretained(this)));
-  extension_registry_observer_.Add(ExtensionRegistry::Get(context_));
-  process_manager_observation_.Add(ProcessManager::Get(context_));
+  extension_registry_observation_.Observe(ExtensionRegistry::Get(context_));
+  process_manager_observation_.Observe(ProcessManager::Get(context_));
 }
 
 KeepAliveImpl::~KeepAliveImpl() = default;

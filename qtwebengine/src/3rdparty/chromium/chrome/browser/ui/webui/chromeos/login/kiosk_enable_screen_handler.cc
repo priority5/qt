@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/bind.h"
+#include "chrome/browser/ash/login/screens/kiosk_enable_screen.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/login/screens/kiosk_enable_screen.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
@@ -19,10 +19,9 @@ namespace chromeos {
 
 constexpr StaticOobeScreenId KioskEnableScreenView::kScreenId;
 
-KioskEnableScreenHandler::KioskEnableScreenHandler(
-    JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(kScreenId, js_calls_container) {
-  set_user_acted_method_path("login.KioskEnableScreen.userActed");
+KioskEnableScreenHandler::KioskEnableScreenHandler()
+    : BaseScreenHandler(kScreenId) {
+  set_user_acted_method_path_deprecated("login.KioskEnableScreen.userActed");
 }
 
 KioskEnableScreenHandler::~KioskEnableScreenHandler() {
@@ -31,18 +30,18 @@ KioskEnableScreenHandler::~KioskEnableScreenHandler() {
 }
 
 void KioskEnableScreenHandler::Show() {
-  if (!page_is_ready()) {
+  if (!IsJavascriptAllowed()) {
     show_on_init_ = true;
     return;
   }
-  ShowScreen(kScreenId);
+  ShowInWebUI();
 }
 
 void KioskEnableScreenHandler::SetScreen(KioskEnableScreen* screen) {
-  BaseScreenHandler::SetBaseScreen(screen);
+  BaseScreenHandler::SetBaseScreenDeprecated(screen);
   screen_ = screen;
-  if (page_is_ready() && screen_)
-    Initialize();
+  if (IsJavascriptAllowed() && screen_)
+    InitializeDeprecated();
 }
 
 void KioskEnableScreenHandler::DeclareLocalizedValues(
@@ -58,8 +57,8 @@ void KioskEnableScreenHandler::DeclareLocalizedValues(
   builder->Add("kioskEnableErrorMsg", IDS_KIOSK_ENABLE_SCREEN_ERROR);
 }
 
-void KioskEnableScreenHandler::Initialize() {
-  if (!page_is_ready() || !screen_)
+void KioskEnableScreenHandler::InitializeDeprecated() {
+  if (!IsJavascriptAllowed() || !screen_)
     return;
 
   if (show_on_init_) {

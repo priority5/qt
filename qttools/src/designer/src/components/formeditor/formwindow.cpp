@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "formwindow.h"
 #include "formeditor.h"
@@ -72,29 +47,31 @@
 
 #include <abstractdialoggui_p.h>
 
-#include <QtCore/qdebug.h>
-#include <QtCore/qbuffer.h>
-#include <QtCore/qtimer.h>
-#include <QtCore/qvector.h>
-#include <QtCore/qxmlstream.h>
 #include <QtWidgets/qmenu.h>
-#include <QtWidgets/qaction.h>
-#include <QtWidgets/qactiongroup.h>
-#if QT_CONFIG(clipboard)
-#include <QtGui/qclipboard.h>
-#endif
-#include <QtWidgets/qundogroup.h>
 #include <QtWidgets/qscrollarea.h>
 #include <QtWidgets/qrubberband.h>
 #include <QtWidgets/qapplication.h>
 #include <QtWidgets/qsplitter.h>
-#include <QtGui/qpainter.h>
 #include <QtWidgets/qgroupbox.h>
 #include <QtWidgets/qdockwidget.h>
 #include <QtWidgets/qtoolbox.h>
 #include <QtWidgets/qstackedwidget.h>
 #include <QtWidgets/qtabwidget.h>
 #include <QtWidgets/qbuttongroup.h>
+
+#include <QtGui/qaction.h>
+#include <QtGui/qactiongroup.h>
+#if QT_CONFIG(clipboard)
+#  include <QtGui/qclipboard.h>
+#endif
+#include <QtGui/qpainter.h>
+#include <QtGui/qundogroup.h>
+
+#include <QtCore/qdebug.h>
+#include <QtCore/qbuffer.h>
+#include <QtCore/qtimer.h>
+#include <QtCore/qlist.h>
+#include <QtCore/qxmlstream.h>
 
 Q_DECLARE_METATYPE(QWidget*)
 
@@ -163,7 +140,7 @@ public:
 
 private:
 
-    using SelectionPool = QVector<WidgetSelection *>;
+    using SelectionPool = QList<WidgetSelection *>;
     SelectionPool m_selectionPool;
 
     typedef QHash<QWidget *, WidgetSelection *> SelectionHash;
@@ -599,7 +576,7 @@ bool FormWindow::handleMousePressEvent(QWidget * widget, QWidget *managedWidget,
     if (buttons != Qt::LeftButton && buttons != Qt::MiddleButton)
         return true;
 
-    m_startPos = mapFromGlobal(e->globalPos());
+    m_startPos = mapFromGlobal(e->globalPosition().toPoint());
 
     if (debugFormWindow)
         qDebug() << "handleMousePressEvent:" <<  widget << ',' << managedWidget;
@@ -610,7 +587,7 @@ bool FormWindow::handleMousePressEvent(QWidget * widget, QWidget *managedWidget,
 
         m_mouseState = MouseDrawRubber;
         m_currRect = QRect();
-        startRectDraw(mapFromGlobal(e->globalPos()), this, Rubber);
+        startRectDraw(mapFromGlobal(e->globalPosition().toPoint()), this, Rubber);
         return true;
     }
     if (buttons != Qt::LeftButton)
@@ -661,7 +638,7 @@ bool FormWindow::handleMouseMoveEvent(QWidget *, QWidget *, QMouseEvent *e)
     if (m_startPos.isNull())
         return true;
 
-    const QPoint pos = mapFromGlobal(e->globalPos());
+    const QPoint pos = mapFromGlobal(e->globalPosition().toPoint());
 
     switch (m_mouseState) {
     case MouseDrawRubber:  // Rubber band with left/middle mouse
@@ -1230,8 +1207,19 @@ void FormWindow::insertWidget(QWidget *w, const QRect &rect, QWidget *container,
 
     m_undoStack.push(geom_cmd);
 
-    InsertWidgetCommand *cmd = new InsertWidgetCommand(this);
-    cmd->init(w, already_in_form);
+    QUndoCommand *cmd = nullptr;
+    if (auto dockWidget = qobject_cast<QDockWidget *>(w)) {
+        if (auto mainWindow = qobject_cast<QMainWindow *>(container)) {
+            auto addDockCmd = new AddDockWidgetCommand(this);
+            addDockCmd->init(mainWindow, dockWidget);
+            cmd = addDockCmd;
+        }
+    }
+    if (cmd == nullptr) {
+        auto insertCmd = new InsertWidgetCommand(this);
+        insertCmd->init(w, already_in_form);
+        cmd = insertCmd;
+    }
     m_undoStack.push(cmd);
 
     endCommand();
@@ -2424,8 +2412,7 @@ void FormWindow::simplifySelection(QWidgetList *sel) const
         sel->push_back(mainC);
         return;
     }
-    using WidgetVector = QVector<QWidget *>;
-    WidgetVector toBeRemoved;
+    QWidgetList toBeRemoved;
     toBeRemoved.reserve(sel->size());
     const QWidgetList::const_iterator scend = sel->constEnd();
     for (QWidgetList::const_iterator it = sel->constBegin(); it != scend; ++it) {
@@ -2444,8 +2431,8 @@ void FormWindow::simplifySelection(QWidgetList *sel) const
     // Now we can actually remove the widgets that were marked
     // for removal in the previous pass.
     if (!toBeRemoved.isEmpty()) {
-        const WidgetVector::const_iterator rcend = toBeRemoved.constEnd();
-        for (WidgetVector::const_iterator it = toBeRemoved.constBegin(); it != rcend; ++it)
+        const QWidgetList::const_iterator rcend = toBeRemoved.constEnd();
+        for (QWidgetList::const_iterator it = toBeRemoved.constBegin(); it != rcend; ++it)
             sel->removeAll(*it);
     }
 }
@@ -2699,7 +2686,7 @@ bool FormWindow::blockSelectionChanged(bool b)
 void FormWindow::editContents()
 {
     const QWidgetList sel = selectedWidgets();
-    if (sel.count() == 1) {
+    if (sel.size() == 1) {
         QWidget *widget = sel.first();
 
         if (QAction *a = preferredEditAction(core(), widget))

@@ -1,8 +1,8 @@
-# v-0006 - Fails because 'f' is not a struct.
+// v-0007 - Fails because 'f' is not a struct.
 
-fn main() -> void {
+@stage(fragment)
+fn main() {
   var f : f32;
   f.a = 4.0;
   return;
 }
-entry_point vertex = main;

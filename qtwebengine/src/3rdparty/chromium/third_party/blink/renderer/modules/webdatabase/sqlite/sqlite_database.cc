@@ -46,8 +46,8 @@ std::tuple<int, sqlite3*> OpenDatabase(const String& filename) {
                               /*make_default=*/false);
 
   sqlite3* connection;
-  constexpr int open_flags =
-      SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_PRIVATECACHE;
+  constexpr int open_flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
+                             SQLITE_OPEN_EXRESCODE | SQLITE_OPEN_PRIVATECACHE;
   int status = sqlite3_open_v2(filename.Utf8().c_str(), &connection, open_flags,
                                kSqliteVfsName);
   if (status != SQLITE_OK) {
@@ -57,7 +57,7 @@ std::tuple<int, sqlite3*> OpenDatabase(const String& filename) {
       connection = nullptr;
     }
   }
-  return std::make_tuple(status, connection);
+  return {status, connection};
 }
 
 }  // namespace
@@ -71,15 +71,7 @@ const int kSQLResultConstraint = SQLITE_CONSTRAINT;
 
 static const char kNotOpenErrorMessage[] = "database is not open";
 
-SQLiteDatabase::SQLiteDatabase()
-    : db_(nullptr),
-      page_size_(-1),
-      transaction_in_progress_(false),
-      opening_thread_(0),
-      open_error_(SQLITE_ERROR),
-      open_error_message_(),
-      last_changes_count_(0) {
-}
+SQLiteDatabase::SQLiteDatabase() : open_error_(SQLITE_ERROR) {}
 
 SQLiteDatabase::~SQLiteDatabase() {
   Close();
@@ -108,16 +100,6 @@ bool SQLiteDatabase::Open(const String& filename) {
     return false;
   }
 
-  open_error_ = sqlite3_extended_result_codes(db_, 1);
-  if (open_error_ != SQLITE_OK) {
-    open_error_message_ = sqlite3_errmsg(db_);
-    DLOG(ERROR) << "SQLite database error when enabling extended errors - "
-                << open_error_message_.data();
-    sqlite3_close(db_);
-    db_ = nullptr;
-    return false;
-  }
-
   // Defensive mode is a layer of defense in depth for applications that must
   // run SQL queries from an untrusted source, such as WebDatabase. Refuse to
   // proceed if this layer cannot be enabled.
@@ -132,6 +114,9 @@ bool SQLiteDatabase::Open(const String& filename) {
   }
 
   opening_thread_ = CurrentThread();
+
+  if (!SQLiteStatement(*this, "PRAGMA locking_mode = NORMAL;").ExecuteCommand())
+    DLOG(ERROR) << "SQLite database could not set locking_mode to normal";
 
   if (!SQLiteStatement(*this, "PRAGMA temp_store = MEMORY;").ExecuteCommand())
     DLOG(ERROR) << "SQLite database could not set temp_store to memory";
@@ -280,18 +265,18 @@ void SQLiteDatabase::UpdateLastChangesCount() {
   if (!db_)
     return;
 
-  last_changes_count_ = sqlite3_total_changes(db_);
+  last_changes_count_ = sqlite3_total_changes64(db_);
 }
 
-int SQLiteDatabase::LastChanges() {
+int64_t SQLiteDatabase::LastChanges() {
   if (!db_)
     return 0;
 
-  return sqlite3_total_changes(db_) - last_changes_count_;
+  return sqlite3_total_changes64(db_) - last_changes_count_;
 }
 
 int SQLiteDatabase::LastError() {
-  return db_ ? sqlite3_errcode(db_) : open_error_;
+  return db_ ? sqlite3_extended_errcode(db_) : open_error_;
 }
 
 const char* SQLiteDatabase::LastErrorMsg() {

@@ -104,15 +104,6 @@ Currently supported additional index fields are:
 *   `profile.form_factor`
 *   `profile.system_ram`
 
-### Aggregation by Metrics in the Same Event
-
-Aggregation can occur against other metrics of the same event by listing
-"metrics._foo_" as an index field. That other metric must also have `history`,
-`statistics`, and `**enumeration**` tags.
-
-**NOTE:** There is currently a limitation that only _one_ (1) `index` tag can
-include such a reference.
-
 ### Enumeration Proportions
 
 Proportions are calculated against the number of "page loads" (meaning per
@@ -166,7 +157,7 @@ emitted.
 
 In order to record UKM events, your code needs a UkmRecorder object, defined by [//services/metrics/public/cpp/ukm_recorder.h](https://cs.chromium.org/chromium/src/services/metrics/public/cpp/ukm_recorder.h)
 
-There are two main ways of getting a UkmRecorder instance.
+There are three main ways of getting a UkmRecorder instance.
 
 1) Use `ukm::UkmRecorder::Get()`.  This currently only works from the Browser process.
 
@@ -180,11 +171,15 @@ ukm::builders::MyEvent(source_id)
     .Record(ukm_recorder.get());
 ```
 
+3) Within blink/renderer, use `blink::Document::UkmRecorder()`.
+
 ### Get A ukm::SourceId
 
 UKM identifies navigations by their source ID and you'll need to associate an ID with your event in order to tie it to a main frame URL.  Preferably, get an existing ID for the navigation from another object.
 
-The main method for doing this is by getting a navigation ID:
+Prefer using `ukm::SourceId` if only the underlying int64 value is required to identify a source and is used in Mojo interface, and no type conversion needs to be performed. If additional source type information is needed, `ukm::SourceIdObj` can be used.
+
+The main method for getting an existing ID is by converting from the navigation ID:
 
 ```cpp
 ukm::SourceId source_id = GetSourceIdForWebContentsDocument(web_contents);
@@ -205,7 +200,7 @@ auto* ukm_background_service = ukm::UkmBackgroundRecorderFactory::GetForProfile(
 ukm_background_service->GetBackgroundSourceIdIfAllowed(origin, base::BindOnce(&DidGetBackgroundSourceId));
 
 // A callback will run with an optional source ID.
-void DidGetBackgroundSourceId(base::Optional<ukm::SourceId> source_id) {
+void DidGetBackgroundSourceId(absl::optional<ukm::SourceId> source_id) {
   if (!source_id) return;  // Can't record as it wasn't found in the history.
 
   // Use the newly generated source ID.
@@ -215,7 +210,7 @@ void DidGetBackgroundSourceId(base::Optional<ukm::SourceId> source_id) {
 }
 ```
 
-For the remaining cases you may need to temporarily create your own IDs and associate the URL with them. However we currently prefer that this method is not used, and if you need to setup the URL yourself, please email us first at ukm-team@google.com.
+For the remaining cases you may need to temporarily create your own IDs and associate the URL with them. However we currently prefer that this method is not used, and if you need to setup the URL yourself, please email the OWNERS of components/ukm.
 Example:
 
 ```cpp
@@ -236,12 +231,14 @@ void OnGoatTeleported() {
   ...
   ukm::builders::Goat_Teleported(source_id)
       .SetDuration(duration.InMilliseconds())
-      .SetType(goat_type)
+      .SetGoatType(goat_type)
       .Record(ukm_recorder);
 }
 ```
 
 If the event name in the XML contains a period (`.`), it is replaced with an underscore (`_`) in the method name.
+
+To avoid having UKM report becoming unbounded in size, an upper limit is placed on the number of events recorded for each event type. Events that are recorded too frequently may be subject to downsampling (see go/ukm-sampling). As a rule of thumb, it is recommended that most entries be recorded at most once per 100 pageloads on average to limit data volume.
 
 ### Local Testing
 
@@ -250,3 +247,50 @@ Build Chromium and run it with '--force-enable-metrics-reporting --metrics-uploa
 ## Unit Testing
 
 You can pass your code a TestUkmRecorder (see [//components/ukm/test_ukm_recorder.h](https://cs.chromium.org/chromium/src/components/ukm/test_ukm_recorder.h)) and then use the methods it provides to test that your data records correctly.
+
+## Adding UKMs every report
+
+Certain information may be useful to be included on every UKM upload. This may be applicable if your information is always "available" in some sense, as opposed to triggered/computed at a particular instance, which is the default. In this case, the best way to proceed is to setup a [MetricsProvider](https://source.chromium.org/chromium/src/components/metrics/metrics_provider.h). The new Provider should implement the ProvideCurrentSessionUKMData() method. Record a UKM Event within that implementation, and it will be recorded exactly once per UKM report, immediately before the information is uploaded.
+
+## Recording Information about Subframes URLs via Categorization
+
+The UKM infrastructure primarily supports recording metrics tied with navigation URLs as that is the basis of the consent model. As there is desire for information related to URLs loaded within a page itself (i.e. subframe URLs), here we describe an approach for how to record this via categorization.
+
+We are able to emit information related to subframe URLs within an UKM event as long as we don't capture the exact URL, but instead emit some categorical label, such as 'ad', or 'uses WebFramework1'. It may be possible for specific sites to be added as a category but this requires privacy review. In general, we prefer to avoid being specific about a site and suggest more general categorization instead.
+
+The full metrics will not be keyed off the subframe URL. Rather, the subframe URL data will be tied with the main frame URL, and it will be emitted as a custom metric. It is possible to emit these events multiple times if there are several subframe URLs with the properties we want to observe on the same page.
+
+### Example
+
+
+```xml
+<event name="WebFrameworkPerformance">
+  <owner>owner@chromium.org</owner>
+  <summary>
+    Recorded when a page uses on of a list of known web frameworks. This records various performance measurements.
+  </summary>
+ <metric name="WebFramework" enum="WebFrameworkName">
+    <summary>
+      Web Framework used.
+   </summary>
+ </metric>
+ <metric name="FrameworkLoadInMs">
+    <summary>
+      Time to load the framework in milliseconds.
+   </summary>
+ </metric>
+</event>
+```
+
+And in the UKM enum.xml:
+
+```xml
+<enum name="WebFrameworkName">
+ <int value="0" label="Unknown"/>
+ <int value="1" label="WebFramework1"/>
+ <int value="1" label="WebFramework2"/>
+…
+</enum>
+```
+
+In this example, if a known framework was loaded with a time of 150ms, we could record the framework name and the load time, tied together with the main frame URL. Note that there will need to be custom logic to map the provider to the enum. It’s possible this logic may be reusable across UKM clients, please verify if some similar recording is being done elsewhere.

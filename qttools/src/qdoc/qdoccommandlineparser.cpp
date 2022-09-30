@@ -1,38 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qdoccommandlineparser.h"
 
-#include "loggingcategory.h"
 #include "utilities.h"
 
 #include <QtCore/qdebug.h>
-#include <QtCore/qdir.h>
 #include <QtCore/qfile.h>
 
 QDocCommandLineParser::QDocCommandLineParser()
@@ -46,17 +19,16 @@ QDocCommandLineParser::QDocCommandLineParser()
       noExamplesOption(QStringList() << QStringLiteral("no-examples")),
       indexDirOption(QStringList() << QStringLiteral("indexdir")),
       installDirOption(QStringList() << QStringLiteral("installdir")),
-      obsoleteLinksOption(QStringList() << QStringLiteral("obsoletelinks")),
       outputDirOption(QStringList() << QStringLiteral("outputdir")),
       outputFormatOption(QStringList() << QStringLiteral("outputformat")),
       noLinkErrorsOption(QStringList() << QStringLiteral("no-link-errors")),
       autoLinkErrorsOption(QStringList() << QStringLiteral("autolink-errors")),
       debugOption(QStringList() << QStringLiteral("debug")),
+      atomsDumpOption("atoms-dump"),
       prepareOption(QStringList() << QStringLiteral("prepare")),
       generateOption(QStringList() << QStringLiteral("generate")),
       logProgressOption(QStringList() << QStringLiteral("log-progress")),
       singleExecOption(QStringList() << QStringLiteral("single-exec")),
-      writeQaPagesOption(QStringList() << QStringLiteral("write-qa-pages")),
       includePathOption("I", "Add dir to the include path for header files.", "path"),
       includePathSystemOption("isystem", "Add dir to the system include path for header files.",
                               "path"),
@@ -111,10 +83,6 @@ QDocCommandLineParser::QDocCommandLineParser()
     installDirOption.setValueName(QStringLiteral("dir"));
     addOption(installDirOption);
 
-    obsoleteLinksOption.setDescription(QCoreApplication::translate(
-            "qdoc", "Report links from obsolete items to non-obsolete items"));
-    addOption(obsoleteLinksOption);
-
     outputDirOption.setDescription(QCoreApplication::translate(
             "qdoc", "Specify output directory, overrides setting in qdocconf file"));
     outputDirOption.setValueName(QStringLiteral("dir"));
@@ -136,6 +104,11 @@ QDocCommandLineParser::QDocCommandLineParser()
     debugOption.setDescription(QCoreApplication::translate("qdoc", "Enable debug output"));
     addOption(debugOption);
 
+    atomsDumpOption.setDescription(QCoreApplication::translate(
+            "qdoc",
+            "Shows a human-readable form of the intermediate result of parsing a block-comment."));
+    addOption(atomsDumpOption);
+
     prepareOption.setDescription(QCoreApplication::translate(
             "qdoc", "Run qdoc only to generate an index file, not the docs"));
     addOption(prepareOption);
@@ -151,9 +124,6 @@ QDocCommandLineParser::QDocCommandLineParser()
     singleExecOption.setDescription(
             QCoreApplication::translate("qdoc", "Run qdoc once over all the qdoc conf files."));
     addOption(singleExecOption);
-
-    writeQaPagesOption.setDescription(QCoreApplication::translate("qdoc", "Write QA pages."));
-    addOption(writeQaPagesOption);
 
     includePathOption.setFlags(QCommandLineOption::ShortOptionStyle);
     addOption(includePathOption);

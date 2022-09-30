@@ -9,15 +9,14 @@
 
 #include <map>
 #include <memory>
-#include <vector>
 
 #include "base/cancelable_callback.h"
 #include "base/containers/small_map.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/media_router/browser/issues_observer.h"
 #include "components/media_router/common/issue.h"
 
@@ -28,6 +27,10 @@ namespace media_router {
 class IssueManager {
  public:
   IssueManager();
+
+  IssueManager(const IssueManager&) = delete;
+  IssueManager& operator=(const IssueManager&) = delete;
+
   ~IssueManager();
 
   // Returns the amount of time before |issue_info| is dismissed after it is
@@ -64,22 +67,24 @@ class IssueManager {
 
  private:
   // Issues tracked internally by the IssueManager.
-  // TODO(imcheng): Rather than holding a base::CancelableClosure, it might be a
-  // bit simpler to use a CancelableTaskTracker and track TaskIds here. This
-  // will require adding support for delayed tasks to CancelableTaskTracker.
+  // TODO(imcheng): Rather than holding a base::CancelableOnceClosure, it might
+  // be a bit simpler to use a CancelableTaskTracker and track TaskIds here.
+  // This will require adding support for delayed tasks to
+  // CancelableTaskTracker.
   struct Entry {
     Entry(const Issue& issue,
           std::unique_ptr<base::CancelableOnceClosure>
               cancelable_dismiss_callback);
+
+    Entry(const Entry&) = delete;
+    Entry& operator=(const Entry&) = delete;
+
     ~Entry();
 
     Issue issue;
 
     // Set to non-null if |issue| can be auto-dismissed.
     std::unique_ptr<base::CancelableOnceClosure> cancelable_dismiss_callback;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Entry);
   };
 
   // Checks if the current top issue has changed. Updates |top_issue_|.
@@ -95,7 +100,7 @@ class IssueManager {
   base::ObserverList<IssuesObserver>::Unchecked issues_observers_;
 
   // Pointer to the top Issue in |issues_|, or |nullptr| if there are no issues.
-  const Issue* top_issue_;
+  raw_ptr<const Issue> top_issue_;
 
   // The SingleThreadTaskRunner that this IssueManager runs on, and is used
   // for posting issue auto-dismissal tasks.
@@ -105,8 +110,6 @@ class IssueManager {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(IssueManager);
 };
 
 }  // namespace media_router

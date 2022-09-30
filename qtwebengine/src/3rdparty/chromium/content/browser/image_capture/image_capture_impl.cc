@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/unguessable_token.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/media/media_devices_permission_checker.h"
@@ -151,7 +151,7 @@ void ImageCaptureImpl::TakePhoto(const std::string& source_id,
 ImageCaptureImpl::ImageCaptureImpl(
     RenderFrameHost* render_frame_host,
     mojo::PendingReceiver<media::mojom::ImageCapture> receiver)
-    : FrameServiceBase(render_frame_host, std::move(receiver)) {}
+    : DocumentService(render_frame_host, std::move(receiver)) {}
 
 ImageCaptureImpl::~ImageCaptureImpl() = default;
 

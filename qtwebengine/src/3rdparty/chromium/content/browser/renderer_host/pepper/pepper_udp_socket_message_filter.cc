@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
 #include "content/browser/renderer_host/pepper/pepper_socket_utils.h"
 #include "content/public/browser/browser_context.h"
@@ -42,9 +43,9 @@
 #include "ppapi/shared_impl/socket_option_data.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chromeos/network/firewall_hole.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 using ppapi::NetAddressPrivateImpl;
 using ppapi::host::NetErrorToPepperError;
@@ -387,8 +388,8 @@ int32_t PepperUDPSocketMessageFilter::OnMsgBind(
 
   SiteInstance* site_instance = render_frame_host->GetSiteInstance();
   network::mojom::NetworkContext* network_context =
-      BrowserContext::GetStoragePartition(site_instance->GetBrowserContext(),
-                                          site_instance)
+      site_instance->GetBrowserContext()
+          ->GetStoragePartition(site_instance)
           ->GetNetworkContext();
   if (g_create_udp_socket_callback_for_testing) {
     g_create_udp_socket_callback_for_testing->Run(
@@ -552,7 +553,7 @@ void PepperUDPSocketMessageFilter::DoBindCallback(
     mojo::PendingReceiver<network::mojom::UDPSocketListener> listener_receiver,
     const ppapi::host::ReplyMessageContext& context,
     int result,
-    const base::Optional<net::IPEndPoint>& local_addr_out) {
+    const absl::optional<net::IPEndPoint>& local_addr_out) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (result != net::OK) {
@@ -568,16 +569,15 @@ void PepperUDPSocketMessageFilter::DoBindCallback(
     return;
   }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   pepper_socket_utils::OpenUDPFirewallHole(
       *local_addr_out,
       base::BindOnce(&PepperUDPSocketMessageFilter::OnFirewallHoleOpened,
                      firewall_hole_weak_ptr_factory_.GetWeakPtr(),
-                     base::Passed(std::move(listener_receiver)), context,
-                     net_address));
-#else   // !defined(OS_CHROMEOS)
+                     std::move(listener_receiver), context, net_address));
+#else   // !BUILDFLAG(IS_CHROMEOS_ASH)
   OnBindComplete(std::move(listener_receiver), context, net_address);
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 void PepperUDPSocketMessageFilter::OnBindComplete(
@@ -597,7 +597,7 @@ void PepperUDPSocketMessageFilter::OnBindComplete(
   socket_->ReceiveMore(UDPSocketResourceConstants::kPluginReceiveBufferSlots);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void PepperUDPSocketMessageFilter::OnFirewallHoleOpened(
     mojo::PendingReceiver<network::mojom::UDPSocketListener> listener_receiver,
     const ppapi::host::ReplyMessageContext& context,
@@ -610,7 +610,7 @@ void PepperUDPSocketMessageFilter::OnFirewallHoleOpened(
 
   OnBindComplete(std::move(listener_receiver), context, net_address);
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 void PepperUDPSocketMessageFilter::StartPendingSend() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -636,8 +636,8 @@ void PepperUDPSocketMessageFilter::Close() {
 
 void PepperUDPSocketMessageFilter::OnReceived(
     int result,
-    const base::Optional<net::IPEndPoint>& src_addr,
-    base::Optional<base::span<const uint8_t>> data) {
+    const absl::optional<net::IPEndPoint>& src_addr,
+    absl::optional<base::span<const uint8_t>> data) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!closed_);
 
@@ -712,7 +712,7 @@ void PepperUDPSocketMessageFilter::SendRecvFromResult(
     const PP_NetAddress_Private& addr) {
   // Unlike SendReply, which is safe to call on any thread, SendUnsolicitedReply
   // calls are only safe to make on the IO thread.
-  GetIOThreadTaskRunner({})->PostTask(
+  GetUIThreadTaskRunner({})->PostTask(
       FROM_HERE,
       base::BindOnce(
           &PepperUDPSocketMessageFilter::SendRecvFromResultOnIOThread, this,
@@ -743,11 +743,11 @@ void PepperUDPSocketMessageFilter::SendBindError(
     const ppapi::host::ReplyMessageContext& context,
     int32_t result) {
   socket_.reset();
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // In the unlikely case that this is due to a Mojo error while trying to open
   // a hole in the firewall on ChromeOS, abandon opening a hole in the firewall.
   firewall_hole_weak_ptr_factory_.InvalidateWeakPtrs();
-#endif  // !defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   SendBindReply(context, result, NetAddressPrivateImpl::kInvalidNetAddress);
 }
 

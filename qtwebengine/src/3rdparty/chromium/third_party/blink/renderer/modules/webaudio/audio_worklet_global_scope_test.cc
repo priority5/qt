@@ -12,21 +12,24 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
-#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/worker_devtools_params.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
 #include "third_party/blink/renderer/core/messaging/message_channel.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
+#include "third_party/blink/renderer/core/script/js_module_script.h"
 #include "third_party/blink/renderer/core/script/script.h"
+#include "third_party/blink/renderer/core/testing/module_test_base.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_backing_thread.h"
@@ -54,12 +57,18 @@ static const size_t kRenderQuantumFrames = 128;
 
 // The test uses OfflineAudioWorkletThread because the test does not have a
 // strict real-time constraint.
-class AudioWorkletGlobalScopeTest : public PageTestBase {
+class AudioWorkletGlobalScopeTest : public PageTestBase, public ModuleTestBase {
  public:
   void SetUp() override {
-    PageTestBase::SetUp(IntSize());
+    ModuleTestBase::SetUp();
+    PageTestBase::SetUp(gfx::Size());
     NavigateTo(KURL("https://example.com/"));
     reporting_proxy_ = std::make_unique<WorkerReportingProxy>();
+  }
+
+  void TearDown() override {
+    PageTestBase::TearDown();
+    ModuleTestBase::TearDown();
   }
 
   std::unique_ptr<OfflineAudioWorkletThread> CreateAudioWorkletThread() {
@@ -71,18 +80,23 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
             window->Url(), mojom::blink::ScriptType::kModule, "AudioWorklet",
             window->UserAgent(),
             window->GetFrame()->Loader().UserAgentMetadata(),
-            nullptr /* web_worker_fetch_context */, Vector<CSPHeaderAndType>(),
+            nullptr /* web_worker_fetch_context */,
+            Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
+            Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
             window->GetReferrerPolicy(), window->GetSecurityOrigin(),
             window->IsSecureContext(), window->GetHttpsState(),
             nullptr /* worker_clients */, nullptr /* content_settings_client */,
-            window->AddressSpace(), OriginTrialContext::GetTokens(window).get(),
+            window->AddressSpace(),
+            OriginTrialContext::GetInheritedTrialFeatures(window).get(),
             base::UnguessableToken::Create(), nullptr /* worker_settings */,
             mojom::blink::V8CacheOptions::kDefault,
             MakeGarbageCollected<WorkletModuleResponsesMap>(),
             mojo::NullRemote() /* browser_interface_broker */,
-            BeginFrameProviderParams(), nullptr /* parent_feature_policy */,
-            window->GetAgentClusterID(), window->GetExecutionContextToken()),
-        base::nullopt, std::make_unique<WorkerDevToolsParams>());
+            window->GetFrame()->Loader().CreateWorkerCodeCacheHost(),
+            BeginFrameProviderParams(), nullptr /* parent_permissions_policy */,
+            window->GetAgentClusterID(), ukm::kInvalidSourceId,
+            window->GetExecutionContextToken()),
+        absl::nullopt, std::make_unique<WorkerDevToolsParams>());
     return thread;
   }
 
@@ -132,26 +146,29 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
   }
 
  private:
-  // Returns false when a script evaluation error happens.
-  bool EvaluateScriptModule(AudioWorkletGlobalScope* global_scope,
-                            const String& source_code) {
+  void ExpectEvaluateScriptModule(AudioWorkletGlobalScope* global_scope,
+                                  const String& source_code,
+                                  bool expect_success) {
     ScriptState* script_state =
         global_scope->ScriptController()->GetScriptState();
     EXPECT_TRUE(script_state);
     KURL js_url("https://example.com/worklet.js");
-    v8::Local<v8::Module> module = ModuleRecord::Compile(
-        script_state->GetIsolate(), source_code, js_url, js_url,
-        ScriptFetchOptions(), TextPosition::MinimumPosition(),
-        ASSERT_NO_EXCEPTION);
+    v8::Local<v8::Module> module =
+        ModuleTestBase::CompileModule(script_state, source_code, js_url);
     EXPECT_FALSE(module.IsEmpty());
     ScriptValue exception =
         ModuleRecord::Instantiate(script_state, module, js_url);
     EXPECT_TRUE(exception.IsEmpty());
 
     ScriptEvaluationResult result =
-        ModuleRecord::Evaluate(script_state, module, js_url);
-    return result.GetResultType() ==
-           ScriptEvaluationResult::ResultType::kSuccess;
+        JSModuleScript::CreateForTest(Modulator::From(script_state), module,
+                                      js_url)
+            ->RunScriptAndReturnValue();
+    if (expect_success) {
+      EXPECT_FALSE(GetResult(script_state, result).IsEmpty());
+    } else {
+      EXPECT_FALSE(GetException(script_state, result).IsEmpty());
+    }
   }
 
   // Test if AudioWorkletGlobalScope and V8 components (ScriptState, Isolate)
@@ -181,7 +198,7 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
           }
           registerProcessor('testProcessor', TestProcessor);
         )JS";
-    ASSERT_TRUE(EvaluateScriptModule(global_scope, source_code));
+    ExpectEvaluateScriptModule(global_scope, source_code, true);
 
     AudioWorkletProcessorDefinition* definition =
         global_scope->FindDefinition("testProcessor");
@@ -197,7 +214,8 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
     EXPECT_TRUE(processor);
     EXPECT_EQ(processor->Name(), "testProcessor");
     v8::Local<v8::Value> processor_value =
-        ToV8(processor, script_state->GetContext()->Global(), isolate);
+        ToV8Traits<AudioWorkletProcessor>::ToV8(script_state, processor)
+            .ToLocalChecked();
     EXPECT_TRUE(processor_value->IsObject());
 
     wait_event->Signal();
@@ -230,7 +248,7 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
             class2.prototype = { process: function () {} };
             registerProcessor('class2', class2);
           )JS";
-      ASSERT_TRUE(EvaluateScriptModule(global_scope, source_code));
+      ExpectEvaluateScriptModule(global_scope, source_code, true);
       EXPECT_TRUE(global_scope->FindDefinition("class1"));
       EXPECT_TRUE(global_scope->FindDefinition("class2"));
     }
@@ -250,7 +268,7 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
               });
             registerProcessor('class3', class3);
           )JS";
-      ASSERT_FALSE(EvaluateScriptModule(global_scope, source_code));
+      ExpectEvaluateScriptModule(global_scope, source_code, false);
       EXPECT_FALSE(global_scope->FindDefinition("class3"));
     }
 
@@ -268,6 +286,10 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
         global_scope->ScriptController()->GetScriptState();
 
     ScriptState::Scope scope(script_state);
+    v8::Isolate* isolate = script_state->GetIsolate();
+    EXPECT_TRUE(isolate);
+    v8::MicrotasksScope microtasks_scope(
+        isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
 
     String source_code =
         R"JS(
@@ -286,7 +308,7 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
           }
           registerProcessor('testProcessor', TestProcessor);
         )JS";
-    ASSERT_TRUE(EvaluateScriptModule(global_scope, source_code));
+    ExpectEvaluateScriptModule(global_scope, source_code, true);
 
     auto* channel = MakeGarbageCollected<MessageChannel>(thread->GlobalScope());
     MessagePortChannel dummy_port_channel = channel->port2()->Disentangle();
@@ -351,7 +373,7 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
           }
           registerProcessor('testProcessor', TestProcessor);
         )JS";
-    ASSERT_TRUE(EvaluateScriptModule(global_scope, source_code));
+    ExpectEvaluateScriptModule(global_scope, source_code, true);
 
     AudioWorkletProcessorDefinition* definition =
         global_scope->FindDefinition("testProcessor");

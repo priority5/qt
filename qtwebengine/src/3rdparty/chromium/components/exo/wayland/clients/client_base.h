@@ -9,8 +9,10 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_set.h"
 #include "base/memory/shared_memory_mapping.h"
 #include "components/exo/wayland/clients/client_helper.h"
+#include "linux-dmabuf-unstable-v1-client-protocol.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/geometry/size.h"
@@ -63,6 +65,10 @@ class ClientBase {
     bool use_memfd = false;
     bool use_touch = false;
     bool use_vulkan = false;
+    bool use_xdg = false;
+    bool use_release_fences = false;
+    bool use_stylus = false;
+    absl::optional<std::string> wayland_socket = {};
   };
 
   struct Globals {
@@ -79,12 +85,15 @@ class ClientBase {
     std::unique_ptr<wl_subcompositor> subcompositor;
     std::unique_ptr<wl_touch> touch;
     std::unique_ptr<zaura_shell> aura_shell;
+    std::unique_ptr<zxdg_shell_v6> xdg_shell_v6;
+    std::unique_ptr<xdg_wm_base> xdg_wm_base;
     std::unique_ptr<zwp_fullscreen_shell_v1> fullscreen_shell;
     std::unique_ptr<zwp_input_timestamps_manager_v1> input_timestamps_manager;
     std::unique_ptr<zwp_linux_explicit_synchronization_v1>
         linux_explicit_synchronization;
     std::unique_ptr<zcr_vsync_feedback_v1> vsync_feedback;
-    std::unique_ptr<zcr_color_space_v1> color_space;
+    std::unique_ptr<zcr_color_manager_v1> color_manager;
+    std::unique_ptr<zcr_stylus_v2> stylus;
   };
 
   struct Buffer {
@@ -111,17 +120,18 @@ class ClientBase {
     sk_sp<SkSurface> sk_surface;
   };
 
+  ClientBase(const ClientBase&) = delete;
+  ClientBase& operator=(const ClientBase&) = delete;
+
   bool Init(const InitParams& params);
 
  protected:
   ClientBase();
   virtual ~ClientBase();
-  std::unique_ptr<Buffer> CreateBuffer(
-      const gfx::Size& size,
-      int32_t drm_format,
-      int32_t bo_usage,
-      wl_buffer_listener* buffer_listener = nullptr,
-      void* data = nullptr);
+  std::unique_ptr<Buffer> CreateBuffer(const gfx::Size& size,
+                                       int32_t drm_format,
+                                       int32_t bo_usage,
+                                       bool add_buffer_listener = true);
   std::unique_ptr<Buffer> CreateDrmBuffer(const gfx::Size& size,
                                           int32_t drm_format,
                                           int32_t bo_usage,
@@ -182,6 +192,18 @@ class ClientBase {
                                  int32_t id,
                                  wl_fixed_t orientation);
 
+  // zwp_linux_dmabuf_v1_listener
+  virtual void HandleDmabufFormat(
+      void* data,
+      struct zwp_linux_dmabuf_v1* zwp_linux_dmabuf_v1,
+      uint32_t format);
+  virtual void HandleDmabufModifier(
+      void* data,
+      struct zwp_linux_dmabuf_v1* zwp_linux_dmabuf_v1,
+      uint32_t format,
+      uint32_t modifier_hi,
+      uint32_t modifier_lo);
+
   gfx::Size size_ = gfx::Size(256, 256);
   int scale_ = 1;
   int transform_ = WL_OUTPUT_TRANSFORM_NORMAL;
@@ -196,6 +218,12 @@ class ClientBase {
   std::unique_ptr<wl_registry> registry_;
   std::unique_ptr<wl_surface> surface_;
   std::unique_ptr<wl_shell_surface> shell_surface_;
+  std::unique_ptr<xdg_surface> xdg_surface_;
+  std::unique_ptr<xdg_toplevel> xdg_toplevel_;
+  std::unique_ptr<zxdg_surface_v6> zxdg_surface_;
+  std::unique_ptr<zxdg_toplevel_v6> zxdg_toplevel_;
+  std::unique_ptr<wl_pointer> wl_pointer_;
+  std::unique_ptr<zcr_pointer_stylus_v2> zcr_pointer_stylus_;
   Globals globals_;
 #if defined(USE_GBM)
   base::ScopedFD drm_fd_;
@@ -215,9 +243,11 @@ class ClientBase {
   unsigned egl_sync_type_ = 0;
   std::vector<std::unique_ptr<Buffer>> buffers_;
   sk_sp<GrDirectContext> gr_context_;
+  base::flat_set<uint32_t> bug_fix_ids_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ClientBase);
+  void SetupAuraShellIfAvailable();
+  void SetupPointerStylus();
 };
 
 }  // namespace clients

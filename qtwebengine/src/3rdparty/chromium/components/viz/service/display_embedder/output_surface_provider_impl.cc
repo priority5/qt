@@ -7,15 +7,19 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind_helpers.h"
+#include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
+#include "build/chromeos_buildflags.h"
 #include "cc/base/switches.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
+#include "components/viz/service/display/display_compositor_memory_and_task_controller.h"
 #include "components/viz/service/display_embedder/gl_output_surface.h"
 #include "components/viz/service/display_embedder/gl_output_surface_buffer_queue.h"
 #include "components/viz/service/display_embedder/gl_output_surface_offscreen.h"
@@ -39,26 +43,21 @@
 #include "ui/gl/gl_context.h"
 #include "ui/gl/init/gl_factory.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "components/viz/service/display_embedder/software_output_device_win.h"
 #endif
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "components/viz/service/display_embedder/gl_output_surface_android.h"
 #endif
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
 #include "components/viz/service/display_embedder/software_output_device_mac.h"
 #include "ui/base/cocoa/remote_layer_api.h"
 #endif
 
-#if defined(USE_X11)
-#include "components/viz/service/display_embedder/software_output_device_x11.h"
-#endif
-
 #if defined(USE_OZONE)
 #include "components/viz/service/display_embedder/software_output_device_ozone.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/platform_window_surface.h"
@@ -66,13 +65,9 @@
 #include "ui/ozone/public/surface_ozone_canvas.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "components/viz/service/display_embedder/gl_output_surface_chromeos.h"
 #include "components/viz/service/display_embedder/output_surface_unified.h"
-#endif
-
-#ifndef GL_BGRA_EXT
-#define GL_BGRA_EXT             0x80E1
 #endif
 
 namespace viz {
@@ -81,13 +76,13 @@ OutputSurfaceProviderImpl::OutputSurfaceProviderImpl(
     GpuServiceImpl* gpu_service_impl,
     gpu::CommandBufferTaskExecutor* task_executor,
     gpu::GpuChannelManagerDelegate* gpu_channel_manager_delegate,
-    std::unique_ptr<gpu::GpuMemoryBufferManager> gpu_memory_buffer_manager,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     gpu::ImageFactory* image_factory,
     bool headless)
     : gpu_service_impl_(gpu_service_impl),
       task_executor_(task_executor),
       gpu_channel_manager_delegate_(gpu_channel_manager_delegate),
-      gpu_memory_buffer_manager_(std::move(gpu_memory_buffer_manager)),
+      gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
       image_factory_(image_factory),
       task_runner_(base::ThreadTaskRunnerHandle::Get()),
       headless_(headless) {}
@@ -103,13 +98,36 @@ OutputSurfaceProviderImpl::OutputSurfaceProviderImpl(bool headless)
 
 OutputSurfaceProviderImpl::~OutputSurfaceProviderImpl() = default;
 
+std::unique_ptr<DisplayCompositorMemoryAndTaskController>
+OutputSurfaceProviderImpl::CreateGpuDependency(
+    bool gpu_compositing,
+    gpu::SurfaceHandle surface_handle,
+    const RendererSettings& renderer_settings) {
+  if (!gpu_compositing)
+    return nullptr;
+
+  if (renderer_settings.use_skia_renderer) {
+    gpu::ScopedAllowScheduleGpuTask allow_schedule_gpu_task;
+    auto skia_deps = std::make_unique<SkiaOutputSurfaceDependencyImpl>(
+        gpu_service_impl_, surface_handle);
+    return std::make_unique<DisplayCompositorMemoryAndTaskController>(
+        std::move(skia_deps));
+  } else {
+    DCHECK(task_executor_);
+    gpu::ScopedAllowScheduleGpuTask allow_schedule_gpu_task;
+    return std::make_unique<DisplayCompositorMemoryAndTaskController>(
+        task_executor_, image_factory_);
+  }
+}
+
 std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
     gpu::SurfaceHandle surface_handle,
     bool gpu_compositing,
     mojom::DisplayClient* display_client,
+    DisplayCompositorMemoryAndTaskController* gpu_dependency,
     const RendererSettings& renderer_settings,
     const DebugRendererSettings* debug_settings) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (surface_handle == gpu::kNullSurfaceHandle)
     return std::make_unique<OutputSurfaceUnified>();
 #endif
@@ -126,26 +144,36 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
         CreateSoftwareOutputDeviceForPlatform(surface_handle, display_client));
 #endif
   } else if (renderer_settings.use_skia_renderer) {
+    DCHECK(gpu_dependency);
     {
       gpu::ScopedAllowScheduleGpuTask allow_schedule_gpu_task;
       output_surface = SkiaOutputSurfaceImpl::Create(
-          std::make_unique<SkiaOutputSurfaceDependencyImpl>(gpu_service_impl_,
-                                                            surface_handle),
-          renderer_settings, debug_settings);
+          gpu_dependency, renderer_settings, debug_settings);
     }
+
+#if BUILDFLAG(IS_ANDROID)
+    // As with non-skia-renderer case, communicate the creation result to
+    // CompositorImplAndroid so that it can attempt to recreate the surface on
+    // failure.
+    display_client->OnContextCreationResult(
+        output_surface ? gpu::ContextResult::kSuccess
+                       : gpu::ContextResult::kSurfaceFailure);
+#endif  // BUILDFLAG(IS_ANDROID)
+
     if (!output_surface) {
-#if defined(OS_CHROMEOS) || BUILDFLAG(IS_CHROMECAST)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMECAST)
       // GPU compositing is expected to always work on Chrome OS so we should
       // never encounter fatal context error. This could be an unrecoverable
       // hardware error or a bug.
       LOG(FATAL) << "Unexpected fatal context error";
-#elif !defined(OS_ANDROID)
+#elif !BUILDFLAG(IS_ANDROID)
       gpu_service_impl_->DisableGpuCompositing();
 #endif
       return nullptr;
     }
   } else {
     DCHECK(task_executor_);
+    DCHECK(gpu_dependency);
 
     scoped_refptr<VizProcessContextProvider> context_provider;
 
@@ -163,20 +191,21 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
 
       context_provider = base::MakeRefCounted<VizProcessContextProvider>(
           task_executor_, surface_handle, gpu_memory_buffer_manager_.get(),
-          image_factory_, gpu_channel_manager_delegate_, renderer_settings);
+          image_factory_, gpu_channel_manager_delegate_, gpu_dependency,
+          renderer_settings);
       context_result = context_provider->BindToCurrentThread();
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
       display_client->OnContextCreationResult(context_result);
 #endif
 
       if (IsFatalOrSurfaceFailure(context_result)) {
-#if defined(OS_CHROMEOS) || BUILDFLAG(IS_CHROMECAST)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMECAST)
         // GL compositing is expected to always work on Chrome OS so we should
         // never encounter fatal context error. This could be an unrecoverable
         // hardware error or a bug.
         LOG(FATAL) << "Unexpected fatal context error";
-#elif !defined(OS_ANDROID)
+#elif !BUILDFLAG(IS_ANDROID)
         gpu_service_impl_->DisableGpuCompositing();
 #endif
         return nullptr;
@@ -190,11 +219,7 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
       output_surface = std::make_unique<GLOutputSurfaceOffscreen>(
           std::move(context_provider));
     } else if (context_provider->ContextCapabilities().surfaceless) {
-#if defined(USE_OZONE) || defined(OS_APPLE) || defined(OS_ANDROID)
-#if defined(USE_OZONE)
-      if (!features::IsUsingOzonePlatform())
-        NOTREACHED();
-#endif
+#if defined(USE_OZONE) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_ANDROID)
       output_surface = std::make_unique<GLOutputSurfaceBufferQueue>(
           std::move(context_provider), surface_handle,
           std::make_unique<BufferQueue>(
@@ -203,13 +228,13 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
       NOTREACHED();
 #endif
     } else {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       output_surface = std::make_unique<GLOutputSurface>(
           std::move(context_provider), surface_handle);
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
       output_surface = std::make_unique<GLOutputSurfaceAndroid>(
           std::move(context_provider), surface_handle);
-#elif defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_CHROMEOS_ASH)
       output_surface = std::make_unique<GLOutputSurfaceChromeOS>(
           std::move(context_provider), surface_handle);
 #else
@@ -223,13 +248,6 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
   return output_surface;
 }
 
-gpu::SharedImageManager* OutputSurfaceProviderImpl::GetSharedImageManager() {
-  if (!gpu_service_impl_)
-    return nullptr;
-
-  return gpu_service_impl_->shared_image_manager();
-}
-
 std::unique_ptr<SoftwareOutputDevice>
 OutputSurfaceProviderImpl::CreateSoftwareOutputDeviceForPlatform(
     gpu::SurfaceHandle surface_handle,
@@ -237,17 +255,16 @@ OutputSurfaceProviderImpl::CreateSoftwareOutputDeviceForPlatform(
   if (headless_)
     return std::make_unique<SoftwareOutputDevice>();
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return CreateSoftwareOutputDeviceWin(surface_handle, &output_device_backing_,
                                        display_client);
-#elif defined(OS_APPLE)
+#elif BUILDFLAG(IS_APPLE)
   return std::make_unique<SoftwareOutputDeviceMac>(task_runner_);
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   // Android does not do software compositing, so we can't get here.
   NOTREACHED();
   return nullptr;
 #elif defined(USE_OZONE)
-  if (features::IsUsingOzonePlatform()) {
     ui::SurfaceFactoryOzone* factory =
         ui::OzonePlatform::GetInstance()->GetSurfaceFactoryOzone();
     std::unique_ptr<ui::PlatformWindowSurface> platform_window_surface =
@@ -257,11 +274,6 @@ OutputSurfaceProviderImpl::CreateSoftwareOutputDeviceForPlatform(
     CHECK(surface_ozone);
     return std::make_unique<SoftwareOutputDeviceOzone>(
         std::move(platform_window_surface), std::move(surface_ozone));
-  }
-#endif
-
-#if defined(USE_X11)
-  return std::make_unique<SoftwareOutputDeviceX11>(surface_handle);
 #else
   NOTREACHED();
   return nullptr;

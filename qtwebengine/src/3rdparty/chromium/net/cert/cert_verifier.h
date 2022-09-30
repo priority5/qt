@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/strings/string_piece.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/hash_value.h"
 #include "net/base/net_export.h"
@@ -77,11 +77,11 @@ class NET_EXPORT CertVerifier {
    public:
     Request() {}
 
+    Request(const Request&) = delete;
+    Request& operator=(const Request&) = delete;
+
     // Destruction of the Request cancels it.
     virtual ~Request() {}
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Request);
   };
 
   enum VerifyFlags {
@@ -123,10 +123,10 @@ class NET_EXPORT CertVerifier {
    public:
     RequestParams();
     RequestParams(scoped_refptr<X509Certificate> certificate,
-                  const std::string& hostname,
+                  base::StringPiece hostname,
                   int flags,
-                  const std::string& ocsp_response,
-                  const std::string& sct_list);
+                  base::StringPiece ocsp_response,
+                  base::StringPiece sct_list);
     RequestParams(const RequestParams& other);
     ~RequestParams();
 
@@ -160,10 +160,10 @@ class NET_EXPORT CertVerifier {
   // Returns OK if successful or an error code upon failure.
   //
   // The |*verify_result| structure, including the |verify_result->cert_status|
-  // bitmask, is always filled out regardless of the return value. If the
-  // certificate has multiple errors, the corresponding status flags are set in
-  // |verify_result->cert_status|, and the error code for the most serious
-  // error is returned.
+  // bitmask and |verify_result->verified_cert|, is always filled out regardless
+  // of the return value. If the certificate has multiple errors, the
+  // corresponding status flags are set in |verify_result->cert_status|, and the
+  // error code for the most serious error is returned.
   //
   // |callback| must not be null. ERR_IO_PENDING is returned if the operation
   // could not be completed synchronously, in which case the result code will

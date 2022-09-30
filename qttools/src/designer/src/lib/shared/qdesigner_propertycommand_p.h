@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 //
 //  W A R N I N G
@@ -44,6 +19,7 @@
 
 #include <QtCore/qvariant.h>
 #include <QtCore/qlist.h>
+#include <QtCore/qmap.h>
 #include <QtCore/qpair.h>
 #include <QtCore/qsharedpointer.h>
 
@@ -187,7 +163,7 @@ protected:
 
         QString m_propertyName;
         QString m_propertyGroup;
-        QVariant::Type m_propertyType = QVariant::Invalid;
+        int m_propertyType = QMetaType::UnknownType;
         SpecialProperty m_specialProperty = SP_None;
     };
     const PropertyDescription &propertyDescription() const { return  m_propertyDescription; }
@@ -242,10 +218,10 @@ public:
     bool init(QObject *object, const QString &propertyName);
     bool init(const QObjectList &list, const QString &propertyName, QObject *referenceObject = nullptr);
 
-    virtual void redo();
+    void redo() override;
 
 protected:
-    virtual bool mergeWith(const QUndoCommand *) { return false; }
+    bool mergeWith(const QUndoCommand *) override { return false; }
 
 private:
     void setDescription();
@@ -261,8 +237,8 @@ public:
 
     bool init(const QList<QObject *> &selection, QObject *current, const QString &propertyName, const QVariant &value);
 
-    virtual void redo();
-    virtual void undo();
+    void redo() override;
+    void undo() override;
 private:
     void setDescription();
     QString m_propertyName;
@@ -278,8 +254,8 @@ public:
 
     bool init(const QList<QObject *> &selection, QObject *current, const QString &propertyName);
 
-    virtual void redo();
-    virtual void undo();
+    void redo() override;
+    void undo() override;
 private:
     void setDescription();
     QString m_propertyName;

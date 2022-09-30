@@ -1,43 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <private/qqmlglobal_p.h>
+#include <QtQml/private/qqmlmetatype_p.h>
 
 #include <QtQml/qqmlengine.h>
 #include <QtCore/qvariant.h>
@@ -47,232 +12,64 @@
 
 QT_BEGIN_NAMESPACE
 
-QQmlValueTypeProvider::QQmlValueTypeProvider()
-    : next(nullptr)
+bool QQmlValueTypeProvider::initValueType(QMetaType metaType, QVariant &dst)
 {
+    if (!metaType.isValid())
+        return false;
+    dst = QVariant(metaType);
+    return true;
 }
 
-QQmlValueTypeProvider::~QQmlValueTypeProvider()
+bool QQmlValueTypeProvider::createValueType(QMetaType metaType, const QJSValue &s, QVariant &data)
 {
-    QQml_removeValueTypeProvider(this);
-}
-
-const QMetaObject *QQmlValueTypeProvider::metaObjectForMetaType(int type)
-{
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (const QMetaObject *mo = p->getMetaObjectForMetaType(type))
-            return mo;
-    } while ((p = p->next));
-
-    return nullptr;
-}
-
-bool QQmlValueTypeProvider::initValueType(int type, QVariant& dst)
-{
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->init(type, dst))
+    const QQmlType qmlType = QQmlMetaType::qmlType(metaType);
+    if (auto valueTypeFunction = qmlType.createValueTypeFunction()) {
+        QVariant result = valueTypeFunction(s);
+        if (result.metaType() == metaType) {
+            data = std::move(result);
             return true;
-    } while ((p = p->next));
-
-    return false;
-}
-
-QVariant QQmlValueTypeProvider::createValueType(int type, int argc, const void *argv[])
-{
-    QVariant v;
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->create(type, argc, argv, &v))
-            return v;
-    } while ((p = p->next));
-
-    return QVariant();
-}
-
-bool QQmlValueTypeProvider::createValueFromString(int type, const QString &s, void *data, size_t n)
-{
-    Q_ASSERT(data);
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->createFromString(type, s, data, n))
-            return true;
-    } while ((p = p->next));
-
-    return false;
-}
-
-bool QQmlValueTypeProvider::createStringFromValue(int type, const void *data, QString *s)
-{
-    Q_ASSERT(data);
-    Q_ASSERT(s);
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->createStringFrom(type, data, s))
-            return true;
-    } while ((p = p->next));
-
-    return false;
-}
-
-QVariant QQmlValueTypeProvider::createVariantFromString(const QString &s)
-{
-    QVariant v;
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->variantFromString(s, &v))
-            return v;
-    } while ((p = p->next));
-
-    // Return a variant containing the string itself
-    return QVariant(s);
-}
-
-QVariant QQmlValueTypeProvider::createVariantFromString(int type, const QString &s, bool *ok)
-{
-    QVariant v;
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->variantFromString(type, s, &v)) {
-            if (ok) *ok = true;
-            return v;
         }
-    } while ((p = p->next));
+    }
 
-    if (ok) *ok = false;
-    return QVariant();
+    return false;
 }
 
-QVariant QQmlValueTypeProvider::createVariantFromJsObject(int type, const QV4::Value &obj,
-                                                          QV4::ExecutionEngine *e, bool *ok)
-{
-    QVariant v;
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->variantFromJsObject(type, obj, e, &v)) {
-            if (ok) *ok = true;
-            return v;
-        }
-    } while ((p = p->next));
-
-    if (ok) *ok = false;
-    return QVariant();
-}
-
-bool QQmlValueTypeProvider::equalValueType(int type, const void *lhs, const QVariant& rhs)
+bool QQmlValueTypeProvider::equalValueType(QMetaType metaType, const void *lhs, const QVariant &rhs)
 {
     Q_ASSERT(lhs);
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->equal(type, lhs, rhs))
-            return true;
-    } while ((p = p->next));
-
-    return false;
+    return metaType.equals(lhs, rhs.constData());
 }
 
-bool QQmlValueTypeProvider::storeValueType(int type, const void *src, void *dst, size_t dstSize)
-{
-    Q_ASSERT(src);
-    Q_ASSERT(dst);
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->store(type, src, dst, dstSize))
-            return true;
-    } while ((p = p->next));
-
-    return false;
-}
-
-bool QQmlValueTypeProvider::readValueType(const QVariant& src, void *dst, int dstType)
+bool QQmlValueTypeProvider::readValueType(QMetaType metaType, const QVariant  &src, void *dst)
 {
     Q_ASSERT(dst);
+    if (!metaType.isValid()
+            || (src.metaType() == metaType && metaType.equals(src.constData(), dst))) {
+        return false;
+    }
 
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->read(src, dst, dstType))
-            return true;
-    } while ((p = p->next));
-
-    return false;
+    metaType.destruct(dst);
+    metaType.construct(dst, src.metaType() == metaType ? src.constData() : nullptr);
+    return true;
 }
 
-bool QQmlValueTypeProvider::writeValueType(int type, const void *src, QVariant& dst)
+bool QQmlValueTypeProvider::writeValueType(QMetaType metaType, const void *src, QVariant &dst)
 {
     Q_ASSERT(src);
-
-    QQmlValueTypeProvider *p = this;
-    do {
-        if (p->write(type, src, dst))
-            return true;
-    } while ((p = p->next));
-
-    return false;
-}
-
-const QMetaObject *QQmlValueTypeProvider::getMetaObjectForMetaType(int) { return nullptr; }
-bool QQmlValueTypeProvider::init(int, QVariant&) { return false; }
-bool QQmlValueTypeProvider::create(int, int, const void *[], QVariant *) { return false; }
-bool QQmlValueTypeProvider::createFromString(int, const QString &, void *, size_t) { return false; }
-bool QQmlValueTypeProvider::createStringFrom(int, const void *, QString *) { return false; }
-bool QQmlValueTypeProvider::variantFromString(const QString &, QVariant *) { return false; }
-bool QQmlValueTypeProvider::variantFromString(int, const QString &, QVariant *) { return false; }
-bool QQmlValueTypeProvider::variantFromJsObject(int, const QV4::Value &, QV4::ExecutionEngine *, QVariant *) { return false; }
-bool QQmlValueTypeProvider::equal(int, const void *, const QVariant&) { return false; }
-bool QQmlValueTypeProvider::store(int, const void *, void *, size_t) { return false; }
-bool QQmlValueTypeProvider::read(const QVariant&, void *, int) { return false; }
-bool QQmlValueTypeProvider::write(int, const void *, QVariant&) { return false; }
-
-struct ValueTypeProviderList {
-    QQmlValueTypeProvider nullProvider;
-    QQmlValueTypeProvider *head = &nullProvider;
-};
-
-Q_GLOBAL_STATIC(ValueTypeProviderList, valueTypeProviders)
-
-Q_QML_PRIVATE_EXPORT void QQml_addValueTypeProvider(QQmlValueTypeProvider *newProvider)
-{
-    if (ValueTypeProviderList *providers = valueTypeProviders()) {
-        newProvider->next = providers->head;
-        providers->head = newProvider;
+    if (!metaType.isValid()
+            || (dst.metaType() == metaType && metaType.equals(src, dst.constData()))) {
+        return false;
     }
+
+    dst = QVariant(metaType, src);
+    return true;
 }
 
-Q_QML_PRIVATE_EXPORT void QQml_removeValueTypeProvider(QQmlValueTypeProvider *oldProvider)
-{
-    if (ValueTypeProviderList *providers = valueTypeProviders()) {
-        QQmlValueTypeProvider *prev = providers->head;
-        if (prev == oldProvider) {
-            providers->head = oldProvider->next;
-            return;
-        }
-
-        // singly-linked list removal
-        for (; prev; prev = prev->next) {
-            if (prev->next != oldProvider)
-                continue;               // this is not the provider you're looking for
-            prev->next = oldProvider->next;
-            return;
-        }
-
-        qWarning("QQml_removeValueTypeProvider: was asked to remove provider %p but it was not found", oldProvider);
-    }
-}
+Q_GLOBAL_STATIC(QQmlValueTypeProvider, valueTypeProvider)
 
 Q_AUTOTEST_EXPORT QQmlValueTypeProvider *QQml_valueTypeProvider()
 {
-    if (ValueTypeProviderList *providers = valueTypeProviders())
-        return providers->head;
-    return nullptr;
+    return valueTypeProvider();
 }
 
 QQmlColorProvider::~QQmlColorProvider() {}
@@ -283,6 +80,10 @@ QVariant QQmlColorProvider::fromHslF(double, double, double, double) { return QV
 QVariant QQmlColorProvider::fromHsvF(double, double, double, double) { return QVariant(); }
 QVariant QQmlColorProvider::lighter(const QVariant &, qreal) { return QVariant(); }
 QVariant QQmlColorProvider::darker(const QVariant &, qreal) { return QVariant(); }
+QVariant QQmlColorProvider::alpha(const QVariant &, qreal)
+{
+    return QVariant();
+}
 QVariant QQmlColorProvider::tint(const QVariant &, const QVariant &) { return QVariant(); }
 
 static QQmlColorProvider *colorProvider = nullptr;
@@ -313,9 +114,12 @@ Q_AUTOTEST_EXPORT QQmlColorProvider *QQml_colorProvider(void)
 
 
 QQmlGuiProvider::~QQmlGuiProvider() {}
-QObject *QQmlGuiProvider::application(QObject *) { return new QQmlApplication(); }
+QQmlApplication *QQmlGuiProvider::application(QObject *parent)
+{
+    return new QQmlApplication(parent);
+}
 QStringList QQmlGuiProvider::fontFamilies() { return QStringList(); }
-bool QQmlGuiProvider::openUrlExternally(QUrl &) { return false; }
+bool QQmlGuiProvider::openUrlExternally(const QUrl &) { return false; }
 
 QObject *QQmlGuiProvider::inputMethod()
 {

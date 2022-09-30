@@ -4,6 +4,8 @@
 
 #include "net/base/prioritized_dispatcher.h"
 
+#include <ostream>
+
 #include "base/check_op.h"
 
 namespace net {
@@ -18,8 +20,7 @@ PrioritizedDispatcher::Limits::~Limits() = default;
 
 PrioritizedDispatcher::PrioritizedDispatcher(const Limits& limits)
     : queue_(limits.reserved_slots.size()),
-      max_running_jobs_(limits.reserved_slots.size()),
-      num_running_jobs_(0) {
+      max_running_jobs_(limits.reserved_slots.size()) {
   SetLimits(limits);
 }
 

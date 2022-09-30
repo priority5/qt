@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_functions.h"
+#include "build/chromeos_buildflags.h"
 #include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
 #include "google_apis/gcm/protocol/checkin.pb.h"
 #include "net/base/load_flags.h"
@@ -14,6 +15,7 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace gcm {
 
@@ -138,7 +140,7 @@ void CheckinRequest::Start() {
 
   checkin_proto::AndroidCheckinProto* checkin = request.mutable_checkin();
   checkin->mutable_chrome_build()->CopyFrom(request_info_.chrome_build_proto);
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   checkin->set_type(checkin_proto::DEVICE_CHROME_OS);
 #else
   checkin->set_type(checkin_proto::DEVICE_CHROME_BROWSER);

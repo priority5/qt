@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickspriteengine_p.h"
 #include "qquicksprite_p.h"
@@ -45,8 +9,6 @@
 #include <QPainter>
 #include <QRandomGenerator>
 #include <QSet>
-#include <QtGui/qopengl.h>
-#include <QOpenGLFunctions>
 
 QT_BEGIN_NAMESPACE
 
@@ -456,12 +418,12 @@ QImage QQuickSpriteEngine::assembledImage(int maxSize)
         QImage img(state->m_pix.image());
         const int frameWidth = state->m_frameWidth;
         const int frameHeight = state->m_frameHeight;
-        const int imgHeight = img.height() / img.devicePixelRatioF();
-        const int imgWidth = img.width() / img.devicePixelRatioF();
+        const int imgHeight = img.height() / img.devicePixelRatio();
+        const int imgWidth = img.width() / img.devicePixelRatio();
         if (imgHeight == frameHeight && imgWidth <  maxSize){ //Simple case
             p.drawImage(QRect(0, y, state->m_frames * frameWidth, frameHeight),
                         img,
-                        QRect(state->m_frameX * img.devicePixelRatioF(), 0, state->m_frames * frameWidth * img.devicePixelRatioF(), frameHeight * img.devicePixelRatioF()));
+                        QRect(state->m_frameX * img.devicePixelRatio(), 0, state->m_frames * frameWidth * img.devicePixelRatio(), frameHeight * img.devicePixelRatio()));
             state->m_rowStartX = 0;
             state->m_rowY = y;
             y += frameHeight;
@@ -478,7 +440,7 @@ QImage QQuickSpriteEngine::assembledImage(int maxSize)
                     framesLeft -= copied/frameWidth;
                     p.drawImage(QRect(x, y, copied, frameHeight),
                                 img,
-                                QRect(curX * img.devicePixelRatioF(), curY * img.devicePixelRatioF(), copied * img.devicePixelRatioF(), frameHeight * img.devicePixelRatioF()));
+                                QRect(curX * img.devicePixelRatio(), curY * img.devicePixelRatio(), copied * img.devicePixelRatio(), frameHeight * img.devicePixelRatio()));
                     y += frameHeight;
                     curX += copied;
                     x = 0;
@@ -491,7 +453,7 @@ QImage QQuickSpriteEngine::assembledImage(int maxSize)
                     framesLeft -= copied/frameWidth;
                     p.drawImage(QRect(x, y, copied, frameHeight),
                                 img,
-                                QRect(curX * img.devicePixelRatioF(), curY * img.devicePixelRatioF(), copied * img.devicePixelRatioF(), frameHeight * img.devicePixelRatioF()));
+                                QRect(curX * img.devicePixelRatio(), curY * img.devicePixelRatio(), copied * img.devicePixelRatio(), frameHeight * img.devicePixelRatio()));
                     curY += frameHeight;
                     x += copied;
                     curX = 0;

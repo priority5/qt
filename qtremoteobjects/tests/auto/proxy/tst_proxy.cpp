@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 Ford Motor Company
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtRemoteObjects module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 Ford Motor Company
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "rep_engine_merged.h"
 #include "rep_subclass_merged.h"
@@ -34,12 +9,14 @@
 #include <QRemoteObjectReplica>
 #include <QRemoteObjectNode>
 
-const QUrl localHostUrl = QUrl(QLatin1String("local:testHost"));
+#include "../../shared/testutils.h"
+
+const QUrl localHostUrl = QUrl(QLatin1String(LOCAL_SOCKET ":testHost"));
 const QUrl tcpHostUrl = QUrl(QLatin1String("tcp://127.0.0.1:9989"));
 const QUrl proxyNodeUrl = QUrl(QLatin1String("tcp://127.0.0.1:12123"));
 const QUrl remoteNodeUrl = QUrl(QLatin1String("tcp://127.0.0.1:23234"));
-const QUrl registryUrl = QUrl(QLatin1String("local:testRegistry"));
-const QUrl proxyHostUrl = QUrl(QLatin1String("local:fromProxy"));
+const QUrl registryUrl = QUrl(QLatin1String(LOCAL_SOCKET ":testRegistry"));
+const QUrl proxyHostUrl = QUrl(QLatin1String(LOCAL_SOCKET ":fromProxy"));
 
 #define SET_NODE_NAME(obj) (obj).setName(QLatin1String(#obj))
 
@@ -139,7 +116,7 @@ void ProxyTest::testProxy()
 
         //Compare Replica to Source
         QCOMPARE(rep->rpm(), engine.rpm());
-        QCOMPARE((EngineReplica::EngineType)rep->type(), EngineReplica::Gas);
+        QCOMPARE(EngineReplica::EngineType(rep->type()), EngineReplica::Gas);
 
         //Change Replica and make sure change propagates to source
         QSignalSpy sourceSpy(&engine, &EngineSimpleSource::rpmChanged);
@@ -199,7 +176,7 @@ void ProxyTest::testProxy()
     // Now test subclass Source
     ParentClassSimpleSource parent;
     SubClassSimpleSource subclass;
-    const MyPOD initialValue(42, 3.14, QStringLiteral("SubClass"));
+    const MyPOD initialValue(42, 3.14f, QStringLiteral("SubClass"));
     subclass.setMyPOD(initialValue);
     QStringListModel model;
     model.setStringList(QStringList() << "Track1" << "Track2" << "Track3");
@@ -224,7 +201,7 @@ void ProxyTest::testProxy()
         QVERIFY(tracksSpy.count() || tracksSpy.wait());
         // Rep file only uses display role, but proxy doesn't forward that yet
         if (!useProxy)
-            QCOMPARE(rep->tracks()->availableRoles(), QVector<int>{Qt::DisplayRole});
+            QCOMPARE(rep->tracks()->availableRoles(), QList<int> { Qt::DisplayRole });
         else {
             const auto &availableRolesVec = rep->tracks()->availableRoles();
             QSet<int> availableRoles;
@@ -236,7 +213,7 @@ void ProxyTest::testProxy()
                 roles.insert(it.key());
             QCOMPARE(availableRoles, roles);
         }
-        QVector<QModelIndex> pending;
+        QList<QModelIndex> pending;
         QTRY_COMPARE(rep->tracks()->rowCount(), model.rowCount());
         for (int i = 0; i < rep->tracks()->rowCount(); i++)
         {
@@ -253,12 +230,12 @@ void ProxyTest::testProxy()
         QVERIFY(w.wait());
         for (int i = 0; i < rep->tracks()->rowCount(); i++)
         {
-            QCOMPARE(rep->tracks()->data(rep->tracks()->index(i, 0)), model.data(model.index(i), Qt::DisplayRole));
+            QTRY_COMPARE(rep->tracks()->data(rep->tracks()->index(i, 0)), model.data(model.index(i), Qt::DisplayRole));
         }
 
         //Change SubClass and make sure change propagates
         SubClassSimpleSource updatedSubclass;
-        const MyPOD updatedValue(-1, 123.456, QStringLiteral("Updated"));
+        const MyPOD updatedValue(-1, 123.456f, QStringLiteral("Updated"));
         updatedSubclass.setMyPOD(updatedValue);
         QSignalSpy replicaSpy(rep, &ParentClassReplica::subClassChanged);
         parent.setSubClass(&updatedSubclass);
@@ -298,7 +275,7 @@ void ProxyTest::testProxy()
         // Verify tracks data
         // Rep file only uses display role, but proxy doesn't forward that yet
         if (!useProxy)
-            QCOMPARE(tracksReplica->availableRoles(), QVector<int>{Qt::DisplayRole});
+            QCOMPARE(tracksReplica->availableRoles(), QList<int> { Qt::DisplayRole });
         else {
             const auto &availableRolesVec = tracksReplica->availableRoles();
             QSet<int> availableRoles;
@@ -312,7 +289,7 @@ void ProxyTest::testProxy()
         }
         QTRY_COMPARE(tracksReplica->isInitialized(), true);
         QSignalSpy dataSpy(tracksReplica, &QAbstractItemModelReplica::dataChanged);
-        QVector<QModelIndex> pending;
+        QList<QModelIndex> pending;
         QTRY_COMPARE(tracksReplica->rowCount(), model.rowCount());
         for (int i = 0; i < tracksReplica->rowCount(); i++)
         {
@@ -334,7 +311,7 @@ void ProxyTest::testProxy()
 
         //Change SubClass and make sure change propagates
         SubClassSimpleSource updatedSubclass;
-        const MyPOD updatedValue(-1, 123.456, QStringLiteral("Updated"));
+        const MyPOD updatedValue(-1, 123.456f, QStringLiteral("Updated"));
         updatedSubclass.setMyPOD(updatedValue);
         QSignalSpy replicaSpy(replica.data(), QByteArray(QByteArrayLiteral("2")+subclassMeta.notifySignal().methodSignature().constData()));
         parent.setSubClass(&updatedSubclass);
@@ -400,7 +377,6 @@ void ProxyTest::testReverseProxy()
     SET_NODE_NAME(host);
 
     // Setup Proxy
-    // QRemoteObjectRegistryHost proxyNode(proxyNodeUrl);
     QRemoteObjectRegistryHost proxyNode(proxyNodeUrl);
     SET_NODE_NAME(proxyNode);
     proxyNode.proxy(registryUrl, proxyHostUrl);
@@ -436,7 +412,7 @@ void ProxyTest::testTopLevelModel()
 
     QStringListModel model;
     model.setStringList(QStringList() << "Track1" << "Track2" << "Track3");
-    host.enableRemoting(&model, "trackList", QVector<int>() << Qt::DisplayRole);
+    host.enableRemoting(&model, "trackList", QList<int> { Qt::DisplayRole });
 
     QRemoteObjectHost proxyNode;
     SET_NODE_NAME(proxyNode);

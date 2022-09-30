@@ -43,7 +43,7 @@ class TopControlsSwapPromise : public cc::SwapPromise {
       DidNotSwapReason reason) override {
     return DidNotSwapAction::KEEP_ACTIVE;
   }
-  int64_t TraceId() const override { return 0; }
+  int64_t GetTraceId() const override { return 0; }
 
  private:
   const float height_;
@@ -117,13 +117,15 @@ void DelegatedFrameHostAndroid::CopyFromCompositingSurface(
   }
   std::unique_ptr<viz::CopyOutputRequest> request =
       std::make_unique<viz::CopyOutputRequest>(
-          viz::CopyOutputRequest::ResultFormat::RGBA_BITMAP,
+          viz::CopyOutputRequest::ResultFormat::RGBA,
+          viz::CopyOutputRequest::ResultDestination::kSystemMemory,
           base::BindOnce(
               [](base::OnceCallback<void(const SkBitmap&)> callback,
                  std::unique_ptr<ui::WindowAndroidCompositor::ReadbackRef>
                      readback_ref,
                  std::unique_ptr<viz::CopyOutputResult> result) {
-                std::move(callback).Run(result->AsSkBitmap());
+                auto scoped_bitmap = result->ScopedAccessSkBitmap();
+                std::move(callback).Run(scoped_bitmap.GetOutScopedBitmap());
               },
               std::move(callback), std::move(readback_ref)));
 
@@ -158,10 +160,24 @@ bool DelegatedFrameHostAndroid::CanCopyFromCompositingSurface() const {
 void DelegatedFrameHostAndroid::EvictDelegatedFrame() {
   content_layer_->SetSurfaceId(viz::SurfaceId(),
                                cc::DeadlinePolicy::UseDefaultDeadline());
-  if (!HasSavedFrame() || frame_evictor_->visible())
+  std::vector<viz::SurfaceId> surface_ids;
+  // If we have a surface from before a navigation, evict it, regardless of
+  // visibility state.
+  if (pre_navigation_local_surface_id_.is_valid()) {
+    viz::SurfaceId pre_nav =
+        viz::SurfaceId(frame_sink_id_, pre_navigation_local_surface_id_);
+    surface_ids.push_back(pre_nav);
+  } else if (!HasSavedFrame() || frame_evictor_->visible()) {
     return;
-  std::vector<viz::SurfaceId> surface_ids = {
-      viz::SurfaceId(frame_sink_id_, local_surface_id_)};
+  }
+
+  if (local_surface_id_.is_valid()) {
+    viz::SurfaceId current = viz::SurfaceId(frame_sink_id_, local_surface_id_);
+    surface_ids.push_back(current);
+  }
+
+  if (surface_ids.empty())
+    return;
   host_frame_sink_manager_->EvictSurfaces(surface_ids);
   frame_evictor_->OnSurfaceDiscarded();
   // When surface sync is on, this call will force |client_| to allocate a new
@@ -170,6 +186,19 @@ void DelegatedFrameHostAndroid::EvictDelegatedFrame() {
   // when it becomes visible just in case the previous LocalSurfaceId is evicted
   // by the browser.
   client_->WasEvicted();
+}
+
+void DelegatedFrameHostAndroid::ClearFallbackSurfaceForCommitPending() {
+  const absl::optional<viz::SurfaceId> fallback_surface_id =
+      content_layer_->oldest_acceptable_fallback();
+
+  // CommitPending without a target for TakeFallbackContentFrom. Since we cannot
+  // guarantee that Navigation will complete, evict our surfaces which are from
+  // a previous Navigation.
+  if (fallback_surface_id && fallback_surface_id->is_valid()) {
+    EvictDelegatedFrame();
+    content_layer_->SetOldestAcceptableFallback(viz::SurfaceId());
+  }
 }
 
 void DelegatedFrameHostAndroid::ResetFallbackToFirstNavigationSurface() {
@@ -183,6 +212,14 @@ void DelegatedFrameHostAndroid::ResetFallbackToFirstNavigationSurface() {
           .IsSameOrNewerThan(first_local_surface_id_after_navigation_)) {
     return;
   }
+
+  // If we have a surface from before a navigation, evict it as well.
+  if (pre_navigation_local_surface_id_.is_valid() &&
+      !first_local_surface_id_after_navigation_.is_valid()) {
+    EvictDelegatedFrame();
+    content_layer_->SetBackgroundColor(SK_ColorTRANSPARENT);
+  }
+
   content_layer_->SetOldestAcceptableFallback(
       viz::SurfaceId(frame_sink_id_, first_local_surface_id_after_navigation_));
 }
@@ -241,12 +278,29 @@ void DelegatedFrameHostAndroid::EmbedSurface(
     const gfx::Size& new_size_in_pixels,
     cc::DeadlinePolicy deadline_policy,
     bool is_fullscreen) {
+  TRACE_EVENT2("viz", "DelegatedFrameHostAndroid::EmbedSurface", "surface_id",
+               new_local_surface_id.ToString(), "deadline_policy",
+               deadline_policy.ToString());
+
   // We should never attempt to embed an invalid surface. Catch this here to
   // track down the root cause. Otherwise we will have vague crashes later on
   // at serialization time.
   CHECK(new_local_surface_id.is_valid());
 
-  local_surface_id_ = new_local_surface_id;
+  // Confirm that there is a valid fallback surface on, otherwise we need to
+  // adjust deadline times. To avoid displaying invalid content.
+  bool has_fallback_surface =
+      (content_layer_->oldest_acceptable_fallback() &&
+       content_layer_->oldest_acceptable_fallback()->is_valid());
+  SetLocalSurfaceId(new_local_surface_id);
+  // The embedding of a new surface completes the navigation process.
+  pre_navigation_local_surface_id_ = viz::LocalSurfaceId();
+  // Navigations performed while hidden delay embedding until transitioning to
+  // becoming visible. So we may not have a valid surace when DidNavigate is
+  // called. Cache the first surface here so we have the correct oldest surface
+  // to fallback to.
+  if (!first_local_surface_id_after_navigation_.is_valid())
+    first_local_surface_id_after_navigation_ = local_surface_id_;
   surface_size_in_pixels_ = new_size_in_pixels;
 
   viz::SurfaceId current_primary_surface_id = content_layer_->surface_id();
@@ -257,9 +311,14 @@ void DelegatedFrameHostAndroid::EmbedSurface(
     // content. So we advance the fallback forcing viz to fallback to blank
     // screen if renderer won't submit frame in time. See
     // https://crbug.com/1088369 and  https://crbug.com/813157
-    if (surface_size_in_pixels_ != content_layer_->bounds() &&
-        content_layer_->oldest_acceptable_fallback() &&
-        content_layer_->oldest_acceptable_fallback()->is_valid()) {
+    //
+    // An empty content layer bounds indicates this renderer has never been made
+    // visible. This is the case for pre-rendered contents. Don't use the
+    // primary id as fallback since it's guaranteed to have no content. See
+    // crbug.com/1218238.
+    if (!content_layer_->bounds().IsEmpty() &&
+        surface_size_in_pixels_ != content_layer_->bounds() &&
+        has_fallback_surface) {
       content_layer_->SetOldestAcceptableFallback(new_primary_surface_id);
 
       // We default to black background for fullscreen case.
@@ -293,6 +352,11 @@ void DelegatedFrameHostAndroid::EmbedSurface(
         deadline_policy = cc::DeadlinePolicy::UseSpecifiedDeadline(0u);
       }
     }
+    // If there is not a valid current surface, nor a valid fallback, we want to
+    // produce new content as soon as possible. To avoid displaying invalide
+    // content, such as surfaces from before a navigation.
+    if (!has_fallback_surface)
+      deadline_policy = cc::DeadlinePolicy::UseSpecifiedDeadline(0u);
     content_layer_->SetSurfaceId(new_primary_surface_id, deadline_policy);
     content_layer_->SetBounds(new_size_in_pixels);
   }
@@ -303,12 +367,20 @@ void DelegatedFrameHostAndroid::OnFirstSurfaceActivation(
   NOTREACHED();
 }
 
-void DelegatedFrameHostAndroid::OnFrameTokenChanged(uint32_t frame_token) {
-  client_->OnFrameTokenChanged(frame_token);
+void DelegatedFrameHostAndroid::OnFrameTokenChanged(
+    uint32_t frame_token,
+    base::TimeTicks activation_time) {
+  client_->OnFrameTokenChanged(frame_token, activation_time);
 }
 
 viz::SurfaceId DelegatedFrameHostAndroid::SurfaceId() const {
   return viz::SurfaceId(frame_sink_id_, local_surface_id_);
+}
+
+void DelegatedFrameHostAndroid::SetLocalSurfaceId(
+    const viz::LocalSurfaceId& local_surface_id) {
+  local_surface_id_ = local_surface_id;
+  client_->OnSurfaceIdChanged();
 }
 
 bool DelegatedFrameHostAndroid::HasPrimarySurface() const {
@@ -326,7 +398,7 @@ void DelegatedFrameHostAndroid::TakeFallbackContentFrom(
     return;
 
   const viz::SurfaceId& other_primary = other->content_layer_->surface_id();
-  const base::Optional<viz::SurfaceId>& other_fallback =
+  const absl::optional<viz::SurfaceId>& other_fallback =
       other->content_layer_->oldest_acceptable_fallback();
   viz::SurfaceId desired_fallback;
   if (!other->HasFallbackSurface() ||
@@ -341,6 +413,18 @@ void DelegatedFrameHostAndroid::TakeFallbackContentFrom(
 
 void DelegatedFrameHostAndroid::DidNavigate() {
   first_local_surface_id_after_navigation_ = local_surface_id_;
+}
+
+void DelegatedFrameHostAndroid::OnNavigateToNewPage() {
+  // We are navigating to a different page, so the current |local_surface_id_|
+  // and the fallback option of |first_local_surface_id_after_navigation_| are
+  // no longer valid, as they represent older content from a different source.
+  //
+  // Cache the current |local_surface_id_| so that if navigation fails we can
+  // evict it when transitioning to becoming visible.
+  pre_navigation_local_surface_id_ = local_surface_id_;
+  first_local_surface_id_after_navigation_ = viz::LocalSurfaceId();
+  SetLocalSurfaceId(viz::LocalSurfaceId());
 }
 
 void DelegatedFrameHostAndroid::SetTopControlsVisibleHeight(float height) {

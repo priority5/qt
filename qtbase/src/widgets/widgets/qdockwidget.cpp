@@ -1,47 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWidgets module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qdockwidget.h"
 
 #include <qaction.h>
 #include <qapplication.h>
-#include <qdesktopwidget.h>
 #include <qdrawutil.h>
 #include <qevent.h>
 #include <qfontmetrics.h>
@@ -57,10 +20,13 @@
 #include <private/qstylesheetstyle_p.h>
 #include <qpa/qplatformtheme.h>
 
+#include <private/qhighdpiscaling_p.h>
 #include "qdockwidget_p.h"
 #include "qmainwindowlayout_p.h"
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 extern QString qt_setWindowTitle_helperHelper(const QString&, const QWidget*); // qwidget.cpp
 
@@ -130,7 +96,7 @@ public:
     QSize minimumSizeHint() const override
     { return sizeHint(); }
 
-    void enterEvent(QEvent *event) override;
+    void enterEvent(QEnterEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
 
@@ -206,7 +172,7 @@ QSize QDockWidgetTitleButton::sizeHint() const
     return QSize(size, size);
 }
 
-void QDockWidgetTitleButton::enterEvent(QEvent *event)
+void QDockWidgetTitleButton::enterEvent(QEnterEvent *event)
 {
     if (isEnabled()) update();
     QAbstractButton::enterEvent(event);
@@ -220,21 +186,23 @@ void QDockWidgetTitleButton::leaveEvent(QEvent *event)
 
 void QDockWidgetTitleButton::paintEvent(QPaintEvent *)
 {
-    QPainter p(this);
+    QStylePainter p(this);
 
     QStyleOptionToolButton opt;
-    opt.init(this);
+    opt.initFrom(this);
     opt.state |= QStyle::State_AutoRaise;
 
-    if (style()->styleHint(QStyle::SH_DockWidget_ButtonsHaveFrame, nullptr, this))
-    {
+    if (style()->styleHint(QStyle::SH_DockWidget_ButtonsHaveFrame, nullptr, this)) {
         if (isEnabled() && underMouse() && !isChecked() && !isDown())
             opt.state |= QStyle::State_Raised;
         if (isChecked())
             opt.state |= QStyle::State_On;
         if (isDown())
             opt.state |= QStyle::State_Sunken;
-        style()->drawPrimitive(QStyle::PE_PanelButtonTool, &opt, &p, this);
+        p.drawPrimitive(QStyle::PE_PanelButtonTool, opt);
+    } else if (isDown() || isChecked()) {
+        // no frame, but the icon might have explicit pixmaps for QIcon::On
+        opt.state |= QStyle::State_On | QStyle::State_Sunken;
     }
 
     opt.icon = icon();
@@ -243,7 +211,7 @@ void QDockWidgetTitleButton::paintEvent(QPaintEvent *)
     opt.features = QStyleOptionToolButton::None;
     opt.arrowType = Qt::NoArrow;
     opt.iconSize = dockButtonIconSize();
-    style()->drawComplexControl(QStyle::CC_ToolButton, &opt, &p, this);
+    p.drawComplexControl(QStyle::CC_ToolButton, opt);
 }
 
 /******************************************************************************
@@ -284,7 +252,7 @@ bool QDockWidgetLayout::wmSupportsNativeWindowDeco()
 #if defined(Q_OS_ANDROID)
     return false;
 #else
-    static const bool xcb = !QGuiApplication::platformName().compare(QLatin1String("xcb"), Qt::CaseInsensitive);
+    static const bool xcb = !QGuiApplication::platformName().compare("xcb"_L1, Qt::CaseInsensitive);
     return !xcb;
 #endif
 }
@@ -296,7 +264,7 @@ bool QDockWidgetLayout::wmSupportsNativeWindowDeco()
  */
 bool QDockWidgetLayout::nativeWindowDeco(bool floating) const
 {
-    return wmSupportsNativeWindowDeco() && floating && item_list.at(QDockWidgetLayout::TitleBar) == 0;
+    return wmSupportsNativeWindowDeco() && floating && item_list.at(QDockWidgetLayout::TitleBar) == nullptr;
 }
 
 
@@ -658,12 +626,12 @@ void QDockWidgetPrivate::init()
     layout->setSizeConstraint(QLayout::SetMinAndMaxSize);
 
     QAbstractButton *button = new QDockWidgetTitleButton(q);
-    button->setObjectName(QLatin1String("qt_dockwidget_floatbutton"));
+    button->setObjectName("qt_dockwidget_floatbutton"_L1);
     QObject::connect(button, SIGNAL(clicked()), q, SLOT(_q_toggleTopLevel()));
     layout->setWidgetForRole(QDockWidgetLayout::FloatButton, button);
 
     button = new QDockWidgetTitleButton(q);
-    button->setObjectName(QLatin1String("qt_dockwidget_closebutton"));
+    button->setObjectName("qt_dockwidget_closebutton"_L1);
     QObject::connect(button, SIGNAL(clicked()), q, SLOT(close()));
     layout->setWidgetForRole(QDockWidgetLayout::CloseButton, button);
 
@@ -741,7 +709,7 @@ void QDockWidgetPrivate::updateButtons()
         = qobject_cast<QAbstractButton*>(dwLayout->widgetForRole(QDockWidgetLayout::FloatButton));
     button->setIcon(q->style()->standardIcon(QStyle::SP_TitleBarNormalButton, &opt, q));
     button->setVisible(canFloat && !hideButtons);
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
     //: Accessible name for button undocking a dock widget (floating state)
     button->setAccessibleName(QDockWidget::tr("Float"));
     button->setAccessibleDescription(QDockWidget::tr("Undocks and re-attaches the dock widget"));
@@ -750,7 +718,7 @@ void QDockWidgetPrivate::updateButtons()
         = qobject_cast <QAbstractButton*>(dwLayout->widgetForRole(QDockWidgetLayout::CloseButton));
     button->setIcon(q->style()->standardIcon(QStyle::SP_TitleBarCloseButton, &opt, q));
     button->setVisible(canClose && !hideButtons);
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
     //: Accessible name for button closing a dock widget
     button->setAccessibleName(QDockWidget::tr("Close"));
     button->setAccessibleDescription(QDockWidget::tr("Closes the dock widget"));
@@ -785,6 +753,8 @@ void QDockWidgetPrivate::initDrag(const QPoint &pos, bool nca)
 
     state = new QDockWidgetPrivate::DragState;
     state->pressPos = pos;
+    state->globalPressPos = q->mapToGlobal(pos);
+    state->widgetInitialPos = q->isFloating() ? q->pos() : q->mapToGlobal(QPoint(0, 0));
     state->dragging = false;
     state->widgetItem = nullptr;
     state->ownWidgetItem = false;
@@ -810,10 +780,10 @@ void QDockWidgetPrivate::startDrag(bool group)
 
     state->widgetItem = layout->unplug(q, group);
     if (state->widgetItem == nullptr) {
-        /* I have a QMainWindow parent, but I was never inserted with
+        /*  Dock widget has a QMainWindow parent, but was never inserted with
             QMainWindow::addDockWidget, so the QMainWindowLayout has no
-            widget item for me. :( I have to create it myself, and then
-            delete it if I don't get dropped into a dock area. */
+            widget item for it. It will be newly created and deleted if it doesn't
+            get dropped into a dock area. */
         QDockWidgetGroupWindow *floatingTab = qobject_cast<QDockWidgetGroupWindow*>(parent);
         if (floatingTab && !q->isFloating())
             state->widgetItem = new QDockWidgetGroupWindowItem(floatingTab);
@@ -867,7 +837,15 @@ void QDockWidgetPrivate::endDrag(bool abort)
                 if (q->isFloating()) { // Might not be floating when dragging a QDockWidgetGroupWindow
                     undockedGeometry = q->geometry();
 #if QT_CONFIG(tabwidget)
-                    tabPosition = mwLayout->tabPosition(mainWindow->dockWidgetArea(q));
+                    // is the widget located within the mainwindow?
+                    const Qt::DockWidgetArea area = mainWindow->dockWidgetArea(q);
+                    if (area != Qt::NoDockWidgetArea) {
+                        tabPosition = mwLayout->tabPosition(area);
+                    } else if (auto dwgw = qobject_cast<QDockWidgetGroupWindow *>(q->parent())) {
+                        // DockWidget wasn't found in one of the docks within mainwindow
+                        // => derive tabPosition from parent
+                        tabPosition = mwLayout->tabPosition(toDockWidgetArea(dwgw->layoutInfo()->dockPos));
+                    }
 #endif
                 }
                 q->activateWindow();
@@ -882,15 +860,25 @@ void QDockWidgetPrivate::endDrag(bool abort)
     state = nullptr;
 }
 
+Qt::DockWidgetArea QDockWidgetPrivate::toDockWidgetArea(QInternal::DockPosition pos)
+{
+    switch (pos) {
+    case QInternal::LeftDock:   return Qt::LeftDockWidgetArea;
+    case QInternal::RightDock:  return Qt::RightDockWidgetArea;
+    case QInternal::TopDock:    return Qt::TopDockWidgetArea;
+    case QInternal::BottomDock: return Qt::BottomDockWidgetArea;
+    default: break;
+    }
+    return Qt::NoDockWidgetArea;
+}
+
 void QDockWidgetPrivate::setResizerActive(bool active)
 {
     Q_Q(QDockWidget);
-    if (active && !resizer) {
+    if (active && !resizer)
         resizer = new QWidgetResizeHandler(q);
-        resizer->setMovingEnabled(false);
-    }
     if (resizer)
-        resizer->setActive(QWidgetResizeHandler::Resize, active);
+        resizer->setEnabled(active);
 }
 
 bool QDockWidgetPrivate::isAnimating() const
@@ -918,16 +906,16 @@ bool QDockWidgetPrivate::mousePressEvent(QMouseEvent *event)
         QDockWidgetGroupWindow *floatingTab = qobject_cast<QDockWidgetGroupWindow*>(parent);
 
         if (event->button() != Qt::LeftButton ||
-            !titleArea.contains(event->pos()) ||
+            !titleArea.contains(event->position().toPoint()) ||
             // check if the tool window is movable... do nothing if it
             // is not (but allow moving if the window is floating)
             (!hasFeature(this, QDockWidget::DockWidgetMovable) && !q->isFloating()) ||
-            (qobject_cast<QMainWindow*>(parent) == 0 && !floatingTab) ||
+            (qobject_cast<QMainWindow*>(parent) == nullptr && !floatingTab) ||
             isAnimating() || state != nullptr) {
             return false;
         }
 
-        initDrag(event->pos(), false);
+        initDrag(event->position().toPoint(), false);
 
         if (state)
             state->ctrlDrag = (hasFeature(this, QDockWidget::DockWidgetFloatable) && event->modifiers() & Qt::ControlModifier) ||
@@ -947,7 +935,7 @@ bool QDockWidgetPrivate::mouseDoubleClickEvent(QMouseEvent *event)
     if (!dwLayout->nativeWindowDeco()) {
         QRect titleArea = dwLayout->titleArea();
 
-        if (event->button() == Qt::LeftButton && titleArea.contains(event->pos()) &&
+        if (event->button() == Qt::LeftButton && titleArea.contains(event->position().toPoint()) &&
             hasFeature(this, QDockWidget::DockWidgetFloatable)) {
             _q_toggleTopLevel();
             return true;
@@ -971,11 +959,11 @@ bool QDockWidgetPrivate::mouseMoveEvent(QMouseEvent *event)
     if (!dwlayout->nativeWindowDeco()) {
         if (!state->dragging
             && mwlayout->pluggingWidget == nullptr
-            && (event->pos() - state->pressPos).manhattanLength()
+            && (event->position().toPoint() - state->pressPos).manhattanLength()
                 > QApplication::startDragDistance()) {
 
 #ifdef Q_OS_MACOS
-            if (windowHandle()) {
+            if (windowHandle() && !q->isFloating()) {
                 // When using native widgets on mac, we have not yet been successful in
                 // starting a drag on an NSView that belongs to one window (QMainWindow),
                 // but continue the drag on another (QDockWidget). This is what happens if
@@ -996,7 +984,34 @@ bool QDockWidgetPrivate::mouseMoveEvent(QMouseEvent *event)
     if (state && state->dragging && !state->nca) {
         QMargins windowMargins = q->window()->windowHandle()->frameMargins();
         QPoint windowMarginOffset = QPoint(windowMargins.left(), windowMargins.top());
-        QPoint pos = event->globalPos() - state->pressPos - windowMarginOffset;
+
+        // TODO maybe use QScreen API (if/when available) to simplify the below code.
+        const QScreen *orgWdgScreen = QGuiApplication::screenAt(state->widgetInitialPos);
+        const QScreen *screenFrom = QGuiApplication::screenAt(state->globalPressPos);
+        const QScreen *screenTo = QGuiApplication::screenAt(event->globalPosition().toPoint());
+        const QScreen *wdgScreen = q->screen();
+
+        QPoint pos;
+        if (Q_LIKELY(screenFrom && screenTo && wdgScreen && orgWdgScreen)) {
+            const QPoint nativeWdgOrgPos = QHighDpiScaling::mapPositionToNative(
+                    state->widgetInitialPos, orgWdgScreen->handle());
+            const QPoint nativeTo = QHighDpiScaling::mapPositionToNative(
+                    event->globalPosition().toPoint(), screenTo->handle());
+            const QPoint nativeFrom = QHighDpiScaling::mapPositionToNative(state->globalPressPos,
+                                                                           screenFrom->handle());
+
+            // Calculate new nativePos based on startPos + mouse delta move.
+            const QPoint nativeNewPos = nativeWdgOrgPos + (nativeTo - nativeFrom);
+            pos = QHighDpiScaling::mapPositionFromNative(nativeNewPos, wdgScreen->handle())
+                    - windowMarginOffset;
+        } else {
+            // Fallback in the unlikely case that source and target screens could not be established
+            qCWarning(lcQpaDockWidgets)
+                    << "QDockWidget failed to find relevant screen info. screenFrom:" << screenFrom
+                    << "screenTo:" << screenTo << " wdgScreen:" << wdgScreen << "orgWdgScreen"
+                    << orgWdgScreen;
+            pos = event->globalPosition().toPoint() - state->pressPos - windowMarginOffset;
+        }
 
         QDockWidgetGroupWindow *floatingTab = qobject_cast<QDockWidgetGroupWindow*>(parent);
         if (floatingTab && !q->isFloating())
@@ -1005,7 +1020,7 @@ bool QDockWidgetPrivate::mouseMoveEvent(QMouseEvent *event)
             q->move(pos);
 
         if (state && !state->ctrlDrag)
-            mwlayout->hover(state->widgetItem, event->globalPos());
+            mwlayout->hover(state->widgetItem, event->globalPosition().toPoint());
 
         ret = true;
     }
@@ -1045,15 +1060,15 @@ void QDockWidgetPrivate::nonClientAreaMouseEvent(QMouseEvent *event)
 
     switch (event->type()) {
         case QEvent::NonClientAreaMouseButtonPress:
-            if (!titleRect.contains(event->globalPos()))
+            if (!titleRect.contains(event->globalPosition().toPoint()))
                 break;
             if (state != nullptr)
                 break;
-            if (qobject_cast<QMainWindow*>(parent) == 0 && qobject_cast<QDockWidgetGroupWindow*>(parent) == 0)
+            if (qobject_cast<QMainWindow*>(parent) == nullptr && qobject_cast<QDockWidgetGroupWindow*>(parent) == nullptr)
                 break;
             if (isAnimating())
                 break;
-            initDrag(event->pos(), true);
+            initDrag(event->position().toPoint(), true);
             if (state == nullptr)
                 break;
             state->ctrlDrag = (event->modifiers() & Qt::ControlModifier) ||
@@ -1064,14 +1079,14 @@ void QDockWidgetPrivate::nonClientAreaMouseEvent(QMouseEvent *event)
             if (state == nullptr || !state->dragging)
                 break;
 
-#ifndef Q_OS_MAC
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WASM)
             if (state->nca) {
                 endDrag();
             }
 #endif
             break;
         case QEvent::NonClientAreaMouseButtonRelease:
-#ifdef Q_OS_MAC
+#if defined(Q_OS_MAC) || defined(Q_OS_WASM)
                         if (state)
                                 endDrag();
 #endif
@@ -1100,7 +1115,7 @@ void QDockWidgetPrivate::moveEvent(QMoveEvent *event)
     if (state == nullptr || !state->dragging || !state->nca)
         return;
 
-    if (!q->isWindow() && qobject_cast<QDockWidgetGroupWindow*>(parent) == 0)
+    if (!q->isWindow() && qobject_cast<QDockWidgetGroupWindow*>(parent) == nullptr)
         return;
 
     // When the native window frame is being dragged, all we get is these mouse
@@ -1259,11 +1274,6 @@ void QDockWidgetPrivate::setWindowState(bool floating, bool unplug, const QRect 
                                   bar on its left side. This can be used to
                                   increase the amount of vertical space in
                                   a QMainWindow.
-    \value AllDockWidgetFeatures  (Deprecated) The dock widget can be closed, moved,
-                                  and floated. Since new features might be added in future
-                                  releases, the look and behavior of dock widgets might
-                                  change if you use this flag. Please specify individual
-                                  flags instead.
     \value NoDockWidgetFeatures   The dock widget cannot be closed, moved,
                                   or floated.
 
@@ -1491,7 +1501,7 @@ void QDockWidget::closeEvent(QCloseEvent *event)
 /*! \reimp */
 void QDockWidget::paintEvent(QPaintEvent *event)
 {
-    Q_UNUSED(event)
+    Q_UNUSED(event);
     Q_D(QDockWidget);
 
     QDockWidgetLayout *layout
@@ -1505,7 +1515,7 @@ void QDockWidget::paintEvent(QPaintEvent *event)
         // when not floating.
         if (isFloating()) {
             QStyleOptionFrame framOpt;
-            framOpt.init(this);
+            framOpt.initFrom(this);
             p.drawPrimitive(QStyle::PE_FrameDockWidget, framOpt);
         }
 
@@ -1613,8 +1623,8 @@ bool QDockWidget::event(QEvent *event)
 
         // Usually the window won't get resized while it's being moved, but it can happen,
         // for example on Windows when moving to a screen with bigger scale factor
-        // (and Qt::AA_EnableHighDpiScaling is enabled). If that happens we should
-        // update state->pressPos, otherwise it will be outside the window when the window shrinks.
+        // If that happens we should update state->pressPos, otherwise it will be outside
+        // the window when the window shrinks.
         if (d->state && d->state->dragging)
             d->recalculatePressPos(static_cast<QResizeEvent*>(event));
         break;

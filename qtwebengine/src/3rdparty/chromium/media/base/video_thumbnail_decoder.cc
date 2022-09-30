@@ -5,7 +5,7 @@
 #include "media/base/video_thumbnail_decoder.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/video_frame.h"
 
@@ -36,7 +36,7 @@ void VideoThumbnailDecoder::Start(VideoFrameCallback video_frame_callback) {
       base::DoNothing());
 }
 
-void VideoThumbnailDecoder::OnVideoDecoderInitialized(Status status) {
+void VideoThumbnailDecoder::OnVideoDecoderInitialized(DecoderStatus status) {
   if (!status.is_ok()) {
     NotifyComplete(nullptr);
     return;
@@ -50,7 +50,7 @@ void VideoThumbnailDecoder::OnVideoDecoderInitialized(Status status) {
                                   weak_factory_.GetWeakPtr()));
 }
 
-void VideoThumbnailDecoder::OnVideoBufferDecoded(Status status) {
+void VideoThumbnailDecoder::OnVideoBufferDecoded(DecoderStatus status) {
   if (!status.is_ok()) {
     NotifyComplete(nullptr);
     return;
@@ -62,7 +62,7 @@ void VideoThumbnailDecoder::OnVideoBufferDecoded(Status status) {
                                   weak_factory_.GetWeakPtr()));
 }
 
-void VideoThumbnailDecoder::OnEosBufferDecoded(Status status) {
+void VideoThumbnailDecoder::OnEosBufferDecoded(DecoderStatus status) {
   if (!status.is_ok())
     NotifyComplete(nullptr);
 }

@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/webgl/webgl_multi_draw_instanced_base_vertex_base_instance.h"
 
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
 
 namespace blink {
 
@@ -84,6 +85,8 @@ void WebGLMultiDrawInstancedBaseVertexBaseInstance::
     return;
   }
 
+  scoped.Context()->RecordUKMCanvasDrawnToAtFirstDrawCall();
+
   scoped.Context()->ContextGL()->MultiDrawArraysInstancedBaseInstanceWEBGL(
       mode, &firsts[firsts_offset], &counts[counts_offset],
       &instance_counts[instance_counts_offset],
@@ -132,6 +135,8 @@ void WebGLMultiDrawInstancedBaseVertexBaseInstance::
                      baseinstances_offset, drawcount)) {
     return;
   }
+
+  scoped.Context()->RecordUKMCanvasDrawnToAtFirstDrawCall();
 
   scoped.Context()
       ->ContextGL()

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/base64.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
@@ -16,26 +17,24 @@
 #include "base/strings/string_util.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "content/public/common/content_switches.h"
 #include "net/base/escape.h"
 #include "third_party/modp_b64/modp_b64.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/template_expressions.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/resources/grit/webui_resources.h"
+#include "ui/resources/grit/webui_generated_resources.h"
 #include "ui/strings/grit/app_locale_settings.h"
 #include "url/gurl.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
-#endif
-
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#include "ui/base/ui_base_features.h"
 #endif
 
 namespace webui {
@@ -59,7 +58,7 @@ std::string GetBitmapDataUrl(const SkBitmap& bitmap) {
 
 std::string GetPngDataUrl(const unsigned char* data, size_t size) {
   constexpr char kPrefix[] = "data:image/png;base64,";
-  constexpr size_t kPrefixLen = base::size(kPrefix) - 1;
+  constexpr size_t kPrefixLen = std::size(kPrefix) - 1;
   // Includes room for trailing null byte.
   size_t max_encode_len = modp_b64_encode_len(size);
   std::string output;
@@ -76,17 +75,13 @@ std::string GetPngDataUrl(const unsigned char* data, size_t size) {
 
 WindowOpenDisposition GetDispositionFromClick(const base::ListValue* args,
                                               int start_index) {
-  double button = 0.0;
-  bool alt_key = false;
-  bool ctrl_key = false;
-  bool meta_key = false;
-  bool shift_key = false;
+  base::Value::ConstListView list = args->GetListDeprecated();
+  double button = list[start_index].GetDouble();
+  bool alt_key = list[start_index + 1].GetBool();
+  bool ctrl_key = list[start_index + 2].GetBool();
+  bool meta_key = list[start_index + 3].GetBool();
+  bool shift_key = list[start_index + 4].GetBool();
 
-  CHECK(args->GetDouble(start_index++, &button));
-  CHECK(args->GetBoolean(start_index++, &alt_key));
-  CHECK(args->GetBoolean(start_index++, &ctrl_key));
-  CHECK(args->GetBoolean(start_index++, &meta_key));
-  CHECK(args->GetBoolean(start_index++, &shift_key));
   return ui::DispositionFromClick(
       button == 1.0, alt_key, ctrl_key, meta_key, shift_key);
 }
@@ -187,16 +182,17 @@ void ParsePathAndScale(const GURL& url,
   ParsePathAndImageSpec(url, path, scale_factor, nullptr);
 }
 
-void ParsePathAndFrame(const GURL& url, std::string* path, int* frame_index) {
-  ParsePathAndImageSpec(url, path, nullptr, frame_index);
+void SetLoadTimeDataDefaults(const std::string& app_locale,
+                             base::Value* localized_strings) {
+  SetLoadTimeDataDefaults(app_locale, localized_strings->GetIfDict());
 }
 
 void SetLoadTimeDataDefaults(const std::string& app_locale,
-                             base::DictionaryValue* localized_strings) {
-  localized_strings->SetString("fontfamily", GetFontFamily());
-  localized_strings->SetString("fontsize", GetFontSize());
-  localized_strings->SetString("language", l10n_util::GetLanguage(app_locale));
-  localized_strings->SetString("textdirection", GetTextDirection());
+                             base::Value::Dict* localized_strings) {
+  localized_strings->Set("fontfamily", GetFontFamily());
+  localized_strings->Set("fontsize", GetFontSize());
+  localized_strings->Set("language", l10n_util::GetLanguage(app_locale));
+  localized_strings->Set("textdirection", GetTextDirection());
 }
 
 void SetLoadTimeDataDefaults(const std::string& app_locale,
@@ -211,14 +207,14 @@ std::string GetWebUiCssTextDefaults() {
   const ui::ResourceBundle& resource_bundle =
       ui::ResourceBundle::GetSharedInstance();
   return GetWebUiCssTextDefaults(
-      resource_bundle.LoadDataResourceString(IDR_WEBUI_CSS_TEXT_DEFAULTS));
+      resource_bundle.LoadDataResourceString(IDR_WEBUI_CSS_TEXT_DEFAULTS_CSS));
 }
 
 std::string GetWebUiCssTextDefaultsMd() {
   const ui::ResourceBundle& resource_bundle =
       ui::ResourceBundle::GetSharedInstance();
-  return GetWebUiCssTextDefaults(
-      resource_bundle.LoadDataResourceString(IDR_WEBUI_CSS_TEXT_DEFAULTS_MD));
+  return GetWebUiCssTextDefaults(resource_bundle.LoadDataResourceString(
+      IDR_WEBUI_CSS_TEXT_DEFAULTS_MD_CSS));
 }
 
 void AppendWebUiCssTextDefaults(std::string* html) {
@@ -230,14 +226,17 @@ void AppendWebUiCssTextDefaults(std::string* html) {
 std::string GetFontFamily() {
   std::string font_family = l10n_util::GetStringUTF8(IDS_WEB_FONT_FAMILY);
 
-// TODO(dnicoara) Remove Ozone check when PlatformFont support is introduced
-// into Ozone: crbug.com/320050
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  if (!features::IsUsingOzonePlatform()) {
-    font_family = ui::ResourceBundle::GetSharedInstance()
-                      .GetFont(ui::ResourceBundle::BaseFont)
-                      .GetFontName() +
-                  ", " + font_family;
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
+  if (!cmdline->HasSwitch(switches::kSingleProcess)) {
+    std::string font_name = ui::ResourceBundle::GetSharedInstance()
+                                .GetFont(ui::ResourceBundle::BaseFont)
+                                .GetFontName();
+    // Wrap |font_name| with quotes to ensure it will always be parsed correctly
+    // in CSS.
+    font_family = "\"" + font_name + "\", " + font_family;
   }
 #endif
 

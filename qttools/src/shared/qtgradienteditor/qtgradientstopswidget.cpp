@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qtgradientstopswidget.h"
 #include "qtgradientstopsmodel.h"
@@ -51,13 +15,16 @@
 
 QT_BEGIN_NAMESPACE
 
-class QtGradientStopsWidgetPrivate
+class QtGradientStopsWidgetPrivate : public QObject
 {
+    Q_OBJECT
     QtGradientStopsWidget *q_ptr;
     Q_DECLARE_PUBLIC(QtGradientStopsWidget)
 public:
     typedef QMap<qreal, QColor> PositionColorMap;
     typedef QMap<QtGradientStop *, qreal> StopPositionMap;
+
+    void setGradientStopsModel(QtGradientStopsModel *model);
 
     void slotStopAdded(QtGradientStop *stop);
     void slotStopRemoved(QtGradientStop *stop);
@@ -113,6 +80,60 @@ public:
 
     PositionColorMap m_moveOriginal;
 };
+
+void QtGradientStopsWidgetPrivate::setGradientStopsModel(QtGradientStopsModel *model)
+{
+    if (m_model == model)
+        return;
+
+    if (m_model) {
+        disconnect(m_model, &QtGradientStopsModel::stopAdded,
+                    this, &QtGradientStopsWidgetPrivate::slotStopAdded);
+        disconnect(m_model, &QtGradientStopsModel::stopRemoved,
+                    this, &QtGradientStopsWidgetPrivate::slotStopRemoved);
+        disconnect(m_model, &QtGradientStopsModel::stopMoved,
+                    this, &QtGradientStopsWidgetPrivate::slotStopMoved);
+        disconnect(m_model, &QtGradientStopsModel::stopsSwapped,
+                    this, &QtGradientStopsWidgetPrivate::slotStopsSwapped);
+        disconnect(m_model, &QtGradientStopsModel::stopChanged,
+                    this, &QtGradientStopsWidgetPrivate::slotStopChanged);
+        disconnect(m_model, &QtGradientStopsModel::stopSelected,
+                    this, &QtGradientStopsWidgetPrivate::slotStopSelected);
+        disconnect(m_model, &QtGradientStopsModel::currentStopChanged,
+                    this, &QtGradientStopsWidgetPrivate::slotCurrentStopChanged);
+
+        m_stops.clear();
+    }
+
+    m_model = model;
+
+    if (m_model) {
+        connect(m_model, &QtGradientStopsModel::stopAdded,
+                    this, &QtGradientStopsWidgetPrivate::slotStopAdded);
+        connect(m_model, &QtGradientStopsModel::stopRemoved,
+                    this, &QtGradientStopsWidgetPrivate::slotStopRemoved);
+        connect(m_model, &QtGradientStopsModel::stopMoved,
+                    this, &QtGradientStopsWidgetPrivate::slotStopMoved);
+        connect(m_model, &QtGradientStopsModel::stopsSwapped,
+                    this, &QtGradientStopsWidgetPrivate::slotStopsSwapped);
+        connect(m_model, &QtGradientStopsModel::stopChanged,
+                    this, &QtGradientStopsWidgetPrivate::slotStopChanged);
+        connect(m_model, &QtGradientStopsModel::stopSelected,
+                    this, &QtGradientStopsWidgetPrivate::slotStopSelected);
+        connect(m_model, &QtGradientStopsModel::currentStopChanged,
+                    this, &QtGradientStopsWidgetPrivate::slotCurrentStopChanged);
+
+        const QtGradientStopsModel::PositionStopMap stopsMap = m_model->stops();
+        for (auto it = stopsMap.cbegin(), end = stopsMap.cend(); it != end; ++it)
+            slotStopAdded(it.value());
+
+        const auto selected = m_model->selectedStops();
+        for (QtGradientStop *stop : selected)
+            slotStopSelected(stop, true);
+
+        slotCurrentStopChanged(m_model->currentStop());
+    }
+}
 
 double QtGradientStopsWidgetPrivate::fromViewport(int x) const
 {
@@ -406,56 +427,7 @@ bool QtGradientStopsWidget::isBackgroundCheckered() const
 
 void QtGradientStopsWidget::setGradientStopsModel(QtGradientStopsModel *model)
 {
-    if (d_ptr->m_model == model)
-        return;
-
-    if (d_ptr->m_model) {
-        disconnect(d_ptr->m_model, SIGNAL(stopAdded(QtGradientStop*)),
-                    this, SLOT(slotStopAdded(QtGradientStop*)));
-        disconnect(d_ptr->m_model, SIGNAL(stopRemoved(QtGradientStop*)),
-                    this, SLOT(slotStopRemoved(QtGradientStop*)));
-        disconnect(d_ptr->m_model, SIGNAL(stopMoved(QtGradientStop*,qreal)),
-                    this, SLOT(slotStopMoved(QtGradientStop*,qreal)));
-        disconnect(d_ptr->m_model, SIGNAL(stopsSwapped(QtGradientStop*,QtGradientStop*)),
-                    this, SLOT(slotStopsSwapped(QtGradientStop*,QtGradientStop*)));
-        disconnect(d_ptr->m_model, SIGNAL(stopChanged(QtGradientStop*,QColor)),
-                    this, SLOT(slotStopChanged(QtGradientStop*,QColor)));
-        disconnect(d_ptr->m_model, SIGNAL(stopSelected(QtGradientStop*,bool)),
-                    this, SLOT(slotStopSelected(QtGradientStop*,bool)));
-        disconnect(d_ptr->m_model, SIGNAL(currentStopChanged(QtGradientStop*)),
-                    this, SLOT(slotCurrentStopChanged(QtGradientStop*)));
-
-        d_ptr->m_stops.clear();
-    }
-
-    d_ptr->m_model = model;
-
-    if (d_ptr->m_model) {
-        connect(d_ptr->m_model, SIGNAL(stopAdded(QtGradientStop*)),
-                    this, SLOT(slotStopAdded(QtGradientStop*)));
-        connect(d_ptr->m_model, SIGNAL(stopRemoved(QtGradientStop*)),
-                    this, SLOT(slotStopRemoved(QtGradientStop*)));
-        connect(d_ptr->m_model, SIGNAL(stopMoved(QtGradientStop*,qreal)),
-                    this, SLOT(slotStopMoved(QtGradientStop*,qreal)));
-        connect(d_ptr->m_model, SIGNAL(stopsSwapped(QtGradientStop*,QtGradientStop*)),
-                    this, SLOT(slotStopsSwapped(QtGradientStop*,QtGradientStop*)));
-        connect(d_ptr->m_model, SIGNAL(stopChanged(QtGradientStop*,QColor)),
-                    this, SLOT(slotStopChanged(QtGradientStop*,QColor)));
-        connect(d_ptr->m_model, SIGNAL(stopSelected(QtGradientStop*,bool)),
-                    this, SLOT(slotStopSelected(QtGradientStop*,bool)));
-        connect(d_ptr->m_model, SIGNAL(currentStopChanged(QtGradientStop*)),
-                    this, SLOT(slotCurrentStopChanged(QtGradientStop*)));
-
-        const QtGradientStopsModel::PositionStopMap stopsMap = d_ptr->m_model->stops();
-        for (auto it = stopsMap.cbegin(), end = stopsMap.cend(); it != end; ++it)
-            d_ptr->slotStopAdded(it.value());
-
-        const auto selected = d_ptr->m_model->selectedStops();
-        for (QtGradientStop *stop : selected)
-            d_ptr->slotStopSelected(stop, true);
-
-        d_ptr->slotCurrentStopChanged(d_ptr->m_model->currentStop());
-    }
+    d_ptr->setGradientStopsModel(model);
 }
 
 void QtGradientStopsWidget::mousePressEvent(QMouseEvent *e)
@@ -471,8 +443,8 @@ void QtGradientStopsWidget::mousePressEvent(QMouseEvent *e)
 
     d_ptr->m_moveStops.clear();
     d_ptr->m_moveOriginal.clear();
-    d_ptr->m_clickPos = e->pos();
-    QtGradientStop *stop = d_ptr->stopAt(e->pos());
+    d_ptr->m_clickPos = e->position().toPoint();
+    QtGradientStop *stop = d_ptr->stopAt(e->position().toPoint());
     if (stop) {
         if (e->modifiers() & Qt::ControlModifier) {
             d_ptr->m_model->selectStop(stop, !d_ptr->m_model->isSelected(stop));
@@ -498,7 +470,7 @@ void QtGradientStopsWidget::mousePressEvent(QMouseEvent *e)
                 d_ptr->m_model->selectStop(stop, true);
             }
         }
-        d_ptr->setupMove(stop, e->pos().x());
+        d_ptr->setupMove(stop, e->position().toPoint().x());
     } else {
         d_ptr->m_model->clearSelection();
         d_ptr->m_rubber->setGeometry(QRect(d_ptr->m_clickPos, QSize()));
@@ -561,7 +533,7 @@ void QtGradientStopsWidget::mouseMoveEvent(QMouseEvent *e)
 
         PositionStopMap newPositions;
 
-        int viewportX = e->pos().x() - d_ptr->m_moveOffset;
+        int viewportX = e->position().toPoint().x() - d_ptr->m_moveOffset;
 
         if (viewportX > viewport()->size().width())
             viewportX = viewport()->size().width();
@@ -619,20 +591,20 @@ void QtGradientStopsWidget::mouseMoveEvent(QMouseEvent *e)
         }
 
     } else {
-        QRect r(QRect(d_ptr->m_clickPos, e->pos()).normalized());
+        QRect r(QRect(d_ptr->m_clickPos, e->position().toPoint()).normalized());
         r.translate(1, 0);
         d_ptr->m_rubber->setGeometry(r);
         //d_ptr->m_model->clearSelection();
 
         int xv1 = d_ptr->m_clickPos.x();
-        int xv2 = e->pos().x();
+        int xv2 = e->position().toPoint().x();
         if (xv1 > xv2) {
             int temp = xv1;
             xv1 = xv2;
             xv2 = temp;
         }
         int yv1 = d_ptr->m_clickPos.y();
-        int yv2 = e->pos().y();
+        int yv2 = e->position().toPoint().y();
         if (yv1 > yv2) {
             int temp = yv1;
             yv1 = yv2;
@@ -676,7 +648,7 @@ void QtGradientStopsWidget::mouseDoubleClickEvent(QMouseEvent *e)
     if (e->button() != Qt::LeftButton)
         return;
 
-    if (d_ptr->m_clickPos != e->pos()) {
+    if (d_ptr->m_clickPos != e->position().toPoint()) {
         mousePressEvent(e);
         return;
     }
@@ -684,7 +656,7 @@ void QtGradientStopsWidget::mouseDoubleClickEvent(QMouseEvent *e)
     d_ptr->m_moveStops.clear();
     d_ptr->m_moveOriginal.clear();
 
-    QtGradientStop *stop = d_ptr->newStop(e->pos());
+    QtGradientStop *stop = d_ptr->newStop(e->position().toPoint());
 
     if (!stop)
         return;
@@ -692,7 +664,7 @@ void QtGradientStopsWidget::mouseDoubleClickEvent(QMouseEvent *e)
     d_ptr->m_model->clearSelection();
     d_ptr->m_model->selectStop(stop, true);
 
-    d_ptr->setupMove(stop, e->pos().x());
+    d_ptr->setupMove(stop, e->position().toPoint().x());
 
     viewport()->update();
 }
@@ -710,7 +682,7 @@ void QtGradientStopsWidget::keyPressEvent(QKeyEvent *e)
         PositionStopMap stops = d_ptr->m_model->stops();
         if (stops.isEmpty())
             return;
-        QtGradientStop *newCurrent = 0;
+        QtGradientStop *newCurrent = nullptr;
         QtGradientStop *current = d_ptr->m_model->currentStop();
         if (!current || e->key() == Qt::Key_Home || e->key() == Qt::Key_End) {
             if (e->key() == Qt::Key_Left || e->key() == Qt::Key_Home)
@@ -940,13 +912,13 @@ void QtGradientStopsWidget::contextMenuEvent(QContextMenuEvent *e)
     } else if (zoom() >= 100) {
         zoomInAction->setEnabled(false);
     }
-    connect(newStopAction, SIGNAL(triggered()), this, SLOT(slotNewStop()));
-    connect(deleteAction, SIGNAL(triggered()), this, SLOT(slotDelete()));
-    connect(flipAllAction, SIGNAL(triggered()), this, SLOT(slotFlipAll()));
-    connect(selectAllAction, SIGNAL(triggered()), this, SLOT(slotSelectAll()));
-    connect(zoomInAction, SIGNAL(triggered()), this, SLOT(slotZoomIn()));
-    connect(zoomOutAction, SIGNAL(triggered()), this, SLOT(slotZoomOut()));
-    connect(zoomAllAction, SIGNAL(triggered()), this, SLOT(slotResetZoom()));
+    connect(newStopAction, &QAction::triggered, d_ptr.data(), &QtGradientStopsWidgetPrivate::slotNewStop);
+    connect(deleteAction, &QAction::triggered, d_ptr.data(), &QtGradientStopsWidgetPrivate::slotDelete);
+    connect(flipAllAction, &QAction::triggered, d_ptr.data(), &QtGradientStopsWidgetPrivate::slotFlipAll);
+    connect(selectAllAction, &QAction::triggered, d_ptr.data(), &QtGradientStopsWidgetPrivate::slotSelectAll);
+    connect(zoomInAction, &QAction::triggered, d_ptr.data(), &QtGradientStopsWidgetPrivate::slotZoomIn);
+    connect(zoomOutAction, &QAction::triggered, d_ptr.data(), &QtGradientStopsWidgetPrivate::slotZoomOut);
+    connect(zoomAllAction, &QAction::triggered, d_ptr.data(), &QtGradientStopsWidgetPrivate::slotResetZoom);
     menu.addAction(newStopAction);
     menu.addAction(deleteAction);
     menu.addAction(flipAllAction);
@@ -1006,13 +978,13 @@ void QtGradientStopsWidget::dragMoveEvent(QDragMoveEvent *event)
 {
     QRectF rect = viewport()->rect();
     rect.adjust(0, d_ptr->m_handleSize, 0, 0);
-    double x = d_ptr->fromViewport(event->pos().x());
-    QtGradientStop *dragStop = d_ptr->stopAt(event->pos());
+    double x = d_ptr->fromViewport(event->position().toPoint().x());
+    QtGradientStop *dragStop = d_ptr->stopAt(event->position().toPoint());
     if (dragStop) {
         event->accept();
         d_ptr->removeClonedStop();
         d_ptr->changeStop(dragStop->position());
-    } else if (rect.contains(event->pos())) {
+    } else if (rect.contains(event->position().toPoint())) {
         event->accept();
         if (d_ptr->m_model->at(x)) {
             d_ptr->removeClonedStop();
@@ -1132,4 +1104,4 @@ double QtGradientStopsWidget::zoom() const
 
 QT_END_NAMESPACE
 
-#include "moc_qtgradientstopswidget.cpp"
+#include "qtgradientstopswidget.moc"

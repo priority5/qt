@@ -162,7 +162,7 @@ void VpnThreadExtensionFunction::SignalCallCompletionSuccess() {
 
 void VpnThreadExtensionFunction::SignalCallCompletionSuccessWithId(
     const std::string& configuration_id) {
-  Respond(OneArgument(std::make_unique<base::Value>(configuration_id)));
+  Respond(OneArgument(base::Value(configuration_id)));
 }
 
 void VpnThreadExtensionFunction::SignalCallCompletionSuccessWithWarning(
@@ -190,7 +190,7 @@ VpnProviderCreateConfigFunction::~VpnProviderCreateConfigFunction() {
 
 ExtensionFunction::ResponseAction VpnProviderCreateConfigFunction::Run() {
   std::unique_ptr<api_vpn::CreateConfig::Params> params(
-      api_vpn::CreateConfig::Params::Create(*args_));
+      api_vpn::CreateConfig::Params::Create(args()));
   if (!params) {
     return RespondNow(Error("Invalid arguments."));
   }
@@ -205,12 +205,12 @@ ExtensionFunction::ResponseAction VpnProviderCreateConfigFunction::Run() {
   // be used, requiring a mapping between the two.
   service->CreateConfiguration(
       extension_id(), extension()->name(), params->name,
-      base::Bind(
+      base::BindOnce(
           &VpnProviderCreateConfigFunction::SignalCallCompletionSuccessWithId,
           this, params->name),
-      base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
-                     SignalCallCompletionFailure,
-                 this));
+      base::BindOnce(&VpnProviderNotifyConnectionStateChangedFunction::
+                         SignalCallCompletionFailure,
+                     this));
 
   return RespondLater();
 }
@@ -220,7 +220,7 @@ VpnProviderDestroyConfigFunction::~VpnProviderDestroyConfigFunction() {
 
 ExtensionFunction::ResponseAction VpnProviderDestroyConfigFunction::Run() {
   std::unique_ptr<api_vpn::DestroyConfig::Params> params(
-      api_vpn::DestroyConfig::Params::Create(*args_));
+      api_vpn::DestroyConfig::Params::Create(args()));
   if (!params) {
     return RespondNow(Error("Invalid arguments."));
   }
@@ -233,11 +233,11 @@ ExtensionFunction::ResponseAction VpnProviderDestroyConfigFunction::Run() {
 
   service->DestroyConfiguration(
       extension_id(), params->id,
-      base::Bind(&VpnProviderDestroyConfigFunction::SignalCallCompletionSuccess,
-                 this),
-      base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
-                     SignalCallCompletionFailure,
-                 this));
+      base::BindOnce(
+          &VpnProviderDestroyConfigFunction::SignalCallCompletionSuccess, this),
+      base::BindOnce(&VpnProviderNotifyConnectionStateChangedFunction::
+                         SignalCallCompletionFailure,
+                     this));
 
   return RespondLater();
 }
@@ -247,7 +247,7 @@ VpnProviderSetParametersFunction::~VpnProviderSetParametersFunction() {
 
 ExtensionFunction::ResponseAction VpnProviderSetParametersFunction::Run() {
   std::unique_ptr<api_vpn::SetParameters::Params> params(
-      api_vpn::SetParameters::Params::Create(*args_));
+      api_vpn::SetParameters::Params::Create(args()));
   if (!params) {
     return RespondNow(Error("Invalid arguments."));
   }
@@ -267,12 +267,12 @@ ExtensionFunction::ResponseAction VpnProviderSetParametersFunction::Run() {
 
   service->SetParameters(
       extension_id(), parameter_value,
-      base::Bind(&VpnProviderSetParametersFunction::
-                     SignalCallCompletionSuccessWithWarning,
-                 this),
-      base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
-                     SignalCallCompletionFailure,
-                 this));
+      base::BindOnce(&VpnProviderSetParametersFunction::
+                         SignalCallCompletionSuccessWithWarning,
+                     this),
+      base::BindOnce(&VpnProviderNotifyConnectionStateChangedFunction::
+                         SignalCallCompletionFailure,
+                     this));
 
   return RespondLater();
 }
@@ -282,7 +282,7 @@ VpnProviderSendPacketFunction::~VpnProviderSendPacketFunction() {
 
 ExtensionFunction::ResponseAction VpnProviderSendPacketFunction::Run() {
   std::unique_ptr<api_vpn::SendPacket::Params> params(
-      api_vpn::SendPacket::Params::Create(*args_));
+      api_vpn::SendPacket::Params::Create(args()));
   if (!params) {
     return RespondNow(Error("Invalid arguments."));
   }
@@ -312,7 +312,7 @@ VpnProviderNotifyConnectionStateChangedFunction::
 ExtensionFunction::ResponseAction
 VpnProviderNotifyConnectionStateChangedFunction::Run() {
   std::unique_ptr<api_vpn::NotifyConnectionStateChanged::Params> params(
-      api_vpn::NotifyConnectionStateChanged::Params::Create(*args_));
+      api_vpn::NotifyConnectionStateChanged::Params::Create(args()));
   if (!params) {
     return RespondNow(Error("Invalid arguments."));
   }
@@ -325,12 +325,12 @@ VpnProviderNotifyConnectionStateChangedFunction::Run() {
 
   service->NotifyConnectionStateChanged(
       extension_id(), params->state,
-      base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
-                     SignalCallCompletionSuccess,
-                 this),
-      base::Bind(&VpnProviderNotifyConnectionStateChangedFunction::
-                     SignalCallCompletionFailure,
-                 this));
+      base::BindOnce(&VpnProviderNotifyConnectionStateChangedFunction::
+                         SignalCallCompletionSuccess,
+                     this),
+      base::BindOnce(&VpnProviderNotifyConnectionStateChangedFunction::
+                         SignalCallCompletionFailure,
+                     this));
 
   return RespondLater();
 }

@@ -5,6 +5,7 @@
 #include "ui/compositor/recyclable_compositor_mac.h"
 
 #include "base/bind.h"
+#include "base/no_destructor.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/viz/common/features.h"
 #include "ui/accelerated_widget_mac/window_resize_helper_mac.h"
@@ -130,6 +131,8 @@ void RecyclableCompositorMacFactory::RecycleCompositor(
   if (recycling_disabled_)
     return;
 
+  // Invalidate the surface before suspending it.
+  compositor->InvalidateSurface();
   compositor->accelerated_widget_mac_->SetSuspended(true);
 
   // Make this RecyclableCompositorMac recyclable for future instances.
@@ -154,7 +157,10 @@ void RecyclableCompositorMacFactory::RecycleCompositor(
 }
 
 RecyclableCompositorMacFactory::RecyclableCompositorMacFactory()
-    : weak_factory_(this) {}
+    : weak_factory_(this) {
+  if (features::IsUsingSkiaRenderer())
+    recycling_disabled_ = true;
+}
 
 RecyclableCompositorMacFactory::~RecyclableCompositorMacFactory() = default;
 

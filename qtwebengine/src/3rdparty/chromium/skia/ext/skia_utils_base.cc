@@ -7,10 +7,12 @@
 #include <stdint.h>
 
 #include "base/pickle.h"
+#include "base/strings/stringprintf.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkEncodedImageFormat.h"
 #include "third_party/skia/include/core/SkImage.h"
+#include "third_party/skia/include/core/SkImageInfo.h"
 #include "third_party/skia/include/core/SkSerialProcs.h"
 
 namespace skia {
@@ -91,7 +93,8 @@ bool SkBitmapToN32OpaqueOrPremul(const SkBitmap& in, SkBitmap* out) {
     return true;
   }
   const SkImageInfo& info = in.info();
-  if (info.colorType() == kN32_SkColorType &&
+  const bool stride_matches_width = in.rowBytes() == info.minRowBytes();
+  if (stride_matches_width && info.colorType() == kN32_SkColorType &&
       (info.alphaType() == kPremul_SkAlphaType ||
        info.alphaType() == kOpaque_SkAlphaType)) {
     // Shallow copy if the data is already in the right format.
@@ -113,4 +116,8 @@ bool SkBitmapToN32OpaqueOrPremul(const SkBitmap& in, SkBitmap* out) {
   return true;
 }
 
+std::string SkColorToHexString(SkColor color) {
+  return base::StringPrintf("#%02X%02X%02X", SkColorGetR(color),
+                            SkColorGetG(color), SkColorGetB(color));
+}
 }  // namespace skia

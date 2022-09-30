@@ -9,13 +9,17 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/threading/thread_checker.h"
+#include "base/token.h"
+#include "build/build_config.h"
 #include "media/base/video_frame.h"
+#include "media/capture/mojom/video_capture_types.mojom-shared.h"
 #include "media/capture/video_capture_types.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/media/video_capture.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 #include "third_party/blink/public/platform/modules/mediastream/media_stream_types.h"
@@ -25,6 +29,7 @@
 #include "third_party/blink/public/platform/modules/mediastream/web_platform_media_stream_source.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/web/modules/mediastream/encoded_video_frame.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -60,7 +65,10 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   // RestartCallback is used for both the StopForRestart and Restart operations.
   using RestartCallback = base::OnceCallback<void(RestartResult)>;
 
-  MediaStreamVideoSource();
+  explicit MediaStreamVideoSource(
+      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner);
+  MediaStreamVideoSource(const MediaStreamVideoSource&) = delete;
+  MediaStreamVideoSource& operator=(const MediaStreamVideoSource&) = delete;
   ~MediaStreamVideoSource() override;
 
   // Returns the MediaStreamVideoSource object owned by |source|.
@@ -102,7 +110,8 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   // verified by checking that the IsRunning() method returns true.
   // Any attempt to invoke StopForRestart() before the source has started
   // results in no action and |callback| invoked with INVALID_STATE.
-  void StopForRestart(RestartCallback callback);
+  // If |send_black_frame| is set, an additional black frame will be sent.
+  void StopForRestart(RestartCallback callback, bool send_black_frame = false);
 
   // Tries to restart a source that was previously temporarily stopped using the
   // supplied |new_format|. This method can be invoked only after a successful
@@ -131,6 +140,9 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
 
   void UpdateCapturingLinkSecure(MediaStreamVideoTrack* track, bool is_secure);
 
+  // Indicate that the capturer can discard its alpha channel (if it has one).
+  virtual void SetCanDiscardAlpha(bool can_discard_alpha) {}
+
   // Request underlying source to capture a new frame.
   virtual void RequestRefreshFrame() {}
 
@@ -150,17 +162,38 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   // Implementations must return the capture format if available.
   // Implementations supporting devices of type MEDIA_DEVICE_VIDEO_CAPTURE
   // must return a value.
-  virtual base::Optional<media::VideoCaptureFormat> GetCurrentFormat() const;
+  virtual absl::optional<media::VideoCaptureFormat> GetCurrentFormat() const;
 
   // Implementations must return the capture parameters if available.
   // Implementations supporting devices of type MEDIA_DEVICE_VIDEO_CAPTURE
   // must return a value. The format in the returned VideoCaptureParams must
   // coincide with the value returned by GetCurrentFormat().
-  virtual base::Optional<media::VideoCaptureParams> GetCurrentCaptureParams()
+  virtual absl::optional<media::VideoCaptureParams> GetCurrentCaptureParams()
       const;
 
   // Returns true if encoded output can be enabled in the source.
   virtual bool SupportsEncodedOutput() const;
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Start/stop cropping a video track.
+  //
+  // Non-empty |crop_id| sets (or changes) the crop-target.
+  // Empty |crop_id| reverts the capture to its original, uncropped state.
+  //
+  // |crop_version| is plumbed down to Viz, which associates that value with
+  // all subsequent frames.
+  // For a given device, new calls to Crop() must be with a |crop_version| that
+  // is greater than the value from the previous call, but not necessarily by
+  // exactly one. (If a call to cropTo is rejected earlier in the pipeline,
+  // the crop-version can increase in Blink, and later calls to cropTo()
+  // can appear over this mojom pipe with a higher version.)
+  //
+  // The callback reports success/failure.
+  virtual void Crop(
+      const base::Token& crop_id,
+      uint32_t crop_version,
+      base::OnceCallback<void(media::mojom::CropRequestResult)> callback);
+#endif
 
   // Notifies the source about that the number of encoded sinks have been
   // updated. Note: Can only be called if the number of encoded sinks have
@@ -169,14 +202,19 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
 
   bool IsRunning() const { return state_ == STARTED; }
 
+  bool IsStoppedForRestart() const { return state_ == STOPPED_FOR_RESTART; }
+
+  // Provides a callback for consumers to trigger when they have some
+  // feedback to report.
+  // The returned callback can be called on any thread.
+  virtual VideoCaptureFeedbackCB GetFeedbackCallback() const;
+
   size_t NumTracks() const {
-    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+    DCHECK(GetTaskRunner()->BelongsToCurrentThread());
     return tracks_.size();
   }
 
-  base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() {
-    return weak_factory_.GetWeakPtr();
-  }
+  virtual base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() const = 0;
 
  protected:
   // MediaStreamSource implementation.
@@ -289,18 +327,15 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   // in the context of the callback. If gUM fails, the implementation will
   // simply drop the references to the blink source and track which will lead
   // to this object being deleted.
-  void FinalizeAddPendingTracks();
+  void FinalizeAddPendingTracks(mojom::MediaStreamRequestResult result);
 
-  // Actually adds |track| to this source, provided the source has started.
-  void FinalizeAddTrack(MediaStreamVideoTrack* track,
-                        const VideoCaptureDeliverFrameCB& frame_callback,
-                        const VideoTrackAdapterSettings& adapter_settings);
   void StartFrameMonitoring();
   void UpdateTrackSettings(MediaStreamVideoTrack* track,
                            const VideoTrackAdapterSettings& adapter_settings);
   void DidStopSource(RestartResult result);
   void NotifyCapturingLinkSecured(size_t num_encoded_sinks);
   size_t CountEncodedSinks() const;
+  scoped_refptr<VideoTrackAdapter> GetTrackAdapter();
 
   State state_;
 
@@ -327,7 +362,7 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
     std::unique_ptr<VideoTrackAdapterSettings> adapter_settings;
     ConstraintsOnceCallback callback;
   };
-  std::vector<PendingTrackInfo> pending_tracks_;
+  Vector<PendingTrackInfo> pending_tracks_;
 
   // |restart_callback_| is used for notifying both StopForRestart and Restart,
   // since it is impossible to have a situation where there can be callbacks
@@ -338,11 +373,11 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   scoped_refptr<VideoTrackAdapter> track_adapter_;
 
   // Tracks that currently are connected to this source.
-  std::vector<MediaStreamVideoTrack*> tracks_;
+  Vector<MediaStreamVideoTrack*> tracks_;
 
   // Tracks that have no paths to a consuming endpoint, and so do not need
   // frames delivered from the source. This is a subset of |tracks_|.
-  std::vector<MediaStreamVideoTrack*> suspended_tracks_;
+  Vector<MediaStreamVideoTrack*> suspended_tracks_;
 
   // This is used for tracking if all connected video sinks are secure.
   SecureDisplayLinkTracker<MediaStreamVideoTrack> secure_tracker_;
@@ -355,11 +390,6 @@ class BLINK_MODULES_EXPORT MediaStreamVideoSource
   // died before this callback is resolved, we still need to trigger the
   // callback to notify the caller that the request is canceled.
   base::OnceClosure remove_last_track_callback_;
-
-  // NOTE: Weak pointers must be invalidated before all other member variables.
-  base::WeakPtrFactory<MediaStreamVideoSource> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaStreamVideoSource);
 };
 
 }  // namespace blink

@@ -8,7 +8,8 @@
 
 namespace blink {
 
-ValueRange LengthPropertyFunctions::GetValueRange(const CSSProperty& property) {
+Length::ValueRange LengthPropertyFunctions::GetValueRange(
+    const CSSProperty& property) {
   switch (property.PropertyID()) {
     case CSSPropertyID::kBorderBottomWidth:
     case CSSPropertyID::kBorderLeftWidth:
@@ -39,9 +40,9 @@ ValueRange LengthPropertyFunctions::GetValueRange(const CSSProperty& property) {
     case CSSPropertyID::kColumnWidth:
     case CSSPropertyID::kWidth:
     case CSSPropertyID::kTabSize:
-      return kValueRangeNonNegative;
+      return Length::ValueRange::kNonNegative;
     default:
-      return kValueRangeAll;
+      return Length::ValueRange::kAll;
   }
 }
 
@@ -90,8 +91,10 @@ bool LengthPropertyFunctions::GetPixelsForKeyword(const CSSProperty& property,
   }
 }
 
-bool LengthPropertyFunctions::GetInitialLength(const CSSProperty& property,
-                                               Length& result) {
+bool LengthPropertyFunctions::GetInitialLength(
+    const CSSProperty& property,
+    const ComputedStyle& initial_style,
+    Length& result) {
   switch (property.PropertyID()) {
     // The computed value of "initial" for the following properties is 0px if
     // the associated *-style property resolves to "none" or "hidden".
@@ -118,7 +121,7 @@ bool LengthPropertyFunctions::GetInitialLength(const CSSProperty& property,
       return true;
 
     default:
-      return GetLength(property, ComputedStyle::InitialStyle(), result);
+      return GetLength(property, initial_style, result);
   }
 }
 
@@ -130,10 +133,10 @@ bool LengthPropertyFunctions::GetLength(const CSSProperty& property,
       result = style.Bottom();
       return true;
     case CSSPropertyID::kCx:
-      result = style.SvgStyle().Cx();
+      result = style.Cx();
       return true;
     case CSSPropertyID::kCy:
-      result = style.SvgStyle().Cy();
+      result = style.Cy();
       return true;
     case CSSPropertyID::kFlexBasis:
       result = style.FlexBasis();
@@ -184,16 +187,16 @@ bool LengthPropertyFunctions::GetLength(const CSSProperty& property,
       result = style.PaddingTop();
       return true;
     case CSSPropertyID::kR:
-      result = style.SvgStyle().R();
+      result = style.R();
       return true;
     case CSSPropertyID::kRight:
       result = style.Right();
       return true;
     case CSSPropertyID::kRx:
-      result = style.SvgStyle().Rx();
+      result = style.Rx();
       return true;
     case CSSPropertyID::kRy:
-      result = style.SvgStyle().Ry();
+      result = style.Ry();
       return true;
     case CSSPropertyID::kShapeMargin:
       result = style.ShapeMargin();
@@ -223,10 +226,10 @@ bool LengthPropertyFunctions::GetLength(const CSSProperty& property,
       result = style.Width();
       return true;
     case CSSPropertyID::kX:
-      result = style.SvgStyle().X();
+      result = style.X();
       return true;
     case CSSPropertyID::kY:
-      result = style.SvgStyle().Y();
+      result = style.Y();
       return true;
 
     case CSSPropertyID::kBorderBottomWidth:
@@ -277,9 +280,9 @@ bool LengthPropertyFunctions::GetLength(const CSSProperty& property,
       return true;
 
     case CSSPropertyID::kBaselineShift:
-      if (style.BaselineShift() != BS_LENGTH)
+      if (style.BaselineShiftType() != EBaselineShiftType::kLength)
         return false;
-      result = style.BaselineShiftValue();
+      result = style.BaselineShift();
       return true;
     case CSSPropertyID::kLineHeight:
       // Percent Lengths are used to represent numbers on line-height.
@@ -322,7 +325,8 @@ bool LengthPropertyFunctions::SetLength(const CSSProperty& property,
   switch (property.PropertyID()) {
     // Setters that take a Length value.
     case CSSPropertyID::kBaselineShift:
-      style.SetBaselineShiftValue(value);
+      style.SetBaselineShiftType(EBaselineShiftType::kLength);
+      style.SetBaselineShift(value);
       return true;
     case CSSPropertyID::kBottom:
       style.SetBottom(value);
@@ -452,8 +456,6 @@ bool LengthPropertyFunctions::SetLength(const CSSProperty& property,
     case CSSPropertyID::kWebkitTransformOriginZ:
     case CSSPropertyID::kWordSpacing:
     case CSSPropertyID::kTabSize:
-      return false;
-
       return false;
 
     default:

@@ -9,8 +9,8 @@
 #include "cc/paint/element_id.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/point_f.h"
-#include "ui/gfx/geometry/scroll_offset.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace base {
 namespace trace_event {
@@ -23,6 +23,7 @@ namespace cc {
 struct CC_EXPORT TransformNode {
   TransformNode();
   TransformNode(const TransformNode&);
+  TransformNode& operator=(const TransformNode&);
 
   // The node index of this node in the transform tree node vector.
   int id;
@@ -89,6 +90,8 @@ struct CC_EXPORT TransformNode {
 
   bool scrolls : 1;
 
+  bool is_fixed_to_viewport : 1;
+
   bool should_be_snapped : 1;
 
   // Used by the compositor to determine which layers need to be repositioned by
@@ -115,17 +118,17 @@ struct CC_EXPORT TransformNode {
   // Set to true, if the node or it's parent |will_change_transform| is true.
   bool node_or_ancestors_will_change_transform : 1;
 
-  gfx::ScrollOffset scroll_offset;
+  gfx::PointF scroll_offset;
 
   // This value stores the snapped amount whenever we snap. If the snap is due
   // to a scroll, we need it to calculate fixed-pos elements adjustment, even
   // otherwise we may need it to undo the snapping next frame.
   gfx::Vector2dF snap_amount;
 
-  // See MutatorHost::GetAnimationScales() for their meanings. Updated by
-  // PropertyTrees::AnimationScalesChanged().
+  // From MutatorHost::GetMaximuimAnimationScale(). Updated by
+  // PropertyTrees::MaximumAnimationScaleChanged() and
+  // LayerTreeImpl::UpdateTransformAnimation().
   float maximum_animation_scale;
-  float starting_animation_scale;
 
   // Set to the element ID of containing document if this transform node is the
   // root of a visible frame subtree.

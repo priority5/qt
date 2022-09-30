@@ -2,6 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
+
+assert(is_chromeos_ash)
+
 source_set("browser_tests") {
   testonly = true
 
@@ -17,16 +21,24 @@ source_set("browser_tests") {
     ":test_support",
     "//ash:test_support",
     "//ash/public/cpp",
+    "//ash/public/cpp/holding_space:test_support",
     "//base/test:test_support",
     "//chrome/browser",
+    "//chrome/browser/ash/crosapi",
     "//chrome/browser/chromeos",
+    "//chrome/browser/chromeos:test_support",
     "//chrome/browser/extensions",
+    "//chrome/browser/profiles:profile",
     "//chrome/browser/ui",
     "//chrome/test:test_support_ui",
+    "//chromeos/dbus/power:power",
     "//content/test:test_support",
     "//ui/aura",
     "//ui/base",
+    "//ui/base/dragdrop:types",
+    "//ui/base/dragdrop/mojom",
     "//ui/events:test_support",
+    "//ui/gfx:test_support",
     "//ui/views",
     "//ui/wm/public",
   ]
@@ -38,6 +50,8 @@ source_set("test_support") {
   sources = [
     "//chrome/browser/ui/ash/holding_space/holding_space_browsertest_base.cc",
     "//chrome/browser/ui/ash/holding_space/holding_space_browsertest_base.h",
+    "//chrome/browser/ui/ash/holding_space/scoped_test_mount_point.cc",
+    "//chrome/browser/ui/ash/holding_space/scoped_test_mount_point.h",
   ]
 
   deps = [
@@ -48,6 +62,7 @@ source_set("test_support") {
     "//chrome/browser/chromeos",
     "//chrome/browser/extensions",
     "//chrome/browser/ui",
+    "//chrome/browser/web_applications:browser_tests_base",
     "//chrome/test:test_support_ui",
     "//chromeos/dbus/session_manager",
     "//components/session_manager/core",

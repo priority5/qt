@@ -1,56 +1,31 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
-#include <QtWidgets/QOpenGLWidget>
+#include <QtOpenGLWidgets/QOpenGLWidget>
 #include <QtGui/QOpenGLFunctions>
 #include <QtGui/QPainter>
 #include <QtGui/QScreen>
 #include <QtGui/QStaticText>
-#include <QtWidgets/QDesktopWidget>
 #include <QtWidgets/QGraphicsView>
 #include <QtWidgets/QGraphicsScene>
 #include <QtWidgets/QGraphicsRectItem>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QStackedWidget>
-#include <QtTest/QtTest>
+#include <QtWidgets/QTabWidget>
+#include <QtWidgets/QLabel>
+#include <QTest>
 #include <QSignalSpy>
 #include <private/qguiapplication_p.h>
 #include <private/qstatictext_p.h>
 #include <private/qopengltextureglyphcache_p.h>
 #include <qpa/qplatformintegration.h>
+#include <private/qguiapplication_p.h>
+#include <qpa/qplatformintegration.h>
 
 class tst_QOpenGLWidget : public QObject
 {
     Q_OBJECT
-
-public:
-    static void initMain() { QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling); }
 
 private slots:
     void initTestCase();
@@ -62,6 +37,7 @@ private slots:
     void reparentToAlreadyCreated();
     void reparentToNotYetCreated();
     void reparentHidden();
+    void reparentTopLevel();
     void asViewport();
     void requestUpdate();
     void fboRedirect();
@@ -70,6 +46,7 @@ private slots:
     void stackWidgetOpaqueChildIsVisible();
     void offscreen();
     void offscreenThenOnscreen();
+    void paintWhileHidden();
 
 #ifdef QT_BUILD_INTERNAL
     void staticTextDanglingPointer();
@@ -156,6 +133,9 @@ void tst_QOpenGLWidget::clearAndGrab()
 
 void tst_QOpenGLWidget::clearAndResizeAndGrab()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
     QScopedPointer<QOpenGLWidget> w(new ClearWidget(0, 640, 480));
     w->resize(640, 480);
     w->show();
@@ -210,7 +190,7 @@ void tst_QOpenGLWidget::createNonTopLevel()
 class PainterWidget : public QOpenGLWidget, protected QOpenGLFunctions
 {
 public:
-    PainterWidget(QWidget *parent)
+    PainterWidget(QWidget *parent = nullptr)
         : QOpenGLWidget(parent), m_clear(false) { }
 
     void initializeGL() override {
@@ -276,6 +256,9 @@ void tst_QOpenGLWidget::reparentToAlreadyCreated()
 
 void tst_QOpenGLWidget::reparentToNotYetCreated()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
     QWidget w1;
     PainterWidget *glw = new PainterWidget(&w1);
     w1.resize(640, 480);
@@ -324,6 +307,70 @@ void tst_QOpenGLWidget::reparentHidden()
     QVERIFY(originalContext != newContext);
 }
 
+void tst_QOpenGLWidget::reparentTopLevel()
+{
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
+    // no GL content yet, just an ordinary tab widget, top-level
+    QTabWidget tabWidget;
+    tabWidget.resize(640, 480);
+    tabWidget.addTab(new QLabel("Dummy page"), "Page 1");
+    tabWidget.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&tabWidget));
+
+    PainterWidget *glw1 = new PainterWidget;
+    // add child GL widget as a tab page
+    {
+        QSignalSpy frameSwappedSpy(glw1, &QOpenGLWidget::frameSwapped);
+        tabWidget.setCurrentIndex(tabWidget.addTab(glw1, "OpenGL widget 1"));
+        QTRY_VERIFY(frameSwappedSpy.count() > 0);
+    }
+
+    PainterWidget *glw2 = new PainterWidget;
+    // add child GL widget #2 as a tab page
+    {
+        QSignalSpy frameSwappedSpy(glw2, &QOpenGLWidget::frameSwapped);
+        tabWidget.setCurrentIndex(tabWidget.addTab(glw2, "OpenGL widget 2"));
+        QTRY_VERIFY(frameSwappedSpy.count() > 0);
+    }
+
+    QImage image = glw2->grabFramebuffer();
+    QVERIFY(image.pixel(20, 10) == qRgb(0, 0, 255));
+
+    // now delete GL widget #2
+    {
+        QSignalSpy frameSwappedSpy(glw1, &QOpenGLWidget::frameSwapped);
+        delete glw2;
+        QTRY_VERIFY(frameSwappedSpy.count() > 0);
+    }
+
+    image = glw1->grabFramebuffer();
+    QVERIFY(image.pixel(20, 10) == qRgb(0, 0, 255));
+
+    // make the GL widget top-level
+    {
+        QSignalSpy frameSwappedSpy(glw1, &QOpenGLWidget::frameSwapped);
+        glw1->setParent(nullptr);
+        glw1->show();
+        QVERIFY(QTest::qWaitForWindowExposed(glw1));
+        QTRY_VERIFY(frameSwappedSpy.count() > 0);
+    }
+
+    image = glw1->grabFramebuffer();
+    QVERIFY(image.pixel(20, 10) == qRgb(0, 0, 255));
+
+    // back to a child widget by readding to the tab widget
+    {
+        QSignalSpy frameSwappedSpy(glw1, &QOpenGLWidget::frameSwapped);
+        tabWidget.setCurrentIndex(tabWidget.addTab(glw1, "Re-added OpenGL widget 1"));
+        QTRY_VERIFY(frameSwappedSpy.count() > 0);
+    }
+
+    image = glw1->grabFramebuffer();
+    QVERIFY(image.pixel(20, 10) == qRgb(0, 0, 255));
+}
+
 class CountingGraphicsView : public QGraphicsView
 {
 public:
@@ -350,6 +397,9 @@ void CountingGraphicsView::drawForeground(QPainter *, const QRectF &)
 
 void tst_QOpenGLWidget::asViewport()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
     // Have a QGraphicsView with a QOpenGLWidget as its viewport.
     QGraphicsScene scene;
     scene.addItem(new QGraphicsRectItem(10, 10, 100, 100));
@@ -364,6 +414,16 @@ void tst_QOpenGLWidget::asViewport()
     widget.setLayout(layout);
     widget.show();
     QVERIFY(QTest::qWaitForWindowExposed(&widget));
+
+    if (QGuiApplicationPrivate::platformIntegration()->hasCapability(QPlatformIntegration::WindowActivation)) {
+        // On some platforms (macOS), the palette will be different depending on if a
+        // window is active or not. And because of that, the whole window will be
+        // repainted when going from Inactive to Active. So wait for the window to be
+        // active before we continue, so the activation doesn't happen at a random
+        // time below. And call processEvents to have the paint events delivered right away.
+        QVERIFY(QTest::qWaitForWindowActive(&widget));
+        qApp->processEvents();
+    }
 
     QVERIFY(view->paintCount() > 0);
     view->resetPaintCount();
@@ -388,6 +448,9 @@ public:
 
 void tst_QOpenGLWidget::requestUpdate()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
     if (QGuiApplication::platformName().startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
         QSKIP("Wayland: This fails. Figure out why.");
 
@@ -415,6 +478,9 @@ public:
 
 void tst_QOpenGLWidget::fboRedirect()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
     FboCheckWidget w;
     w.resize(640, 480);
     w.show();
@@ -430,6 +496,9 @@ void tst_QOpenGLWidget::fboRedirect()
 
 void tst_QOpenGLWidget::showHide()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
     QScopedPointer<ClearWidget> w(new ClearWidget(0, 800, 600));
     w->resize(800, 600);
     w->show();
@@ -456,6 +525,9 @@ void tst_QOpenGLWidget::showHide()
 
 void tst_QOpenGLWidget::nativeWindow()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
     QScopedPointer<ClearWidget> w(new ClearWidget(0, 800, 600));
     w->resize(800, 600);
     w->show();
@@ -498,23 +570,19 @@ static inline QString msgRgbMismatch(unsigned actual, unsigned expected)
 
 static QPixmap grabWidgetWithoutRepaint(const QWidget *widget, QRect clipArea)
 {
-    const QWidget *targetWidget = widget;
+    const QWindow *window = widget->window()->windowHandle();
+    Q_ASSERT(window);
+    WId windowId = window->winId();
+
 #ifdef Q_OS_WIN
     // OpenGL content is not properly grabbed on Windows when passing a top level widget window,
     // because GDI functions can't grab OpenGL layer content.
     // Instead the whole screen should be captured, with an adjusted clip area, which contains
     // the final composited content.
-    QDesktopWidget *desktopWidget = QApplication::desktop();
-    const QWidget *mainScreenWidget = desktopWidget->screen();
-    targetWidget = mainScreenWidget;
+    windowId = 0;
     clipArea = QRect(widget->mapToGlobal(clipArea.topLeft()),
                      widget->mapToGlobal(clipArea.bottomRight()));
 #endif
-
-    const QWindow *window = targetWidget->window()->windowHandle();
-    Q_ASSERT(window);
-    WId windowId = window->winId();
-
     QScreen *screen = window->screen();
     Q_ASSERT(screen);
 
@@ -583,9 +651,13 @@ void tst_QOpenGLWidget::stackWidgetOpaqueChildIsVisible()
     QSKIP("QScreen::grabWindow() doesn't work properly on OSX HighDPI screen: QTBUG-46803");
     return;
 #endif
-    if (QGuiApplication::platformName().startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
-        QSKIP("Wayland: This fails. Figure out why.");
-
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
+    if (!QGuiApplicationPrivate::platformIntegration()->hasCapability(QPlatformIntegration::WindowActivation))
+        QSKIP("Platform does not support window activation");
+    if (QGuiApplication::platformName().startsWith(QLatin1String("offscreen"), Qt::CaseInsensitive))
+        QSKIP("Offscreen: This fails.");
 
     QStackedWidget stack;
 
@@ -668,6 +740,9 @@ void tst_QOpenGLWidget::offscreen()
 
 void tst_QOpenGLWidget::offscreenThenOnscreen()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
     QScopedPointer<ClearWidget> w(new ClearWidget(0, 800, 600));
     w->resize(800, 600);
 
@@ -691,6 +766,33 @@ void tst_QOpenGLWidget::offscreenThenOnscreen()
     QVERIFY(image.pixel(30, 40) == qRgb(0, 0, 255));
 }
 
+void tst_QOpenGLWidget::paintWhileHidden()
+{
+#ifdef Q_OS_ANDROID
+    QSKIP("Crashes on Android, figure out why (QTBUG-102043)");
+#endif
+    QScopedPointer<QWidget> tlw(new QWidget);
+    tlw->resize(640, 480);
+
+    ClearWidget *w = new ClearWidget(0, 640, 480);
+    w->setParent(tlw.data());
+    w->setClearColor(0, 0, 1);
+
+    tlw->show();
+    QVERIFY(QTest::qWaitForWindowExposed(tlw.data()));
+
+    // QTBUG-101620: Now make visible=false and call update and see if we get to
+    // paintEvent/paintGL eventually, to ensure the updating of the texture is
+    // not optimized permanently away even though there is no composition
+    // on-screen at the point when update() is called.
+
+    w->setVisible(false);
+    w->m_paintCalled = 0;
+    w->update();
+    w->setVisible(true);
+    QTRY_VERIFY(w->m_paintCalled > 0);
+}
+
 class StaticTextPainterWidget : public QOpenGLWidget
 {
 public:
@@ -699,7 +801,7 @@ public:
     {
     }
 
-    void paintEvent(QPaintEvent *)
+    void paintEvent(QPaintEvent *) override
     {
         QPainter p(this);
         text.setText(QStringLiteral("test"));

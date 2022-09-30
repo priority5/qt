@@ -1,36 +1,15 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QtTest/private/qpropertytesthelper_p.h>
+#include <QSignalSpy>
+#include <QAnimationGroup>
+#include <QSequentialAnimationGroup>
 #include <QtCore/qpropertyanimation.h>
 #include <QtCore/qvariantanimation.h>
 #include <private/qabstractanimation_p.h>
-#include <QtGui/qtouchdevice.h>
+#include <QtGui/qpointingdevice.h>
 #include <QtWidgets/qwidget.h>
 
 Q_DECLARE_METATYPE(QAbstractAnimation::State)
@@ -39,10 +18,10 @@ class UncontrolledAnimation : public QPropertyAnimation
 {
     Q_OBJECT
 public:
-    int duration() const { return -1; /* not time driven */ }
+    int duration() const override { return -1; /* not time driven */ }
 
 protected:
-    void updateCurrentTime(int currentTime)
+    void updateCurrentTime(int currentTime) override
     {
         QPropertyAnimation::updateCurrentTime(currentTime);
         if (currentTime >= QPropertyAnimation::duration() || currentLoop() >= 1)
@@ -65,7 +44,7 @@ private:
 class DummyPropertyAnimation : public QPropertyAnimation
 {
 public:
-    DummyPropertyAnimation(QObject *parent = 0) : QPropertyAnimation(parent)
+    DummyPropertyAnimation(QObject *parent = nullptr) : QPropertyAnimation(parent)
     {
         setTargetObject(&o);
         this->setPropertyName("x");
@@ -115,10 +94,10 @@ public:
         static const int interval = 1000/60;
         qint64 until = m_elapsed + ms;
         while (m_elapsed < until) {
-            advanceAnimation(m_elapsed);
+            advanceAnimation();
             m_elapsed += interval;
         }
-        advanceAnimation(m_elapsed);
+        advanceAnimation();
         // This is to make sure that animations that were started with DeleteWhenStopped
         // will actually delete themselves within the test function.
         // Normally, they won't be deleted until the main event loop is processed.
@@ -190,6 +169,7 @@ private slots:
     void totalDuration();
     void zeroLoopCount();
     void recursiveAnimations();
+    void bindings();
 };
 
 void tst_QPropertyAnimation::initTestCase()
@@ -286,16 +266,16 @@ void tst_QPropertyAnimation::statesAndSignals_data()
 void tst_QPropertyAnimation::statesAndSignals()
 {
     QFETCH(bool, uncontrolled);
-    QPropertyAnimation *anim;
+    std::unique_ptr<QPropertyAnimation> anim;
     if (uncontrolled)
-        anim = new UncontrolledAnimation;
+        anim = std::make_unique<UncontrolledAnimation>();
     else
-        anim = new DummyPropertyAnimation;
+        anim = std::make_unique<DummyPropertyAnimation>();
     anim->setDuration(100);
 
-    QSignalSpy finishedSpy(anim, &QPropertyAnimation::finished);
-    QSignalSpy runningSpy(anim, &QPropertyAnimation::stateChanged);
-    QSignalSpy currentLoopSpy(anim, &QPropertyAnimation::currentLoopChanged);
+    QSignalSpy finishedSpy(anim.get(), &QPropertyAnimation::finished);
+    QSignalSpy runningSpy(anim.get(), &QPropertyAnimation::stateChanged);
+    QSignalSpy currentLoopSpy(anim.get(), &QPropertyAnimation::currentLoopChanged);
 
     QVERIFY(finishedSpy.isValid());
     QVERIFY(runningSpy.isValid());
@@ -366,8 +346,6 @@ void tst_QPropertyAnimation::statesAndSignals()
         QCOMPARE(runningSpy.count(), 1); // anim has stopped
         QCOMPARE(finishedSpy.count(), 2);
         QCOMPARE(anim->currentLoopTime(), 100);
-
-        delete anim;
     }
 }
 
@@ -416,9 +394,10 @@ void tst_QPropertyAnimation::deletion1()
 void tst_QPropertyAnimation::deletion2()
 {
     TestAnimationDriver timeDriver;
-    //test that the animation get deleted if the object is deleted
+    // test that the animation does not get deleted if the object is deleted
     QObject *object = new QWidget;
     QPointer<QPropertyAnimation> anim = new QPropertyAnimation(object,"minimumWidth");
+    QVERIFY(anim->parent() != object);
     anim->setStartValue(10);
     anim->setEndValue(20);
     anim->setDuration(200);
@@ -445,14 +424,18 @@ void tst_QPropertyAnimation::deletion2()
     QTimer::singleShot(0, object, SLOT(deleteLater()));
     timeDriver.wait(50);
 
+    QVERIFY(anim);
     QVERIFY(!anim->targetObject());
+
+    delete anim;
 }
 
 void tst_QPropertyAnimation::deletion3()
 {
     //test that the stopped signal is emit when the animation is destroyed
     TestAnimationDriver timeDriver;
-    QObject *object = new QWidget;
+    QWidget w;
+    QObject *object = &w;
     QPropertyAnimation *anim = new QPropertyAnimation(object,"minimumWidth");
     anim->setStartValue(10);
     anim->setEndValue(20);
@@ -508,7 +491,7 @@ public:
     void setOle(int v) { o = v; values << v; }
 
     int o;
-    QVector<int> values;
+    QList<int> values;
 };
 
 void tst_QPropertyAnimation::noStartValue()
@@ -1283,7 +1266,7 @@ public:
         innerAnim->start();
     }
 
-    void updateState(QAbstractAnimation::State newState, QAbstractAnimation::State oldState)
+    void updateState(QAbstractAnimation::State newState, QAbstractAnimation::State oldState) override
     {
         QPropertyAnimation::updateState(newState, oldState);
         if (newState == QAbstractAnimation::Stopped)
@@ -1327,8 +1310,8 @@ void tst_QPropertyAnimation::totalDuration()
 
 void tst_QPropertyAnimation::zeroLoopCount()
 {
-    DummyPropertyAnimation* anim;
-    anim = new DummyPropertyAnimation;
+    DummyPropertyAnimation animation;
+    auto *anim = &animation;
     anim->setStartValue(0);
     anim->setDuration(20);
     anim->setLoopCount(0);
@@ -1396,6 +1379,29 @@ void tst_QPropertyAnimation::recursiveAnimations()
     QCOMPARE(o.y(), qreal(4000));
 }
 
+void tst_QPropertyAnimation::bindings()
+{
+    std::unique_ptr<AnimationObject> o1(new AnimationObject);
+    std::unique_ptr<AnimationObject> o2(new AnimationObject);
+    QPropertyAnimation a(o1.get(), "value");
+
+    QTestPrivate::testReadWritePropertyBasics<QPropertyAnimation, QByteArray>(
+            a, QByteArray("realValue"), QByteArray("value"), "propertyName");
+    if (QTest::currentTestFailed()) {
+        qDebug() << "Failed property test for QPropertyAnimation::propertyName";
+        return;
+    }
+    QTestPrivate::testReadWritePropertyBasics<QPropertyAnimation, QObject *>(a, o2.get(), o1.get(),
+                                                                             "targetObject");
+    if (QTest::currentTestFailed()) {
+        qDebug() << "Failed property test for QPropertyAnimation::targetObject";
+        return;
+    }
+
+    a.setTargetObject(o1.get());
+    o1.reset();
+    QCOMPARE(a.targetObject(), nullptr);
+}
 
 QTEST_MAIN(tst_QPropertyAnimation)
 #include "tst_qpropertyanimation.moc"

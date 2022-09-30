@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \page 21-0-qdoc-configuration.html
@@ -56,14 +32,17 @@
     Qt online documentation. See the \l {Supporting Derived projects}
     section.
 
+    A valid configuration variable name can include upper and lower case
+    letters, numbers, and an underscore, '_'.
+
     The value of a configuration variable can be set using either '='
     or '+='. The difference is that '=' overrides the previous value,
     while '+=' adds a new value to the current one.
 
-    Some configuration variables accept a list of strings as their
-    value, for example:
+    Values of some configuration variables are interpreted as a list of
+    strings, for example:
     \l {sourcedirs-variable}
-    {\c{sourcedirs}}, while others accept only a single string. Double
+    {\c{sourcedirs}}, while others are treated as a single string. Double
     quotes around a value string are optional, but including them allows
     you to use special characters like '=' and ' \" ' within the value
     string, for example:
@@ -76,9 +55,84 @@
     line but the last:
 
     \badcode
+    sourcedirs = kernel tools widgets
+    \endcode
+
+    This can be written as:
+    \badcode
     sourcedirs = kernel \
                  tools \
                  widgets
+    \endcode
+
+    If a value spans multiple lines but is interpreted as a single string,
+    the lines are joined with spaces.
+
+    \section1 Expansion of Configuration Values
+
+    QDoc supports expanding environment variables within configuration files.
+    For example, Qt modules rely on the environment variable QT_INSTALL_DOCS
+    to include definitions related to all Qt module documentation projects:
+
+    \badcode
+    include($QT_INSTALL_DOCS/global/qt-module-defaults.qdocconf)
+    \endcode
+
+    A variable to expand is prefixed with '$'. To use the literal character
+    '$' within a value string, escape it with a backslash: '\\$'.
+
+    Since QDoc 6.0, values can be expanded also from other configuration
+    variables. In addition to the \c {$variable} syntax, also \c {${variable}}
+    is valid. The latter eliminates the need to separate the variable
+    name with whitespace or non-variable characters. For example:
+
+    \badcode
+    baseurl = https://doc.qt.io/
+    ...
+    url = ${baseurl}qtcreator
+    \endcode
+
+    If the target variable refers to a list of strings, they will be
+    joined using spaces in the expanded value:
+
+    \badcode
+    vars = foo \
+           bar \
+           baz
+
+    items = "Items: $vars"          # Expands to "Items: foo bar baz"
+    \endcode
+
+    Controlling which character is used for joining the string list is also
+    possible:
+
+    \badcode
+    items = "Items: ${vars,|}"      # Expands to "Items: foo|bar|baz"
+    items = "Items: ${vars,,}"      # Expands to "Items: foo,bar,baz"
+    items = "Items: ${vars,}"       # Expands to "Items: foobarbaz"
+    \endcode
+
+    As the expansion is performed after reading in all variables, the order
+    in which they are defined does not matter.
+
+    \note Nested variable expansion is not supported.
+
+    \section2 Expanding Environment Variables
+
+    When expanding environment variables, the \c {${variable}} syntax has
+    different behavior compared to \c {$variable}. The former expands the
+    content of the variable in place to be parsed as part of the
+    configuration file, while the latter simply assigns the content as a
+    value for the current configuration variable. This has implications if
+    the environment variable contains a list of elements separated by
+    whitespace, or other formatting recognized by QDoc.
+
+    For example, if the value of an environment variable \c SRCDIRS is
+    \c {"../src/a ../src/b"}, then
+
+    \badcode
+    sourcedirs  = $SRCDIRS      # Fail - value is interpreted as a single path.
+    sourcedirs  = ${SRCDIRS}    # Ok - whitespace is used as a delimiter.
     \endcode
 
     \section1 Configuration Variables
@@ -87,12 +141,11 @@
 
     \list
     \li \l {alias-variable} {alias}
-    \li \l {Cpp.ignoredirectives-variable} {Cpp.ignoredirectives}
-    \li \l {Cpp.ignoretokens-variable} {Cpp.ignoretokens}
     \li \l {defines-variable} {defines}
     \li \l {depends-variable} {depends}
     \li \l {exampledirs-variable} {exampledirs}
     \li \l {examples-variable} {examples}
+    \li \l {examplesinstallpath-variable} {examplesinstallpath}
     \li \l {examples.fileextensions-variable} {examples.fileextensions}
     \li \l {excludedirs-variable} {excludedirs}
     \li \l {excludefiles-variable} {excludefiles}
@@ -104,6 +157,7 @@
     \li \l {HTML.footer-variable} {HTML.footer}
     \li \l {HTML.postheader-variable} {HTML.postheader}
     \li \l {HTML.style-variable} {HTML.style}
+    \li \l {includepaths-variable} {includepaths}
     \li \l {ignorewords-variable} {ignorewords}
     \li \l {ignoresince-variable} {ignoresince}
     \li \l {imagedirs-variable} {imagedirs}
@@ -114,6 +168,7 @@
     \li \l {locationinfo-variable} {locationinfo}
     \li \l {macro-variable} {macro}
     \li \l {manifestmeta-variable} {manifestmeta}
+    \li \l {moduleheader-variable} {moduleheader}
     \li \l {navigation-variable} {navigation}
     \li \l {outputdir-variable} {outputdir}
     \li \l {outputformats-variable} {outputformats}
@@ -136,7 +191,6 @@
 
     \list
     \li \l {Generic Configuration Variables}
-    \li \l {C++ Specific Configuration Variables}
     \li \l {Format-specific Configuration Variables}
     \endlist
 
@@ -210,7 +264,7 @@
     enclose documentation that only will be included if the
     preprocessor symbol is defined.
 
-    The values of the variable are regular expressions (see QRegExp
+    The values of the variable are regular expressions (see QRegularExpression
     for details). By default, no symbol is defined, meaning that code
     protected with #ifdef...#endif will be ignored.
 
@@ -264,7 +318,7 @@
     of dependencies for a single module consists of actual build
     dependencies. In addition, if there is a documentation project
     (module) that acts as a top-level entry point for the entire
-    documentation set and provides \l {navigation-variable}[navigation}
+    documentation set and provides \l {navigation-variable}{navigation}
     links, each module documentation should include it as a dependency.
 
     When QDoc generates documentation for a project, it will also generate
@@ -386,6 +440,58 @@
 
     See also \l {exampledirs-variable} {exampledirs}.
 
+    \target examplesinstallpath-variable
+    \section1 examplesinstallpath
+
+    The \c examplesinstallpath variable sets the root path for this
+    project's examples under the \e installed example directory.
+
+    Assuming a root install path of \c QT_INSTALL_EXAMPLES for all
+    examples, then the path
+
+    \badcode
+    <QT_INSTALL_EXAMPLES>/<examplesinstallpath>/<example_path>
+    \endcode
+
+    will be used to refer to a path of a single example within this
+    documentation project. These paths are recorded in the
+    \l {Example Manifest Files} {example manifest file}, read by Qt
+    Creator.
+
+    To ensure correct paths, \c examplesinstallpath must match with
+    one of the directories listed in \l {exampledirs-variable}
+    {exampledirs}. The path passed as an argument for each
+    \l {example-command} {\\example} command is relative to
+    the path in \e exampledirs.
+
+    For example:
+
+    \badcode
+    exampledirs = ./snippets \
+                  ../../../examples/mymodule
+
+    examplesinstallpath = mymodule
+    \endcode
+
+    And given a following \\example command:
+
+    \badcode *
+    /*!
+        \example basic/hello
+        ...
+    \1/
+    \endcode
+
+    Then, the path \c {mymodule/basic/hello} is recorded in the manifest file
+    for this example.
+
+    \note It is possible to override \c examplesinstallpath for an individual
+          \l {example-command}{\\example} using the \l {meta-command}{\\meta}
+          command.
+
+    \b {See also}: \l {exampledirs}, \l {example-command} {\\example}, and
+    \l {meta-command}{\\meta}.
+
     \target examples.fileextensions-variable
     \section1 examples.fileextensions
 
@@ -483,7 +589,7 @@
     The \c falsehoods variable defines the truth value of specified
     preprocessor symbols as false.
 
-    The values of the variable are regular expressions (see QRegExp
+    The values of the variable are regular expressions (see QRegularExpression
     for details). If this variable is not set for a preprocessor
     symbol, QDoc assumes its truth value is true. The exception is
     '0', which is always false.
@@ -567,8 +673,7 @@
 
     In the specified directories, QDoc will only read the files with
     the \c fileextensions specified in the \l {headers.fileextensions}
-    {\c headers.fileextensions} variable. The default extensions are
-    *.ch, *.h, *.h++, *.hh, *.hpp, and *.hxx". The files specified by
+    {\c headers.fileextensions} variable. The files specified by
     \l {headers} {\c headers} will be read without taking into account
     their fileextensions.
 
@@ -618,6 +723,28 @@
     \warning The above assignment may not work as described.
 
     See also \l headerdirs.
+
+    \target includepaths-variable
+    \section1 includepaths
+
+    The \c includepaths variable is used for passing additional
+    include paths to the Clang parser that QDoc uses for parsing C++
+    code for documentation comments.
+
+    The variable accepts a list of paths, prefixed with \c{-I} (include
+    path), \c {-F} (\macos framework include path), or \c{-isystem}
+    (system include path). If a prefix is omitted, \c{-I} is used by
+    default.
+
+    Paths relative to the current .qdocconf file are resolved into
+    absolute paths. Paths that do not exist in the file system are
+    ignored.
+
+    \note For Qt documentation projects, the build system typically
+          provides the required include paths as command line
+          arguments when invoking QDoc.
+
+    See also \l moduleheader.
 
     \target ignorewords-variable
     \section1 ignorewords
@@ -904,6 +1031,52 @@
 
     See the \l{Manifest Meta Content} section for more information.
 
+    \target moduleheader-variable
+    \section1 moduleheader
+
+    The \c moduleheader variable defines the name of the module
+    header of a documented C++ module.
+
+    Projects that document C++ APIs require a module-level header
+    that includes all public classes, namespaces and header files
+    for the module. The Clang parser in QDoc uses this file to
+    build a pre-compiled header (PCH) for the module to increase
+    the speed of parsing source files.
+
+    By default, the \l{project-variable}{project} name is used
+    also as the module header name.
+
+    \badcode
+    project = QtCore
+    \endcode
+
+    With the above project name, QDoc searches a module header
+    \e QtCore in all known include paths; first using the paths
+    passed as command line arguments, then the paths listed in
+    the \l includepaths variable.
+
+    QDoc will issue a warning if the module header is not found.
+    It will then attempt to build an artificial module header
+    based on the headers listed in the \l {headerdirs-variable}
+    {headerdirs} variable.
+
+    For Qt documentation projects, the build system typically
+    provides QDoc with correct include paths to locate the
+    module header, provided that the \c project variable is set
+    correctly. The \c moduleheader variable provides an
+    alternative file name for QDoc to search for.
+
+    If the project contains no C++ documentation, QDoc should be
+    instructed to skip generating a PCH by setting \c moduleheader
+    to an empty string:
+
+    \badcode
+    # No C++ code to document in this project
+    moduleheader =
+    \endcode
+
+    See also \l includepaths and \l project.
+
     \target naturallanguage-variable
     \section1 naturallanguage
 
@@ -963,6 +1136,16 @@
       \row \li \c navigation.qmltypestitle
            \li (Optional) User-visible title for the QML types page.
                Default is "QML Types".
+      \row \li \c navigation.toctitles (Since QDoc 6.0)
+           \li Page title(s) containing a \l {list-command}{\\list} structure that
+               acts as a table of contents (TOC). QDoc generates navigation links
+               for pages listed in the TOC, without the need for
+               \l {nextpage-command}{\\nextpage} and \l {previouspage-command}
+               {\\previouspage} commands, as well as a navigation hierarchy that's
+               visible in the navigation bar (breadcrumbs) for HTML output.
+      \row \li \c navigation.toctitles.inclusive (Since QDoc 6.3)
+           \li If set to \c true, page(s) listed in \c navigation.toctitles
+               will also appear in the navigation bar as a root item.
     \endtable
 
     For example:
@@ -1134,8 +1317,7 @@
 
     In the specified directories, QDoc will only read the files with
     the \c fileextensions specified in the \l {sources.fileextensions}
-    {\c sources.fileextensions} variable. The default extensions are
-    *.c++, *.cc, *.cpp and *.cxx. The files specified by \l {sources}
+    {\c sources.fileextensions} variable. The files specified by \l {sources}
     {\c sources} will be read independent of their fileextensions.
 
     See also \l {sources-variable} {sources} and
@@ -1196,7 +1378,8 @@
     variable. In this way QDoc avoid spending time reading irrelevant
     files.
 
-    The default extensions are *.c++, *.cc, *.cpp and *.cxx.
+    The default extensions are *.c++, *.cc, *.cpp, *.cxx, *.mm, *.qml
+    and *.qdoc.
 
     The extensions are given as standard wildcard expressions. You
     can add a file extension to the filter using '+='. For example:
@@ -1338,7 +1521,7 @@
 /*!
     \page 22-creating-help-project-files.html
     \previouspage Generic Configuration Variables
-    \nextpage C++ Specific Configuration Variables
+    \nextpage Format-specific Configuration Variables
 
     \title Creating Help Project Files
 
@@ -1364,10 +1547,6 @@
     qhp.QtQuick.virtualFolder       = qtquick
     qhp.QtQuick.indexTitle          = Qt Quick
     qhp.QtQuick.indexRoot           =
-
-    qhp.QtQuick.filterAttributes    = qtquick $QT_VERSION qtrefdoc
-    qhp.QtQuick.customFilters.Qt.name = QtQuick $QT_VERSION
-    qhp.QtQuick.customFilters.Qt.filterAttributes = qtquick $QT_VERSION
 
     qhp.QtQuick.subprojects         = qmltypes classes examples
 
@@ -1469,118 +1648,8 @@
 */
 
 /*!
-    \page 23-qdoc-configuration-cppvariables.html
-    \previouspage Creating Help Project Files
-    \nextpage Format-specific Configuration Variables
-
-    \title C++ Specific Configuration Variables
-
-    The C++ specific configuration variables are provided to avoid
-    erroneous documentation due to non-standard C++ constructs.
-
-    \target Cpp.ignoredirectives-variable
-    \section1 Cpp.ignoredirectives
-    The \c Cpp.ignoredirectives variable makes QDoc ignore the
-    specified non-standard constructs, within C++ source code.
-
-    If not specified by the \tt {\l Cpp.ignoretokens} or \tt {\l
-    Cpp.ignoredirectives} variables, non-standard constructs
-    (typically macros) can result in erroneous documentation.
-
-    \badcode
-    Cpp.ignoredirectives = Q_DECLARE_INTERFACE \
-                           Q_DECLARE_OPERATORS_FOR_FLAGS \
-                           Q_DECLARE_PRIVATE \
-                           Q_DECLARE_PUBLIC \
-                           Q_DISABLE_COPY \
-                           Q_DUMMY_COMPARISON_OPERATOR \
-                           Q_ENUMS \
-                           Q_FLAGS \
-                           Q_INTERFACES \
-                           __attribute__
-    \endcode
-
-    makes sure that when processing the code below, for example, QDoc
-    will simply ignore the 'Q_ENUMS' and 'Q_FLAGS' expressions:
-
-    \code
-        class Q_CORE_EXPORT Qt {
-            Q_OBJECT
-            Q_ENUMS(Orientation TextFormat BackgroundMode
-                    DateFormat ScrollBarPolicy FocusPolicy
-                    ContextMenuPolicy CaseSensitivity
-                    LayoutDirection ArrowType)
-            Q_ENUMS(ToolButtonStyle)
-            Q_FLAGS(Alignment)
-            Q_FLAGS(Orientations)
-            Q_FLAGS(DockWidgetAreas)
-
-          public:
-            ...
-        };
-    \endcode
-
-    The Q_OBJECT macro, however, is an exception: QDoc recognizes this
-    particular non-standard construct, so there is no need specifying
-    it using the \tt {\l Cpp.ignoredirectives} variable.
-
-    Regarding the Q_CORE_EXPORT macro; see the documentation of the
-    \tt {\l Cpp.ignoretokens} variable.
-
-    See also \l Cpp.ignoretokens.
-
-    \target Cpp.ignoretokens-variable
-    \section1 Cpp.ignoretokens
-
-    The \c Cpp.ignoretokens variable makes QDoc ignore the specified
-    non-standard constructs, within C++ source code.
-
-    If not specified by the \tt {\l Cpp.ignoretokens} or \tt {\l
-    Cpp.ignoredirectives} variables, non-standard constructs
-    (typically macros) can result in erroneous documentation.
-
-    In \l qtgui.qdocconf:
-
-    \badcode
-    Cpp.ignoretokens = QAXFACTORY_EXPORT \
-                       QM_EXPORT_CANVAS \
-                       ...
-                       Q_COMPAT_EXPORT \
-                       Q_CORE_EXPORT \
-                       Q_EXPLICIT \
-                       Q_EXPORT \
-                       ...
-                       Q_XML_EXPORT
-    \endcode
-
-    makes sure that when processing the code below, for example, QDoc
-    will simply ignore the 'Q_CORE_EXPORT' expression:
-
-    \code
-        class Q_CORE_EXPORT Qt {
-            Q_OBJECT
-            Q_ENUMS(Orientation TextFormat BackgroundMode
-                    DateFormat ScrollBarPolicy FocusPolicy
-                    ContextMenuPolicy CaseSensitivity
-                    LayoutDirection ArrowType)
-            Q_ENUMS(ToolButtonStyle)
-            Q_FLAGS(Alignment)
-            Q_FLAGS(Orientations)
-            Q_FLAGS(DockWidgetAreas)
-          public:
-            ...
-        };
-    \endcode
-
-    Regarding the Q_OBJECT, Q_ENUMS and Q_FLAGS macros; see the
-    documentation of the \tt {\l Cpp.ignoredirectives} variable.
-
-    See also \l Cpp.ignoredirectives.
-*/
-
-/*!
     \page 24-qdoc-configuration-htmlvariables.html
-    \previouspage C++ Specific Configuration Variables
+    \previouspage Creating Help Project Files
     \nextpage Supporting Derived Projects
 
     \keyword HTML Specific Configuration Variables
@@ -1752,8 +1821,7 @@
     \target indexes-variable
     \section1 indexes
 
-    The \l {indexes-variable}[indexes} variable defines a set of paths
-    to index files to load.
+    The \c indexes variable defines a set of paths to index files to load.
 
     \badcode
     indexes = \

@@ -29,15 +29,19 @@
 
 #include <memory>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/thread_annotations.h"
+#include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink-forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/inspector/inspector_issue_storage.h"
 #include "third_party/blink/renderer/core/workers/parent_execution_context_task_runners.h"
 #include "third_party/blink/renderer/core/workers/worker_backing_thread_startup_data.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
@@ -91,21 +95,21 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
     kGracefullyTerminated,
     kSyncForciblyTerminated,
     kAsyncForciblyTerminated,
-    kLastEnum,
+    kMaxValue = kAsyncForciblyTerminated,
   };
 
   ~WorkerThread() override;
 
   // Starts the underlying thread and creates the global scope. Called on the
   // main thread.
-  // Startup data for WorkerBackingThread is base::nullopt if |this| doesn't own
+  // Startup data for WorkerBackingThread is absl::nullopt if |this| doesn't own
   // the underlying WorkerBackingThread.
   // TODO(nhiroki): We could separate WorkerBackingThread initialization from
   // GlobalScope initialization sequence, that is, InitializeOnWorkerThread().
   // After that, we could remove this startup data for WorkerBackingThread.
   // (https://crbug.com/710364)
   void Start(std::unique_ptr<GlobalScopeCreationParams>,
-             const base::Optional<WorkerBackingThreadStartupData>&,
+             const absl::optional<WorkerBackingThreadStartupData>&,
              std::unique_ptr<WorkerDevToolsParams>);
 
   // Posts a task to evaluate a top-level classic script on the worker thread.
@@ -151,14 +155,6 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
   // is quickly terminated. Called on the main thread.
   virtual void TerminateForTesting();
 
-  // Called on the main thread for the leak detector. Forcibly terminates the
-  // script execution and waits by *blocking* the calling thread until the
-  // workers are shut down. Please be careful when using this function, because
-  // after the synchronous termination any V8 APIs may suddenly start to return
-  // empty handles and it may cause crashes.
-  // WARNING: This is not safe if a nested worker is running.
-  static void TerminateAllWorkersForTesting();
-
   // Thread::TaskObserver.
   void WillProcessTask(const base::PendingTask&, bool) override;
   void DidProcessTask(const base::PendingTask&) override;
@@ -168,8 +164,8 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
   ConsoleMessageStorage* GetConsoleMessageStorage() const {
     return console_message_storage_.Get();
   }
-  InspectorIssueStorage* GetInspectorIssueStorage() const {
-    return inspector_issue_storage_.Get();
+  InspectorIssueStorage* GetInspectorIssueStorage() {
+    return &inspector_issue_storage_;
   }
   v8::Isolate* GetIsolate();
 
@@ -219,8 +215,6 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
 
   int GetWorkerThreadId() const { return worker_thread_id_; }
 
-  PlatformThreadId GetPlatformThreadId();
-
   bool IsForciblyTerminated() LOCKS_EXCLUDED(mutex_);
 
   void WaitForShutdownForTesting();
@@ -251,7 +245,10 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
   // this worker to FrozenPaused and may enter a nested run loop. Only one
   // nested message loop will be entered but |pause_or_freeze_count_| will be
   // incremented on each call. May be called multiple times and from any thread.
-  void Freeze();
+  //
+  // `is_in_back_forward_cache` represents whether the page goes to back/forward
+  // cache.
+  void Freeze(bool is_in_back_forward_cache);
 
   // Decrements |pause_or_freeze_count_| and if count is zero then
   // it will exit the entered nested run loop. Might be called from any thread.
@@ -333,7 +330,7 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
   void InitializeSchedulerOnWorkerThread(base::WaitableEvent*);
   void InitializeOnWorkerThread(
       std::unique_ptr<GlobalScopeCreationParams>,
-      const base::Optional<WorkerBackingThreadStartupData>&,
+      const absl::optional<WorkerBackingThreadStartupData>&,
       std::unique_ptr<WorkerDevToolsParams>) LOCKS_EXCLUDED(mutex_);
 
   void EvaluateClassicScriptOnWorkerThread(
@@ -397,8 +394,10 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
   bool CheckRequestedToTerminate() LOCKS_EXCLUDED(mutex_);
 
   class InterruptData;
-  void PauseOrFreeze(mojom::FrameLifecycleState state);
-  void PauseOrFreezeOnWorkerThread(mojom::FrameLifecycleState state);
+  void PauseOrFreeze(mojom::blink::FrameLifecycleState state,
+                     bool is_in_back_forward_cache);
+  void PauseOrFreezeOnWorkerThread(mojom::blink::FrameLifecycleState state,
+                                   bool is_in_back_forward_cache);
   void ResumeOnWorkerThread();
   void PauseOrFreezeWithInterruptDataOnWorkerThread(InterruptData*);
   static void PauseOrFreezeInsideV8InterruptOnWorkerThread(v8::Isolate*,
@@ -419,6 +418,7 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
 
   scoped_refptr<InspectorTaskRunner> inspector_task_runner_;
   base::UnguessableToken devtools_worker_token_;
+  InspectorIssueStorage inspector_issue_storage_;
   int debugger_task_counter_ GUARDED_BY(mutex_) = 0;
 
   WorkerReportingProxy& worker_reporting_proxy_;
@@ -456,7 +456,6 @@ class CORE_EXPORT WorkerThread : public Thread::TaskObserver {
   Platform::NestedMessageLoopRunner* nested_runner_ = nullptr;
 
   CrossThreadPersistent<ConsoleMessageStorage> console_message_storage_;
-  CrossThreadPersistent<InspectorIssueStorage> inspector_issue_storage_;
   CrossThreadPersistent<WorkerOrWorkletGlobalScope> global_scope_;
   CrossThreadPersistent<WorkerInspectorController> worker_inspector_controller_;
 

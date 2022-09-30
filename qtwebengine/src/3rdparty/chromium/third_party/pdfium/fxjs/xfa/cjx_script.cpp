@@ -6,7 +6,8 @@
 
 #include "fxjs/xfa/cjx_script.h"
 
-#include "fxjs/xfa/cfxjse_value.h"
+#include "fxjs/fxv8.h"
+#include "v8/include/v8-primitive.h"
 #include "xfa/fxfa/parser/cxfa_script.h"
 
 CJX_Script::CJX_Script(CXFA_Script* node) : CJX_Node(node) {}
@@ -17,12 +18,13 @@ bool CJX_Script::DynamicTypeIs(TypeTag eType) const {
   return eType == static_type__ || ParentType__::DynamicTypeIs(eType);
 }
 
-void CJX_Script::stateless(CFXJSE_Value* pValue,
+void CJX_Script::stateless(v8::Isolate* pIsolate,
+                           v8::Local<v8::Value>* pValue,
                            bool bSetting,
                            XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
-  pValue->SetString("0");
+  *pValue = fxv8::NewStringHelper(pIsolate, "0");
 }

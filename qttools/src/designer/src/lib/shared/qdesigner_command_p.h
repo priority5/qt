@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Designer of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 //
 //  W A R N I N G
@@ -40,23 +15,24 @@
 #ifndef QDESIGNER_COMMAND_H
 #define QDESIGNER_COMMAND_H
 
-#include "shared_global_p.h"
-#include "shared_enums_p.h"
 #include "layoutinfo_p.h"
-#include "qdesigner_utils_p.h"
-#include "qdesigner_formwindowcommand_p.h"
 #include "qdesigner_formeditorcommand_p.h"
+#include "qdesigner_formwindowcommand_p.h"
+#include "qdesigner_utils_p.h"
+#include "shared_enums_p.h"
+#include "shared_global_p.h"
 
 #include <QtDesigner/layoutdecoration.h>
 
 #include <QtGui/qicon.h>
+
+#include <QtCore/qhash.h>
+#include <QtCore/qlist.h>
+#include <QtCore/qmap.h>
 #include <QtCore/qobject.h>
 #include <QtCore/qpair.h>
-#include <QtCore/qmap.h>
-#include <QtCore/qhash.h>
 #include <QtCore/qpoint.h>
 #include <QtCore/qrect.h>
-#include <QtCore/qvector.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -180,7 +156,7 @@ private:
 // Helper to correctly unmanage a widget and its children for delete operations
 class  QDESIGNER_SHARED_EXPORT ManageWidgetCommandHelper {
 public:
-    using WidgetVector = QVector<QWidget *>;
+    using WidgetVector = QList<QWidget *>;
 
     ManageWidgetCommandHelper();
     void init(const QDesignerFormWindowInterface *fw, QWidget *widget);
@@ -317,7 +293,7 @@ private:
 class QDESIGNER_SHARED_EXPORT PromoteToCustomWidgetCommand : public QDesignerFormWindowCommand
 {
 public:
-    using WidgetPointerList = QVector<QPointer<QWidget> >;
+    using WidgetPointerList = QList<QPointer<QWidget> >;
 
     explicit PromoteToCustomWidgetCommand(QDesignerFormWindowInterface *formWindow);
 
@@ -355,7 +331,7 @@ public:
     void restore(QDesignerFormWindowInterface *formWindow) const;
 
 private:
-    using WidgetPointerList = QVector<QPointer<QWidget> >;
+    using WidgetPointerList = QList<QPointer<QWidget> >;
     WidgetPointerList m_selection;
     QPointer<QWidget> m_current;
 };
@@ -753,7 +729,7 @@ protected:
     QPointer<QDockWidget> m_dockWidget;
 };
 
-class AddDockWidgetCommand: public QDesignerFormWindowCommand
+class QDESIGNER_SHARED_EXPORT AddDockWidgetCommand: public QDesignerFormWindowCommand
 {
 
 public:
@@ -874,7 +850,7 @@ struct QDESIGNER_SHARED_EXPORT ListContents {
     bool operator==(const ListContents &rhs) const { return m_items == rhs.m_items; }
     bool operator!=(const ListContents &rhs) const { return m_items != rhs.m_items; }
 
-    QVector<ItemData> m_items;
+    QList<ItemData> m_items;
 };
 
 // Data structure representing the contents of a QTableWidget with
@@ -936,7 +912,7 @@ struct QDESIGNER_SHARED_EXPORT TreeWidgetContents {
         //bool m_firstColumnSpanned:1;
         //bool m_hidden:1;
         //bool m_expanded:1;
-        QVector<ItemContents> m_children;
+        QList<ItemContents> m_children;
     };
 
     void clear();
@@ -948,7 +924,7 @@ struct QDESIGNER_SHARED_EXPORT TreeWidgetContents {
     bool operator!=(const TreeWidgetContents &rhs) const { return !(*this == rhs); }
 
     ListContents m_headerItem;
-    QVector<ItemContents> m_rootItems;
+    QList<ItemContents> m_rootItems;
 };
 
 class QDESIGNER_SHARED_EXPORT ChangeTreeContentsCommand: public QDesignerFormWindowCommand
@@ -1019,7 +995,7 @@ public:
         QAction *before;
         QWidget *widget;
     };
-    using ActionData = QVector<ActionDataItem>;
+    using ActionData = QList<ActionDataItem>;
 
 private:
     QAction *m_action;

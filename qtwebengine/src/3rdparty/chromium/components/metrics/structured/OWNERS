@@ -1,4 +1,6 @@
 file://base/metrics/OWNERS
+jongahn@chromium.org
 tby@chromium.org
 
-# COMPONENT: Internals>Metrics
+# For emergency or cleanup only.
+karkhedkar@chromium.org

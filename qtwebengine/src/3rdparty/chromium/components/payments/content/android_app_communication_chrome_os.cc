@@ -6,13 +6,16 @@
 
 #include <utility>
 
-#include "components/arc/mojom/payment_app.mojom.h"
-#include "components/arc/pay/arc_payment_app_bridge.h"
+#include "ash/components/arc/mojom/payment_app.mojom.h"
+#include "ash/components/arc/pay/arc_payment_app_bridge.h"
+#include "ash/public/cpp/external_arc/overlay/arc_overlay_manager.h"
+#include "base/callback_helpers.h"
 #include "components/payments/core/android_app_description.h"
 #include "components/payments/core/chrome_os_error_strings.h"
 #include "components/payments/core/method_strings.h"
 #include "components/payments/core/native_error_strings.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 
 namespace payments {
@@ -45,7 +48,7 @@ void OnIsImplemented(
   if (response->get_valid()->activity_names.empty()) {
     // If a TWA does not implement PAY intent in any of its activities, then
     // |activity_names| is empty, which is not an error.
-    std::move(callback).Run(/*error_message=*/base::nullopt,
+    std::move(callback).Run(/*error_message=*/absl::nullopt,
                             /*app_descriptions=*/{});
     return;
   }
@@ -71,7 +74,7 @@ void OnIsImplemented(
   std::vector<std::unique_ptr<AndroidAppDescription>> app_descriptions;
   app_descriptions.emplace_back(std::move(app));
 
-  std::move(callback).Run(/*error_message=*/base::nullopt,
+  std::move(callback).Run(/*error_message=*/absl::nullopt,
                           std::move(app_descriptions));
 }
 
@@ -94,14 +97,19 @@ void OnIsReadyToPay(AndroidAppCommunication::IsReadyToPayCallback callback,
     return;
   }
 
-  std::move(callback).Run(/*error_message=*/base::nullopt,
+  std::move(callback).Run(/*error_message=*/absl::nullopt,
                           response->get_response());
 }
 
 void OnPaymentAppResponse(
     AndroidAppCommunication::InvokePaymentAppCallback callback,
+    base::ScopedClosureRunner overlay_state,
     arc::mojom::InvokePaymentAppResultPtr response) {
+  // Dismiss and prevent any further overlays
+  overlay_state.RunAndReset();
+
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
   if (response.is_null()) {
     std::move(callback).Run(errors::kEmptyResponse,
                             /*is_activity_result_ok=*/false,
@@ -129,7 +137,7 @@ void OnPaymentAppResponse(
   // Chrome OS TWA currently supports only methods::kGooglePlayBilling payment
   // method identifier.
   std::move(callback).Run(
-      /*error_message=*/base::nullopt,
+      /*error_message=*/absl::nullopt,
       response->get_valid()->is_activity_result_ok,
       /*payment_method_identifier=*/methods::kGooglePlayBilling,
       response->get_valid()->stringified_details);
@@ -142,7 +150,7 @@ arc::mojom::PaymentParametersPtr CreatePaymentParameters(
     const GURL& top_level_origin,
     const GURL& payment_request_origin,
     const std::string& payment_request_id,
-    base::Optional<std::string>* error_message) {
+    absl::optional<std::string>* error_message) {
   // Chrome OS TWA supports only kGooglePlayBilling payment method identifier
   // at this time.
   auto supported_method_iterator =
@@ -208,14 +216,14 @@ class AndroidAppCommunicationChromeOS : public AndroidAppCommunication {
       // Chrome OS supports Android app payment only through a TWA. An empty
       // |twa_package_name| indicates that Chrome was not launched from a TWA,
       // so there're no payment apps available.
-      std::move(callback).Run(/*error_message=*/base::nullopt,
+      std::move(callback).Run(/*error_message=*/absl::nullopt,
                               /*app_descriptions=*/{});
       return;
     }
 
     if (!package_name_for_testing_.empty()) {
       std::move(callback).Run(
-          /*error_message=*/base::nullopt,
+          /*error_message=*/absl::nullopt,
           CreateAppForTesting(package_name_for_testing_, method_for_testing_));
       return;
     }
@@ -249,7 +257,7 @@ class AndroidAppCommunicationChromeOS : public AndroidAppCommunication {
       return;
     }
 
-    base::Optional<std::string> error_message;
+    absl::optional<std::string> error_message;
     auto parameters = CreatePaymentParameters(
         package_name, service_name, stringified_method_data, top_level_origin,
         payment_request_origin, payment_request_id, &error_message);
@@ -271,10 +279,21 @@ class AndroidAppCommunicationChromeOS : public AndroidAppCommunication {
                         const GURL& top_level_origin,
                         const GURL& payment_request_origin,
                         const std::string& payment_request_id,
+                        const base::UnguessableToken& request_token,
+                        content::WebContents* web_contents,
                         InvokePaymentAppCallback callback) override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-    base::Optional<std::string> error_message;
+    // Create and register a token with ArcOverlayManager for the
+    // browser window. Doing so is required to allow the Android Play Billing
+    // interface to be overlaid on top of the browser window.
+    ash::ArcOverlayManager* const overlay_manager =
+        ash::ArcOverlayManager::instance();
+    base::ScopedClosureRunner overlay_state =
+        overlay_manager->RegisterHostWindow(request_token.ToString(),
+                                            web_contents->GetNativeView());
+
+    absl::optional<std::string> error_message;
     if (package_name_for_testing_ == package_name) {
       std::move(callback).Run(error_message,
                               /*is_activity_result_ok=*/true,
@@ -301,10 +320,23 @@ class AndroidAppCommunicationChromeOS : public AndroidAppCommunication {
                               /*stringified_details=*/kEmptyDictionaryJson);
       return;
     }
+    parameters->request_token = request_token.ToString();
 
     payment_app_service->InvokePaymentApp(
         std::move(parameters),
-        base::BindOnce(&OnPaymentAppResponse, std::move(callback)));
+        base::BindOnce(&OnPaymentAppResponse, std::move(callback),
+                       std::move(overlay_state)));
+  }
+
+  void AbortPaymentApp(const base::UnguessableToken& token,
+                       AbortPaymentAppCallback callback) override {
+    auto* payment_app_service = get_app_service_.Run(context());
+    if (!payment_app_service) {
+      std::move(callback).Run(false);
+      return;
+    }
+
+    payment_app_service->AbortPaymentApp(token.ToString(), std::move(callback));
   }
 
   // AndroidAppCommunication implementation.

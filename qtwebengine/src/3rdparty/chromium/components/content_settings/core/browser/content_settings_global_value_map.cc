@@ -19,6 +19,9 @@ class RuleIteratorSimple : public RuleIterator {
  public:
   RuleIteratorSimple(ContentSetting setting) : setting_(setting) {}
 
+  RuleIteratorSimple(const RuleIteratorSimple&) = delete;
+  RuleIteratorSimple& operator=(const RuleIteratorSimple&) = delete;
+
   bool HasNext() const override { return !is_done_; }
 
   Rule Next() override {
@@ -32,8 +35,6 @@ class RuleIteratorSimple : public RuleIterator {
  private:
   const ContentSetting setting_;
   bool is_done_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(RuleIteratorSimple);
 };
 
 }  // namespace
@@ -43,11 +44,7 @@ GlobalValueMap::GlobalValueMap() {}
 GlobalValueMap::~GlobalValueMap() {}
 
 std::unique_ptr<RuleIterator> GlobalValueMap::GetRuleIterator(
-    ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier) const {
-  if (!resource_identifier.empty())
-    return nullptr;
-
+    ContentSettingsType content_type) const {
   auto it = settings_.find(content_type);
   if (it == settings_.end())
     return nullptr;

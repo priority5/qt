@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/browser_thread.h"
@@ -21,14 +21,14 @@ using content::BrowserThread;
 namespace extensions {
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<
-    ApiResourceManager<UsbDeviceResource>>>::DestructorAtExit g_factory =
+    ApiResourceManager<UsbDeviceResource>>>::DestructorAtExit g_factory2 =
     LAZY_INSTANCE_INITIALIZER;
 
 // static
 template <>
 BrowserContextKeyedAPIFactory<ApiResourceManager<UsbDeviceResource> >*
 ApiResourceManager<UsbDeviceResource>::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_factory2.Pointer();
 }
 
 UsbDeviceResource::UsbDeviceResource(

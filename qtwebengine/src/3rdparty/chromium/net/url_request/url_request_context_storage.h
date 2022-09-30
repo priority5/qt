@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "build/buildflag.h"
 #include "net/base/net_export.h"
@@ -18,8 +18,6 @@ namespace net {
 class CertVerifier;
 class CookieStore;
 class CTPolicyEnforcer;
-class CTVerifier;
-class FtpAuthCache;
 class HostResolver;
 class HttpAuthHandlerFactory;
 class HttpNetworkSession;
@@ -34,6 +32,7 @@ class SCTAuditingDelegate;
 class SSLConfigService;
 class TransportSecurityState;
 class URLRequestContext;
+class ClientSocketFactory;
 class URLRequestJobFactory;
 class URLRequestThrottlerManager;
 
@@ -51,6 +50,10 @@ class NET_EXPORT URLRequestContextStorage {
   // URLRequestContext, since it is often designed to be embedded in a
   // URLRequestContext subclass.
   explicit URLRequestContextStorage(URLRequestContext* context);
+
+  URLRequestContextStorage(const URLRequestContextStorage&) = delete;
+  URLRequestContextStorage& operator=(const URLRequestContextStorage&) = delete;
+
   ~URLRequestContextStorage();
 
   // These setters will set both the member variables and call the setter on the
@@ -71,8 +74,6 @@ class NET_EXPORT URLRequestContextStorage {
   void set_cookie_store(std::unique_ptr<CookieStore> cookie_store);
   void set_transport_security_state(
       std::unique_ptr<TransportSecurityState> transport_security_state);
-  void set_cert_transparency_verifier(
-      std::unique_ptr<CTVerifier> cert_transparency_verifier);
   void set_ct_policy_enforcer(
       std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer);
   void set_sct_auditing_delegate(
@@ -87,9 +88,6 @@ class NET_EXPORT URLRequestContextStorage {
   void set_quic_context(std::unique_ptr<QuicContext> quic_context);
   void set_http_user_agent_settings(
       std::unique_ptr<HttpUserAgentSettings> http_user_agent_settings);
-#if !BUILDFLAG(DISABLE_FTP_SUPPORT)
-  void set_ftp_auth_cache(std::unique_ptr<FtpAuthCache> ftp_auth_cache);
-#endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
 
 #if BUILDFLAG(ENABLE_REPORTING)
   void set_persistent_reporting_and_nel_store(
@@ -102,6 +100,9 @@ class NET_EXPORT URLRequestContextStorage {
           network_error_logging_service);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
+  void set_client_socket_factory(
+      std::unique_ptr<ClientSocketFactory> client_socket_factory);
+
   // Everything else can be access through the URLRequestContext, but this
   // cannot.  Having an accessor for it makes usage a little cleaner.
   HttpNetworkSession* http_network_session() const {
@@ -110,7 +111,7 @@ class NET_EXPORT URLRequestContextStorage {
 
  private:
   // Not owned.
-  URLRequestContext* const context_;
+  const raw_ptr<URLRequestContext> context_;
 
   // Owned members.
   std::unique_ptr<HostResolver> host_resolver_;
@@ -124,13 +125,10 @@ class NET_EXPORT URLRequestContextStorage {
   std::unique_ptr<HttpUserAgentSettings> http_user_agent_settings_;
   std::unique_ptr<CookieStore> cookie_store_;
   std::unique_ptr<TransportSecurityState> transport_security_state_;
-  std::unique_ptr<CTVerifier> cert_transparency_verifier_;
   std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer_;
   std::unique_ptr<SCTAuditingDelegate> sct_auditing_delegate_;
   std::unique_ptr<QuicContext> quic_context_;
-#if !BUILDFLAG(DISABLE_FTP_SUPPORT)
-  std::unique_ptr<FtpAuthCache> ftp_auth_cache_;
-#endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
+  std::unique_ptr<ClientSocketFactory> client_socket_factory_;
 
   // Not actually pointed at by the URLRequestContext, but may be used (but not
   // owned) by the HttpTransactionFactory.
@@ -148,8 +146,6 @@ class NET_EXPORT URLRequestContextStorage {
   std::unique_ptr<ReportingService> reporting_service_;
   std::unique_ptr<NetworkErrorLoggingService> network_error_logging_service_;
 #endif  // BUILDFLAG(ENABLE_REPORTING)
-
-  DISALLOW_COPY_AND_ASSIGN(URLRequestContextStorage);
 };
 
 }  // namespace net

@@ -5,7 +5,6 @@
 import("//build/config/c++/c++.gni")
 import("//build/config/chrome_build.gni")
 import("//build/config/chromecast_build.gni")
-import("//build/config/crypto.gni")
 import("//build/config/dcheck_always_on.gni")
 import("//build/config/features.gni")
 
@@ -63,9 +62,6 @@ config("feature_flags") {
   if (use_glib) {
     defines += [ "USE_GLIB=1" ]
   }
-  if (use_nss_certs) {
-    defines += [ "USE_NSS_CERTS=1" ]
-  }
   if (use_ozone && !is_android) {
     # Note that some Chrome OS builds unconditionally set |use_ozone| to true,
     # but they also build some targets with the Android toolchain. This ensures
@@ -74,9 +70,6 @@ config("feature_flags") {
     # TODO(crbug.com/837032): Maybe this can be cleaned up if we can avoid
     # setting use_ozone globally.
     defines += [ "USE_OZONE=1" ]
-  }
-  if (use_x11) {
-    defines += [ "USE_X11=1" ]
   }
   if (is_asan || is_hwasan || is_lsan || is_tsan || is_msan) {
     defines += [ "MEMORY_TOOL_REPLACES_ALLOCATOR" ]
@@ -101,11 +94,6 @@ config("feature_flags") {
   }
   if (is_official_build) {
     defines += [ "OFFICIAL_BUILD" ]
-  }
-
-  if (is_chrome_branded) {
-    # TODO(thakis): Remove this in favor of build/branding_buildflags.h.
-    defines += [ "GOOGLE_CHROME_BUILD" ]
   }
 
   if (use_qt) {
@@ -137,7 +125,8 @@ config("debug") {
       # builds, and we have to tell it to turn it off.
       defines += [ "_HAS_ITERATOR_DEBUGGING=0" ]
     }
-  } else if ((is_linux || is_chromeos) && current_cpu == "x64" && enable_iterator_debugging) {
+  } else if ((is_linux || is_chromeos) && current_cpu == "x64" &&
+             enable_iterator_debugging) {
     # Enable libstdc++ debugging facilities to help catch problems early, see
     # http://crbug.com/65151 .
     # TODO(phajdan.jr): Should we enable this for all of POSIX?
@@ -269,13 +258,12 @@ group("common_deps") {
     public_deps += [ "//base/android/orderfile:orderfile_instrumentation" ]
   }
 
-  if (is_win && generate_order_files && !is_nacl) {
-    public_deps += [ "//tools/cygprofile_win" ]
-  }
-
   if (is_fuchsia) {
     public_deps +=
         [ "//third_party/fuchsia-sdk/sdk/build/config:runtime_library_group" ]
+    if (is_asan) {
+      public_deps += [ "//build/config/fuchsia:asan_runtime_library" ]
+    }
   }
 }
 
@@ -351,7 +339,10 @@ config("shared_library_config") {
   } else if (is_mac) {
     configs += [ "//build/config/mac:mac_dynamic_flags" ]
   } else if (is_ios) {
-    configs += [ "//build/config/ios:ios_dynamic_flags" ]
+    configs += [
+      "//build/config/ios:ios_dynamic_flags",
+      "//build/config/ios:ios_shared_library_flags",
+    ]
   } else if (is_chromecast) {
     configs += [ "//build/config/chromecast:shared_library_config" ]
   } else if (is_linux || is_chromeos || current_os == "aix") {
@@ -392,7 +383,7 @@ config("precompiled_headers") {
 
       # Force include the header.
       cflags = [ "/FI$precompiled_header" ]
-    } else if (is_mac) {
+    } else if (is_mac || is_linux) {
       precompiled_source = "//build/precompile.h"
     }
   }

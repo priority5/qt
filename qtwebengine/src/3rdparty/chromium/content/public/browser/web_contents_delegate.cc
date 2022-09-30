@@ -11,14 +11,14 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
-#include "components/viz/common/surfaces/surface_id.h"
+#include "content/public/browser/color_chooser.h"
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/security_style_explanations.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/url_constants.h"
+#include "third_party/blink/public/common/security/protocol_handler_security_level.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -31,8 +31,8 @@ WebContents* WebContentsDelegate::OpenURLFromTab(WebContents* source,
   return nullptr;
 }
 
-bool WebContentsDelegate::ShouldTransferNavigation(
-    bool is_main_frame_navigation) {
+bool WebContentsDelegate::ShouldAllowRendererInitiatedCrossProcessNavigation(
+    bool is_outermost_main_frame_navigation) {
   return true;
 }
 
@@ -51,9 +51,9 @@ bool WebContentsDelegate::ShouldPreserveAbortedURLs(WebContents* source) {
 bool WebContentsDelegate::DidAddMessageToConsole(
     WebContents* source,
     blink::mojom::ConsoleMessageLevel log_level,
-    const base::string16& message,
+    const std::u16string& message,
     int32_t line_no,
-    const base::string16& source_id) {
+    const std::u16string& source_id) {
   return false;
 }
 
@@ -85,7 +85,7 @@ void WebContentsDelegate::CanDownload(const GURL& url,
   std::move(callback).Run(true);
 }
 
-bool WebContentsDelegate::HandleContextMenu(RenderFrameHost* render_frame_host,
+bool WebContentsDelegate::HandleContextMenu(RenderFrameHost& render_frame_host,
                                             const ContextMenuParams& params) {
   return false;
 }
@@ -135,7 +135,7 @@ WebContents* WebContentsDelegate::CreateCustomWebContents(
     const GURL& opener_url,
     const std::string& frame_name,
     const GURL& target_url,
-    const std::string& partition_id,
+    const StoragePartitionConfig& partition_config,
     SessionStorageNamespace* session_storage_namespace) {
   return nullptr;
 }
@@ -145,33 +145,22 @@ JavaScriptDialogManager* WebContentsDelegate::GetJavaScriptDialogManager(
   return nullptr;
 }
 
-std::unique_ptr<BluetoothChooser> WebContentsDelegate::RunBluetoothChooser(
-    RenderFrameHost* frame,
-    const BluetoothChooser::EventHandler& event_handler) {
-  return nullptr;
-}
-
 void WebContentsDelegate::CreateSmsPrompt(
     RenderFrameHost* host,
-    const url::Origin& origin,
+    const std::vector<url::Origin>& origin_list,
     const std::string& one_time_code,
     base::OnceCallback<void()> on_confirm,
     base::OnceCallback<void()> on_cancel) {}
 
-std::unique_ptr<BluetoothScanningPrompt>
-WebContentsDelegate::ShowBluetoothScanningPrompt(
-    RenderFrameHost* frame,
-    const BluetoothScanningPrompt::EventHandler& event_handler) {
-  return nullptr;
-}
-
-bool WebContentsDelegate::EmbedsFullscreenWidget() {
-  return false;
-}
-
 bool WebContentsDelegate::IsFullscreenForTabOrPending(
     const WebContents* web_contents) {
   return false;
+}
+
+bool WebContentsDelegate::CanEnterFullscreenModeForTab(
+    RenderFrameHost* requesting_frame,
+    const blink::mojom::FullscreenOptions& options) {
+  return true;
 }
 
 blink::mojom::DisplayMode WebContentsDelegate::GetDisplayMode(
@@ -179,12 +168,31 @@ blink::mojom::DisplayMode WebContentsDelegate::GetDisplayMode(
   return blink::mojom::DisplayMode::kBrowser;
 }
 
-ColorChooser* WebContentsDelegate::OpenColorChooser(
+blink::ProtocolHandlerSecurityLevel
+WebContentsDelegate::GetProtocolHandlerSecurityLevel(RenderFrameHost*) {
+  return blink::ProtocolHandlerSecurityLevel::kStrict;
+}
+
+void WebContentsDelegate::RequestToLockMouse(WebContents* web_contents,
+                                             bool user_gesture,
+                                             bool last_unlocked_by_target) {
+  web_contents->GotResponseToLockMouseRequest(
+      blink::mojom::PointerLockResult::kUnknownError);
+}
+
+void WebContentsDelegate::RequestKeyboardLock(WebContents* web_contents,
+                                              bool esc_key_locked) {
+  web_contents->GotResponseToKeyboardLockRequest(false);
+}
+
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC) || defined(TOOLKIT_QT)
+std::unique_ptr<ColorChooser> WebContentsDelegate::OpenColorChooser(
     WebContents* web_contents,
     SkColor color,
     const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
   return nullptr;
 }
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)
 
 std::unique_ptr<EyeDropper> WebContentsDelegate::OpenEyeDropper(
     RenderFrameHost* frame,
@@ -232,19 +240,16 @@ std::string WebContentsDelegate::GetDefaultMediaDeviceID(
   return std::string();
 }
 
-#if defined(OS_ANDROID)
+std::string WebContentsDelegate::GetTitleForMediaControls(
+    WebContents* web_contents) {
+  return {};
+}
+
+#if BUILDFLAG(IS_ANDROID)
 bool WebContentsDelegate::ShouldBlockMediaRequest(const GURL& url) {
   return false;
 }
 #endif
-
-void WebContentsDelegate::RequestPpapiBrokerPermission(
-    WebContents* web_contents,
-    const GURL& url,
-    const base::FilePath& plugin_path,
-    base::OnceCallback<void(bool)> callback) {
-  std::move(callback).Run(false);
-}
 
 WebContentsDelegate::~WebContentsDelegate() {
   while (!attached_contents_.empty()) {
@@ -277,14 +282,10 @@ bool WebContentsDelegate::GuestSaveFrame(WebContents* guest_web_contents) {
   return false;
 }
 
-bool WebContentsDelegate::SaveFrame(const GURL& url, const Referrer& referrer) {
+bool WebContentsDelegate::SaveFrame(const GURL& url,
+                                    const Referrer& referrer,
+                                    content::RenderFrameHost* rfh) {
   return false;
-}
-
-blink::SecurityStyle WebContentsDelegate::GetSecurityStyle(
-    WebContents* web_contents,
-    SecurityStyleExplanations* security_style_explanations) {
-  return blink::SecurityStyle::kUnknown;
 }
 
 bool WebContentsDelegate::ShouldAllowRunningInsecureContent(
@@ -325,14 +326,20 @@ bool WebContentsDelegate::OnlyExpandTopControlsAtPageTop() {
 }
 
 PictureInPictureResult WebContentsDelegate::EnterPictureInPicture(
-    WebContents* web_contents,
-    const viz::SurfaceId&,
-    const gfx::Size&) {
+    WebContents* web_contents) {
   return PictureInPictureResult::kNotSupported;
 }
 
 bool WebContentsDelegate::ShouldAllowLazyLoad() {
   return true;
+}
+
+bool WebContentsDelegate::IsBackForwardCacheSupported() {
+  return false;
+}
+
+bool WebContentsDelegate::IsPrerender2Supported(WebContents& web_contents) {
+  return false;
 }
 
 std::unique_ptr<WebContents> WebContentsDelegate::ActivatePortalWebContents(
@@ -353,12 +360,6 @@ bool WebContentsDelegate::ShouldShowStaleContentOnEviction(
   return false;
 }
 
-bool WebContentsDelegate::IsFrameLowPriority(
-    const WebContents* web_contents,
-    const RenderFrameHost* render_frame_host) {
-  return false;
-}
-
 WebContents* WebContentsDelegate::GetResponsibleWebContents(
     WebContents* web_contents) {
   return web_contents;
@@ -373,9 +374,8 @@ base::WeakPtr<WebContentsDelegate> WebContentsDelegate::GetDelegateWeakPtr() {
   return nullptr;
 }
 
-bool WebContentsDelegate::ShouldNavigateOnBackForwardMouseButtons()
-{
-  return true;
+bool WebContentsDelegate::IsPrivileged() {
+  return false;
 }
 
 }  // namespace content

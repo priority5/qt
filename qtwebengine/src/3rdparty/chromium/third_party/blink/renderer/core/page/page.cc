@@ -29,6 +29,7 @@
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/media_feature_overrides.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
@@ -38,7 +39,6 @@
 #include "third_party/blink/renderer/core/dom/visited_link_state.h"
 #include "third_party/blink/renderer/core/editing/drag_caret.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
-#include "third_party/blink/renderer/core/execution_context/agent_metrics_collector.h"
 #include "third_party/blink/renderer/core/frame/browser_controls.h"
 #include "third_party/blink/renderer/core/frame/dom_timer.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
@@ -54,6 +54,7 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
+#include "third_party/blink/renderer/core/html/fenced_frame/document_fenced_frames.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/portal/document_portals.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -68,6 +69,7 @@
 #include "third_party/blink/renderer/core/page/drag_controller.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/link_highlight.h"
+#include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/core/page/page_hidden_state.h"
 #include "third_party/blink/renderer/core/page/plugin_data.h"
 #include "third_party/blink/renderer/core/page/plugins_changed_observer.h"
@@ -78,17 +80,16 @@
 #include "third_party/blink/renderer/core/page/scrolling/top_document_root_scroller_controller.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
 #include "third_party/blink/renderer/core/page/validation_message_client_impl.h"
-#include "third_party/blink/renderer/core/paint/compositing/paint_layer_compositor.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme_overlay_mobile.h"
 #include "third_party/blink/renderer/core/scroll/smooth_scroll_sequencer.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_chrome_client.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+#include "third_party/blink/renderer/platform/scheduler/public/agent_group_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/skia/include/core/SkColor.h"
 
@@ -129,19 +130,13 @@ Page::PageSet& Page::OrdinaryPages() {
   return *pages;
 }
 
-static AgentMetricsCollector& GlobalAgentMetricsCollector() {
-  DEFINE_STATIC_LOCAL(Persistent<AgentMetricsCollector>, metrics_collector,
-                      (MakeGarbageCollected<AgentMetricsCollector>()));
-  return *metrics_collector;
-}
-
 void Page::InsertOrdinaryPageForTesting(Page* page) {
   OrdinaryPages().insert(page);
 }
 
 HeapVector<Member<Page>> Page::RelatedPages() {
   HeapVector<Member<Page>> result;
-  Page* ptr = this->next_related_page_;
+  Page* ptr = next_related_page_;
   while (ptr != this) {
     result.push_back(ptr);
     ptr = ptr->next_related_page_;
@@ -149,26 +144,21 @@ HeapVector<Member<Page>> Page::RelatedPages() {
   return result;
 }
 
-float DeviceScaleFactorDeprecated(LocalFrame* frame) {
-  if (!frame)
-    return 1;
-  Page* page = frame->GetPage();
-  if (!page)
-    return 1;
-  return page->DeviceScaleFactorDeprecated();
+Page* Page::CreateNonOrdinary(
+    ChromeClient& chrome_client,
+    scheduler::WebAgentGroupScheduler& agent_group_scheduler) {
+  return MakeGarbageCollected<Page>(base::PassKey<Page>(), chrome_client,
+                                    agent_group_scheduler,
+                                    /*is_ordinary=*/false);
 }
 
-Page* Page::CreateNonOrdinary(PageClients& page_clients) {
-  Page* page = MakeGarbageCollected<Page>(page_clients);
-  page->SetPageScheduler(ThreadScheduler::Current()->CreatePageScheduler(page));
-  return page;
-}
-
-Page* Page::CreateOrdinary(PageClients& page_clients, Page* opener) {
-  Page* page = MakeGarbageCollected<Page>(page_clients);
-  page->is_ordinary_ = true;
-  page->agent_metrics_collector_ = &GlobalAgentMetricsCollector();
-  page->SetPageScheduler(ThreadScheduler::Current()->CreatePageScheduler(page));
+Page* Page::CreateOrdinary(
+    ChromeClient& chrome_client,
+    Page* opener,
+    scheduler::WebAgentGroupScheduler& agent_group_scheduler) {
+  Page* page = MakeGarbageCollected<Page>(base::PassKey<Page>(), chrome_client,
+                                          agent_group_scheduler,
+                                          /*is_ordinary=*/true);
 
   if (opener) {
     // Before: ... -> opener -> next -> ...
@@ -186,12 +176,16 @@ Page* Page::CreateOrdinary(PageClients& page_clients, Page* opener) {
   return page;
 }
 
-Page::Page(PageClients& page_clients)
+Page::Page(base::PassKey<Page>,
+           ChromeClient& chrome_client,
+           scheduler::WebAgentGroupScheduler& agent_group_scheduler,
+           bool is_ordinary)
     : SettingsDelegate(std::make_unique<Settings>()),
       main_frame_(nullptr),
+      agent_group_scheduler_(agent_group_scheduler),
       animator_(MakeGarbageCollected<PageAnimator>(*this)),
       autoscroll_controller_(MakeGarbageCollected<AutoscrollController>(*this)),
-      chrome_client_(page_clients.chrome_client),
+      chrome_client_(&chrome_client),
       drag_caret_(MakeGarbageCollected<DragCaret>()),
       drag_controller_(MakeGarbageCollected<DragController>(this)),
       focus_controller_(MakeGarbageCollected<FocusController>(this)),
@@ -203,7 +197,6 @@ Page::Page(PageClients& page_clients)
           MakeGarbageCollected<PointerLockController>(this)),
       browser_controls_(MakeGarbageCollected<BrowserControls>(*this)),
       console_message_storage_(MakeGarbageCollected<ConsoleMessageStorage>()),
-      inspector_issue_storage_(MakeGarbageCollected<InspectorIssueStorage>()),
       global_root_scroller_controller_(
           MakeGarbageCollected<TopDocumentRootScrollerController>(*this)),
       visual_viewport_(MakeGarbageCollected<VisualViewport>(*this)),
@@ -217,9 +210,9 @@ Page::Page(PageClients& page_clients)
           MakeGarbageCollected<ValidationMessageClientImpl>(*this)),
       opened_by_dom_(false),
       tab_key_cycles_through_elements_(true),
-      device_scale_factor_(1),
+      inspector_device_scale_factor_override_(1),
       lifecycle_state_(mojom::blink::PageLifecycleState::New()),
-      is_ordinary_(false),
+      is_ordinary_(is_ordinary),
       is_cursor_visible_(true),
       subframe_count_(0),
       next_related_page_(this),
@@ -229,12 +222,17 @@ Page::Page(PageClients& page_clients)
   DCHECK(!AllPages().Contains(this));
   AllPages().insert(this);
 
-  // Try to dereference the scrollbar theme. This is here to ensure tests are
-  // correctly setting up their platform theme or mocking scrollbars. On
-  // Android, unit tests run without a ThemeEngine and thus must set a mock
-  // ScrollbarTheme, if they don't this call will crash. To set a mock theme,
-  // see ScopedMockOverlayScrollbars or WebScopedMockScrollbars.
-  DCHECK(&GetScrollbarTheme());
+  page_scheduler_ =
+      agent_group_scheduler.AsAgentGroupScheduler().CreatePageScheduler(this);
+  // The scheduler should be set before the main frame.
+  DCHECK(!main_frame_);
+  if (auto* virtual_time_controller =
+          page_scheduler_->GetVirtualTimeController()) {
+    history_navigation_virtual_time_pauser_ =
+        virtual_time_controller->CreateWebScopedVirtualTimePauser(
+            "HistoryNavigation",
+            WebScopedVirtualTimePauser::VirtualTaskDuration::kInstant);
+  }
 }
 
 Page::~Page() {
@@ -295,11 +293,11 @@ const ConsoleMessageStorage& Page::GetConsoleMessageStorage() const {
 }
 
 InspectorIssueStorage& Page::GetInspectorIssueStorage() {
-  return *inspector_issue_storage_;
+  return inspector_issue_storage_;
 }
 
 const InspectorIssueStorage& Page::GetInspectorIssueStorage() const {
-  return *inspector_issue_storage_;
+  return inspector_issue_storage_;
 }
 
 TopDocumentRootScrollerController& Page::GlobalRootScrollerController() const {
@@ -363,13 +361,27 @@ SpatialNavigationController& Page::GetSpatialNavigationController() {
   return *spatial_navigation_controller_;
 }
 
-void Page::PlatformColorsChanged() {
-  for (const Page* page : AllPages())
+void Page::UsesOverlayScrollbarsChanged() {
+  for (Page* page : AllPages()) {
     for (Frame* frame = page->MainFrame(); frame;
          frame = frame->Tree().TraverseNext()) {
       if (auto* local_frame = DynamicTo<LocalFrame>(frame))
-        local_frame->GetDocument()->PlatformColorsChanged();
+        local_frame->View()->UsesOverlayScrollbarsChanged();
     }
+  }
+}
+
+void Page::PlatformColorsChanged() {
+  for (const Page* page : AllPages()) {
+    for (Frame* frame = page->MainFrame(); frame;
+         frame = frame->Tree().TraverseNext()) {
+      if (auto* local_frame = DynamicTo<LocalFrame>(frame)) {
+        local_frame->GetDocument()->PlatformColorsChanged();
+        if (LayoutView* view = local_frame->ContentLayoutObject())
+          view->InvalidatePaintForViewAndDescendants();
+      }
+    }
+  }
 }
 
 void Page::ColorSchemeChanged() {
@@ -379,6 +391,11 @@ void Page::ColorSchemeChanged() {
       if (auto* local_frame = DynamicTo<LocalFrame>(frame))
         local_frame->GetDocument()->ColorSchemeChanged();
     }
+}
+
+void Page::ColorProvidersChanged() {
+  for (Page* page : AllPages())
+    page->InvalidatePaint();
 }
 
 void Page::InitialStyleChanged() {
@@ -391,14 +408,11 @@ void Page::InitialStyleChanged() {
   }
 }
 
-PluginData* Page::GetPluginData(const SecurityOrigin* main_frame_origin) {
+PluginData* Page::GetPluginData() {
   if (!plugin_data_)
     plugin_data_ = MakeGarbageCollected<PluginData>();
 
-  if (!plugin_data_->Origin() ||
-      !main_frame_origin->IsSameOriginWith(plugin_data_->Origin()))
-    plugin_data_->UpdatePluginList(main_frame_origin);
-
+  plugin_data_->UpdatePluginList();
   return plugin_data_.Get();
 }
 
@@ -485,16 +499,6 @@ void Page::SetPageScaleFactor(float scale) {
 
 float Page::PageScaleFactor() const {
   return GetVisualViewport().Scale();
-}
-
-void Page::SetDeviceScaleFactorDeprecated(float scale_factor) {
-  if (device_scale_factor_ == scale_factor)
-    return;
-
-  device_scale_factor_ = scale_factor;
-
-  if (MainFrame() && MainFrame()->IsLocalFrame())
-    DeprecatedLocalMainFrame()->DeviceScaleFactorChanged();
 }
 
 void Page::AllVisitedStateChanged(bool invalidate_visited_link_hashes) {
@@ -603,8 +607,21 @@ void CheckFrameCountConsistency(int expected_frame_count, Frame* frame) {
         DocumentPortals::From(*local_frame->GetDocument()).GetPortals().size());
   }
 
-  for (; frame; frame = frame->Tree().TraverseNext())
+  for (; frame; frame = frame->Tree().TraverseNext()) {
     ++actual_frame_count;
+
+    // Check the ``DocumentFencedFrames`` on every local frame beneath
+    // the ``frame`` to get an accurate count (i.e. if an iframe embeds
+    // a fenced frame and creates a new ``DocumentFencedFrames`` object).
+    if (features::IsFencedFramesMPArchBased()) {
+      if (auto* local_frame = DynamicTo<LocalFrame>(frame)) {
+        actual_frame_count += static_cast<int>(
+            DocumentFencedFrames::From(*local_frame->GetDocument())
+                .GetFencedFrames()
+                .size());
+      }
+    }
+  }
 
   DCHECK_EQ(expected_frame_count, actual_frame_count);
 }
@@ -617,12 +634,12 @@ int Page::SubframeCount() const {
   return subframe_count_;
 }
 
-void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
+void Page::SettingsChanged(ChangeType change_type) {
   switch (change_type) {
-    case SettingsDelegate::kStyleChange:
+    case ChangeType::kStyle:
       InitialStyleChanged();
       break;
-    case SettingsDelegate::kViewportDescriptionChange:
+    case ChangeType::kViewportDescription:
       if (MainFrame() && MainFrame()->IsLocalFrame()) {
         DeprecatedLocalMainFrame()
             ->GetDocument()
@@ -635,17 +652,22 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         TextAutosizer::UpdatePageInfoInAllFrames(MainFrame());
       }
       break;
-    case SettingsDelegate::kViewportScrollbarChange:
+    case ChangeType::kViewportPaintProperties:
+      GetVisualViewport().SetNeedsPaintPropertyUpdate();
       GetVisualViewport().InitializeScrollbars();
+      if (auto* local_frame = DynamicTo<LocalFrame>(MainFrame())) {
+        if (LocalFrameView* view = local_frame->View())
+          view->SetNeedsPaintPropertyUpdate();
+      }
       break;
-    case SettingsDelegate::kDNSPrefetchingChange:
+    case ChangeType::kDNSPrefetching:
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
         if (auto* local_frame = DynamicTo<LocalFrame>(frame))
           local_frame->GetDocument()->InitDNSPrefetch();
       }
       break;
-    case SettingsDelegate::kImageLoadingChange:
+    case ChangeType::kImageLoading:
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
         if (auto* local_frame = DynamicTo<LocalFrame>(frame)) {
@@ -656,14 +678,14 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         }
       }
       break;
-    case SettingsDelegate::kTextAutosizingChange:
+    case ChangeType::kTextAutosizing:
       if (!MainFrame())
         break;
       // We need to update even for remote main frames since this setting
       // could be changed via InternalSettings.
       TextAutosizer::UpdatePageInfoInAllFrames(MainFrame());
       break;
-    case SettingsDelegate::kFontFamilyChange:
+    case ChangeType::kFontFamily:
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
         if (auto* local_frame = DynamicTo<LocalFrame>(frame))
@@ -672,10 +694,10 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
               .UpdateGenericFontFamilySettings();
       }
       break;
-    case SettingsDelegate::kAcceleratedCompositingChange:
+    case ChangeType::kAcceleratedCompositing:
       UpdateAcceleratedCompositingSettings();
       break;
-    case SettingsDelegate::kMediaQueryChange:
+    case ChangeType::kMediaQuery:
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
         if (auto* local_frame = DynamicTo<LocalFrame>(frame)) {
@@ -684,7 +706,7 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         }
       }
       break;
-    case SettingsDelegate::kAccessibilityStateChange:
+    case ChangeType::kAccessibilityState:
       if (!MainFrame() || !MainFrame()->IsLocalFrame())
         break;
       DeprecatedLocalMainFrame()
@@ -692,7 +714,7 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
           ->AXObjectCacheOwner()
           .ClearAXObjectCache();
       break;
-    case SettingsDelegate::kViewportRuleChange: {
+    case ChangeType::kViewportRule: {
       auto* main_local_frame = DynamicTo<LocalFrame>(MainFrame());
       if (!main_local_frame)
         break;
@@ -700,7 +722,7 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         doc->GetStyleEngine().ViewportRulesChanged();
       break;
     }
-    case SettingsDelegate::kTextTrackKindUserPreferenceChange:
+    case ChangeType::kTextTrackKindUserPreference:
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
         if (auto* local_frame = DynamicTo<LocalFrame>(frame)) {
@@ -711,7 +733,7 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         }
       }
       break;
-    case SettingsDelegate::kDOMWorldsChange: {
+    case ChangeType::kDOMWorlds: {
       if (!GetSettings().GetForceMainWorldInitialization())
         break;
       for (Frame* frame = MainFrame(); frame;
@@ -724,7 +746,7 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
       }
       break;
     }
-    case SettingsDelegate::kMediaControlsChange:
+    case ChangeType::kMediaControls:
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
         auto* local_frame = DynamicTo<LocalFrame>(frame);
@@ -735,11 +757,11 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
           HTMLMediaElement::OnMediaControlsEnabledChange(doc);
       }
       break;
-    case SettingsDelegate::kPluginsChange: {
+    case ChangeType::kPlugins: {
       NotifyPluginsChanged();
       break;
     }
-    case SettingsDelegate::kHighlightAdsChange: {
+    case ChangeType::kHighlightAds: {
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
         if (auto* local_frame = DynamicTo<LocalFrame>(frame))
@@ -747,11 +769,11 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
       }
       break;
     }
-    case SettingsDelegate::kPaintChange: {
+    case ChangeType::kPaint: {
       InvalidatePaint();
       break;
     }
-    case SettingsDelegate::kScrollbarLayoutChange: {
+    case ChangeType::kScrollbarLayout: {
       for (Frame* frame = MainFrame(); frame;
            frame = frame->Tree().TraverseNext()) {
         auto* local_frame = DynamicTo<LocalFrame>(frame);
@@ -760,7 +782,7 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
         // Iterate through all of the scrollable areas and mark their layout
         // objects for layout.
         if (LocalFrameView* view = local_frame->View()) {
-          if (const auto* scrollable_areas = view->ScrollableAreas()) {
+          if (const auto* scrollable_areas = view->UserScrollableAreas()) {
             for (const auto& scrollable_area : *scrollable_areas) {
               if (scrollable_area->ScrollsOverflow()) {
                 if (auto* layout_box = scrollable_area->GetLayoutBox()) {
@@ -774,16 +796,16 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
       }
       break;
     }
-    case SettingsDelegate::kColorSchemeChange:
+    case ChangeType::kColorScheme:
       InvalidateColorScheme();
       break;
-    case SettingsDelegate::kSpatialNavigationChange:
+    case ChangeType::kSpatialNavigation:
       if (spatial_navigation_controller_ ||
           GetSettings().GetSpatialNavigationEnabled()) {
         GetSpatialNavigationController().OnSpatialNavigationSettingChanged();
       }
       break;
-    case SettingsDelegate::kUniversalAccessChange: {
+    case ChangeType::kUniversalAccess: {
       if (!GetSettings().GetAllowUniversalAccessFromFileURLs())
         break;
       for (Frame* frame = MainFrame(); frame;
@@ -798,15 +820,11 @@ void Page::SettingsChanged(SettingsDelegate::ChangeType change_type) {
       }
       break;
     }
-    case SettingsDelegate::kVisionDeficiencyChange: {
+    case ChangeType::kVisionDeficiency: {
       if (auto* main_local_frame = DynamicTo<LocalFrame>(MainFrame()))
         main_local_frame->GetDocument()->VisionDeficiencyChanged();
       break;
     }
-    case SettingsDelegate::kForceDarkChange:
-      InvalidateColorScheme();
-      InvalidatePaint();
-      break;
   }
 }
 
@@ -825,7 +843,7 @@ void Page::InvalidatePaint() {
     if (!local_frame)
       continue;
     if (LayoutView* view = local_frame->ContentLayoutObject())
-      view->InvalidatePaintForViewAndCompositedLayers();
+      view->InvalidatePaintForViewAndDescendants();
   }
 }
 
@@ -842,18 +860,13 @@ void Page::UpdateAcceleratedCompositingSettings() {
     auto* local_frame = DynamicTo<LocalFrame>(frame);
     if (!local_frame)
       continue;
-    LayoutView* layout_view = local_frame->ContentLayoutObject();
-    if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
-      layout_view->Compositor()->UpdateAcceleratedCompositingSettings();
-    } else {
-      // Mark all scrollable areas as needing a paint property update because
-      // the compositing reasons may have changed.
-      if (const auto* areas = local_frame->View()->ScrollableAreas()) {
-        for (const auto& scrollable_area : *areas) {
-          if (scrollable_area->ScrollsOverflow()) {
-            if (auto* layout_box = scrollable_area->GetLayoutBox())
-              layout_box->SetNeedsPaintPropertyUpdate();
-          }
+    // Mark all scrollable areas as needing a paint property update because the
+    // compositing reasons may have changed.
+    if (const auto* areas = local_frame->View()->UserScrollableAreas()) {
+      for (const auto& scrollable_area : *areas) {
+        if (scrollable_area->ScrollsOverflow()) {
+          if (auto* layout_box = scrollable_area->GetLayoutBox())
+            layout_box->SetNeedsPaintPropertyUpdate();
         }
       }
     }
@@ -909,7 +922,6 @@ void Page::Trace(Visitor* visitor) const {
   visitor->Trace(scrolling_coordinator_);
   visitor->Trace(browser_controls_);
   visitor->Trace(console_message_storage_);
-  visitor->Trace(inspector_issue_storage_);
   visitor->Trace(global_root_scroller_controller_);
   visitor->Trace(visual_viewport_);
   visitor->Trace(overscroll_controller_);
@@ -918,7 +930,6 @@ void Page::Trace(Visitor* visitor) const {
   visitor->Trace(main_frame_);
   visitor->Trace(plugin_data_);
   visitor->Trace(validation_message_client_);
-  visitor->Trace(agent_metrics_collector_);
   visitor->Trace(plugins_changed_observers_);
   visitor->Trace(next_related_page_);
   visitor->Trace(prev_related_page_);
@@ -937,12 +948,25 @@ void Page::WillCloseAnimationHost(LocalFrameView* view) {
   if (scrolling_coordinator_)
     scrolling_coordinator_->WillCloseAnimationHost(view);
   GetLinkHighlight().WillCloseAnimationHost();
+
+  // We may have disconnected the associated LayerTreeHost during
+  // the frame lifecycle so ensure the PageAnimator is reset to the
+  // default state.
+  animator_->SetSuppressFrameRequestsWorkaroundFor704763Only(false);
 }
 
 void Page::WillBeDestroyed() {
   Frame* main_frame = main_frame_;
 
-  main_frame->Detach(FrameDetachType::kRemove);
+  // TODO(https://crbug.com/838348): Sadly, there are situations where Blink may
+  // attempt to detach a main frame twice due to a bug. That rewinds
+  // FrameLifecycle from kDetached to kDetaching, but GetPage() will already be
+  // null. Since Detach() has already happened, just skip the actual Detach()
+  // call to try to limit the side effects of this bug on the rest of frame
+  // detach.
+  if (main_frame->GetPage()) {
+    main_frame->Detach(FrameDetachType::kRemove);
+  }
 
   DCHECK(AllPages().Contains(this));
   AllPages().erase(this);
@@ -952,12 +976,12 @@ void Page::WillBeDestroyed() {
     // Before: ... -> prev -> this -> next -> ...
     // After: ... -> prev -> next -> ...
     // (this is ok even if |this| is the only element on the list).
-    Page* prev = this->prev_related_page_;
-    Page* next = this->next_related_page_;
+    Page* prev = prev_related_page_;
+    Page* next = next_related_page_;
     next->prev_related_page_ = prev;
     prev->next_related_page_ = next;
-    this->prev_related_page_ = nullptr;
-    this->next_related_page_ = nullptr;
+    prev_related_page_ = nullptr;
+    next_related_page_ = nullptr;
   }
 
   if (scrolling_coordinator_)
@@ -968,16 +992,13 @@ void Page::WillBeDestroyed() {
     validation_message_client_->WillBeDestroyed();
   main_frame_ = nullptr;
 
-  if (agent_metrics_collector_)
-    agent_metrics_collector_->ReportMetrics();
-
   page_visibility_observer_set_.ForEachObserver(
       [](PageVisibilityObserver* observer) {
         observer->ObserverSetWillBeCleared();
       });
   page_visibility_observer_set_.Clear();
 
-  page_scheduler_.reset();
+  page_scheduler_ = nullptr;
 }
 
 void Page::RegisterPluginsChangedObserver(PluginsChangedObserver* observer) {
@@ -987,21 +1008,19 @@ void Page::RegisterPluginsChangedObserver(PluginsChangedObserver* observer) {
 ScrollbarTheme& Page::GetScrollbarTheme() const {
   if (settings_->GetForceAndroidOverlayScrollbar())
     return ScrollbarThemeOverlayMobile::GetInstance();
+
+  // Ensures that renderer preferences are set.
+  DCHECK(main_frame_);
   return ScrollbarTheme::GetTheme();
 }
 
-PageScheduler* Page::GetPageScheduler() const {
-  return page_scheduler_.get();
+scheduler::WebAgentGroupScheduler& Page::GetAgentGroupScheduler() const {
+  return agent_group_scheduler_;
 }
 
-void Page::SetPageScheduler(std::unique_ptr<PageScheduler> page_scheduler) {
-  page_scheduler_ = std::move(page_scheduler);
-  // The scheduler should be set before the main frame.
-  DCHECK(!main_frame_);
-  history_navigation_virtual_time_pauser_ =
-      page_scheduler_->CreateWebScopedVirtualTimePauser(
-          "HistoryNavigation",
-          WebScopedVirtualTimePauser::VirtualTaskDuration::kInstant);
+PageScheduler* Page::GetPageScheduler() const {
+  DCHECK(page_scheduler_);
+  return page_scheduler_.get();
 }
 
 bool Page::IsOrdinary() const {
@@ -1013,7 +1032,7 @@ void Page::ReportIntervention(const String& text) {
     auto* message = MakeGarbageCollected<ConsoleMessage>(
         mojom::ConsoleMessageSource::kOther,
         mojom::ConsoleMessageLevel::kWarning, text,
-        std::make_unique<SourceLocation>(String(), 0, 0, nullptr));
+        std::make_unique<SourceLocation>(String(), String(), 0, 0, nullptr));
     local_frame->GetDocument()->AddConsoleMessage(message);
   }
 }
@@ -1047,11 +1066,27 @@ int32_t Page::AutoplayFlags() const {
 }
 
 void Page::SetInsidePortal(bool inside_portal) {
+  if (inside_portal_ == inside_portal)
+    return;
+
   inside_portal_ = inside_portal;
+
+  if (MainFrame() && MainFrame()->IsLocalFrame() &&
+      DeprecatedLocalMainFrame()->GetDocument()) {
+    DeprecatedLocalMainFrame()->GetDocument()->ClearAXObjectCache();
+  }
 }
 
 bool Page::InsidePortal() const {
   return inside_portal_;
+}
+
+void Page::SetIsMainFrameFencedFrameRoot() {
+  is_fenced_frame_tree_ = true;
+}
+
+bool Page::IsMainFrameFencedFrameRoot() const {
+  return is_fenced_frame_tree_;
 }
 
 void Page::SetMediaFeatureOverride(const AtomicString& media_feature,
@@ -1062,26 +1097,25 @@ void Page::SetMediaFeatureOverride(const AtomicString& media_feature,
     media_feature_overrides_ = std::make_unique<MediaFeatureOverrides>();
   }
   media_feature_overrides_->SetOverride(media_feature, value);
-  if (media_feature == "prefers-color-scheme")
-    SettingsChanged(SettingsDelegate::kColorSchemeChange);
+  if (media_feature == "prefers-color-scheme" ||
+      media_feature == "forced-colors")
+    SettingsChanged(ChangeType::kColorScheme);
   else
-    SettingsChanged(SettingsDelegate::kMediaQueryChange);
+    SettingsChanged(ChangeType::kMediaQuery);
 }
 
 void Page::ClearMediaFeatureOverrides() {
   media_feature_overrides_.reset();
-  SettingsChanged(SettingsDelegate::kMediaQueryChange);
-  SettingsChanged(SettingsDelegate::kColorSchemeChange);
+  SettingsChanged(ChangeType::kMediaQuery);
+  SettingsChanged(ChangeType::kColorScheme);
 }
 
 void Page::SetVisionDeficiency(VisionDeficiency new_vision_deficiency) {
   if (new_vision_deficiency != vision_deficiency_) {
     vision_deficiency_ = new_vision_deficiency;
-    SettingsChanged(SettingsDelegate::kVisionDeficiencyChange);
+    SettingsChanged(ChangeType::kVisionDeficiency);
   }
 }
-
-Page::PageClients::PageClients() : chrome_client(nullptr) {}
 
 template class CORE_TEMPLATE_EXPORT Supplement<Page>;
 

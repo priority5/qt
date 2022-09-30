@@ -11,7 +11,6 @@
 #include "base/check.h"
 #include "base/compiler_specific.h"
 #include "base/no_destructor.h"
-#include "base/stl_util.h"
 #include "base/synchronization/lock.h"
 #include "base/template_util.h"
 #include "base/time/time.h"
@@ -37,11 +36,11 @@ bool IsStudyActive() {
 }
 }  // namespace
 
-constexpr unsigned AggregatingSampleCollector::kMaxTrackedSurfaces;
-constexpr unsigned AggregatingSampleCollector::kMaxTrackedSamplesPerSurface;
-constexpr unsigned AggregatingSampleCollector::kMaxUnsentSamples;
-constexpr unsigned AggregatingSampleCollector::kMaxUnsentSources;
-constexpr base::TimeDelta AggregatingSampleCollector::kMaxUnsentSampleAge;
+const unsigned AggregatingSampleCollector::kMaxTrackedSurfaces;
+const unsigned AggregatingSampleCollector::kMaxTrackedSamplesPerSurface;
+const unsigned AggregatingSampleCollector::kMaxUnsentSamples;
+const unsigned AggregatingSampleCollector::kMaxUnsentSources;
+const base::TimeDelta AggregatingSampleCollector::kMaxUnsentSampleAge;
 
 AggregatingSampleCollector::AggregatingSampleCollector() = default;
 AggregatingSampleCollector::~AggregatingSampleCollector() = default;
@@ -157,7 +156,7 @@ void AggregatingSampleCollector::TryAcceptSingleSample(
 
     per_surface_samples_.emplace(
         new_sample.surface,
-        Samples{{{new_sample.value}}, false, 1});
+        Samples{/*.samples =*/ {{new_sample.value}}, false, /*.total_value_count =*/ 1});
   } else {
     Samples& sample_set = samples_for_surface_it->second;
     ++sample_set.total_value_count;

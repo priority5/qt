@@ -9,10 +9,13 @@
 
 #include <memory>
 
+#include "include/core/SkBitmap.h"
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkPictureRecorder.h"
 #include "include/gpu/GrDirectContext.h"
 #include "src/utils/SkJSONWriter.h"
 #include "tools/ToolUtils.h"
+#include "tools/debugger/DrawCommand.h"
 
 using namespace sk_gpu_test;
 
@@ -186,7 +189,7 @@ bool Request::enableGPU(bool enable) {
             // TODO understand what is actually happening here
             if (fDebugCanvas) {
                 fDebugCanvas->drawTo(this->getCanvas(), this->getLastOp());
-                this->getCanvas()->flush();
+                fSurface->flush();
             }
 
             return true;
@@ -216,7 +219,7 @@ bool Request::initPictureFromStream(SkStream* stream) {
 
     // for some reason we need to 'flush' the debug canvas by drawing all of the ops
     fDebugCanvas->drawTo(this->getCanvas(), this->getLastOp());
-    this->getCanvas()->flush();
+    fSurface->flush();
     return true;
 }
 
@@ -260,12 +263,12 @@ sk_sp<SkData> Request::getJsonInfo(int n) {
     SkDynamicMemoryWStream stream;
     SkJSONWriter writer(&stream, SkJSONWriter::Mode::kFast);
 
-    SkMatrix vm = fDebugCanvas->getCurrentMatrix();
+    SkM44 vm = fDebugCanvas->getCurrentMatrix();
     SkIRect clip = fDebugCanvas->getCurrentClip();
 
     writer.beginObject(); // root
     writer.appendName("ViewMatrix");
-    DrawCommand::MakeJsonMatrix(writer, vm);
+    DrawCommand::MakeJsonMatrix44(writer, vm);
     writer.appendName("ClipRect");
     DrawCommand::MakeJsonIRect(writer, clip);
     writer.endObject(); // root

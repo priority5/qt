@@ -168,7 +168,7 @@ defines a `BindNewPipeAndPassReceiver` method:
 
 ``` cpp
 mojo::Remote<sample::mojom::Logger> logger;
-auto receiver = logger.BindNewPipeAndPassReceiver());
+auto receiver = logger.BindNewPipeAndPassReceiver();
 ```
 
 This second snippet is equivalent to the first one.
@@ -226,7 +226,6 @@ which binds it.
 
 ``` cpp
 #include "base/logging.h"
-#include "base/macros.h"
 #include "sample/logger.mojom.h"
 
 class LoggerImpl : public sample::mojom::Logger {
@@ -236,9 +235,9 @@ class LoggerImpl : public sample::mojom::Logger {
 
   explicit LoggerImpl(mojo::PendingReceiver<sample::mojom::Logger> receiver)
       : receiver_(this, std::move(receiver)) {}
-  ~Logger() override {}
   Logger(const Logger&) = delete;
   Logger& operator=(const Logger&) = delete;
+  ~Logger() override {}
 
   // sample::mojom::Logger:
   void Log(const std::string& message) override {
@@ -1541,7 +1540,7 @@ to valid getter return types:
 | `FooEnum`                    | Value of any type that has an appropriate `EnumTraits` specialization defined. By default this inlcudes only the generated `FooEnum` type.
 | `FooStruct`                  | Value or reference to any type that has an appropriate `StructTraits` specialization defined. By default this includes only the generated `FooStructPtr` type.
 | `FooUnion`                   | Value of reference to any type that has an appropriate `UnionTraits` specialization defined. By default this includes only the generated `FooUnionPtr` type.
-| `Foo?`                       | `base::Optional<CppType>`, where `CppType` is the value type defined by the appropriate traits class specialization (e.g. `StructTraits`, `mojo::MapTraits`, etc.). This may be customized by the [typemapping](#Enabling-a-New-Type-Mapping).
+| `Foo?`                       | `absl::optional<CppType>`, where `CppType` is the value type defined by the appropriate traits class specialization (e.g. `StructTraits`, `mojo::MapTraits`, etc.). This may be customized by the [typemapping](#Enabling-a-New-Type-Mapping).
 
 ### Using Generated DataView Types
 
@@ -1709,6 +1708,9 @@ C++ sources can depend on shared sources only, by referencing the
 `"${target_name}_shared"` target, e.g. `"//foo/mojom:mojom_shared"` in the
 example above.
 
+For converting between Blink and non-Blink variants, please see
+`//third_party/blink/public/platform/cross_variant_mojo_util.h`.
+
 ## Versioning Considerations
 
 For general documentation of versioning in the Mojom IDL see
@@ -1742,23 +1744,20 @@ received.
 
 ### Versioned Enums
 
-For convenience, every extensible enum has a generated helper function to
-determine whether a received enum value is known by the implementation's current
-version of the enum definition. For example:
+All extensible enums should have one enumerator value designated as the default
+using the `[Default]` attribute. When Mojo deserializes an enum value that is
+not defined in the current version of the enum definition, that value will be
+transparently mapped to the `[Default]` enumerator value. Implementations can
+use the presence of this enumerator value to correctly handle version skew.
 
 ```cpp
 [Extensible]
 enum Department {
-  SALES,
-  DEV,
-  RESEARCH,
+  [Default] kUnknown,
+  kSales,
+  kDev,
+  kResearch,
 };
-```
-
-generates the function in the same namespace as the generated C++ enum type:
-
-```cpp
-inline bool IsKnownEnumValue(Department value);
 ```
 
 ### Using Mojo Bindings in Chrome

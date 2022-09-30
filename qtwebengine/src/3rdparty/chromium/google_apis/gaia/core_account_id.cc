@@ -24,11 +24,7 @@ CoreAccountId::~CoreAccountId() = default;
 
 CoreAccountId& CoreAccountId::operator=(const CoreAccountId&) = default;
 
-CoreAccountId& CoreAccountId::operator=(CoreAccountId&& o) noexcept
-{
-  id_ = std::move(o.id_);
-  return *this;
-}
+CoreAccountId& CoreAccountId::operator=(CoreAccountId&&) noexcept = default;
 
 // static
 CoreAccountId CoreAccountId::FromGaiaId(const std::string& gaia_id) {

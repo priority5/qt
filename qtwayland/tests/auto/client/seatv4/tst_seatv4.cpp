@@ -1,35 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "mockcompositor.h"
 
+#include <QtOpenGL/QOpenGLWindow>
 #include <QtGui/QRasterWindow>
-#include <QtGui/QOpenGLWindow>
 #if QT_CONFIG(cursor)
 #include <wayland-cursor.h>
 #include <QtGui/private/qguiapplication_p.h>
@@ -135,19 +110,19 @@ void tst_seatv4::setsCursorOnEnter()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([=] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
+    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
 }
 
 void tst_seatv4::usesEnterSerial()
 {
-    QSignalSpy setCursorSpy(exec([=] { return pointer(); }), &Pointer::setCursor);
+    QSignalSpy setCursorSpy(exec([&] { return pointer(); }), &Pointer::setCursor);
     QRasterWindow window;
     window.resize(64, 64);
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    uint enterSerial = exec([=] {
+    uint enterSerial = exec([&] {
         return pointer()->sendEnter(xdgSurface()->m_surface, {32, 32});
     });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
@@ -158,7 +133,7 @@ void tst_seatv4::usesEnterSerial()
 
 void tst_seatv4::focusDestruction()
 {
-    QSignalSpy setCursorSpy(exec([=] { return pointer(); }), &Pointer::setCursor);
+    QSignalSpy setCursorSpy(exec([&] { return pointer(); }), &Pointer::setCursor);
     QRasterWindow window;
     window.resize(64, 64);
     window.show();
@@ -166,7 +141,7 @@ void tst_seatv4::focusDestruction()
     // Setting a cursor now is not allowed since there has been no enter event
     QCOMPARE(setCursorSpy.count(), 0);
 
-    uint enterSerial = exec([=] {
+    uint enterSerial = exec([&] {
         return pointer()->sendEnter(xdgSurface()->m_surface, {32, 32});
     });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
@@ -213,7 +188,7 @@ void tst_seatv4::mousePressFloat()
 {
     class Window : public QRasterWindow {
     public:
-        void mousePressEvent(QMouseEvent *e) override { m_position = e->localPos(); }
+        void mousePressEvent(QMouseEvent *e) override { m_position = e->position(); }
         QPointF m_position;
     };
 
@@ -287,18 +262,16 @@ void tst_seatv4::simpleAxis()
         }
         struct Event // Because I didn't find a convenient way to copy it entirely
         {
-            Event() = default;
-
-            const QPoint pixelDelta;
-            const QPoint angleDelta; // eights of a degree, positive is upwards, left
+            QPoint pixelDelta;
+            QPoint angleDelta; // eights of a degree, positive is upwards, left
         };
-        QVector<Event> m_events;
+        QList<Event> m_events;
     };
 
     WheelWindow window;
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([=] {
+    exec([&] {
         Surface *surface = xdgSurface()->m_surface;
         pointer()->sendEnter(surface, {32, 32});
         wl_client *client = surface->resource()->client();
@@ -322,7 +295,7 @@ void tst_seatv4::invalidPointerEvents()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([=] {
+    exec([&] {
         auto *p = pointer();
         auto *c = client();
         // Purposefully send events without a wl_pointer.enter
@@ -351,11 +324,11 @@ static bool supportsCursorSize(uint size, wl_shm *shm)
     return false;
 }
 
-static bool supportsCursorSizes(const QVector<uint> &sizes)
+static bool supportsCursorSizes(const QList<uint> &sizes)
 {
     auto *waylandIntegration = static_cast<QtWaylandClient::QWaylandIntegration *>(QGuiApplicationPrivate::platformIntegration());
     wl_shm *shm = waylandIntegration->display()->shm()->object();
-    return std::all_of(sizes.begin(), sizes.end(), [=](uint size) {
+    return std::all_of(sizes.begin(), sizes.end(), [&](uint size) {
         return supportsCursorSize(size, shm);
     });
 }
@@ -384,15 +357,15 @@ void tst_seatv4::scaledCursor()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([=] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
+    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
     QCOMPOSITOR_TRY_VERIFY(cursorSurface()->m_committed.buffer);
     QCOMPOSITOR_TRY_COMPARE(cursorSurface()->m_committed.bufferScale, 1);
-    QSize unscaledPixelSize = exec([=] {
+    QSize unscaledPixelSize = exec([&] {
         return cursorSurface()->m_committed.buffer->size();
     });
 
-    exec([=] {
+    exec([&] {
         auto *surface = cursorSurface();
         surface->sendEnter(getAll<Output>()[1]);
         surface->sendLeave(getAll<Output>()[0]);
@@ -412,7 +385,7 @@ void tst_seatv4::unscaledFallbackCursor()
 
     const int screens = 4; // with scales 1, 2, 4, 8
 
-    exec([=] {
+    exec([&] {
         for (int i = 1; i < screens; ++i) {
             OutputData d;
             d.scale = int(qPow(2, i));
@@ -425,11 +398,11 @@ void tst_seatv4::unscaledFallbackCursor()
     window.resize(64, 64);
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
-    exec([=] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
+    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
     QCOMPOSITOR_TRY_VERIFY(cursorSurface()->m_committed.buffer);
     QCOMPOSITOR_TRY_COMPARE(cursorSurface()->m_committed.bufferScale, 1);
-    QSize unscaledPixelSize = exec([=] {
+    QSize unscaledPixelSize = exec([&] {
         return cursorSurface()->m_committed.buffer->size();
     });
 
@@ -437,7 +410,7 @@ void tst_seatv4::unscaledFallbackCursor()
     QCOMPARE(unscaledPixelSize.height(), int(defaultSize));
 
     for (int i = 1; i < screens; ++i) {
-        exec([=] {
+        exec([&] {
             auto *surface = cursorSurface();
             surface->sendEnter(getAll<Output>()[i]);
             surface->sendLeave(getAll<Output>()[i-1]);
@@ -475,14 +448,14 @@ void tst_seatv4::bitmapCursor()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([=] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
+    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
     QCOMPOSITOR_TRY_VERIFY(cursorSurface()->m_committed.buffer);
     QCOMPOSITOR_COMPARE(cursorSurface()->m_committed.buffer->size(), QSize(24, 24));
     QCOMPOSITOR_COMPARE(cursorSurface()->m_committed.bufferScale, 1);
     QCOMPOSITOR_COMPARE(pointer()->m_hotspot, QPoint(12, 12));
 
-    exec([=] {
+    exec([&] {
         auto *surface = cursorSurface();
         surface->sendEnter(getAll<Output>()[1]);
         surface->sendLeave(getAll<Output>()[0]);
@@ -521,14 +494,14 @@ void tst_seatv4::hidpiBitmapCursor()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([=] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
+    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
     QCOMPOSITOR_TRY_VERIFY(cursorSurface()->m_committed.buffer);
     QCOMPOSITOR_COMPARE(cursorSurface()->m_committed.buffer->size(), QSize(48, 48));
     QCOMPOSITOR_COMPARE(cursorSurface()->m_committed.bufferScale, 2);
     QCOMPOSITOR_COMPARE(pointer()->m_hotspot, QPoint(12, 12));
 
-    exec([=] {
+    exec([&] {
         auto *surface = cursorSurface();
         surface->sendEnter(getAll<Output>()[1]);
         surface->sendLeave(getAll<Output>()[0]);
@@ -558,7 +531,7 @@ void tst_seatv4::hidpiBitmapCursorNonInt()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([=] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
+    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
     QCOMPOSITOR_TRY_VERIFY(cursorSurface()->m_committed.buffer);
     QCOMPOSITOR_COMPARE(cursorSurface()->m_committed.buffer->size(), QSize(100, 100));
@@ -576,12 +549,12 @@ void tst_seatv4::animatedCursor()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([=] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
+    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
 
     // We should get the first buffer without waiting for a frame callback
     QCOMPOSITOR_TRY_VERIFY(cursorSurface()->m_committed.buffer);
-    QSignalSpy bufferSpy(exec([=] { return cursorSurface(); }), &Surface::bufferCommitted);
+    QSignalSpy bufferSpy(exec([&] { return cursorSurface(); }), &Surface::bufferCommitted);
 
     exec([&] {
         // Make sure no extra buffers have arrived

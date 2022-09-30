@@ -6,10 +6,10 @@
 #define CONTENT_BROWSER_XR_METRICS_SESSION_METRICS_HELPER_H_
 
 #include <memory>
-#include <set>
 #include <unordered_map>
+#include <unordered_set>
 
-#include "base/time/time.h"
+#include "content/common/content_export.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "device/vr/public/mojom/vr_service.mojom-forward.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
@@ -25,7 +25,8 @@ class WebXRSessionTracker;
 // metrics that require state monitoring, such as durations, but also tracks
 // data we want attached to that, such as number of videos watched and how the
 // session was started.
-class SessionMetricsHelper : public content::WebContentsObserver {
+class CONTENT_EXPORT SessionMetricsHelper
+    : public content::WebContentsObserver {
  public:
   // Returns the SessionMetricsHelper singleton if it has been created for the
   // WebContents.
@@ -38,10 +39,10 @@ class SessionMetricsHelper : public content::WebContentsObserver {
   // Records that an inline session was started and returns the |PendingRemote|
   // for the created session recorder.
   mojo::PendingRemote<device::mojom::XRSessionMetricsRecorder>
-  StartInlineSession(
-      const device::mojom::XRSessionOptions& session_options,
-      const std::set<device::mojom::XRSessionFeature>& enabled_features,
-      size_t session_id);
+  StartInlineSession(const device::mojom::XRSessionOptions& session_options,
+                     const std::unordered_set<device::mojom::XRSessionFeature>&
+                         enabled_features,
+                     size_t session_id);
 
   // Records that inline session was stopped. Will record an UKM entry.
   void StopAndRecordInlineSession(size_t session_id);
@@ -52,7 +53,8 @@ class SessionMetricsHelper : public content::WebContentsObserver {
   mojo::PendingRemote<device::mojom::XRSessionMetricsRecorder>
   StartImmersiveSession(
       const device::mojom::XRSessionOptions& session_options,
-      const std::set<device::mojom::XRSessionFeature>& enabled_features);
+      const std::unordered_set<device::mojom::XRSessionFeature>&
+          enabled_features);
 
   // Records that an immersive session was stopped. Will record a UKM entry.
   void StopAndRecordImmersiveSession();
@@ -67,7 +69,7 @@ class SessionMetricsHelper : public content::WebContentsObserver {
       const MediaPlayerInfo& media_info,
       const content::MediaPlayerId&,
       WebContentsObserver::MediaStoppedReason reason) override;
-  void DidStartNavigation(content::NavigationHandle* handle) override;
+  void PrimaryPageChanged(content::Page& page) override;
 
   std::unique_ptr<SessionTimer> session_video_timer_;
   std::unique_ptr<SessionTimer> session_timer_;

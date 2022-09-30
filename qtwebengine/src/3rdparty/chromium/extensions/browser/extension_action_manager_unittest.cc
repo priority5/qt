@@ -6,13 +6,12 @@
 
 #include <memory>
 
-#include "components/version_info/channel.h"
+#include "base/memory/raw_ptr.h"
 #include "extensions/browser/extension_action.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extensions_test.h"
 #include "extensions/common/api/extension_action/action_info_test_util.h"
 #include "extensions/common/extension_builder.h"
-#include "extensions/common/features/feature_channel.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/value_builder.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -28,6 +27,10 @@ class ExtensionActionManagerTest
  public:
   ExtensionActionManagerTest();
 
+  ExtensionActionManagerTest(const ExtensionActionManagerTest&) = delete;
+  ExtensionActionManagerTest& operator=(const ExtensionActionManagerTest&) =
+      delete;
+
  protected:
   // ExtensionsTest:
   void SetUp() override;
@@ -36,18 +39,11 @@ class ExtensionActionManagerTest
   ExtensionRegistry* registry() { return registry_; }
 
  private:
-  ExtensionRegistry* registry_;
-  ExtensionActionManager* manager_;
-
-  // Note: Instantiate the channel override, if any, before the rest of the
-  // test environment gets set up in SetUp().
-  std::unique_ptr<ScopedCurrentChannel> current_channel_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionActionManagerTest);
+  raw_ptr<ExtensionRegistry> registry_;
+  raw_ptr<ExtensionActionManager> manager_;
 };
 
-ExtensionActionManagerTest::ExtensionActionManagerTest()
-    : current_channel_(GetOverrideChannelForActionType(GetParam())) {}
+ExtensionActionManagerTest::ExtensionActionManagerTest() = default;
 
 void ExtensionActionManagerTest::SetUp() {
   ExtensionsTest::SetUp();

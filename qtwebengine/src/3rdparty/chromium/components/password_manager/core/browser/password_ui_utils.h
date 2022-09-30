@@ -12,12 +12,12 @@
 
 #include "base/strings/string_piece.h"
 
-#include "components/password_manager/core/browser/password_form_forward.h"
 #include "url/origin.h"
 
 namespace password_manager {
 
 class PasswordFormManagerForUI;
+struct PasswordForm;
 
 // Reverses order of labels in hostname.
 std::string SplitByDotAndReverse(base::StringPiece host);
@@ -43,8 +43,8 @@ std::string GetShownOrigin(const url::Origin& origin);
 // Updates the |form_manager| pending credentials with |username| and
 // |password|.
 void UpdatePasswordFormUsernameAndPassword(
-    const base::string16& username,
-    const base::string16& password,
+    const std::u16string& username,
+    const std::u16string& password,
     PasswordFormManagerForUI* form_manager);
 
 }  // namespace password_manager

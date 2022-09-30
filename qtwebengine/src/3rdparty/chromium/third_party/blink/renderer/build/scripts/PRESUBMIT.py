@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+USE_PYTHON3 = True
+
 
 def _GenerateTestCommand(input_api, output_api, file_name, affected_list):
     if not input_api.AffectedFiles(
@@ -41,15 +43,19 @@ def _RunTests(input_api, output_api):
     tests = [{
         'file_name': 'json5_generator_unittest.py',
         'affected_list': [r'.*json5_generator.*', r'.*\btests[\\\/].*']
-    },
-             {
-                 'file_name': 'make_runtime_features_utilities_unittest.py',
-                 'affected_list': [r'.*make_runtime_features_utilities.*']
-             },
-             {
-                 'file_name': 'make_document_policy_features_unittest.py',
-                 'affected_list': [r'.*make_document_policy_features.*']
-             }]
+    }, {
+        'file_name': 'make_runtime_features_utilities_unittest.py',
+        'affected_list': [r'.*make_runtime_features_utilities.*']
+    }, {
+        'file_name': 'make_document_policy_features_unittest.py',
+        'affected_list': [r'.*make_document_policy_features.*']
+    }, {
+        'file_name': 'make_document_policy_features_tests.py',
+        'affected_list': [r'.*make_document_policy_features.*']
+    }, {
+        'file_name': 'make_permissions_policy_features_tests.py',
+        'affected_list': [r'.*make_permissions_policy_features.*']
+    }]
     test_commands = []
     for test in tests:
         test_commands.append(

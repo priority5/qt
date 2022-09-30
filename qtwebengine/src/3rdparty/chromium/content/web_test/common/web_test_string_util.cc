@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/rand_util.h"
 #include "third_party/blink/public/web/web_navigation_policy.h"
 #include "url/gurl.h"
@@ -30,6 +29,7 @@ const char* kPolicyNewBackgroundTab = "new background tab";
 const char* kPolicyNewForegroundTab = "new foreground tab";
 const char* kPolicyNewWindow = "new window";
 const char* kPolicyNewPopup = "new popup";
+const char* kPolicyPictureInPicture = "picture in picture";
 
 }  // namespace
 
@@ -70,6 +70,27 @@ const char* WebNavigationPolicyToString(
     case blink::kWebNavigationPolicyNewWindow:
       return kPolicyNewWindow;
     case blink::kWebNavigationPolicyNewPopup:
+      return kPolicyNewPopup;
+    case blink::kWebNavigationPolicyPictureInPicture:
+      return kPolicyPictureInPicture;
+    default:
+      return kIllegalString;
+  }
+}
+
+const char* WindowOpenDispositionToString(WindowOpenDisposition disposition) {
+  switch (disposition) {
+    case WindowOpenDisposition::SAVE_TO_DISK:
+      return kPolicyDownload;
+    case WindowOpenDisposition::CURRENT_TAB:
+      return kPolicyCurrentTab;
+    case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+      return kPolicyNewBackgroundTab;
+    case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+      return kPolicyNewForegroundTab;
+    case WindowOpenDisposition::NEW_WINDOW:
+      return kPolicyNewWindow;
+    case WindowOpenDisposition::NEW_POPUP:
       return kPolicyNewPopup;
     default:
       return kIllegalString;

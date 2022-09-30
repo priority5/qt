@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "deviceskin.h"
 
@@ -69,7 +33,7 @@ namespace {
 }
 
 static void parseRect(const QString &value, QRect *rect) {
-    const auto l = value.splitRef(QLatin1Char(' '));
+    const auto l = QStringView{value}.split(QLatin1Char(' '));
     rect->setRect(l[0].toInt(), l[1].toInt(), l[2].toInt(), l[3].toInt());
 }
 
@@ -175,7 +139,7 @@ bool DeviceSkinParameters::read(QTextStream &ts, ReadMode rm, QString *errorMess
             QString line = ts.readLine();
             if ( line.isNull() )
                 break;
-            if ( line[0] != QLatin1Char('#') && !line.isEmpty() ) {
+            if (!line.isEmpty() && line.at(0) != u'#') {
                 int eq = line.indexOf(QLatin1Char('='));
                 if ( eq >= 0 ) {
                     const QString key = line.left(eq);
@@ -354,8 +318,8 @@ public:
     bool handleMouseEvent(QEvent *ev);
 
 protected:
-    bool event( QEvent *);
-    bool eventFilter( QObject*, QEvent *);
+    bool event(QEvent *) override;
+    bool eventFilter(QObject*, QEvent *) override;
 
 private:
     QWidget *mouseRecipient;
@@ -535,7 +499,7 @@ void DeviceSkin::paintEvent( QPaintEvent *)
     } else {
         p.drawPixmap(0, 0, skinImageClosed);
     }
-    QVector<int> toDraw;
+    QList<int> toDraw;
     if ( buttonPressed == true ) {
         toDraw += buttonIndex;
     }
@@ -566,7 +530,7 @@ void DeviceSkin::mousePressEvent( QMouseEvent *e )
         const int numAreas = m_parameters.buttonAreas.size();
         for (int i = 0; i < numAreas ; i++) {
             const DeviceSkinButtonArea &ba = m_parameters.buttonAreas[i];
-            if (  buttonRegions[i].contains( e->pos() ) ) {
+            if (  buttonRegions[i].contains( e->position().toPoint() ) ) {
                 if ( flipped_open || ba.activeWhenClosed ) {
                     if ( m_parameters.joystick == i ) {
                         joydown = true;
@@ -582,11 +546,11 @@ void DeviceSkin::mousePressEvent( QMouseEvent *e )
                 }
             }
         }
-        clickPos = e->pos();
+        clickPos = e->position().toPoint();
 //      This is handy for finding the areas to define rectangles for new skins
         if (debugDeviceSkin)
-            qDebug()<< "Clicked in " <<  e->pos().x() << ',' <<  e->pos().y();
-        clickPos = e->pos();
+            qDebug()<< "Clicked in " <<  e->position().toPoint().x() << ',' <<  e->position().toPoint().y();
+        clickPos = e->position().toPoint();
     }
 }
 
@@ -643,7 +607,7 @@ void DeviceSkin::mouseMoveEvent( QMouseEvent *e )
 {
     if ( e->buttons() & Qt::LeftButton ) {
         const int joystick = m_parameters.joystick;
-        QPoint newpos =  e->globalPos() - clickPos;
+        QPoint newpos =  e->globalPosition().toPoint() - clickPos;
         if (joydown) {
             int k1=0, k2=0;
             if (newpos.x() < -joydistance) {
@@ -675,7 +639,7 @@ void DeviceSkin::mouseMoveEvent( QMouseEvent *e )
         }
     }
     if ( cursorw )
-        cursorw->setPos(e->globalPos());
+        cursorw->setPos(e->globalPosition().toPoint());
 }
 
 void DeviceSkin::moveParent()
@@ -727,7 +691,7 @@ bool CursorWindow::handleMouseEvent(QEvent *ev)
         if (m_view) {
             if (ev->type() >= QEvent::MouseButtonPress && ev->type() <= QEvent::MouseMove) {
                 QMouseEvent *e = (QMouseEvent*)ev;
-                QPoint gp = e->globalPos();
+                QPoint gp = e->globalPosition().toPoint();
                 QPoint vp = m_view->mapFromGlobal(gp);
                 QPoint sp = skin->mapFromGlobal(gp);
                 if (e->type() == QEvent::MouseButtonPress || e->type() == QEvent::MouseButtonDblClick) {
@@ -784,15 +748,9 @@ CursorWindow::CursorWindow(const QImage &img, QPoint hot, QWidget* sk)
     QPixmap p;
     p = QPixmap::fromImage(img);
     if (!p.mask()) {
-        if (img.hasAlphaChannel()) {
-            QBitmap bm;
-            bm = QPixmap::fromImage(img.createAlphaMask());
-            p.setMask(bm);
-        } else {
-            QBitmap bm;
-            bm = QPixmap::fromImage(img.createHeuristicMask());
-            p.setMask(bm);
-        }
+        QBitmap bm = img.hasAlphaChannel() ? QBitmap::fromImage(img.createAlphaMask())
+                                           : QBitmap::fromImage(img.createHeuristicMask());
+        p.setMask(bm);
     }
     QPalette palette;
     palette.setBrush(backgroundRole(), QBrush(p));

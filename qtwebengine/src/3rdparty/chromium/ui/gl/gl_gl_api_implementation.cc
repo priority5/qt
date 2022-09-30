@@ -6,7 +6,7 @@
 
 #include <vector>
 
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "ui/gl/gl_context.h"
@@ -364,19 +364,21 @@ void RealGLApi::glTexStorageMem2DEXTFn(GLenum target,
                                     height, memory, offset);
 }
 
-void RealGLApi::glTexStorageMemFlags2DANGLEFn(GLenum target,
-                                              GLsizei levels,
-                                              GLenum internalformat,
-                                              GLsizei width,
-                                              GLsizei height,
-                                              GLuint memory,
-                                              GLuint64 offset,
-                                              GLbitfield createFlags,
-                                              GLbitfield usageFlags) {
+void RealGLApi::glTexStorageMemFlags2DANGLEFn(
+    GLenum target,
+    GLsizei levels,
+    GLenum internalformat,
+    GLsizei width,
+    GLsizei height,
+    GLuint memory,
+    GLuint64 offset,
+    GLbitfield createFlags,
+    GLbitfield usageFlags,
+    const void* imageCreateInfoPNext) {
   internalformat = GetInternalFormat(version_.get(), internalformat);
-  GLApiBase::glTexStorageMemFlags2DANGLEFn(target, levels, internalformat,
-                                           width, height, memory, offset,
-                                           createFlags, usageFlags);
+  GLApiBase::glTexStorageMemFlags2DANGLEFn(
+      target, levels, internalformat, width, height, memory, offset,
+      createFlags, usageFlags, imageCreateInfoPNext);
 }
 
 void RealGLApi::glRenderbufferStorageEXTFn(GLenum target,

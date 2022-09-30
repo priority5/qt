@@ -6,7 +6,7 @@
 #define MEDIA_RENDERERS_DECRYPTING_RENDERER_FACTORY_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "media/base/media_export.h"
 #include "media/base/renderer_factory.h"
 
@@ -21,11 +21,16 @@ class MediaLog;
 //
 // The caller must guarantee that the returned DecryptingRenderer will never
 // be initialized with a |media_resource| of type MediaResource::Type::URL.
-class MEDIA_EXPORT DecryptingRendererFactory : public RendererFactory {
+class MEDIA_EXPORT DecryptingRendererFactory final : public RendererFactory {
  public:
   DecryptingRendererFactory(
       MediaLog* media_log,
       std::unique_ptr<media::RendererFactory> renderer_factory);
+
+  DecryptingRendererFactory(const DecryptingRendererFactory&) = delete;
+  DecryptingRendererFactory& operator=(const DecryptingRendererFactory&) =
+      delete;
+
   ~DecryptingRendererFactory() final;
 
   // RendererFactory implementation.
@@ -38,11 +43,9 @@ class MEDIA_EXPORT DecryptingRendererFactory : public RendererFactory {
       const gfx::ColorSpace& target_color_space) final;
 
  private:
-  MediaLog* media_log_;
+  raw_ptr<MediaLog> media_log_;
 
   std::unique_ptr<media::RendererFactory> renderer_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(DecryptingRendererFactory);
 };
 
 }  // namespace media

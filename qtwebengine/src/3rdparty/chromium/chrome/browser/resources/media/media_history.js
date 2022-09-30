@@ -2,16 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+import {assertNotReached} from 'chrome://resources/js/assert.m.js';
+import {decorate} from 'chrome://resources/js/cr/ui.m.js';
+import {TabBox} from 'chrome://resources/js/cr/ui/tabs.js';
+import {PromiseResolver} from 'chrome://resources/js/promise_resolver.m.js';
+import {$} from 'chrome://resources/js/util.m.js';
+import {String16} from 'chrome://resources/mojo/mojo/public/mojom/base/string16.mojom-webui.js';
+
+import {MediaDataTable, MediaDataTableDelegate} from './media_data_table.js';
+import {MediaHistoryStats, MediaHistoryStore} from './media_history_store.mojom-webui.js';
 
 // Allow a function to be provided by tests, which will be called when
 // the page has been populated.
 const mediaHistoryPageIsPopulatedResolver = new PromiseResolver();
-function whenPageIsPopulatedForTest() {
+window.whenPageIsPopulatedForTest = function() {
   return mediaHistoryPageIsPopulatedResolver.promise;
-}
-
-(function() {
+};
 
 let store = null;
 let statsTableBody = null;
@@ -34,7 +40,7 @@ function createStatsRow(name, count) {
   return document.importNode(template.content, true);
 }
 
-/** @implements {cr.ui.MediaDataTableDelegate} */
+/** @implements {MediaDataTableDelegate} */
 class MediaHistoryTableDelegate {
   /**
    * Formats a field to be displayed in the data table and inserts it into the
@@ -74,7 +80,7 @@ class MediaHistoryTableDelegate {
         key === 'sourceTitle') {
       // Format a mojo string16.
       td.textContent = decodeString16(
-          /** @type {mojoBase.mojom.String16} */ (data));
+          /** @type {String16} */ (data));
     } else if (key === 'artwork') {
       // Format an array of mojo media images.
       data.forEach((image) => {
@@ -112,7 +118,7 @@ class MediaHistoryTableDelegate {
       return val1.url > val2.url ? 1 : -1;
     }
 
-    // Compare mojo_base.mojom.TimeDelta microseconds value.
+    // Compare TimeDelta microseconds value.
     if (sortKey === 'cachedAudioVideoWatchtime' ||
         sortKey === 'actualAudioVideoWatchtime' || sortKey === 'watchtime' ||
         sortKey === 'duration' || sortKey === 'position') {
@@ -143,7 +149,7 @@ class MediaHistoryTableDelegate {
 
 /**
  * Parses utf16 coded string.
- * @param {mojoBase.mojom.String16} arr
+ * @param {String16} arr
  * @return {string}
  */
 function decodeString16(arr) {
@@ -156,7 +162,7 @@ function decodeString16(arr) {
 
 /**
  * Regenerates the stats table.
- * @param {!mediaHistory.mojom.MediaHistoryStats} stats The stats for the Media
+ * @param {!MediaHistoryStats} stats The stats for the Media
  *     History store.
  */
 function renderStatsTable(stats) {
@@ -196,17 +202,17 @@ function showTab(name) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  store = mediaHistory.mojom.MediaHistoryStore.getRemote();
+  store = MediaHistoryStore.getRemote();
 
   statsTableBody = $('stats-table-body');
 
   delegate = new MediaHistoryTableDelegate();
 
-  originsTable = new cr.ui.MediaDataTable($('origins-table'), delegate);
-  playbacksTable = new cr.ui.MediaDataTable($('playbacks-table'), delegate);
-  sessionsTable = new cr.ui.MediaDataTable($('sessions-table'), delegate);
+  originsTable = new MediaDataTable($('origins-table'), delegate);
+  playbacksTable = new MediaDataTable($('playbacks-table'), delegate);
+  sessionsTable = new MediaDataTable($('sessions-table'), delegate);
 
-  cr.ui.decorate('tabbox', cr.ui.TabBox);
+  decorate('tabbox', TabBox);
 
   // Allow tabs to be navigated to by fragment. The fragment with be of the
   // format "#tab-<tab id>".
@@ -247,4 +253,3 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 });
-})();

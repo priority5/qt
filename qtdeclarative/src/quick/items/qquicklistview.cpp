@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquicklistview_p.h"
 #include "qquickitemview_p_p.h"
@@ -64,8 +28,8 @@ class FxListItemSG;
 
 class QQuickListViewPrivate : public QQuickItemViewPrivate
 {
-    Q_DECLARE_PUBLIC(QQuickListView)
 public:
+    Q_DECLARE_PUBLIC(QQuickListView)
     static QQuickListViewPrivate* get(QQuickListView *item) { return item->d_func(); }
 
     Qt::Orientation layoutOrientation() const override;
@@ -130,6 +94,8 @@ public:
     bool hasStickyHeader() const override;
     bool hasStickyFooter() const override;
 
+    void initializeComponentItem(QQuickItem *item) const override;
+
     void changedVisibleIndex(int newIndex) override;
     void initializeCurrentItem() override;
 
@@ -146,7 +112,7 @@ public:
     void fixupHeader();
     void fixupHeaderCompleted();
 
-    bool wantsPointerEvent(const QEvent *event) override;
+    bool wantsPointerEvent(const QPointerEvent *event) override;
 
     QQuickListView::Orientation orient;
     qreal visiblePos;
@@ -157,9 +123,9 @@ public:
     QQuickListView::HeaderPositioning headerPositioning;
     QQuickListView::FooterPositioning footerPositioning;
 
-    QSmoothedAnimation *highlightPosAnimator;
-    QSmoothedAnimation *highlightWidthAnimator;
-    QSmoothedAnimation *highlightHeightAnimator;
+    std::unique_ptr<QSmoothedAnimation> highlightPosAnimator;
+    std::unique_ptr<QSmoothedAnimation> highlightWidthAnimator;
+    std::unique_ptr<QSmoothedAnimation> highlightHeightAnimator;
     qreal highlightMoveVelocity;
     qreal highlightResizeVelocity;
     int highlightResizeDuration;
@@ -201,11 +167,6 @@ public:
         , correctFlick(false), inFlickCorrection(false), wantedMousePress(false)
     {
         highlightMoveDuration = -1; //override default value set in base class
-    }
-    ~QQuickListViewPrivate() {
-        delete highlightPosAnimator;
-        delete highlightWidthAnimator;
-        delete highlightHeightAnimator;
     }
 
     friend class QQuickViewSection;
@@ -550,7 +511,7 @@ qreal QQuickListViewPrivate::lastPosition() const
             // All visible items are in delayRemove state
             invisibleCount = model->count();
         }
-        pos = (*(--visibleItems.constEnd()))->endPosition();
+        pos = (*(visibleItems.constEnd() - 1))->endPosition();
         if (invisibleCount > 0)
             pos += invisibleCount * (averageSize + spacing);
     } else if (model && model->count()) {
@@ -575,7 +536,7 @@ qreal QQuickListViewPrivate::positionAt(int modelIndex) const
             return (*visibleItems.constBegin())->position() - count * (averageSize + spacing) - cs;
         } else {
             int count = modelIndex - findLastVisibleIndex(visibleIndex) - 1;
-            return (*(--visibleItems.constEnd()))->endPosition() + spacing + count * (averageSize + spacing);
+            return (*(visibleItems.constEnd() - 1))->endPosition() + spacing + count * (averageSize + spacing);
         }
     }
     return 0;
@@ -591,7 +552,7 @@ qreal QQuickListViewPrivate::endPositionAt(int modelIndex) const
             return (*visibleItems.constBegin())->position() - (count - 1) * (averageSize + spacing) - spacing;
         } else {
             int count = modelIndex - findLastVisibleIndex(visibleIndex) - 1;
-            return (*(--visibleItems.constEnd()))->endPosition() + count * (averageSize + spacing);
+            return (*(visibleItems.constEnd() - 1))->endPosition() + count * (averageSize + spacing);
         }
     }
     return 0;
@@ -617,7 +578,7 @@ qreal QQuickListViewPrivate::snapPosAt(qreal pos)
         return snapItem->itemPosition();
     if (visibleItems.count()) {
         qreal firstPos = (*visibleItems.constBegin())->position();
-        qreal endPos = (*(--visibleItems.constEnd()))->position();
+        qreal endPos = (*(visibleItems.constEnd() - 1))->position();
         if (pos < firstPos) {
             return firstPos - qRound((firstPos - pos) / averageSize) * averageSize;
         } else if (pos > endPos)
@@ -762,7 +723,7 @@ bool QQuickListViewPrivate::addVisibleItems(qreal fillFrom, qreal fillTo, qreal 
     qreal itemEnd = visiblePos;
     if (visibleItems.count()) {
         visiblePos = (*visibleItems.constBegin())->position();
-        itemEnd = (*(--visibleItems.constEnd()))->endPosition() + spacing;
+        itemEnd = (*(visibleItems.constEnd() - 1))->endPosition() + spacing;
     }
 
     int modelIndex = findLastVisibleIndex();
@@ -901,12 +862,17 @@ void QQuickListViewPrivate::layoutVisibleItems(int fromModelIndex)
         const qreal from = isContentFlowReversed() ? -position()-displayMarginBeginning-size() : position()-displayMarginBeginning;
         const qreal to = isContentFlowReversed() ? -position()+displayMarginEnd : position()+size()+displayMarginEnd;
 
-        FxViewItem *firstItem = *visibleItems.constBegin();
+        FxListItemSG *firstItem = static_cast<FxListItemSG *>(visibleItems.constFirst());
         bool fixedCurrent = currentItem && firstItem->item == currentItem->item;
         firstVisibleItemPosition = firstItem->position();
         qreal sum = firstItem->size();
         qreal pos = firstItem->position() + firstItem->size() + spacing;
         firstItem->setVisible(firstItem->endPosition() >= from && firstItem->position() <= to);
+
+        // setPosition will affect the position of the item, and its section, if it has one.
+        // This will prevent them from potentially overlapping.
+        if (firstItem->section())
+            firstItem->setPosition(firstItem->position());
 
         for (int i=1; i < visibleItems.count(); ++i) {
             FxListItemSG *item = static_cast<FxListItemSG*>(visibleItems.at(i));
@@ -979,14 +945,13 @@ void QQuickListViewPrivate::createHighlight(bool onDestruction)
 {
     bool changed = false;
     if (highlight) {
-        if (trackedItem == highlight)
+        if (trackedItem == highlight.get())
             trackedItem = nullptr;
-        delete highlight;
-        highlight = nullptr;
+        highlight.reset();
 
-        delete highlightPosAnimator;
-        delete highlightWidthAnimator;
-        delete highlightHeightAnimator;
+        highlightPosAnimator.reset();
+        highlightWidthAnimator.reset();
+        highlightHeightAnimator.reset();
         highlightPosAnimator = nullptr;
         highlightWidthAnimator = nullptr;
         highlightHeightAnimator = nullptr;
@@ -1001,7 +966,8 @@ void QQuickListViewPrivate::createHighlight(bool onDestruction)
     if (currentItem) {
         QQuickItem *item = createHighlightItem();
         if (item) {
-            FxListItemSG *newHighlight = new FxListItemSG(item, q, true);
+            std::unique_ptr<FxListItemSG> newHighlight
+                    = std::make_unique<FxListItemSG>(item, q, true);
             newHighlight->trackGeometry(true);
 
             if (autoHighlight) {
@@ -1009,22 +975,22 @@ void QQuickListViewPrivate::createHighlight(bool onDestruction)
                 newHighlight->setPosition(static_cast<FxListItemSG*>(currentItem)->itemPosition());
             }
             const QLatin1String posProp(orient == QQuickListView::Vertical ? "y" : "x");
-            highlightPosAnimator = new QSmoothedAnimation;
+            highlightPosAnimator = std::make_unique<QSmoothedAnimation>();
             highlightPosAnimator->target = QQmlProperty(item, posProp);
             highlightPosAnimator->velocity = highlightMoveVelocity;
             highlightPosAnimator->userDuration = highlightMoveDuration;
 
-            highlightWidthAnimator = new QSmoothedAnimation;
+            highlightWidthAnimator = std::make_unique<QSmoothedAnimation>();
             highlightWidthAnimator->velocity = highlightResizeVelocity;
             highlightWidthAnimator->userDuration = highlightResizeDuration;
             highlightWidthAnimator->target = QQmlProperty(item, QStringLiteral("width"));
 
-            highlightHeightAnimator = new QSmoothedAnimation;
+            highlightHeightAnimator = std::make_unique<QSmoothedAnimation>();
             highlightHeightAnimator->velocity = highlightResizeVelocity;
             highlightHeightAnimator->userDuration = highlightResizeDuration;
             highlightHeightAnimator->target = QQmlProperty(item, QStringLiteral("height"));
 
-            highlight = newHighlight;
+            highlight = std::move(newHighlight);
             changed = true;
         }
     }
@@ -1064,8 +1030,10 @@ void QQuickListViewPrivate::updateHighlight()
 
 void QQuickListViewPrivate::resetHighlightPosition()
 {
-    if (highlight && currentItem)
-        static_cast<FxListItemSG*>(highlight)->setPosition(static_cast<FxListItemSG*>(currentItem)->itemPosition());
+    if (highlight && currentItem) {
+        static_cast<FxListItemSG*>(highlight.get())->setPosition(
+                static_cast<FxListItemSG*>(currentItem)->itemPosition());
+    }
 }
 
 bool QQuickListViewPrivate::movingFromHighlight()
@@ -1100,8 +1068,8 @@ QQuickItem * QQuickListViewPrivate::getSectionItem(const QString &section)
         QQmlComponentPrivate* delegatePriv = QQmlComponentPrivate::get(delegate);
         QObject *nobj = delegate->beginCreate(context);
         if (nobj) {
-            if (delegatePriv->hadRequiredProperties()) {
-                delegate->setInitialProperties(nobj, {{"section", section}});
+            if (delegatePriv->hadTopLevelRequiredProperties()) {
+                delegate->setInitialProperties(nobj, {{QLatin1String("section"), section}});
             } else {
                 context->setContextProperty(QLatin1String("section"), section);
             }
@@ -1573,6 +1541,14 @@ bool QQuickListViewPrivate::hasStickyFooter() const
     return footer && footerPositioning != QQuickListView::InlineFooter;
 }
 
+void QQuickListViewPrivate::initializeComponentItem(QQuickItem *item) const
+{
+    QQuickListViewAttached *attached = static_cast<QQuickListViewAttached *>(
+            qmlAttachedPropertiesObject<QQuickListView>(item));
+    if (attached) // can be null for default components (see createComponentItem)
+        attached->setView(const_cast<QQuickListView*>(q_func()));
+}
+
 void QQuickListViewPrivate::itemGeometryChanged(QQuickItem *item, QQuickGeometryChange change,
                                                 const QRectF &oldGeometry)
 {
@@ -1641,6 +1617,10 @@ void QQuickListViewPrivate::fixup(AxisData &data, qreal minExtent, qreal maxExte
             QQuickItemViewPrivate::fixup(data, minExtent, maxExtent);
         return;
     }
+
+    // update footer if all visible items have been removed
+    if (visibleItems.count() == 0)
+        updateFooter();
 
     correctFlick = false;
     fixupMode = moveReason == Mouse ? fixupMode : Immediate;
@@ -2052,9 +2032,9 @@ QQuickItemViewAttached *QQuickListViewPrivate::getAttachedObject(const QObject *
     Delegates are instantiated as needed and may be destroyed at any time.
     As such, state should \e never be stored in a delegate.
     Delegates are usually parented to ListView's \l {Flickable::contentItem}{contentItem}, but
-    typically depending on whether it's visible in the view or not, the \l parent
+    typically depending on whether it's visible in the view or not, the \e parent
     can change, and sometimes be \c null. Because of that, binding to
-    the parent's properties from within the delegate is \i not recommended. If you
+    the parent's properties from within the delegate is \e not recommended. If you
     want the delegate to fill out the width of the ListView, consider
     using one of the following approaches instead:
 
@@ -2202,7 +2182,7 @@ QQuickItemViewAttached *QQuickListViewPrivate::getAttachedObject(const QObject *
     The following example shows a delegate that animates a spinning rectangle. When
     it is pooled, the animation is temporarily paused:
 
-    \snippet qml/listview/reusabledelegate.qml 0
+    \snippet qml/listview/ReusableDelegate.qml 0
 
     \sa {QML Data Models}, GridView, PathView, {Qt Quick Examples - Views}
 */
@@ -2298,8 +2278,8 @@ QQuickListView::~QQuickListView()
     This property holds the model providing data for the list.
 
     The model provides the set of data that is used to create the items
-    in the view. Models can be created directly in QML using \l ListModel, \l XmlListModel
-    or \l ObjectModel, or provided by C++ model classes. If a C++ model class is
+    in the view. Models can be created directly in QML using \l ListModel,
+    \l ObjectModel, or provided by C++ model classes. If a C++ model class is
     used, it must be a subclass of \l QAbstractItemModel or a simple list.
 
     \sa {qml-data-models}{Data Models}
@@ -2376,7 +2356,38 @@ QQuickListView::~QQuickListView()
 
     \since 5.15
 
-    \sa {Reusing items}, ListView::pooled, ListView::reused
+    \sa {Reusing items}, pooled(), reused()
+*/
+
+/*!
+    \qmlattachedsignal QtQuick::ListView::pooled()
+
+    This signal is emitted after an item has been added to the reuse
+    pool. You can use it to pause ongoing timers or animations inside
+    the item, or free up resources that cannot be reused.
+
+    This signal is emitted only if the \l reuseItems property is \c true.
+
+    \sa {Reusing items}, reuseItems, reused()
+*/
+
+/*!
+    \qmlattachedsignal QtQuick::ListView::reused()
+
+    This signal is emitted after an item has been reused. At this point, the
+    item has been taken out of the pool and placed inside the content view,
+    and the model properties such as \c index and \c row have been updated.
+
+    Other properties that are not provided by the model does not change when an
+    item is reused. You should avoid storing any state inside a delegate, but if
+    you do, manually reset that state on receiving this signal.
+
+    This signal is emitted when the item is reused, and not the first time the
+    item is created.
+
+    This signal is emitted only if the \l reuseItems property is \c true.
+
+    \sa {Reusing items}, reuseItems, pooled()
 */
 
 /*!
@@ -3048,7 +3059,8 @@ void QQuickListView::setFooterPositioning(QQuickListView::FooterPositioning posi
     \list
     \li The view is first created
     \li The view's \l model changes in such a way that the visible delegates are completely replaced
-    \li The view's \l model is \l {QAbstractItemModel::reset()}{reset}, if the model is a QAbstractItemModel subclass
+    \li The view's \l model is \l {QAbstractItemModel::beginResetModel()}{reset}, if the model is a
+        QAbstractItemModel subclass
     \endlist
 
     For example, here is a view that specifies such a transition:
@@ -3393,7 +3405,7 @@ void QQuickListView::viewportMoved(Qt::Orientations orient)
                 pos = viewPos + d->highlightRangeStart;
             if (pos != d->highlight->position()) {
                 d->highlightPosAnimator->stop();
-                static_cast<FxListItemSG*>(d->highlight)->setPosition(pos);
+                static_cast<FxListItemSG*>(d->highlight.get())->setPosition(pos);
             } else {
                 d->updateHighlight();
             }
@@ -3485,7 +3497,7 @@ void QQuickListView::keyPressEvent(QKeyEvent *event)
     QQuickItemView::keyPressEvent(event);
 }
 
-void QQuickListView::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
+void QQuickListView::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     Q_D(QQuickListView);
 
@@ -3504,7 +3516,7 @@ void QQuickListView::geometryChanged(const QRectF &newGeometry, const QRectF &ol
         qreal dy = newGeometry.height() - oldGeometry.height();
         setContentY(contentY() - dy);
     }
-    QQuickItemView::geometryChanged(newGeometry, oldGeometry);
+    QQuickItemView::geometryChange(newGeometry, oldGeometry);
 }
 
 void QQuickListView::initItem(int index, QObject *object)
@@ -3711,8 +3723,10 @@ bool QQuickListViewPrivate::applyInsertionChange(const QQmlChangeSet::Change &ch
                 item = createItem(it.index, QQmlIncubator::Synchronous);
             if (!item)
                 return false;
-            if (it.removedAtIndex)
+            if (it.removedAtIndex) {
+                releaseItem(item, reusableFlag);
                 continue;
+            }
 
             visibleItems.insert(index, item);
             if (index == 0)
@@ -3912,24 +3926,12 @@ QQuickListViewAttached *QQuickListView::qmlAttachedProperties(QObject *obj)
 /*! \internal
     Prevents clicking or dragging through floating headers (QTBUG-74046).
 */
-bool QQuickListViewPrivate::wantsPointerEvent(const QEvent *event)
+bool QQuickListViewPrivate::wantsPointerEvent(const QPointerEvent *event)
 {
     Q_Q(const QQuickListView);
     bool ret = true;
 
-    QPointF pos;
-    // TODO switch not needed in Qt 6: use points().first().position()
-    switch (event->type()) {
-    case QEvent::Wheel:
-        pos = static_cast<const QWheelEvent *>(event)->position();
-        break;
-    case QEvent::MouseButtonPress:
-        pos = static_cast<const QMouseEvent *>(event)->localPos();
-        break;
-    default:
-        break;
-    }
-
+    QPointF pos = event->points().first().position();
     if (!pos.isNull()) {
         if (auto header = q->headerItem()) {
             if (q->headerPositioning() != QQuickListView::InlineHeader &&

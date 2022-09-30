@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 /****************************************************************************
 **
@@ -71,6 +35,8 @@
 **
 ****************************************************************************/
 
+#include <AppKit/AppKit.h>
+
 #include "qcocoaeventdispatcher.h"
 #include "qcocoawindow.h"
 #include "qcocoahelpers.h"
@@ -88,8 +54,6 @@
 #include <qpa/qplatformnativeinterface.h>
 
 #include <QtCore/qdebug.h>
-
-#include <AppKit/AppKit.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -196,7 +160,7 @@ void QCocoaEventDispatcherPrivate::maybeStopCFRunLoopTimer()
     runLoopTimerRef = nullptr;
 }
 
-void QCocoaEventDispatcher::registerTimer(int timerId, int interval, Qt::TimerType timerType, QObject *obj)
+void QCocoaEventDispatcher::registerTimer(int timerId, qint64 interval, Qt::TimerType timerType, QObject *obj)
 {
 #ifndef QT_NO_DEBUG
     if (timerId < 1 || interval < 0 || !obj) {
@@ -286,13 +250,6 @@ void QCocoaEventDispatcher::unregisterSocketNotifier(QSocketNotifier *notifier)
 {
     Q_D(QCocoaEventDispatcher);
     d->cfSocketNotifier.unregisterSocketNotifier(notifier);
-}
-
-bool QCocoaEventDispatcher::hasPendingEvents()
-{
-    extern uint qGlobalPostedEventsCount();
-    extern bool qt_is_gui_used; //qapplication.cpp
-    return qGlobalPostedEventsCount() || (qt_is_gui_used && !CFRunLoopIsWaiting(CFRunLoopGetMain()));
 }
 
 static bool isUserInputEvent(NSEvent* event)
@@ -504,6 +461,11 @@ bool QCocoaEventDispatcher::processEvents(QEventLoop::ProcessEventsFlags flags)
                         retVal = true;
                     }
                 }
+
+                // Clean up the modal session list, call endModalSession.
+                if (d->cleanupModalSessionsNeeded)
+                    d->cleanupModalSessions();
+
             } while (!d->interrupt && event);
 
             if ((d->processEventsFlags & QEventLoop::EventLoopExec) == 0) {
@@ -690,7 +652,7 @@ bool QCocoaEventDispatcherPrivate::hasModalSession() const
 void QCocoaEventDispatcherPrivate::cleanupModalSessions()
 {
     // Go through the list of modal sessions, and end those
-    // that no longer has a window assosiated; no window means
+    // that no longer has a window associated; no window means
     // the session has logically ended. The reason we wait like
     // this to actually end the sessions for real (rather than at the
     // point they were marked as stopped), is that ending a session
@@ -963,9 +925,6 @@ void QCocoaEventDispatcher::interrupt()
     // events on the floor before we get a chance to reestablish a new session.
     d->cancelWaitForMoreEvents();
 }
-
-void QCocoaEventDispatcher::flush()
-{ }
 
 // QTBUG-56746: The behavior of processEvents() has been changed to not clear
 // the interrupt flag. Use this function to clear it.

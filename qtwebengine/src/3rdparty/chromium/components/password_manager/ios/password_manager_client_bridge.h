@@ -7,6 +7,7 @@
 
 #import <Foundation/Foundation.h>
 #include <memory>
+#include <string>
 
 #include "components/password_manager/core/browser/leak_detection_dialog_utils.h"
 
@@ -16,6 +17,10 @@ namespace password_manager {
 class PasswordFormManagerForUI;
 class PasswordManager;
 }  // namespace password_manager
+
+namespace safe_browsing {
+enum class WarningAction;
+}  // namespace safe_browsing
 
 namespace web {
 class WebState;
@@ -49,9 +54,16 @@ using password_manager::CredentialLeakType;
 // This also causes the UI to be dismissed.
 - (void)removePasswordInfoBarManualFallback:(BOOL)manual;
 
-// Shows Password Breach for |URL| and |leakType|.
+// Shows Password Breach for |URL|, |leakType|, and |username|.
 - (void)showPasswordBreachForLeakType:(CredentialLeakType)leakType
-                                  URL:(const GURL&)URL;
+                                  URL:(const GURL&)URL
+                             username:(const std::u16string&)username;
+
+// Shows Password Protection warning with |warningText|. |completion| should be
+// called when the UI is dismissed with the user's |action|.
+- (void)showPasswordProtectionWarning:(NSString*)warningText
+                           completion:(void (^)(safe_browsing::WarningAction))
+                                          completion;
 
 @end
 

@@ -850,11 +850,6 @@ static const aom_cdf_prob default_delta_lf_cdf[CDF_SIZE(DELTA_LF_PROBS + 1)] = {
   AOM_CDF4(28160, 32120, 32677)
 };
 
-// FIXME(someone) need real defaults here
-static const aom_cdf_prob default_seg_tree_cdf[CDF_SIZE(MAX_SEGMENTS)] = {
-  AOM_CDF8(4096, 8192, 12288, 16384, 20480, 24576, 28672)
-};
-
 static const aom_cdf_prob
     default_segment_pred_cdf[SEG_TEMPORAL_PRED_CTXS][CDF_SIZE(2)] = {
       { AOM_CDF2(128 * 128) }, { AOM_CDF2(128 * 128) }, { AOM_CDF2(128 * 128) }
@@ -1083,7 +1078,7 @@ int av1_fast_palette_color_index_context(const uint8_t *color_map, int stride,
 #undef NUM_PALETTE_NEIGHBORS
 #undef MAX_COLOR_CONTEXT_HASH
 
-static void init_mode_probs(FRAME_CONTEXT *fc) {
+void av1_init_mode_probs(FRAME_CONTEXT *fc) {
   av1_copy(fc->palette_y_size_cdf, default_palette_y_size_cdf);
   av1_copy(fc->palette_uv_size_cdf, default_palette_uv_size_cdf);
   av1_copy(fc->palette_y_color_index_cdf, default_palette_y_color_index_cdf);
@@ -1114,7 +1109,6 @@ static void init_mode_probs(FRAME_CONTEXT *fc) {
   av1_copy(fc->wedge_interintra_cdf, default_wedge_interintra_cdf);
   av1_copy(fc->interintra_mode_cdf, default_interintra_mode_cdf);
   av1_copy(fc->seg.pred_cdf, default_segment_pred_cdf);
-  av1_copy(fc->seg.tree_cdf, default_seg_tree_cdf);
   av1_copy(fc->filter_intra_cdfs, default_filter_intra_cdfs);
   av1_copy(fc->filter_intra_mode_cdf, default_filter_intra_mode_cdf);
   av1_copy(fc->switchable_restore_cdf, default_switchable_restore_cdf);
@@ -1193,9 +1187,10 @@ void av1_setup_past_independence(AV1_COMMON *cm) {
   // Features disabled, 0, with delta coding (Default state).
   av1_clearall_segfeatures(&cm->seg);
 
-  if (cm->cur_frame->seg_map)
+  if (cm->cur_frame->seg_map) {
     memset(cm->cur_frame->seg_map, 0,
-           (cm->mi_params.mi_rows * cm->mi_params.mi_cols));
+           (cm->cur_frame->mi_rows * cm->cur_frame->mi_cols));
+  }
 
   // reset mode ref deltas
   av1_set_default_ref_deltas(cm->cur_frame->ref_deltas);
@@ -1203,7 +1198,7 @@ void av1_setup_past_independence(AV1_COMMON *cm) {
   set_default_lf_deltas(&cm->lf);
 
   av1_default_coef_probs(cm);
-  init_mode_probs(cm->fc);
+  av1_init_mode_probs(cm->fc);
   av1_init_mv_probs(cm);
   cm->fc->initialized = 1;
   av1_setup_frame_contexts(cm);

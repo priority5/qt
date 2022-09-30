@@ -13,6 +13,7 @@
 
 #include <vector>
 
+#include "rtc_base/event.h"
 #include "rtc_base/gunit.h"
 
 #import "components/audio/RTCAudioSession+Private.h"
@@ -113,25 +114,9 @@
 
 @interface RTCAudioSessionTest : NSObject
 
-- (void)testLockForConfiguration;
-
 @end
 
 @implementation RTCAudioSessionTest
-
-- (void)testLockForConfiguration {
-  RTC_OBJC_TYPE(RTCAudioSession) *session = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
-
-  for (size_t i = 0; i < 2; i++) {
-    [session lockForConfiguration];
-    EXPECT_TRUE(session.isLocked);
-  }
-  for (size_t i = 0; i < 2; i++) {
-    EXPECT_TRUE(session.isLocked);
-    [session unlockForConfiguration];
-  }
-  EXPECT_FALSE(session.isLocked);
-}
 
 - (void)testAddAndRemoveDelegates {
   RTC_OBJC_TYPE(RTCAudioSession) *session = [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
@@ -246,16 +231,17 @@ OCMLocation *OCMMakeLocation(id testCase, const char *fileCString, int line){
     __autoreleasing NSError **retError;
     [invocation getArgument:&retError atIndex:4];
     *retError = [NSError errorWithDomain:@"AVAudioSession"
-                                    code:AVAudioSessionErrorInsufficientPriority
+                                    code:AVAudioSessionErrorCodeCannotInterruptOthers
                                 userInfo:nil];
     BOOL failure = NO;
     [invocation setReturnValue:&failure];
   };
 
   id mockAVAudioSession = OCMPartialMock([AVAudioSession sharedInstance]);
-  OCMStub([[mockAVAudioSession ignoringNonObjectArgs]
-      setActive:YES withOptions:0 error:((NSError __autoreleasing **)[OCMArg anyPointer])]).
-      andDo(setActiveBlock);
+  OCMStub([[mockAVAudioSession ignoringNonObjectArgs] setActive:YES
+                                                    withOptions:0
+                                                          error:([OCMArg anyObjectRef])])
+      .andDo(setActiveBlock);
 
   id mockAudioSession = OCMPartialMock([RTC_OBJC_TYPE(RTCAudioSession) sharedInstance]);
   OCMStub([mockAudioSession session]).andReturn(mockAVAudioSession);
@@ -263,12 +249,12 @@ OCMLocation *OCMMakeLocation(id testCase, const char *fileCString, int line){
   RTC_OBJC_TYPE(RTCAudioSession) *audioSession = mockAudioSession;
   EXPECT_EQ(0, audioSession.activationCount);
   [audioSession lockForConfiguration];
-  EXPECT_TRUE([audioSession checkLock:nil]);
   // configureWebRTCSession is forced to fail in the above mock interface,
   // so activationCount should remain 0
-  OCMExpect([[mockAVAudioSession ignoringNonObjectArgs]
-      setActive:YES withOptions:0 error:((NSError __autoreleasing **)[OCMArg anyPointer])]).
-      andDo(setActiveBlock);
+  OCMExpect([[mockAVAudioSession ignoringNonObjectArgs] setActive:YES
+                                                      withOptions:0
+                                                            error:([OCMArg anyObjectRef])])
+      .andDo(setActiveBlock);
   OCMExpect([mockAudioSession session]).andReturn(mockAVAudioSession);
   EXPECT_FALSE([audioSession configureWebRTCSession:&error]);
   EXPECT_EQ(0, audioSession.activationCount);
@@ -281,6 +267,41 @@ OCMLocation *OCMMakeLocation(id testCase, const char *fileCString, int line){
   OCMVerify([mockAudioSession session]);
   OCMVerify([[mockAVAudioSession ignoringNonObjectArgs] setActive:YES withOptions:0 error:&error]);
   OCMVerify([[mockAVAudioSession ignoringNonObjectArgs] setActive:NO withOptions:0 error:&error]);
+
+  [mockAVAudioSession stopMocking];
+  [mockAudioSession stopMocking];
+}
+
+- (void)testConfigureWebRTCSessionWithoutLocking {
+  NSError *error = nil;
+
+  id mockAVAudioSession = OCMPartialMock([AVAudioSession sharedInstance]);
+  id mockAudioSession = OCMPartialMock([RTC_OBJC_TYPE(RTCAudioSession) sharedInstance]);
+  OCMStub([mockAudioSession session]).andReturn(mockAVAudioSession);
+
+  RTC_OBJC_TYPE(RTCAudioSession) *audioSession = mockAudioSession;
+
+  std::unique_ptr<rtc::Thread> thread = rtc::Thread::Create();
+  EXPECT_TRUE(thread);
+  EXPECT_TRUE(thread->Start());
+
+  rtc::Event waitLock;
+  rtc::Event waitCleanup;
+  constexpr int timeoutMs = 5000;
+  thread->PostTask([audioSession, &waitLock, &waitCleanup] {
+    [audioSession lockForConfiguration];
+    waitLock.Set();
+    waitCleanup.Wait(timeoutMs);
+    [audioSession unlockForConfiguration];
+  });
+
+  waitLock.Wait(timeoutMs);
+  [audioSession setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:0 error:&error];
+  EXPECT_TRUE(error != nil);
+  EXPECT_EQ(error.domain, kRTCAudioSessionErrorDomain);
+  EXPECT_EQ(error.code, kRTCAudioSessionErrorLockRequired);
+  waitCleanup.Set();
+  thread->Stop();
 
   [mockAVAudioSession stopMocking];
   [mockAudioSession stopMocking];
@@ -314,11 +335,6 @@ class AudioSessionTest : public ::testing::Test {
   }
 };
 
-TEST_F(AudioSessionTest, LockForConfiguration) {
-  RTCAudioSessionTest *test = [[RTCAudioSessionTest alloc] init];
-  [test testLockForConfiguration];
-}
-
 TEST_F(AudioSessionTest, AddAndRemoveDelegates) {
   RTCAudioSessionTest *test = [[RTCAudioSessionTest alloc] init];
   [test testAddAndRemoveDelegates];
@@ -347,6 +363,11 @@ TEST_F(AudioSessionTest, AudioSessionActivation) {
 TEST_F(AudioSessionTest, ConfigureWebRTCSession) {
   RTCAudioSessionTest *test = [[RTCAudioSessionTest alloc] init];
   [test testConfigureWebRTCSession];
+}
+
+TEST_F(AudioSessionTest, ConfigureWebRTCSessionWithoutLocking) {
+  RTCAudioSessionTest *test = [[RTCAudioSessionTest alloc] init];
+  [test testConfigureWebRTCSessionWithoutLocking];
 }
 
 TEST_F(AudioSessionTest, AudioVolumeDidNotify) {

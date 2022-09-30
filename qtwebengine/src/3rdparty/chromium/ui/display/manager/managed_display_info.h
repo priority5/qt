@@ -90,11 +90,14 @@ class DISPLAY_MANAGER_EXPORT ManagedDisplayInfo {
   // where [] are optional:
   // - |origin| is given in x+y- format.
   // - |device_scale_factor| is either 2 or 1 (or empty).
-  // - properties can combination of 'o', which adds default overscan insets
-  //   (5%), and one rotation property where 'r' is 90 degree clock-wise
-  //   (to the 'r'ight) 'u' is 180 degrees ('u'pside-down) and 'l' is
-  //   270 degrees (to the 'l'eft).
-  // - zoom-factor is floating value, e.g. @1.5 or @1.25.
+  // - |properties| can combination of:
+  //     - 'o', which adds default overscan insets (5%)
+  //     - 'h', which adds an HDR color space
+  //     - one rotation property, either:
+  //       - 'r' is 90 degree clock-wise (to the 'r'ight)
+  //       - 'u' is 180 degrees ('u'pside-down)
+  //       - 'l' is 270 degrees (to the 'l'eft).
+  // - |zoom-factor| is floating value, e.g. @1.5 or @1.25.
   // - |resolution list| is the list of size that is given in
   //   |width x height [% refresh_rate]| separated by '|'.
   //
@@ -201,10 +204,6 @@ class DISPLAY_MANAGER_EXPORT ManagedDisplayInfo {
 
   // Returns the rotation set by a given |source|.
   Display::Rotation GetRotation(Display::RotationSource source) const;
-
-  // Returns a measure of density relative to a display with 1.0 DSF. Unlike the
-  // effective DSF, this is independent from the UI scale.
-  float GetDensityRatio() const;
 
   // Returns the ui scale and device scale factor actually used to create
   // display that chrome sees. This is |device_scale_factor| x |zoom_factor_|.

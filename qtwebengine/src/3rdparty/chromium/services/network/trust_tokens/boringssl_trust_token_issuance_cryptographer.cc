@@ -29,13 +29,23 @@ BoringsslTrustTokenIssuanceCryptographer::
     ~BoringsslTrustTokenIssuanceCryptographer() = default;
 
 bool BoringsslTrustTokenIssuanceCryptographer::Initialize(
+    mojom::TrustTokenProtocolVersion issuer_configured_version,
     int issuer_configured_batch_size) {
   if (!base::IsValueInRangeForNumericType<size_t>(issuer_configured_batch_size))
     return false;
 
+  const TRUST_TOKEN_METHOD* method = nullptr;
+  switch (issuer_configured_version) {
+    case mojom::TrustTokenProtocolVersion::kTrustTokenV3Pmb:
+      method = TRUST_TOKEN_experiment_v2_pmb();
+      break;
+    case mojom::TrustTokenProtocolVersion::kTrustTokenV3Voprf:
+      method = TRUST_TOKEN_experiment_v2_voprf();
+      break;
+  }
+
   ctx_ = bssl::UniquePtr<TRUST_TOKEN_CLIENT>(TRUST_TOKEN_CLIENT_new(
-      TRUST_TOKEN_experiment_v1(),
-      static_cast<size_t>(issuer_configured_batch_size)));
+      method, static_cast<size_t>(issuer_configured_batch_size)));
   return !!ctx_;
 }
 
@@ -55,16 +65,16 @@ bool BoringsslTrustTokenIssuanceCryptographer::AddKey(base::StringPiece key) {
   return true;
 }
 
-base::Optional<std::string>
+absl::optional<std::string>
 BoringsslTrustTokenIssuanceCryptographer::BeginIssuance(size_t num_tokens) {
   if (!ctx_)
-    return base::nullopt;
+    return absl::nullopt;
 
   ScopedBoringsslBytes raw_issuance_request;
   if (!TRUST_TOKEN_CLIENT_begin_issuance(
           ctx_.get(), raw_issuance_request.mutable_ptr(),
           raw_issuance_request.mutable_len(), num_tokens)) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   return base::Base64Encode(raw_issuance_request.as_span());

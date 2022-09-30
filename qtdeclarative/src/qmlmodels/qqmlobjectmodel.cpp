@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qqmlobjectmodel_p.h"
 
@@ -75,15 +39,15 @@ public:
     QQmlObjectModelPrivate() : QObjectPrivate(), moveId(0) {}
 
     static void children_append(QQmlListProperty<QObject> *prop, QObject *item) {
-        int index = static_cast<QQmlObjectModelPrivate *>(prop->data)->children.count();
+        qsizetype index = static_cast<QQmlObjectModelPrivate *>(prop->data)->children.count();
         static_cast<QQmlObjectModelPrivate *>(prop->data)->insert(index, item);
     }
 
-    static int children_count(QQmlListProperty<QObject> *prop) {
+    static qsizetype children_count(QQmlListProperty<QObject> *prop) {
         return static_cast<QQmlObjectModelPrivate *>(prop->data)->children.count();
     }
 
-    static QObject *children_at(QQmlListProperty<QObject> *prop, int index) {
+    static QObject *children_at(QQmlListProperty<QObject> *prop, qsizetype index) {
         return static_cast<QQmlObjectModelPrivate *>(prop->data)->children.at(index).item;
     }
 
@@ -91,7 +55,7 @@ public:
         static_cast<QQmlObjectModelPrivate *>(prop->data)->clear();
     }
 
-    static void children_replace(QQmlListProperty<QObject> *prop, int index, QObject *item) {
+    static void children_replace(QQmlListProperty<QObject> *prop, qsizetype index, QObject *item) {
         static_cast<QQmlObjectModelPrivate *>(prop->data)->replace(index, item);
     }
 
@@ -175,7 +139,8 @@ public:
 
     void clear() {
         Q_Q(QQmlObjectModel);
-        for (const Item &child : qAsConst(children))
+        const auto copy = children;
+        for (const Item &child : copy)
             emit q->destroyingItem(child.item);
         remove(0, children.count());
     }
@@ -190,6 +155,8 @@ public:
     uint moveId;
     QList<Item> children;
 };
+
+Q_DECLARE_TYPEINFO(QQmlObjectModelPrivate::Item, Q_PRIMITIVE_TYPE);
 
 
 /*!
@@ -393,7 +360,7 @@ void QQmlObjectModel::insert(int index, QObject *object)
     \qmlmethod QtQml.Models::ObjectModel::move(int from, int to, int n = 1)
     \since 5.6
 
-    Moves \e n items \a from one position \a to another.
+    Moves \a n items \a from one position \a to another.
 
     The from and to ranges must exist; for example, to move the first 3 items
     to the end of the model:
@@ -420,7 +387,7 @@ void QQmlObjectModel::move(int from, int to, int n)
     \qmlmethod QtQml.Models::ObjectModel::remove(int index, int n = 1)
     \since 5.6
 
-    Removes \e n items at \a index from the model.
+    Removes \a n items at \a index from the model.
 
     \sa clear()
 */
@@ -446,6 +413,17 @@ void QQmlObjectModel::clear()
 {
     Q_D(QQmlObjectModel);
     d->clear();
+}
+
+bool QQmlInstanceModel::setRequiredProperty(int index, const QString &name, const QVariant &value)
+{
+    Q_UNUSED(index);
+    Q_UNUSED(name);
+    Q_UNUSED(value);
+    // The view should not call this function, unless
+    // it's actually handled in a subclass.
+    Q_UNREACHABLE();
+    return false;
 }
 
 QT_END_NAMESPACE

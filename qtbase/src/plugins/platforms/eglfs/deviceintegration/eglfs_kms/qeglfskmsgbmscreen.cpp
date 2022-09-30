@@ -1,48 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Copyright (C) 2015 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
-** Copyright (C) 2016 Pelagicore AG
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// Copyright (C) 2015 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
+// Copyright (C) 2016 Pelagicore AG
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
-#include "qeglfskmsgbmscreen.h"
-#include "qeglfskmsgbmdevice.h"
-#include "qeglfskmsgbmcursor.h"
-#include "qeglfsintegration_p.h"
+#include "qeglfskmsgbmscreen_p.h"
+#include "qeglfskmsgbmdevice_p.h"
+#include "qeglfskmsgbmcursor_p.h"
+#include <private/qeglfsintegration_p.h>
 
 #include <QtCore/QLoggingCategory>
 
@@ -95,8 +59,9 @@ QEglFSKmsGbmScreen::FrameBuffer *QEglFSKmsGbmScreen::framebufferForBufferObject(
     uint32_t offsets[4] = { 0 };
     uint32_t pixelFormat = gbmFormatToDrmFormat(gbm_bo_get_format(bo));
 
-    QScopedPointer<FrameBuffer> fb(new FrameBuffer);
-    qCDebug(qLcEglfsKmsDebug, "Adding FB, size %ux%u, DRM format 0x%x", width, height, pixelFormat);
+    auto fb = std::make_unique<FrameBuffer>();
+    qCDebug(qLcEglfsKmsDebug, "Adding FB, size %ux%u, DRM format 0x%x, stride %u, handle %u",
+            width, height, pixelFormat, strides[0], handles[0]);
 
     int ret = drmModeAddFB2(device()->fd(), width, height, pixelFormat,
                             handles, strides, offsets, &fb->fb, 0);
@@ -106,8 +71,8 @@ QEglFSKmsGbmScreen::FrameBuffer *QEglFSKmsGbmScreen::framebufferForBufferObject(
         return nullptr;
     }
 
-    gbm_bo_set_user_data(bo, fb.data(), bufferDestroyedHandler);
-    return fb.take();
+    gbm_bo_set_user_data(bo, fb.get(), bufferDestroyedHandler);
+    return fb.release();
 }
 
 QEglFSKmsGbmScreen::QEglFSKmsGbmScreen(QEglFSKmsDevice *device, const QKmsOutput &output, bool headless)
@@ -169,7 +134,7 @@ gbm_surface *QEglFSKmsGbmScreen::createSurface(EGLConfig eglConfig)
                                                    rawGeometry().width(),
                                                    rawGeometry().height(),
                                                    native_format,
-                                                   GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+                                                   gbmFlags());
                 if (m_gbm_surface)
                     m_output.drm_format = gbmFormatToDrmFormat(native_format);
             }
@@ -186,7 +151,7 @@ gbm_surface *QEglFSKmsGbmScreen::createSurface(EGLConfig eglConfig)
                                            rawGeometry().width(),
                                            rawGeometry().height(),
                                            gbmFormat,
-                                           GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+                                           gbmFlags());
         }
     }
     return m_gbm_surface; // not owned, gets destroyed in QEglFSKmsGbmIntegration::destroyNativeWindow() via QEglFSKmsGbmWindow::invalidateSurface()
@@ -198,7 +163,7 @@ void QEglFSKmsGbmScreen::resetSurface()
 }
 
 void QEglFSKmsGbmScreen::initCloning(QPlatformScreen *screenThisScreenClones,
-                                     const QVector<QPlatformScreen *> &screensCloningThisScreen)
+                                     const QList<QPlatformScreen *> &screensCloningThisScreen)
 {
     // clone destinations need to know the clone source
     const bool clonesAnother = screenThisScreenClones != nullptr;
@@ -359,20 +324,21 @@ void QEglFSKmsGbmScreen::flip()
         if (d.screen != this) {
             d.screen->ensureModeSet(fb->fb);
             d.cloneFlipPending = true;
+            QKmsOutput &destOutput(d.screen->output());
 
             if (device()->hasAtomicSupport()) {
 #if QT_CONFIG(drm_atomic)
                 drmModeAtomicReq *request = device()->threadLocalAtomicRequest();
                 if (request) {
-                    drmModeAtomicAddProperty(request, d.screen->output().eglfs_plane->id,
-                                                      d.screen->output().eglfs_plane->framebufferPropertyId, fb->fb);
-                    drmModeAtomicAddProperty(request, d.screen->output().eglfs_plane->id,
-                                                      d.screen->output().eglfs_plane->crtcPropertyId, op.crtc_id);
+                    drmModeAtomicAddProperty(request, destOutput.eglfs_plane->id,
+                                                      destOutput.eglfs_plane->framebufferPropertyId, fb->fb);
+                    drmModeAtomicAddProperty(request, destOutput.eglfs_plane->id,
+                                                      destOutput.eglfs_plane->crtcPropertyId, destOutput.crtc_id);
                 }
 #endif
             } else {
                 int ret = drmModePageFlip(fd,
-                                          d.screen->output().crtc_id,
+                                          destOutput.crtc_id,
                                           fb->fb,
                                           DRM_MODE_PAGE_FLIP_EVENT,
                                           d.screen);

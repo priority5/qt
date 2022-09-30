@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <type_traits>
 
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_piece.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -38,15 +39,15 @@ TEST(CheckedContiguousRange, Constructor_String) {
 TEST(CheckedContiguousRange, Constructor_Array) {
   static constexpr int array[] = {1, 2, 3, 4, 5};
   constexpr CheckedContiguousRange<const int[5]> range(array);
-  static_assert(data(array) == range.data(), "");
-  static_assert(size(array) == range.size(), "");
+  static_assert(std::data(array) == range.data(), "");
+  static_assert(std::size(array) == range.size(), "");
 }
 
 TEST(CheckedContiguousRange, Constructor_StdArray) {
   static constexpr std::array<int, 5> array = {1, 2, 3, 4, 5};
   constexpr CheckedContiguousRange<const std::array<int, 5>> range(array);
   static_assert(data(array) == range.data(), "");
-  static_assert(base::size(array) == range.size(), "");
+  static_assert(std::size(array) == range.size(), "");
 }
 
 TEST(CheckedContiguousRange, Constructor_StringPiece) {
@@ -59,8 +60,8 @@ TEST(CheckedContiguousRange, Constructor_StringPiece) {
 TEST(CheckedContiguousRange, Constructor_InitializerList) {
   static constexpr std::initializer_list<int> il = {1, 2, 3, 4, 5};
   constexpr CheckedContiguousRange<const std::initializer_list<int>> range(il);
-  static_assert(base::data(il) == range.data(), "");
-  static_assert(base::size(il) == range.size(), "");
+  static_assert(std::data(il) == range.data(), "");
+  static_assert(std::size(il) == range.size(), "");
 }
 
 TEST(CheckedContiguousRange, Constructor_Copy) {
@@ -151,9 +152,9 @@ TEST(CheckedContiguousRange, Mutable_Data) {
   std::vector<int> vector = {3, 1, 4, 2, 5};
   CheckedContiguousRange<std::vector<int>> range(vector);
 
-  EXPECT_FALSE(std::is_sorted(vector.begin(), vector.end()));
+  EXPECT_FALSE(ranges::is_sorted(vector));
   std::sort(range.data(), range.data() + range.size());
-  EXPECT_TRUE(std::is_sorted(vector.begin(), vector.end()));
+  EXPECT_TRUE(ranges::is_sorted(vector));
 }
 
 TEST(CheckedContiguousRange, DataSizeEmpty_Constexpr) {
@@ -161,7 +162,7 @@ TEST(CheckedContiguousRange, DataSizeEmpty_Constexpr) {
   constexpr CheckedContiguousRange<const std::array<int, 0>> range(array);
   static_assert(data(array) == range.data(), "");
   static_assert(data(array) == range.cdata(), "");
-  static_assert(base::size(array) == range.size(), "");
+  static_assert(std::size(array) == range.size(), "");
   static_assert(range.empty(), "");
 }
 

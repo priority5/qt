@@ -8,7 +8,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/task_environment.h"
@@ -36,6 +36,10 @@ constexpr char kTestBluetoothDisplayName[] = "device_name";
 class MockObserver : public FidoRequestHandlerBase::Observer {
  public:
   MockObserver() = default;
+
+  MockObserver(const MockObserver&) = delete;
+  MockObserver& operator=(const MockObserver&) = delete;
+
   ~MockObserver() override = default;
 
   MOCK_METHOD1(OnTransportAvailabilityEnumerated,
@@ -48,17 +52,15 @@ class MockObserver : public FidoRequestHandlerBase::Observer {
   MOCK_METHOD1(FidoAuthenticatorRemoved, void(base::StringPiece device_id));
   MOCK_CONST_METHOD0(SupportsPIN, bool());
   MOCK_METHOD2(CollectPIN,
-               void(base::Optional<int>,
-                    base::OnceCallback<void(std::string)>));
+               void(CollectPINOptions,
+                    base::OnceCallback<void(std::u16string)>));
+  MOCK_METHOD0(OnForcePINChange, void());
   MOCK_METHOD1(StartBioEnrollment, void(base::OnceClosure));
   MOCK_METHOD1(OnSampleCollected, void(int));
   MOCK_METHOD0(FinishCollectToken, void());
   MOCK_METHOD1(OnRetryUserVerification, void(int));
   MOCK_METHOD0(OnInternalUserVerificationLocked, void());
   MOCK_METHOD1(SetMightCreateResidentCredential, void(bool));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockObserver);
 };
 
 class FakeFidoRequestHandlerBase : public FidoRequestHandlerBase {
@@ -71,6 +73,10 @@ class FakeFidoRequestHandlerBase : public FidoRequestHandlerBase {
     set_observer(observer);
     Start();
   }
+
+  FakeFidoRequestHandlerBase(const FakeFidoRequestHandlerBase&) = delete;
+  FakeFidoRequestHandlerBase& operator=(const FakeFidoRequestHandlerBase&) =
+      delete;
 
   void SimulateFidoRequestHandlerHasAuthenticator(bool simulate_authenticator) {
     simulate_authenticator_ = simulate_authenticator;
@@ -85,8 +91,6 @@ class FakeFidoRequestHandlerBase : public FidoRequestHandlerBase {
   }
 
   bool simulate_authenticator_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeFidoRequestHandlerBase);
 };
 
 }  // namespace
@@ -138,6 +142,7 @@ class FidoBleAdapterManagerTest : public ::testing::Test {
   std::unique_ptr<FakeFidoRequestHandlerBase> fake_request_handler_;
   std::unique_ptr<BluetoothAdapterFactory::GlobalValuesForTesting>
       bluetooth_config_;
+  FidoRequestHandlerBase::ScopedAlwaysAllowBLECalls always_allow_ble_calls_;
 };
 
 TEST_F(FidoBleAdapterManagerTest, AdapterNotPresent) {

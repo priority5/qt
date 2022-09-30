@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qdbusviewer.h"
 #include "qdbusmodel.h"
@@ -32,14 +7,7 @@
 #include "propertydialog.h"
 #include "logviewer.h"
 
-
-#include <QtCore/QStringListModel>
-#include <QtCore/QMetaProperty>
-#include <QtCore/QSettings>
-#include <QtGui/QKeyEvent>
 #include <QtWidgets/QLineEdit>
-#include <QtWidgets/QAction>
-#include <QtWidgets/QShortcut>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QSplitter>
 #include <QtWidgets/QInputDialog>
@@ -48,9 +16,18 @@
 #include <QtWidgets/QTableWidget>
 #include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QHeaderView>
+
 #include <QtDBus/QDBusConnectionInterface>
 #include <QtDBus/QDBusInterface>
 #include <QtDBus/QDBusMetaType>
+
+#include <QtGui/QAction>
+#include <QtGui/QKeyEvent>
+#include <QtGui/QShortcut>
+
+#include <QtCore/QStringListModel>
+#include <QtCore/QMetaProperty>
+#include <QtCore/QSettings>
 
 #include <private/qdbusutil_p.h>
 
@@ -61,7 +38,7 @@ public:
         : QDBusModel(service, connection)
     {}
 
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override
     {
         if (role == Qt::FontRole && itemType(index) == InterfaceItem) {
             QFont f;
@@ -139,6 +116,7 @@ QDBusViewer::QDBusViewer(const QDBusConnection &connection, QWidget *parent)  :
 
     QWidget *servicesWidget = new QWidget;
     QVBoxLayout *servicesLayout = new QVBoxLayout(servicesWidget);
+    servicesLayout->setContentsMargins(QMargins());
     servicesLayout->addWidget(serviceFilterLine);
     servicesLayout->addWidget(servicesView);
     splitter->addWidget(servicesWidget);
@@ -162,8 +140,7 @@ QDBusViewer::QDBusViewer(const QDBusConnection &connection, QWidget *parent)  :
         logError(QLatin1String("Cannot connect to D-Bus: ") + c.lastError().message());
     }
 
-    objectPathRegExp.setMinimal(true);
-
+    objectPathRegExp.setPatternOptions(QRegularExpression::InvertedGreedinessOption);
 }
 
 static inline QString topSplitterStateKey() { return QStringLiteral("topSplitterState"); }
@@ -256,7 +233,7 @@ void QDBusViewer::getProperty(const BusSignature &sig)
     QList<QVariant> arguments;
     arguments << sig.mInterface << sig.mName;
     message.setArguments(arguments);
-    c.callWithCallback(message, this, SLOT(dumpMessage(QDBusMessage)));
+    c.callWithCallback(message, this, SLOT(dumpMessage(QDBusMessage)), SLOT(dumpError(QDBusError)));
 }
 
 void QDBusViewer::setProperty(const BusSignature &sig)
@@ -273,7 +250,7 @@ void QDBusViewer::setProperty(const BusSignature &sig)
         return;
 
     QVariant value = input;
-    if (!value.convert(prop.type())) {
+    if (!value.convert(prop.metaType())) {
         QMessageBox::warning(this, tr("Unable to marshall"),
                 tr("Value conversion failed, unable to set property"));
         return;
@@ -283,18 +260,15 @@ void QDBusViewer::setProperty(const BusSignature &sig)
     QList<QVariant> arguments;
     arguments << sig.mInterface << sig.mName << QVariant::fromValue(QDBusVariant(value));
     message.setArguments(arguments);
-    c.callWithCallback(message, this, SLOT(dumpMessage(QDBusMessage)));
-
+    c.callWithCallback(message, this, SLOT(dumpMessage(QDBusMessage)), SLOT(dumpError(QDBusError)));
 }
 
 static QString getDbusSignature(const QMetaMethod& method)
 {
     // create a D-Bus type signature from QMetaMethod's parameters
     QString sig;
-    for (int i = 0; i < method.parameterTypes().count(); ++i) {
-        int type = QMetaType::type(method.parameterTypes().at(i));
-        sig.append(QString::fromLatin1(QDBusMetaType::typeToSignature(type)));
-    }
+    for (const auto &type : method.parameterTypes())
+        sig.append(QString::fromLatin1(QDBusMetaType::typeToSignature(QMetaType::fromName(type))));
     return sig;
 }
 
@@ -329,7 +303,7 @@ void QDBusViewer::callMethod(const BusSignature &sig)
         if (paramType.endsWith('&'))
             continue; // ignore OUT parameters
 
-        int type = QMetaType::type(paramType);
+        const int type = QMetaType::fromName(paramType).id();
         dialog.addProperty(QString::fromLatin1(paramNames.value(i)), type);
         types.append(type);
     }
@@ -348,9 +322,10 @@ void QDBusViewer::callMethod(const BusSignature &sig)
     for (int i = 0; i < args.count(); ++i) {
         QVariant a = args.at(i);
         int desttype = types.at(i);
-        if (desttype < int(QMetaType::User) && desttype != int(QVariant::Map)
-            && a.canConvert(desttype)) {
-            args[i].convert(desttype);
+        if (desttype < int(QMetaType::User) && desttype != qMetaTypeId<QVariantMap>()) {
+            const QMetaType metaType(desttype);
+            if (a.canConvert(metaType))
+                args[i].convert(metaType);
         }
         // Special case - convert a value to a QDBusVariant if the
         // interface wants a variant
@@ -361,7 +336,7 @@ void QDBusViewer::callMethod(const BusSignature &sig)
     QDBusMessage message = QDBusMessage::createMethodCall(sig.mService, sig.mPath, sig.mInterface,
             sig.mName);
     message.setArguments(args);
-    c.callWithCallback(message, this, SLOT(dumpMessage(QDBusMessage)));
+    c.callWithCallback(message, this, SLOT(dumpMessage(QDBusMessage)), SLOT(dumpError(QDBusError)));
 }
 
 void QDBusViewer::showContextMenu(const QPoint &point)
@@ -427,10 +402,13 @@ void QDBusViewer::showContextMenu(const QPoint &point)
 
 void QDBusViewer::connectionRequested(const BusSignature &sig)
 {
-    if (!c.connect(sig.mService, QString(), sig.mInterface, sig.mName, this,
+    if (c.connect(sig.mService, QString(), sig.mInterface, sig.mName, this,
               SLOT(dumpMessage(QDBusMessage)))) {
+        logMessage(tr("Connected to service %1, path %2, interface %3, signal %4").arg(
+                    sig.mService, sig.mPath, sig.mInterface, sig.mName));
+    } else {
         logError(tr("Unable to connect to service %1, path %2, interface %3, signal %4").arg(
-                    sig.mService).arg(sig.mPath).arg(sig.mInterface).arg(sig.mName));
+                    sig.mService, sig.mPath, sig.mInterface, sig.mName));
     }
 }
 
@@ -480,6 +458,11 @@ void QDBusViewer::dumpMessage(const QDBusMessage &message)
     }
 
     log->append(out);
+}
+
+void QDBusViewer::dumpError(const QDBusError &error)
+{
+    logError(error.message());
 }
 
 void QDBusViewer::serviceChanged(const QModelIndex &index)

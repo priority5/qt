@@ -1,47 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2016 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2016 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qplatformdefs.h"
 
 #include "qcoreapplication.h"
 #include "qpair.h"
+#include "qhash.h"
 #include "qsocketnotifier.h"
 #include "qthread.h"
 #include "qelapsedtimer.h"
@@ -130,8 +95,8 @@ static void initThreadPipeFD(int fd)
 
 bool QThreadPipe::init()
 {
-#if defined(Q_OS_NACL) || defined(Q_OS_WASM)
-   // do nothing.
+#if defined(Q_OS_WASM)
+    // do nothing.
 #elif defined(Q_OS_VXWORKS)
     qsnprintf(name, sizeof(name), "/pipe/qt_%08x", int(taskIdSelf()));
 
@@ -322,7 +287,7 @@ QEventDispatcherUNIX::~QEventDispatcherUNIX()
 /*!
     \internal
 */
-void QEventDispatcherUNIX::registerTimer(int timerId, int interval, Qt::TimerType timerType, QObject *obj)
+void QEventDispatcherUNIX::registerTimer(int timerId, qint64 interval, Qt::TimerType timerType, QObject *obj)
 {
 #ifndef QT_NO_DEBUG
     if (timerId < 1 || interval < 0 || !obj) {
@@ -469,7 +434,7 @@ bool QEventDispatcherUNIX::processEvents(QEventLoop::ProcessEventsFlags flags)
 
     const bool include_timers = (flags & QEventLoop::X11ExcludeTimers) == 0;
     const bool include_notifiers = (flags & QEventLoop::ExcludeSocketNotifiers) == 0;
-    const bool wait_for_events = flags & QEventLoop::WaitForMoreEvents;
+    const bool wait_for_events = (flags & QEventLoop::WaitForMoreEvents) != 0;
 
     const bool canWait = (threadData->canWaitLocked()
                           && !d->interrupt.loadRelaxed()
@@ -519,12 +484,6 @@ bool QEventDispatcherUNIX::processEvents(QEventLoop::ProcessEventsFlags flags)
     return (nevents > 0);
 }
 
-bool QEventDispatcherUNIX::hasPendingEvents()
-{
-    extern uint qGlobalPostedEventsCount(); // from qapplication.cpp
-    return qGlobalPostedEventsCount();
-}
-
 int QEventDispatcherUNIX::remainingTime(int timerId)
 {
 #ifndef QT_NO_DEBUG
@@ -550,9 +509,6 @@ void QEventDispatcherUNIX::interrupt()
     d->interrupt.storeRelaxed(1);
     wakeUp();
 }
-
-void QEventDispatcherUNIX::flush()
-{ }
 
 QT_END_NAMESPACE
 

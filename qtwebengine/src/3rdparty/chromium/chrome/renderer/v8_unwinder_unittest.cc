@@ -14,9 +14,8 @@
 #include "base/location.h"
 #include "base/profiler/module_cache.h"
 #include "base/profiler/stack_sampling_profiler_test_util.h"
-#include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "gin/public/isolate_holder.h"
@@ -24,22 +23,6 @@
 #include "v8/include/v8.h"
 
 namespace {
-
-class TestModule : public base::ModuleCache::Module {
- public:
-  TestModule(uintptr_t base_address, size_t size)
-      : base_address_(base_address), size_(size) {}
-
-  uintptr_t GetBaseAddress() const override { return base_address_; }
-  std::string GetId() const override { return ""; }
-  base::FilePath GetDebugBasename() const override { return base::FilePath(); }
-  size_t GetSize() const override { return size_; }
-  bool IsNative() const override { return true; }
-
- private:
-  const uintptr_t base_address_;
-  const size_t size_;
-};
 
 v8::Local<v8::String> ToV8String(const char* str) {
   return v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), str)
@@ -170,7 +153,7 @@ base::FunctionAddressRange CallThroughV8(
                 .ToLocalChecked());
     v8::Local<v8::Value> argv[] = {CreatePointerHolder(nullptr)};
     js_compile_wait_for_sample
-        ->Call(context, v8::Undefined(isolate), base::size(argv), argv)
+        ->Call(context, v8::Undefined(isolate), std::size(argv), argv)
         .ToLocalChecked();
 
     // Run waitForSample() with the real closure pointer.
@@ -180,7 +163,7 @@ base::FunctionAddressRange CallThroughV8(
             ->Get(context, ToV8String("waitForSample"))
             .ToLocalChecked());
     js_wait_for_sample
-        ->Call(context, v8::Undefined(isolate), base::size(argv), argv)
+        ->Call(context, v8::Undefined(isolate), std::size(argv), argv)
         .ToLocalChecked();
   }
 
@@ -209,16 +192,93 @@ class UpdateModulesTestUnwinder : public V8Unwinder {
   std::vector<v8::MemoryRange> code_pages_to_provide_;
 };
 
+v8::MemoryRange GetEmbeddedCodeRange(v8::Isolate* isolate) {
+  v8::MemoryRange range;
+  isolate->GetEmbeddedCodeRange(&range.start, &range.length_in_bytes);
+  return range;
+}
+
 }  // namespace
+
+TEST(V8UnwinderTest, EmbeddedCodeRangeModule) {
+  ScopedV8Environment v8_environment;
+  V8Unwinder unwinder(v8_environment.isolate());
+  base::ModuleCache module_cache;
+
+  unwinder.Initialize(&module_cache);
+
+  v8::MemoryRange embedded_code_range;
+  v8_environment.isolate()->GetEmbeddedCodeRange(
+      &embedded_code_range.start, &embedded_code_range.length_in_bytes);
+
+  const base::ModuleCache::Module* module = module_cache.GetModuleForAddress(
+      reinterpret_cast<uintptr_t>(embedded_code_range.start));
+  ASSERT_NE(nullptr, module);
+  EXPECT_EQ(V8Unwinder::kV8EmbeddedCodeRangeBuildId, module->GetId());
+}
+
+TEST(V8UnwinderTest, EmbeddedCodeRangeModulePreservedOnUpdate) {
+  ScopedV8Environment v8_environment;
+  UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
+  base::ModuleCache module_cache;
+
+  unwinder.Initialize(&module_cache);
+
+  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
+
+  unwinder.OnStackCapture();
+  unwinder.UpdateModules();
+
+  v8::MemoryRange embedded_code_range;
+  v8_environment.isolate()->GetEmbeddedCodeRange(
+      &embedded_code_range.start, &embedded_code_range.length_in_bytes);
+
+  const base::ModuleCache::Module* module = module_cache.GetModuleForAddress(
+      reinterpret_cast<uintptr_t>(embedded_code_range.start));
+  ASSERT_NE(nullptr, module);
+  EXPECT_EQ(V8Unwinder::kV8EmbeddedCodeRangeBuildId, module->GetId());
+}
+
+// Checks that the embedded code range is preserved even if it wasn't included
+// in the code pages due to insufficient capacity.
+TEST(V8UnwinderTest, EmbeddedCodeRangeModulePreservedOnOverCapacityUpdate) {
+  ScopedV8Environment v8_environment;
+  UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
+  base::ModuleCache module_cache;
+
+  unwinder.Initialize(&module_cache);
+
+  const int kDefaultCapacity = v8::Isolate::kMinCodePagesBufferSize;
+  std::vector<v8::MemoryRange> code_pages;
+  code_pages.reserve(kDefaultCapacity + 1);
+  for (int i = 0; i < kDefaultCapacity + 1; ++i)
+    code_pages.push_back({reinterpret_cast<void*>(i + 1), 1});
+  unwinder.SetCodePages(code_pages);
+
+  unwinder.OnStackCapture();
+  unwinder.UpdateModules();
+
+  v8::MemoryRange embedded_code_range;
+  v8_environment.isolate()->GetEmbeddedCodeRange(
+      &embedded_code_range.start, &embedded_code_range.length_in_bytes);
+
+  const base::ModuleCache::Module* module = module_cache.GetModuleForAddress(
+      reinterpret_cast<uintptr_t>(embedded_code_range.start));
+  ASSERT_NE(nullptr, module);
+  EXPECT_EQ(V8Unwinder::kV8EmbeddedCodeRangeBuildId, module->GetId());
+}
 
 TEST(V8UnwinderTest, UpdateModules_ModuleAdded) {
   ScopedV8Environment v8_environment;
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
-  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10}});
+  unwinder.Initialize(&module_cache);
+  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   const base::ModuleCache::Module* module = module_cache.GetModuleForAddress(1);
   ASSERT_NE(nullptr, module);
@@ -235,14 +295,18 @@ TEST(V8UnwinderTest, UpdateModules_ModuleAddedBeforeLast) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
-  unwinder.SetCodePages({{reinterpret_cast<void*>(100), 10}});
-  unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.Initialize(&module_cache);
 
-  unwinder.SetCodePages(
-      {{reinterpret_cast<void*>(1), 10}, {reinterpret_cast<void*>(100), 10}});
+  unwinder.SetCodePages({{reinterpret_cast<void*>(100), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
+
+  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10},
+                         {reinterpret_cast<void*>(100), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
+  unwinder.OnStackCapture();
+  unwinder.UpdateModules();
 
   const base::ModuleCache::Module* module = module_cache.GetModuleForAddress(1);
   ASSERT_NE(nullptr, module);
@@ -257,13 +321,16 @@ TEST(V8UnwinderTest, UpdateModules_ModuleRetained) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
-  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10}});
+  unwinder.Initialize(&module_cache);
+
+  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   // Code pages remain the same for this stack capture.
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   const base::ModuleCache::Module* module = module_cache.GetModuleForAddress(1);
   ASSERT_NE(nullptr, module);
@@ -278,14 +345,18 @@ TEST(V8UnwinderTest, UpdateModules_ModuleRetainedWithDifferentSize) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
-  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10}});
+  unwinder.Initialize(&module_cache);
+
+  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   // Code pages remain the same for this stack capture.
-  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 20}});
+  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 20},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   const base::ModuleCache::Module* module =
       module_cache.GetModuleForAddress(11);
@@ -299,13 +370,16 @@ TEST(V8UnwinderTest, UpdateModules_ModuleRemoved) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
-  unwinder.SetCodePages({{{reinterpret_cast<void*>(1), 10}}});
-  unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.Initialize(&module_cache);
 
-  unwinder.SetCodePages({});
+  unwinder.SetCodePages({{{reinterpret_cast<void*>(1), 10},
+                          GetEmbeddedCodeRange(v8_environment.isolate())}});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
+
+  unwinder.SetCodePages({GetEmbeddedCodeRange(v8_environment.isolate())});
+  unwinder.OnStackCapture();
+  unwinder.UpdateModules();
 
   EXPECT_EQ(nullptr, module_cache.GetModuleForAddress(1));
 }
@@ -317,14 +391,18 @@ TEST(V8UnwinderTest, UpdateModules_ModuleRemovedBeforeLast) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
-  unwinder.SetCodePages(
-      {{{reinterpret_cast<void*>(1), 10}, {reinterpret_cast<void*>(100), 10}}});
-  unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.Initialize(&module_cache);
 
-  unwinder.SetCodePages({{reinterpret_cast<void*>(100), 10}});
+  unwinder.SetCodePages({{{reinterpret_cast<void*>(1), 10},
+                          {reinterpret_cast<void*>(100), 10},
+                          GetEmbeddedCodeRange(v8_environment.isolate())}});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
+
+  unwinder.SetCodePages({{reinterpret_cast<void*>(100), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
+  unwinder.OnStackCapture();
+  unwinder.UpdateModules();
 
   EXPECT_EQ(nullptr, module_cache.GetModuleForAddress(1));
 }
@@ -334,17 +412,23 @@ TEST(V8UnwinderTest, UpdateModules_CapacityExceeded) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
+  unwinder.Initialize(&module_cache);
+
   const int kDefaultCapacity = v8::Isolate::kMinCodePagesBufferSize;
+
   std::vector<v8::MemoryRange> code_pages;
-  code_pages.reserve(kDefaultCapacity + 1);
+  // Create kDefaultCapacity + 2 code pages, with the last being the embedded
+  // code page.
+  code_pages.reserve(kDefaultCapacity + 2);
   for (int i = 0; i < kDefaultCapacity + 1; ++i)
     code_pages.push_back({reinterpret_cast<void*>(i + 1), 1});
+  code_pages.push_back(GetEmbeddedCodeRange(v8_environment.isolate()));
 
   // The first sample should successfully create modules up to the default
   // capacity.
   unwinder.SetCodePages(code_pages);
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   EXPECT_NE(nullptr, module_cache.GetModuleForAddress(kDefaultCapacity));
   EXPECT_EQ(nullptr, module_cache.GetModuleForAddress(kDefaultCapacity + 1));
@@ -352,7 +436,7 @@ TEST(V8UnwinderTest, UpdateModules_CapacityExceeded) {
   // The capacity should be expanded by the second sample.
   unwinder.SetCodePages(code_pages);
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   EXPECT_NE(nullptr, module_cache.GetModuleForAddress(kDefaultCapacity));
   EXPECT_NE(nullptr, module_cache.GetModuleForAddress(kDefaultCapacity + 1));
@@ -365,18 +449,22 @@ TEST(V8UnwinderTest, UpdateModules_CapacitySubstantiallyExceeded) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
+  unwinder.Initialize(&module_cache);
+
   const int kDefaultCapacity = v8::Isolate::kMinCodePagesBufferSize;
   const int kCodePages = kDefaultCapacity * 3;
   std::vector<v8::MemoryRange> code_pages;
   code_pages.reserve(kCodePages);
-  for (int i = 0; i < kCodePages; ++i)
+  // Create kCodePages with the last being the embedded code page.
+  for (int i = 0; i < kCodePages - 1; ++i)
     code_pages.push_back({reinterpret_cast<void*>(i + 1), 1});
+  code_pages.push_back(GetEmbeddedCodeRange(v8_environment.isolate()));
 
   // The first sample should successfully create modules up to the default
   // capacity.
   unwinder.SetCodePages(code_pages);
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   EXPECT_NE(nullptr, module_cache.GetModuleForAddress(kDefaultCapacity));
   EXPECT_EQ(nullptr, module_cache.GetModuleForAddress(kDefaultCapacity + 1));
@@ -385,9 +473,9 @@ TEST(V8UnwinderTest, UpdateModules_CapacitySubstantiallyExceeded) {
   // available modules.
   unwinder.SetCodePages(code_pages);
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
-  EXPECT_NE(nullptr, module_cache.GetModuleForAddress(kCodePages));
+  EXPECT_NE(nullptr, module_cache.GetModuleForAddress(kCodePages - 1));
 }
 
 TEST(V8UnwinderTest, CanUnwindFrom_V8Module) {
@@ -395,9 +483,12 @@ TEST(V8UnwinderTest, CanUnwindFrom_V8Module) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
-  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10}});
+  unwinder.Initialize(&module_cache);
+
+  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   const base::ModuleCache::Module* module = module_cache.GetModuleForAddress(1);
   ASSERT_NE(nullptr, module);
@@ -410,11 +501,13 @@ TEST(V8UnwinderTest, CanUnwindFrom_OtherModule) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
-  unwinder.SetCodePages({});
-  unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.Initialize(&module_cache);
 
-  auto other_module = std::make_unique<TestModule>(1, 10);
+  unwinder.SetCodePages({GetEmbeddedCodeRange(v8_environment.isolate())});
+  unwinder.OnStackCapture();
+  unwinder.UpdateModules();
+
+  auto other_module = std::make_unique<base::TestModule>(1, 10);
   const base::ModuleCache::Module* other_module_ptr = other_module.get();
   module_cache.AddCustomNativeModule(std::move(other_module));
 
@@ -426,18 +519,20 @@ TEST(V8UnwinderTest, CanUnwindFrom_NullModule) {
   UpdateModulesTestUnwinder unwinder(v8_environment.isolate());
   base::ModuleCache module_cache;
 
+  unwinder.Initialize(&module_cache);
+
   // Insert a non-native module to potentially exercise the Module comparator.
-  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10}});
+  unwinder.SetCodePages({{reinterpret_cast<void*>(1), 10},
+                         GetEmbeddedCodeRange(v8_environment.isolate())});
   unwinder.OnStackCapture();
-  unwinder.UpdateModules(&module_cache);
+  unwinder.UpdateModules();
 
   EXPECT_FALSE(unwinder.CanUnwindFrom({20, nullptr}));
 }
 
 // Checks that unwinding from C++ through JavaScript and back into C++ succeeds.
 // NB: unwinding is only supported for 64 bit Windows and Intel macOS.
-#if (defined(OS_WIN) && defined(ARCH_CPU_64_BITS)) || \
-    (defined(OS_MAC) && defined(ARCH_CPU_X86_64))
+#if (BUILDFLAG(IS_WIN) && defined(ARCH_CPU_64_BITS)) || BUILDFLAG(IS_MAC)
 #define MAYBE_UnwindThroughV8Frames UnwindThroughV8Frames
 #else
 #define MAYBE_UnwindThroughV8Frames DISABLED_UnwindThroughV8Frames
@@ -472,7 +567,9 @@ TEST(V8UnwinderTest, MAYBE_UnwindThroughV8Frames) {
   auto loc =
       std::find_if(sample.begin(), sample.end(), [&](const base::Frame& frame) {
         return frame.module &&
-               frame.module->GetId() == V8Unwinder::kV8CodeRangeBuildId;
+               (frame.module->GetId() ==
+                    V8Unwinder::kV8EmbeddedCodeRangeBuildId ||
+                frame.module->GetId() == V8Unwinder::kV8CodeRangeBuildId);
       });
   EXPECT_NE(sample.end(), loc);
 }

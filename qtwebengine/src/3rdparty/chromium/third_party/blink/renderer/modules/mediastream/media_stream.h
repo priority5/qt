@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/timer.h"
 
@@ -177,7 +178,7 @@ class MODULES_EXPORT MediaStream final
   // including image capture for video tracks.
   base::OnceCallback<void(MediaStream*)> media_stream_initialized_callback_;
 
-  TaskRunnerTimer<MediaStream> scheduled_event_timer_;
+  HeapTaskRunnerTimer<MediaStream> scheduled_event_timer_;
   HeapVector<Member<Event>> scheduled_events_;
 
   uint32_t number_of_video_tracks_initialized_ = 0;

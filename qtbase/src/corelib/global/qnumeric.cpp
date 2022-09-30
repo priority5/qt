@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qnumeric.h"
 #include "qnumeric_p.h"
@@ -104,6 +68,9 @@ Q_CORE_EXPORT double qQNaN() { return qt_qnan(); }
 Q_CORE_EXPORT double qInf() { return qt_inf(); }
 
 /*!
+    \fn int qFpClassify(double val)
+    \fn int qFpClassify(float val)
+
     \relates <QtGlobal>
     Classifies a floating-point value.
 
@@ -118,10 +85,6 @@ Q_CORE_EXPORT double qInf() { return qt_inf(); }
     \endlist
 */
 Q_CORE_EXPORT int qFpClassify(double val) { return qt_fpclassify(val); }
-
-/*!
-    \overload
-*/
 Q_CORE_EXPORT int qFpClassify(float val) { return qt_fpclassify(val); }
 
 
@@ -169,7 +132,7 @@ Q_CORE_EXPORT quint32 qFloatDistance(float a, float b)
        * IEE754 format.
        * Integers and floats have the same endian
     */
-    Q_STATIC_ASSERT(sizeof(quint32) == sizeof(float));
+    static_assert(sizeof(quint32) == sizeof(float));
     Q_ASSERT(qIsFinite(a) && qIsFinite(b));
     if (a == b)
         return 0;
@@ -227,7 +190,7 @@ Q_CORE_EXPORT quint64 qFloatDistance(double a, double b)
        * IEE754 format double precision
        * Integers and floats have the same endian
     */
-    Q_STATIC_ASSERT(sizeof(quint64) == sizeof(double));
+    static_assert(sizeof(quint64) == sizeof(double));
     Q_ASSERT(qIsFinite(a) && qIsFinite(b));
     if (a == b)
         return 0;
@@ -255,5 +218,102 @@ Q_CORE_EXPORT quint64 qFloatDistance(double a, double b)
     return a > b ? d2i(a) - d2i(b) : d2i(b) - d2i(a);
 }
 
+/*!
+    \fn template<typename T> bool qAddOverflow(T v1, T v2, T *result)
+    \relates <QtGlobal>
+    \since 6.1
+
+    Adds two values \a v1 and \a v2, of a numeric type \c T and records the
+    value in \a result. If the addition overflows the valid range for type \c T,
+    returns \c true, otherwise returns \c false.
+
+    An implementation is guaranteed to be available for 8-, 16-, and 32-bit
+    integer types, as well as integer types of the size of a pointer. Overflow
+    math for other types, if available, is considered private API.
+*/
+
+/*!
+    \fn template <typename T, T V2> bool qAddOverflow(T v1, std::integral_constant<T, V2>, T *r)
+    \since 6.1
+    \internal
+
+    Equivalent to qAddOverflow(v1, v2, r) with \a v1 as first argument, the
+    compile time constant \c V2 as second argument, and \a r as third argument.
+*/
+
+/*!
+    \fn template <auto V2, typename T> bool qAddOverflow(T v1, T *r)
+    \since 6.1
+    \internal
+
+    Equivalent to qAddOverflow(v1, v2, r) with \a v1 as first argument, the
+    compile time constant \c V2 as second argument, and \a r as third argument.
+*/
+
+/*!
+    \fn template<typename T> bool qSubOverflow(T v1, T v2, T *result)
+    \relates <QtGlobal>
+    \since 6.1
+
+    Subtracts \a v2 from \a v1 and records the resulting value in \a result. If
+    the subtraction overflows the valid range for type \c T, returns \c true,
+    otherwise returns \c false.
+
+    An implementation is guaranteed to be available for 8-, 16-, and 32-bit
+    integer types, as well as integer types of the size of a pointer. Overflow
+    math for other types, if available, is considered private API.
+*/
+
+/*!
+    \fn template <typename T, T V2> bool qSubOverflow(T v1, std::integral_constant<T, V2>, T *r)
+    \since 6.1
+    \internal
+
+    Equivalent to qSubOverflow(v1, v2, r) with \a v1 as first argument, the
+    compile time constant \c V2 as second argument, and \a r as third argument.
+*/
+
+/*!
+    \fn template <auto V2, typename T> bool qSubOverflow(T v1, T *r)
+    \since 6.1
+    \internal
+
+    Equivalent to qSubOverflow(v1, v2, r) with \a v1 as first argument, the
+    compile time constant \c V2 as second argument, and \a r as third argument.
+*/
+
+/*!
+    \fn template<typename T> bool qMulOverflow(T v1, T v2, T *result)
+    \relates <QtGlobal>
+    \since 6.1
+
+    Multiplies \a v1 and \a v2, and records the resulting value in \a result. If
+    the multiplication overflows the valid range for type \c T, returns
+    \c true, otherwise returns \c false.
+
+    An implementation is guaranteed to be available for 8-, 16-, and 32-bit
+    integer types, as well as integer types of the size of a pointer. Overflow
+    math for other types, if available, is considered private API.
+*/
+
+/*!
+    \fn template <typename T, T V2> bool qMulOverflow(T v1, std::integral_constant<T, V2>, T *r)
+    \since 6.1
+    \internal
+
+    Equivalent to qMulOverflow(v1, v2, r) with \a v1 as first argument, the
+    compile time constant \c V2 as second argument, and \a r as third argument.
+    This can be faster than calling the version with only variable arguments.
+*/
+
+/*!
+    \fn template <auto V2, typename T> bool qMulOverflow(T v1, T *r)
+    \since 6.1
+    \internal
+
+    Equivalent to qMulOverflow(v1, v2, r) with \a v1 as first argument, the
+    compile time constant \c V2 as second argument, and \a r as third argument.
+    This can be faster than calling the version with only variable arguments.
+*/
 
 QT_END_NAMESPACE

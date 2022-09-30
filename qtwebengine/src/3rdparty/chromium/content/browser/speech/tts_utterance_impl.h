@@ -9,8 +9,10 @@
 #include <set>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "content/common/content_export.h"
 #include "content/public/browser/tts_utterance.h"
-#include "content/public/browser/web_contents_observer.h"
 
 namespace base {
 class Value;
@@ -21,8 +23,7 @@ class BrowserContext;
 class WebContents;
 
 // Implementation of TtsUtterance.
-class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance,
-                                        public WebContentsObserver {
+class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance {
  public:
   TtsUtteranceImpl(BrowserContext* browser_context, WebContents* web_contents);
   ~TtsUtteranceImpl() override;
@@ -62,8 +63,8 @@ class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance,
                                const double volume) override;
   const UtteranceContinuousParameters& GetContinuousParameters() override;
 
-  void SetCanEnqueue(bool can_enqueue) override;
-  bool GetCanEnqueue() override;
+  void SetShouldClearQueue(bool value) override;
+  bool GetShouldClearQueue() override;
 
   void SetRequiredEventTypes(const std::set<TtsEventType>& types) override;
   const std::set<TtsEventType>& GetRequiredEventTypes() override;
@@ -83,12 +84,16 @@ class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance,
   int GetId() override;
   bool IsFinished() override;
 
+  // Returns the associated WebContents, may be null.
+  WebContents* GetWebContents();
+
  private:
   // The BrowserContext that initiated this utterance.
-  BrowserContext* browser_context_;
+  raw_ptr<BrowserContext> browser_context_;
 
   // True if the constructor was supplied with a WebContents.
   const bool was_created_with_web_contents_;
+  base::WeakPtr<WebContents> web_contents_;
 
   // The content embedder engine ID of the engine providing TTS for this
   // utterance, or empty if native TTS is being used.
@@ -117,13 +122,13 @@ class CONTENT_EXPORT TtsUtteranceImpl : public TtsUtterance,
   GURL src_url_;
 
   // The delegate to be called when an utterance event is fired.
-  UtteranceEventDelegate* event_delegate_ = nullptr;
+  raw_ptr<UtteranceEventDelegate> event_delegate_ = nullptr;
 
   // The parsed options.
   std::string voice_name_;
   std::string lang_;
   UtteranceContinuousParameters continuous_parameters_;
-  bool can_enqueue_;
+  bool should_clear_queue_;
   std::set<TtsEventType> required_event_types_;
   std::set<TtsEventType> desired_event_types_;
 

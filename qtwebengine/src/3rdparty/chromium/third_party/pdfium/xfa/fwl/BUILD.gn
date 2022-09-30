@@ -65,9 +65,11 @@ source_set("fwl") {
     "cfwl_pushbutton.h",
     "cfwl_scrollbar.cpp",
     "cfwl_scrollbar.h",
+    "cfwl_themebackground.cpp",
     "cfwl_themebackground.h",
     "cfwl_themepart.cpp",
     "cfwl_themepart.h",
+    "cfwl_themetext.cpp",
     "cfwl_themetext.h",
     "cfwl_widget.cpp",
     "cfwl_widget.h",
@@ -90,6 +92,8 @@ source_set("fwl") {
     "theme/cfwl_datetimepickertp.h",
     "theme/cfwl_edittp.cpp",
     "theme/cfwl_edittp.h",
+    "theme/cfwl_fontmanager.cpp",
+    "theme/cfwl_fontmanager.h",
     "theme/cfwl_listboxtp.cpp",
     "theme/cfwl_listboxtp.h",
     "theme/cfwl_monthcalendartp.cpp",
@@ -104,18 +108,19 @@ source_set("fwl") {
     "theme/cfwl_widgettp.cpp",
     "theme/cfwl_widgettp.h",
   ]
+  configs += [
+    "../../:pdfium_strict_config",
+    "../../:pdfium_noshorten_config",
+    "../:xfa_warnings",
+  ]
   deps = [
     "../../core/fxcrt",
     "../../core/fxge",
     "../../fxbarcode",
     "../../fxjs:gc",
     "../fde",
-    "../fgas",
-    "../fxgraphics",
-  ]
-  configs += [
-    "../../:pdfium_core_config",
-    "../:xfa_warnings",
+    "../fgas/font",
+    "../fgas/graphics",
   ]
   visibility = [ "../../*" ]
 }

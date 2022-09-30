@@ -10,21 +10,22 @@
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/gmock_callback_support.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
 #include "media/base/limits.h"
+#include "media/base/video_frame.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/platform/web_media_player.h"
-#include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 using base::test::RunOnceClosure;
 using ::testing::_;
+using ::testing::DoAll;
 using ::testing::InSequence;
 using ::testing::Mock;
 using ::testing::SaveArg;
@@ -39,7 +40,10 @@ class MockWebMediaPlayer : public WebMediaPlayer {
   MockWebMediaPlayer() {}
   ~MockWebMediaPlayer() override = default;
 
-  LoadTiming Load(LoadType, const WebMediaPlayerSource&, CorsMode) override {
+  LoadTiming Load(LoadType,
+                  const WebMediaPlayerSource&,
+                  CorsMode,
+                  bool is_cache_disabled) override {
     return LoadTiming::kImmediate;
   }
   void Play() override {}
@@ -49,12 +53,14 @@ class MockWebMediaPlayer : public WebMediaPlayer {
   void SetVolume(double) override {}
   void SetLatencyHint(double) override {}
   void SetPreservesPitch(bool) override {}
+  void SetWasPlayedWithUserActivation(bool) override {}
   void OnRequestPictureInPicture() override {}
-  void OnPictureInPictureAvailabilityChanged(bool available) override {}
   WebTimeRanges Buffered() const override { return WebTimeRanges(); }
   WebTimeRanges Seekable() const override { return WebTimeRanges(); }
-  void SetSinkId(const WebString& sinkId,
-                 WebSetSinkIdCompleteCallback) override {}
+  bool SetSinkId(const WebString& sinkId,
+                 WebSetSinkIdCompleteCallback) override {
+    return false;
+  }
   bool HasVideo() const override { return true; }
   bool HasAudio() const override { return false; }
   gfx::Size NaturalSize() const override { return size_; }
@@ -79,19 +85,25 @@ class MockWebMediaPlayer : public WebMediaPlayer {
   unsigned CorruptedFrameCount() const override { return 0; }
   uint64_t AudioDecodedByteCount() const override { return 0; }
   uint64_t VideoDecodedByteCount() const override { return 0; }
+  void SetVolumeMultiplier(double multiplier) override {}
+  void SuspendForFrameClosed() override {}
 
   void SetWouldTaintOrigin(bool taint) { would_taint_origin_ = taint; }
 
   void Paint(cc::PaintCanvas* canvas,
-             const WebRect& rect,
-             cc::PaintFlags&,
-             int already_uploaded_id,
-             VideoFrameUploadMetadata* out_metadata) override {
+             const gfx::Rect& rect,
+             cc::PaintFlags&) override {
+    return;
+  }
+
+  scoped_refptr<media::VideoFrame> GetCurrentFrame() override {
     // We could fill in |canvas| with a meaningful pattern in ARGB and verify
     // that is correctly captured (as I420) by HTMLVideoElementCapturerSource
     // but I don't think that'll be easy/useful/robust, so just let go here.
-    return;
+    return is_video_opaque_ ? media::VideoFrame::CreateBlackFrame(size_)
+                            : media::VideoFrame::CreateTransparentFrame(size_);
   }
+
   bool IsOpaque() const override { return is_video_opaque_; }
   bool HasAvailableVideoFrame() const override { return true; }
 
@@ -120,13 +132,18 @@ class HTMLVideoElementCapturerSourceTest : public testing::TestWithParam<bool> {
   // Necessary callbacks and MOCK_METHODS for them.
   MOCK_METHOD2(DoOnDeliverFrame,
                void(scoped_refptr<media::VideoFrame>, base::TimeTicks));
-  void OnDeliverFrame(scoped_refptr<media::VideoFrame> video_frame,
-                      base::TimeTicks estimated_capture_time) {
+  void OnDeliverFrame(
+      scoped_refptr<media::VideoFrame> video_frame,
+      std::vector<scoped_refptr<media::VideoFrame>> scaled_video_frames,
+      base::TimeTicks estimated_capture_time) {
     DoOnDeliverFrame(std::move(video_frame), estimated_capture_time);
   }
 
   MOCK_METHOD1(DoOnRunning, void(bool));
-  void OnRunning(bool state) { DoOnRunning(state); }
+  void OnRunning(blink::RunState run_state) {
+    bool state = (run_state == blink::RunState::kRunning) ? true : false;
+    DoOnRunning(state);
+  }
 
   void SetVideoPlayerOpacity(bool opacity) {
     web_media_player_->is_video_opaque_ = opacity;
@@ -144,6 +161,18 @@ class HTMLVideoElementCapturerSourceTest : public testing::TestWithParam<bool> {
 // Constructs and destructs all objects, in particular |html_video_capturer_|
 // and its inner object(s). This is a non trivial sequence.
 TEST_F(HTMLVideoElementCapturerSourceTest, ConstructAndDestruct) {}
+
+TEST_F(HTMLVideoElementCapturerSourceTest, EmptyWebMediaPlayerFailsCapture) {
+  web_media_player_.reset();
+  EXPECT_CALL(*this, DoOnRunning(false)).Times(1);
+
+  html_video_capturer_->StartCapture(
+      media::VideoCaptureParams(),
+      WTF::BindRepeating(&HTMLVideoElementCapturerSourceTest::OnDeliverFrame,
+                         base::Unretained(this)),
+      WTF::BindRepeating(&HTMLVideoElementCapturerSourceTest::OnRunning,
+                         base::Unretained(this)));
+}
 
 // Checks that the usual sequence of GetPreferredFormats() ->
 // StartCapture() -> StopCapture() works as expected and let it capture two

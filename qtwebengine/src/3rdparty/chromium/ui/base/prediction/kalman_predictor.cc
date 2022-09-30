@@ -8,9 +8,8 @@
 #include <cmath>
 
 #include "base/numerics/math_constants.h"
+#include "base/time/time.h"
 #include "ui/base/ui_base_features.h"
-
-#include <algorithm>
 
 namespace {
 
@@ -73,7 +72,8 @@ bool KalmanPredictor::HasPrediction() const {
 }
 
 std::unique_ptr<InputPredictor::InputData> KalmanPredictor::GeneratePrediction(
-    base::TimeTicks predict_time) const {
+    base::TimeTicks predict_time,
+    base::TimeDelta frame_interval) {
   if (!HasPrediction())
     return nullptr;
 
@@ -120,8 +120,8 @@ std::unique_ptr<InputPredictor::InputData> KalmanPredictor::GeneratePrediction(
 
 base::TimeDelta KalmanPredictor::TimeInterval() const {
   return time_filter_.GetPosition()
-             ? std::max(kMinTimeInterval, base::TimeDelta::FromMilliseconds(
-                                              time_filter_.GetPosition()))
+             ? std::max(kMinTimeInterval,
+                        base::Milliseconds(time_filter_.GetPosition()))
              : kTimeInterval;
 }
 

@@ -12,7 +12,7 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/containers/span.h"
 #include "base/memory/weak_ptr.h"
 #include "device/fido/fido_device_discovery.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -49,8 +49,16 @@ class COMPONENT_EXPORT(DEVICE_FIDO) AndroidAccessoryDiscovery
     std::string guid;
   };
 
-  explicit AndroidAccessoryDiscovery(
-      mojo::Remote<device::mojom::UsbDeviceManager>);
+  // The |request_description| is a string that is sent to the device to
+  // describe the type of request and may appears in permissions UI on the
+  // device.
+  AndroidAccessoryDiscovery(mojo::Remote<device::mojom::UsbDeviceManager>,
+                            std::string request_description);
+
+  AndroidAccessoryDiscovery(const AndroidAccessoryDiscovery&) = delete;
+  AndroidAccessoryDiscovery& operator=(const AndroidAccessoryDiscovery&) =
+      delete;
+
   ~AndroidAccessoryDiscovery() override;
 
  private:
@@ -71,7 +79,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) AndroidAccessoryDiscovery
               device::mojom::UsbOpenDeviceError error);
   void OnVersionReply(mojo::Remote<device::mojom::UsbDevice> device,
                       device::mojom::UsbTransferStatus status,
-                      const std::vector<uint8_t>& payload);
+                      base::span<const uint8_t> payload);
   void OnConfigurationStepComplete(
       mojo::Remote<device::mojom::UsbDevice> device,
       unsigned step,
@@ -94,18 +102,17 @@ class COMPONENT_EXPORT(DEVICE_FIDO) AndroidAccessoryDiscovery
                       InterfaceInfo interface_info,
                       std::array<uint8_t, kSyncNonceLength> nonce,
                       mojom::UsbTransferStatus result,
-                      const std::vector<uint8_t>& payload);
+                      base::span<const uint8_t> payload);
   void OnAccessoryInterfaceClaimed(
       mojo::Remote<device::mojom::UsbDevice> device,
       InterfaceInfo interface_info,
-      bool success);
+      mojom::UsbClaimInterfaceResult result);
 
   mojo::Remote<device::mojom::UsbDeviceManager> device_manager_;
+  const std::string request_description_;
   mojo::AssociatedReceiver<device::mojom::UsbDeviceManagerClient> receiver_{
       this};
   base::WeakPtrFactory<AndroidAccessoryDiscovery> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AndroidAccessoryDiscovery);
 };
 
 }  // namespace device

@@ -30,7 +30,7 @@
 #include "base/auto_reset.h"
 #include "base/time/time.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
+#include "third_party/blink/renderer/bindings/core/v8/js_event_handler_for_content_attribute.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
@@ -39,8 +39,7 @@
 #include "third_party/blink/renderer/core/svg/animation/smil_time_container.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
@@ -85,7 +84,9 @@ void SMILInstanceTimeList::InsertSortedAndUnique(SMILTime time,
     if (position->Origin() == origin)
       return;
   }
-  instance_times_.insert(position - instance_times_.begin(), time_with_origin);
+  instance_times_.insert(
+      static_cast<wtf_size_t>(position - instance_times_.begin()),
+      time_with_origin);
   AddOrigin(origin);
 }
 
@@ -97,7 +98,8 @@ void SMILInstanceTimeList::RemoveWithOrigin(SMILTimeOrigin origin) {
                      [origin](const SMILTimeWithOrigin& instance_time) {
                        return instance_time.Origin() == origin;
                      });
-  instance_times_.Shrink(tail - instance_times_.begin());
+  instance_times_.Shrink(
+      static_cast<wtf_size_t>(tail - instance_times_.begin()));
   ClearOrigin(origin);
 }
 
@@ -527,13 +529,16 @@ void SVGSMILElement::ParseAttribute(const AttributeModificationParams& params) {
     }
   } else if (name == svg_names::kOnbeginAttr) {
     SetAttributeEventListener(event_type_names::kBeginEvent,
-                              CreateAttributeEventListener(this, name, value));
+                              JSEventHandlerForContentAttribute::Create(
+                                  GetExecutionContext(), name, value));
   } else if (name == svg_names::kOnendAttr) {
     SetAttributeEventListener(event_type_names::kEndEvent,
-                              CreateAttributeEventListener(this, name, value));
+                              JSEventHandlerForContentAttribute::Create(
+                                  GetExecutionContext(), name, value));
   } else if (name == svg_names::kOnrepeatAttr) {
     SetAttributeEventListener(event_type_names::kRepeatEvent,
-                              CreateAttributeEventListener(this, name, value));
+                              JSEventHandlerForContentAttribute::Create(
+                                  GetExecutionContext(), name, value));
   } else if (name == svg_names::kRestartAttr) {
     if (value == "never")
       restart_ = kRestartNever;
@@ -558,15 +563,16 @@ void SVGSMILElement::ParseAttribute(const AttributeModificationParams& params) {
   }
 }
 
-void SVGSMILElement::SvgAttributeChanged(const QualifiedName& attr_name) {
-  if (SVGURIReference::IsKnownAttribute(attr_name)) {
+void SVGSMILElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  if (SVGURIReference::IsKnownAttribute(params.name)) {
     // TODO(fs): Could be smarter here when 'href' is specified and 'xlink:href'
     // is changed.
     SVGElement::InvalidationGuard invalidation_guard(this);
     BuildPendingResource();
     return;
   }
-  SVGElement::SvgAttributeChanged(attr_name);
+  SVGElement::SvgAttributeChanged(params);
 }
 
 bool SVGSMILElement::IsPresentationAttribute(
@@ -664,7 +670,7 @@ static SMILRepeatCount ParseRepeatCount(const AtomicString& value) {
     return SMILRepeatCount::Indefinite();
   bool ok;
   double result = value.ToDouble(&ok);
-  if (ok && result > 0)
+  if (ok && result > 0 && std::isfinite(result))
     return SMILRepeatCount::Numeric(result);
   return SMILRepeatCount::Unspecified();
 }
@@ -1046,9 +1052,9 @@ SVGSMILElement::ProgressState SVGSMILElement::CalculateProgressState(
     repeat = active_time.IntDiv(simple_duration);
     simple_time = active_time % simple_duration;
   }
-  return {clampTo<float>(simple_time.InternalValueAsDouble() /
+  return {ClampTo<float>(simple_time.InternalValueAsDouble() /
                          simple_duration.InternalValueAsDouble()),
-          clampTo<unsigned>(repeat)};
+          ClampTo<unsigned>(repeat)};
 }
 
 SMILTime SVGSMILElement::NextProgressTime(SMILTime presentation_time) const {

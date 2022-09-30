@@ -40,7 +40,7 @@ class AccessibilityLineLayoutBrowserTest : public ContentBrowserTest {
         node->GetRole() == ax::mojom::Role::kInlineTextBox) {
       int next_on_line_id =
           node->GetIntAttribute(ax::mojom::IntAttribute::kNextOnLineId);
-      if (next_on_line_id != ui::AXNode::kInvalidAXID) {
+      if (next_on_line_id != ui::kInvalidAXNodeID) {
         BrowserAccessibility* other =
             node->manager()->GetFromID(next_on_line_id);
         EXPECT_NE(nullptr, other) << "Next on line link is invalid.";
@@ -48,7 +48,7 @@ class AccessibilityLineLayoutBrowserTest : public ContentBrowserTest {
       }
       int previous_on_line_id =
           node->GetIntAttribute(ax::mojom::IntAttribute::kPreviousOnLineId);
-      if (previous_on_line_id != ui::AXNode::kInvalidAXID) {
+      if (previous_on_line_id != ui::kInvalidAXNodeID) {
         BrowserAccessibility* other =
             node->manager()->GetFromID(previous_on_line_id);
         EXPECT_NE(nullptr, other) << "Previous on line link is invalid.";
@@ -105,7 +105,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityLineLayoutBrowserTest,
 // performance regression.  (Android doesn't generate InlineTextBoxes
 // immediately; we can wait for them but without the aforementioned fix the
 // updated tree isn't processed to create the Next/PreviousOnLine links.)
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 IN_PROC_BROWSER_TEST_F(AccessibilityLineLayoutBrowserTest,
                        NestedLayoutNGInlineFormattingContext) {
   ASSERT_TRUE(embedded_test_server()->Start());

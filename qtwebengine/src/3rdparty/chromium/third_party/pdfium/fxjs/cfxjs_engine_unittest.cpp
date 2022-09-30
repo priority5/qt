@@ -9,6 +9,8 @@
 #include "fxjs/cjs_object.h"
 #include "testing/fxv8_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-isolate.h"
 
 class FXJSEngineUnitTest : public FXV8UnitTest {
  public:
@@ -38,7 +40,7 @@ TEST_F(FXJSEngineUnitTest, GC) {
   v8::Isolate::Scope isolate_scope(isolate());
   v8::HandleScope handle_scope(isolate());
 
-  // Object: 0
+  // Object: 1
   engine()->DefineObj(
       "perm", FXJSOBJTYPE_DYNAMIC,
       [](CFXJS_Engine* pEngine, v8::Local<v8::Object> obj) {
@@ -51,7 +53,7 @@ TEST_F(FXJSEngineUnitTest, GC) {
         CFXJS_Engine::SetObjectPrivate(obj, nullptr);
       });
 
-  // Object: 1
+  // Object: 2
   engine()->DefineObj(
       "temp", FXJSOBJTYPE_DYNAMIC,
       [](CFXJS_Engine* pEngine, v8::Local<v8::Object> obj) {
@@ -68,7 +70,7 @@ TEST_F(FXJSEngineUnitTest, GC) {
 
   v8::Context::Scope context_scope(engine()->GetV8Context());
   v8::Local<v8::Object> perm =
-      engine()->NewFXJSBoundObject(0, FXJSOBJTYPE_DYNAMIC);
+      engine()->NewFXJSBoundObject(1, FXJSOBJTYPE_DYNAMIC);
   EXPECT_FALSE(perm.IsEmpty());
   EXPECT_TRUE(perm_created);
   EXPECT_FALSE(perm_destroyed);
@@ -76,13 +78,13 @@ TEST_F(FXJSEngineUnitTest, GC) {
   {
     v8::HandleScope inner_handle_scope(isolate());
     v8::Local<v8::Object> temp =
-        engine()->NewFXJSBoundObject(1, FXJSOBJTYPE_DYNAMIC);
+        engine()->NewFXJSBoundObject(2, FXJSOBJTYPE_DYNAMIC);
     EXPECT_FALSE(temp.IsEmpty());
     EXPECT_TRUE(temp_created);
     EXPECT_FALSE(temp_destroyed);
   }
 
-  Optional<IJS_Runtime::JS_Error> err = engine()->Execute(L"gc();");
+  absl::optional<IJS_Runtime::JS_Error> err = engine()->Execute(L"gc();");
   EXPECT_FALSE(err);
 
   EXPECT_TRUE(perm_created);

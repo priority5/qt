@@ -1,57 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the demonstration applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:BSD$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** BSD License Usage
-** Alternatively, you may use this file under the terms of the BSD license
-** as follows:
-**
-** "Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions are
-** met:
-**   * Redistributions of source code must retain the above copyright
-**     notice, this list of conditions and the following disclaimer.
-**   * Redistributions in binary form must reproduce the above copyright
-**     notice, this list of conditions and the following disclaimer in
-**     the documentation and/or other materials provided with the
-**     distribution.
-**   * Neither the name of The Qt Company Ltd nor the names of its
-**     contributors may be used to endorse or promote products derived
-**     from this software without specific prior written permission.
-**
-**
-** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-** "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-** LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-** A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-** OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-** SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-** LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-** OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 #include <QtCore>
 #include <QtWidgets>
 #include <QtNetwork>
-#include <QtSvg>
+#include <QtSvgWidgets>
 
 #define GET_DATA_ATTR(val) xml.attributes().value(val).toString()
 #define GET_DATETIME(val) QDateTime::fromString(val, "yyyy-MM-ddThh:mm:ss")
@@ -266,11 +219,11 @@ private:
         while (!xml.atEnd()) {
             xml.readNext();
             if (xml.tokenType() == QXmlStreamReader::StartElement) {
-                if (xml.name() == "location") {
+                if (xml.name() == u"location") {
                     while (!xml.atEnd()) {
                         xml.readNext();
                         if (xml.tokenType() == QXmlStreamReader::StartElement) {
-                            if (xml.name() == "name") {
+                            if (xml.name() == u"name") {
                                 city = xml.readElementText();
                                 m_cityItem->setPlainText(city);
                                 setWindowTitle(city);
@@ -279,22 +232,22 @@ private:
                             }
                         }
                     }
-                } else if (xml.name() == "credit") {
+                } else if (xml.name() == u"credit") {
                     while (!xml.atEnd()) {
                         xml.readNext();
                         if (xml.tokenType() == QXmlStreamReader::StartElement) {
-                            if (xml.name() == "link") {
+                            if (xml.name() == u"link") {
                                 m_copyright->setHtml(QString("<td align=\"center\">%1 <a href=\"%2\">(source)</a></td>").arg(GET_DATA_ATTR("text")).arg(GET_DATA_ATTR("url")));
                                 xml.skipCurrentElement();
                                 break;
                             }
                         }
                     }
-                } else if (xml.name() == "tabular") {
+                } else if (xml.name() == u"tabular") {
                     while (!xml.atEnd()) {
                         xml.readNext();
                         if (xml.tokenType() == QXmlStreamReader::StartElement) {
-                            if (xml.name() == "time") {
+                            if (xml.name() == u"time") {
                                 if (!foundCurrentForecast) {
                                     QString temperature;
                                     QString symbol;
@@ -315,7 +268,7 @@ private:
                             }
                         }
                     }
-                } else if (xml.name() != "weatherdata" && xml.name() != "forecast" && xml.name() != "credit"){
+                } else if (xml.name() != u"weatherdata" && xml.name() != u"forecast" && xml.name() != u"credit"){
                     xml.skipCurrentElement();
                 }
             }
@@ -332,7 +285,7 @@ private:
     }
 
     void createNewDay(QXmlStreamReader &xml) {
-        QGraphicsTextItem *dayItem  = 0;
+        QGraphicsTextItem *dayItem  = nullptr;
         QString lowT;
         QString highT;
         QString period = GET_DATA_ATTR("period");
@@ -354,7 +307,7 @@ private:
         while (!xml.atEnd()) {
             xml.readNext();
             if (xml.tokenType() == QXmlStreamReader::StartElement) {
-                if (xml.name() == "time") {
+                if (xml.name() == u"time") {
                     QString period = GET_DATA_ATTR("period");
                     // save data if new day starts
                     if (period == "0") {
@@ -384,7 +337,7 @@ private:
     }
 
     void saveDayItem(QGraphicsTextItem *dayItem, QString lowT, QString highT, QString symbolToShow) {
-        QGraphicsSvgItem *statusItem = 0;
+        QGraphicsSvgItem *statusItem = nullptr;
         if (!symbolToShow.isEmpty()) {
             statusItem = new QGraphicsSvgItem(symbolToShow);
             m_scene.addItem(statusItem);
@@ -418,14 +371,14 @@ private:
         while (!xml.atEnd()) {
             xml.readNext();
             if (xml.tokenType() == QXmlStreamReader::StartElement) {
-                if (xml.name() == "symbol") {
+                if (xml.name() == u"symbol") {
                     QString condition = GET_DATA_ATTR("name");
                     symbol = extractIcon(condition);
                     if (m_conditionItem->toPlainText().isEmpty())
                         m_conditionItem->setPlainText(condition);
                     foundIcon = true;
                 }
-                if (xml.name() == "temperature") {
+                if (xml.name() == u"temperature") {
                     temp = GET_DATA_ATTR("value");
                     foundTemp = true;
                 }

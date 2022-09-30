@@ -1,37 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \example mainwindows/application
-    \title Application Example
+    \title Qt Widgets - Application Example
     \ingroup examples-mainwindow
 
-    \brief The Application example shows how to implement a standard GUI
-    application with menus, toolbars, and a status bar. The example
+    \brief The Application example shows how to implement a standard
+    widget application with menus, toolbars, and a status bar. The example
     itself is a simple text editor program built around QPlainTextEdit.
 
     \image application.png Screenshot of the Application example
@@ -312,9 +288,8 @@
     If we successfully opened the file, we use a QTextStream object
     to read in the data. QTextStream automatically converts the 8-bit
     data into a Unicode QString and supports various encodings. If no
-    encoding is specified, QTextStream assumes the file is written
-    using the system's default 8-bit encoding (for example, Latin-1;
-    see QTextCodec::codecForLocale() for details).
+    encoding is specified, QTextStream assumes the file is encoded in
+    UTF-8.
 
     Since the call to QTextStream::readAll() might take some time, we
     set the cursor to be Qt::WaitCursor for the entire application

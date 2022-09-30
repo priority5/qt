@@ -8,10 +8,10 @@
 #include <map>
 #include <string>
 
+#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
-#include "base/stl_util.h"
 #include "ui/accessibility/ax_base_export.h"
 #include "ui/accessibility/ax_enums.mojom-forward.h"
 
@@ -69,6 +69,9 @@ AX_BASE_EXPORT const char* ToString(ax::mojom::ListStyle list_style);
 
 // ax::mojom::MarkerType
 AX_BASE_EXPORT const char* ToString(ax::mojom::MarkerType marker_type);
+
+// ax::mojom::HighlightType
+AX_BASE_EXPORT const char* ToString(ax::mojom::HighlightType highlight_type);
 
 // ax::mojom::MoveDirection
 AX_BASE_EXPORT const char* ToString(ax::mojom::MoveDirection move_direction);

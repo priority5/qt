@@ -7,23 +7,34 @@
 #include <tuple>
 #include <vector>
 
+#include "base/feature_list.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/system/sys_info.h"
 #include "build/build_config.h"
 #include "components/feed/core/proto/v2/store.pb.h"
 #include "components/feed/core/proto/v2/wire/capability.pb.h"
+#include "components/feed/core/proto/v2/wire/chrome_client_info.pb.h"
+#include "components/feed/core/proto/v2/wire/feed_entry_point_data.pb.h"
+#include "components/feed/core/proto/v2/wire/feed_entry_point_source.pb.h"
+#include "components/feed/core/proto/v2/wire/feed_query.pb.h"
 #include "components/feed/core/proto/v2/wire/feed_request.pb.h"
 #include "components/feed/core/proto/v2/wire/request.pb.h"
 #include "components/feed/core/v2/config.h"
+#include "components/feed/core/v2/enums.h"
 #include "components/feed/core/v2/feed_stream.h"
+#include "components/feed/core/v2/public/feed_api.h"
+#include "components/feed/feed_feature_list.h"
+#include "components/reading_list/features/reading_list_switches.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
 #endif
 
 namespace feed {
 namespace {
+using feedwire::Capability;
+
 feedwire::Version::Architecture GetBuildArchitecture() {
 #if defined(ARCH_CPU_X86_64)
   return feedwire::Version::X86_64;
@@ -82,7 +93,7 @@ feedwire::Version GetPlatformVersionMessage() {
   result.set_major(major);
   result.set_minor(minor);
   result.set_revision(revision);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   result.set_api_version(base::android::BuildInfo::GetInstance()->sdk_int());
 #endif
   return result;
@@ -101,13 +112,14 @@ feedwire::Version GetAppVersionMessage(const ChromeInfo& chrome_info) {
     result.set_revision(static_cast<int32_t>(numbers[3]));
   }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   result.set_api_version(base::android::BuildInfo::GetInstance()->sdk_int());
 #endif
   return result;
 }
 
 feedwire::Request CreateFeedQueryRequest(
+    const StreamType& stream_type,
     feedwire::FeedQuery::RequestReason request_reason,
     const RequestMetadata& request_metadata,
     const std::string& consistency_token,
@@ -116,17 +128,79 @@ feedwire::Request CreateFeedQueryRequest(
   request.set_request_version(feedwire::Request::FEED_QUERY);
 
   feedwire::FeedRequest& feed_request = *request.mutable_feed_request();
-  feed_request.add_client_capability(feedwire::Capability::BASE_UI);
-  feed_request.add_client_capability(feedwire::Capability::CARD_MENU);
+
+  for (Capability capability :
+       {Capability::CARD_MENU, Capability::LOTTIE_ANIMATIONS,
+        Capability::LONG_PRESS_CARD_MENU, Capability::SHARE,
+        Capability::OPEN_IN_TAB, Capability::OPEN_IN_INCOGNITO,
+        Capability::DISMISS_COMMAND, Capability::INFINITE_FEED,
+        Capability::PREFETCH_METADATA, Capability::REQUEST_SCHEDULE,
+        Capability::UI_THEME_V2, Capability::UNDO_FOR_DISMISS_COMMAND}) {
+    feed_request.add_client_capability(capability);
+  }
+
   for (auto capability : GetFeedConfig().experimental_capabilities)
     feed_request.add_client_capability(capability);
+
+  if (base::FeatureList::IsEnabled(kInterestFeedV2Hearts)) {
+    feed_request.add_client_capability(Capability::HEART);
+  }
+  if (request_metadata.autoplay_enabled) {
+    feed_request.add_client_capability(Capability::INLINE_VIDEO_AUTOPLAY);
+    feed_request.add_client_capability(Capability::OPEN_VIDEO_COMMAND);
+  }
+
+  if (base::FeatureList::IsEnabled(kFeedStamp)) {
+    feed_request.add_client_capability(Capability::SILK_AMP_OPEN_COMMAND);
+    feed_request.add_client_capability(Capability::AMP_STORY_PLAYER);
+    feed_request.add_client_capability(Capability::AMP_GROUP_DATASTORE);
+  }
+
+  if (base::FeatureList::IsEnabled(reading_list::switches::kReadLater)) {
+    feed_request.add_client_capability(Capability::READ_LATER);
+  } else {
+    feed_request.add_client_capability(Capability::DOWNLOAD_LINK);
+  }
+
+  if (base::FeatureList::IsEnabled(kPersonalizeFeedUnsignedUsers)) {
+    feed_request.add_client_capability(Capability::ON_DEVICE_USER_PROFILE);
+  }
 
   *feed_request.mutable_client_info() = CreateClientInfo(request_metadata);
   feedwire::FeedQuery& query = *feed_request.mutable_feed_query();
   query.set_reason(request_reason);
-  if (!consistency_token.empty()) {
+  switch (request_metadata.content_order) {
+    case ContentOrder::kReverseChron:
+      query.set_order_by(
+          feedwire::FeedQuery::ContentOrder::FeedQuery_ContentOrder_RECENT);
+      break;
+    case ContentOrder::kGrouped:
+      query.set_order_by(
+          feedwire::FeedQuery::ContentOrder::FeedQuery_ContentOrder_GROUPED);
+      break;
+    case ContentOrder::kUnspecified:
+      break;
+  }
+
+  // Set the feed entry point based on the stream type.
+  feedwire::FeedEntryPointData& entry_point =
+      *query.mutable_feed_entry_point_data();
+  if (stream_type == kForYouStream) {
+    entry_point.set_feed_entry_point_source_value(
+        feedwire::FeedEntryPointSource::CHROME_DISCOVER_FEED);
+  } else if (stream_type == kWebFeedStream) {
+    entry_point.set_feed_entry_point_source_value(
+        feedwire::FeedEntryPointSource::CHROME_FOLLOWING_FEED);
+  }
+
+  // |consistency_token|, for action reporting, is only applicable to signed-in
+  // requests. The presence of |client_instance_id|, also signed-in only, can be
+  // used a proxy for checking if we're creating a signed-in request.
+  if (!consistency_token.empty() &&
+      !request_metadata.client_instance_id.empty()) {
     feed_request.mutable_consistency_token()->set_token(consistency_token);
   }
+
   if (!next_page_token.empty()) {
     DCHECK_EQ(request_reason, feedwire::FeedQuery::NEXT_PAGE_SCROLL);
     query.mutable_next_page_token()
@@ -134,6 +208,27 @@ feedwire::Request CreateFeedQueryRequest(
         ->set_next_page_token(next_page_token);
   }
   return request;
+}
+
+void SetNoticeCardAcknowledged(feedwire::Request* request,
+                               const RequestMetadata& request_metadata) {
+  if (request_metadata.notice_card_acknowledged) {
+    request->mutable_feed_request()
+        ->mutable_feed_query()
+        ->mutable_chrome_fulfillment_info()
+        ->set_notice_card_acknowledged(true);
+  }
+}
+
+void SetCardSpecificNoticeAcknowledged(
+    feedwire::Request* request,
+    const RequestMetadata& request_metadata) {
+  for (const auto& key : request_metadata.acknowledged_notice_keys) {
+    request->mutable_feed_request()
+        ->mutable_feed_query()
+        ->mutable_chrome_fulfillment_info()
+        ->add_acknowledged_notice_key(key);
+  }
 }
 
 }  // namespace
@@ -154,8 +249,8 @@ bool CompareContentId(const feedwire::ContentId& a,
   // Local variables because tie() needs l-values.
   const int a_id = a.id();
   const int b_id = b.id();
-  const feedwire::ContentId::Type a_type = a.type();
-  const feedwire::ContentId::Type b_type = b.type();
+  const int a_type = a.type();
+  const int b_type = b.type();
   return std::tie(a.content_domain(), a_id, a_type) <
          std::tie(b.content_domain(), b_id, b_type);
 }
@@ -176,7 +271,6 @@ bool CompareContent(const feedstore::Content& a, const feedstore::Content& b) {
 
 feedwire::ClientInfo CreateClientInfo(const RequestMetadata& request_metadata) {
   feedwire::ClientInfo client_info;
-  client_info.set_client_instance_id(request_metadata.client_instance_id);
 
   feedwire::DisplayInfo& display_info = *client_info.add_display_info();
   display_info.set_screen_density(request_metadata.display_metrics.density);
@@ -187,45 +281,62 @@ feedwire::ClientInfo CreateClientInfo(const RequestMetadata& request_metadata) {
 
   client_info.set_locale(request_metadata.language_tag);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   client_info.set_platform_type(feedwire::ClientInfo::ANDROID_ID);
-#elif defined(OS_IOS)
+#elif BUILDFLAG(IS_IOS)
   client_info.set_platform_type(feedwire::ClientInfo::IOS);
 #endif
-  client_info.set_app_type(feedwire::ClientInfo::CLANK);
+  client_info.set_app_type(feedwire::ClientInfo::CHROME_ANDROID);
   *client_info.mutable_platform_version() = GetPlatformVersionMessage();
   *client_info.mutable_app_version() =
       GetAppVersionMessage(request_metadata.chrome_info);
+
+  // client_instance_id and session_id should not both be set at the same time.
+  DCHECK(request_metadata.client_instance_id.empty() ||
+         request_metadata.session_id.empty());
+
+  // Populate client_instance_id, session_id, or neither.
+  if (!request_metadata.client_instance_id.empty()) {
+    client_info.set_client_instance_id(request_metadata.client_instance_id);
+  } else if (!request_metadata.session_id.empty()) {
+    client_info.mutable_chrome_client_info()->set_session_id(
+        request_metadata.session_id);
+  }
+
+  client_info.mutable_chrome_client_info()->set_start_surface(
+      request_metadata.chrome_info.start_surface);
   return client_info;
 }
 
 feedwire::Request CreateFeedQueryRefreshRequest(
+    const StreamType& stream_type,
     feedwire::FeedQuery::RequestReason request_reason,
     const RequestMetadata& request_metadata,
     const std::string& consistency_token) {
-  return CreateFeedQueryRequest(request_reason, request_metadata,
-                                consistency_token, std::string());
+  feedwire::Request request =
+      CreateFeedQueryRequest(stream_type, request_reason, request_metadata,
+                             consistency_token, std::string());
+  if (stream_type.IsWebFeed()) {
+    // A special token that requests content for followed Web Feeds.
+    constexpr char kChromeFollowToken[] = "\"\004\022\002\b5*\tFollowing";
+    request.mutable_feed_request()
+        ->mutable_feed_query()
+        ->mutable_web_feed_token()
+        ->mutable_web_feed_token()
+        ->set_web_feed_token(kChromeFollowToken);
+  }
+  SetNoticeCardAcknowledged(&request, request_metadata);
+  SetCardSpecificNoticeAcknowledged(&request, request_metadata);
+  return request;
 }
 
 feedwire::Request CreateFeedQueryLoadMoreRequest(
     const RequestMetadata& request_metadata,
     const std::string& consistency_token,
     const std::string& next_page_token) {
-  return CreateFeedQueryRequest(feedwire::FeedQuery::NEXT_PAGE_SCROLL,
-                                request_metadata, consistency_token,
-                                next_page_token);
+  return CreateFeedQueryRequest(
+      kForYouStream, feedwire::FeedQuery::NEXT_PAGE_SCROLL, request_metadata,
+      consistency_token, next_page_token);
 }
 
 }  // namespace feed
-
-namespace feedstore {
-void SetLastAddedTime(base::Time t, feedstore::StreamData& data) {
-  data.set_last_added_time_millis(
-      (t - base::Time::UnixEpoch()).InMilliseconds());
-}
-
-base::Time GetLastAddedTime(const feedstore::StreamData& data) {
-  return base::Time::UnixEpoch() +
-         base::TimeDelta::FromMilliseconds(data.last_added_time_millis());
-}
-}  // namespace feedstore

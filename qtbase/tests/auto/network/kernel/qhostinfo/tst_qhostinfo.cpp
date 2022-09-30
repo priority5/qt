@@ -1,31 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2016 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2016 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
 // When using WinSock2 on Windows, it's the first thing that can be included
@@ -40,22 +15,19 @@
 # include <ws2tcpip.h>
 #endif
 
-#include <QtTest/QtTest>
-#include <qcoreapplication.h>
+#include <QTest>
+#include <QTestEventLoop>
+#include <QProcess>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QTcpSocket>
-#include <private/qthread_p.h>
 #include <QTcpServer>
 
-#ifndef QT_NO_BEARERMANAGEMENT
-#include <QtNetwork/qnetworkconfigmanager.h>
-#include <QtNetwork/qnetworkconfiguration.h>
-#include <QtNetwork/qnetworksession.h>
-#endif
+#include <private/qthread_p.h>
 
 #include <time.h>
 #if defined(Q_OS_WIN)
-#include <windows.h>
+#include <qt_windows.h>
 #else
 #include <unistd.h>
 #include <signal.h>
@@ -121,11 +93,6 @@ private:
     bool lookupDone;
     int lookupsDoneCounter;
     QHostInfo lookupResults;
-#ifndef QT_NO_BEARERMANAGEMENT
-    QNetworkConfigurationManager *netConfMan;
-    QNetworkConfiguration networkConfiguration;
-    QScopedPointer<QNetworkSession> networkSession;
-#endif
 };
 
 void tst_QHostInfo::swapFunction()
@@ -180,17 +147,6 @@ void tst_QHostInfo::staticInformation()
 
 void tst_QHostInfo::initTestCase()
 {
-#ifndef QT_NO_BEARERMANAGEMENT
-    //start the default network
-    netConfMan = new QNetworkConfigurationManager(this);
-    networkConfiguration = netConfMan->defaultConfiguration();
-    networkSession.reset(new QNetworkSession(networkConfiguration));
-    if (!networkSession->isOpen()) {
-        networkSession->open();
-        networkSession->waitForOpened(30000);
-    }
-#endif
-
     ipv6Available = false;
     ipv6LookupsAvailable = false;
 
@@ -382,7 +338,7 @@ void tst_QHostInfo::lookupConnectToLambda()
     QFETCH(QString, addresses);
 
     lookupDone = false;
-    QHostInfo::lookupHost(hostname, [=](const QHostInfo &hostInfo) {
+    QHostInfo::lookupHost(hostname, [this](const QHostInfo &hostInfo) {
         resultsReady(hostInfo);
     });
 
@@ -547,7 +503,7 @@ void tst_QHostInfo::raceCondition()
 class LookupThread : public QThread
 {
 protected:
-    inline void run()
+    inline void run() override
     {
          QHostInfo info = QHostInfo::fromName("a-single" TEST_DOMAIN);
          QCOMPARE(info.error(), QHostInfo::NoError);

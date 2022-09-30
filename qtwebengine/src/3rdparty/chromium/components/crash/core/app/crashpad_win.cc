@@ -5,13 +5,12 @@
 #include "components/crash/core/app/crashpad.h"
 
 #include <memory>
+#include <string>
 
 #include "base/debug/crash_logging.h"
 #include "base/environment.h"
 #include "base/files/file_util.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -32,22 +31,27 @@ void GetPlatformCrashpadAnnotations(
     std::map<std::string, std::string>* annotations) {
   CrashReporterClient* crash_reporter_client = GetCrashReporterClient();
   wchar_t exe_file[MAX_PATH] = {};
-  CHECK(::GetModuleFileName(nullptr, exe_file, base::size(exe_file)));
-  base::string16 product_name, version, special_build, channel_name;
+  CHECK(::GetModuleFileName(nullptr, exe_file, std::size(exe_file)));
+  std::wstring product_name, version, special_build, channel_name;
   crash_reporter_client->GetProductNameAndVersion(
       exe_file, &product_name, &version, &special_build, &channel_name);
-  (*annotations)["prod"] = base::UTF16ToUTF8(product_name);
-  (*annotations)["ver"] = base::UTF16ToUTF8(version);
+  (*annotations)["prod"] = base::WideToUTF8(product_name);
+  (*annotations)["ver"] = base::WideToUTF8(version);
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Empty means stable.
   const bool allow_empty_channel = true;
+  if (channel_name == L"extended") {
+    // Extended stable reports as stable (empty string) with an extra bool.
+    channel_name.clear();
+    (*annotations)["extended_stable_channel"] = "true";
+  }
 #else
   const bool allow_empty_channel = false;
 #endif
   if (allow_empty_channel || !channel_name.empty())
-    (*annotations)["channel"] = base::UTF16ToUTF8(channel_name);
+    (*annotations)["channel"] = base::WideToUTF8(channel_name);
   if (!special_build.empty())
-    (*annotations)["special"] = base::UTF16ToUTF8(special_build);
+    (*annotations)["special"] = base::WideToUTF8(special_build);
 #if defined(ARCH_CPU_X86)
   (*annotations)["plat"] = std::string("Win32");
 #elif defined(ARCH_CPU_X86_64)
@@ -55,14 +59,14 @@ void GetPlatformCrashpadAnnotations(
 #endif
 }
 
-base::FilePath PlatformCrashpadInitialization(
+bool PlatformCrashpadInitialization(
     bool initial_client,
     bool browser_process,
     bool embedded_handler,
     const std::string& user_data_dir,
     const base::FilePath& exe_path,
-    const std::vector<std::string>& initial_arguments) {
-  base::FilePath database_path;  // Only valid in the browser process.
+    const std::vector<std::string>& initial_arguments,
+    base::FilePath* database_path) {
   base::FilePath metrics_path;  // Only valid in the browser process.
 
   const char kPipeNameVar[] = "CHROME_CRASHPAD_PIPE_NAME";
@@ -72,11 +76,11 @@ base::FilePath PlatformCrashpadInitialization(
   CrashReporterClient* crash_reporter_client = GetCrashReporterClient();
 
   if (initial_client) {
-    base::string16 database_path_str;
+    std::wstring database_path_str;
     if (crash_reporter_client->GetCrashDumpLocation(&database_path_str))
-      database_path = base::FilePath(database_path_str);
+      *database_path = base::FilePath(database_path_str);
 
-    base::string16 metrics_path_str;
+    std::wstring metrics_path_str;
     if (crash_reporter_client->GetCrashMetricsLocation(&metrics_path_str)) {
       metrics_path = base::FilePath(metrics_path_str);
       CHECK(base::CreateDirectoryAndGetError(metrics_path, nullptr));
@@ -95,7 +99,7 @@ base::FilePath PlatformCrashpadInitialization(
     if (exe_file.empty()) {
       wchar_t exe_file_path[MAX_PATH] = {};
       CHECK(::GetModuleFileName(nullptr, exe_file_path,
-                                base::size(exe_file_path)));
+                                std::size(exe_file_path)));
 
       exe_file = base::FilePath(exe_file_path);
     }
@@ -136,19 +140,19 @@ base::FilePath PlatformCrashpadInitialization(
     arguments.push_back(std::string("--monitor-self-annotation=ptype=") +
                         switches::kCrashpadHandler);
 
-    GetCrashpadClient().StartHandler(exe_file, database_path, metrics_path, url,
-                                     process_annotations, arguments, false,
+    GetCrashpadClient().StartHandler(exe_file, *database_path, metrics_path,
+                                     url, process_annotations, arguments, false,
                                      false);
 
     // If we're the browser, push the pipe name into the environment so child
     // processes can connect to it. If we inherited another crashpad_handler's
     // pipe name, we'll overwrite it here.
     env->SetVar(kPipeNameVar,
-                base::UTF16ToUTF8(GetCrashpadClient().GetHandlerIPCPipe()));
+                base::WideToUTF8(GetCrashpadClient().GetHandlerIPCPipe()));
   } else {
     std::string pipe_name_utf8;
     if (env->GetVar(kPipeNameVar, &pipe_name_utf8)) {
-      GetCrashpadClient().SetHandlerIPCPipe(base::UTF8ToUTF16(pipe_name_utf8));
+      GetCrashpadClient().SetHandlerIPCPipe(base::UTF8ToWide(pipe_name_utf8));
     }
   }
 
@@ -159,7 +163,7 @@ base::FilePath PlatformCrashpadInitialization(
                                                   kIndirectMemoryLimit);
   }
 
-  return database_path;
+  return true;
 }
 
 // We need to prevent ICF from folding DumpProcessForHungInputThread(),

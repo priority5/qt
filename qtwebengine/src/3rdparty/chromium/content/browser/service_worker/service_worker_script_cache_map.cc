@@ -8,10 +8,12 @@
 
 #include "base/bind.h"
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "content/browser/service_worker/service_worker_consts.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "net/base/net_errors.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace content {
 
@@ -41,8 +43,8 @@ void ServiceWorkerScriptCacheMap::NotifyStartedCaching(const GURL& url,
     return;  // Our storage has been wiped via DeleteAndStartOver.
   resource_map_[url] =
       storage::mojom::ServiceWorkerResourceRecord::New(resource_id, url, -1);
-  context_->registry()->StoreUncommittedResourceId(resource_id,
-                                                   owner_->scope().GetOrigin());
+  context_->registry()->StoreUncommittedResourceId(
+      resource_id, blink::StorageKey(url::Origin::Create(owner_->scope())));
 }
 
 void ServiceWorkerScriptCacheMap::NotifyFinishedCaching(
@@ -97,7 +99,7 @@ void ServiceWorkerScriptCacheMap::WriteMetadata(
     base::span<const uint8_t> data,
     net::CompletionOnceCallback callback) {
   if (!context_) {
-    std::move(callback).Run(net::ERR_ABORTED);
+    std::move(callback).Run(net::ERR_FAILED);
     return;
   }
 
@@ -109,16 +111,26 @@ void ServiceWorkerScriptCacheMap::WriteMetadata(
     return;
   }
 
+  CHECK_LT(next_callback_id_, std::numeric_limits<uint64_t>::max());
+  uint64_t callback_id = next_callback_id_++;
   mojo_base::BigBuffer buffer(base::as_bytes(data));
+
+  DCHECK(!base::Contains(callbacks_, callback_id));
+  callbacks_[callback_id] = std::move(callback);
+
   mojo::Remote<storage::mojom::ServiceWorkerResourceMetadataWriter> writer;
   context_->GetStorageControl()->CreateResourceMetadataWriter(
       found->second->resource_id, writer.BindNewPipeAndPassReceiver());
+  writer.set_disconnect_handler(
+      base::BindOnce(&ServiceWorkerScriptCacheMap::OnWriterDisconnected,
+                     weak_factory_.GetWeakPtr(), callback_id));
+
   auto* raw_writer = writer.get();
   raw_writer->WriteMetadata(
       std::move(buffer),
       base::BindOnce(&ServiceWorkerScriptCacheMap::OnMetadataWritten,
                      weak_factory_.GetWeakPtr(), std::move(writer),
-                     std::move(callback)));
+                     callback_id));
 }
 
 void ServiceWorkerScriptCacheMap::ClearMetadata(
@@ -127,11 +139,23 @@ void ServiceWorkerScriptCacheMap::ClearMetadata(
   WriteMetadata(url, std::vector<uint8_t>(), std::move(callback));
 }
 
+void ServiceWorkerScriptCacheMap::OnWriterDisconnected(uint64_t callback_id) {
+  RunCallback(callback_id, net::ERR_FAILED);
+}
+
 void ServiceWorkerScriptCacheMap::OnMetadataWritten(
     mojo::Remote<storage::mojom::ServiceWorkerResourceMetadataWriter> writer,
-    net::CompletionOnceCallback callback,
+    uint64_t callback_id,
     int result) {
-  std::move(callback).Run(result);
+  RunCallback(callback_id, result);
+}
+
+void ServiceWorkerScriptCacheMap::RunCallback(uint64_t callback_id,
+                                              int result) {
+  auto it = callbacks_.find(callback_id);
+  DCHECK(it != callbacks_.end());
+  std::move(it->second).Run(result);
+  callbacks_.erase(it);
 }
 
 }  // namespace content

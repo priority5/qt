@@ -63,9 +63,9 @@ public class PlayerFrameScaleControllerTest {
         Size contentSize = new Size(CONTENT_WIDTH, CONTENT_HEIGHT);
         when(mMediatorDelegateMock.getViewport()).thenReturn(mViewport);
         when(mMediatorDelegateMock.getContentSize()).thenReturn(contentSize);
-        when(mMediatorDelegateMock.getInitialScaleFactor()).thenReturn(1f);
+        when(mMediatorDelegateMock.getMinScaleFactor()).thenReturn(1f);
         mScaleController = new PlayerFrameScaleController(
-                mBitmapScaleMatrix, mMediatorDelegateMock, mScaleListener);
+                mBitmapScaleMatrix, mMediatorDelegateMock, null, mScaleListener);
         mViewport.setScale(1f);
         mViewport.setSize(100, 100);
     }

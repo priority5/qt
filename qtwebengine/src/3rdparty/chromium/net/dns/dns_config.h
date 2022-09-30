@@ -13,7 +13,7 @@
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
 #include "net/dns/dns_hosts.h"
-#include "net/dns/public/dns_over_https_server_config.h"
+#include "net/dns/public/dns_over_https_config.h"
 #include "net/dns/public/secure_dns_mode.h"
 
 namespace base {
@@ -22,8 +22,7 @@ class Value;
 
 namespace net {
 
-// Default to 1 second timeout (before exponential backoff).
-constexpr base::TimeDelta kDnsDefaultTimeout = base::TimeDelta::FromMicroseconds(1000 * 1000);
+constexpr base::TimeDelta kDnsDefaultFallbackPeriod = base::Seconds(1);
 
 // DnsConfig stores configuration of the system resolver.
 struct NET_EXPORT DnsConfig {
@@ -49,7 +48,7 @@ struct NET_EXPORT DnsConfig {
   base::Value ToValue() const;
 
   bool IsValid() const {
-    return !nameservers.empty() || !dns_over_https_servers.empty();
+    return !nameservers.empty() || !doh_config.servers().empty();
   }
 
   // List of name server addresses.
@@ -78,7 +77,10 @@ struct NET_EXPORT DnsConfig {
   // Minimum number of dots before global resolution precedes |search|.
   int ndots;
   // Time between retransmissions, see res_state.retrans.
-  base::TimeDelta timeout;
+  // Used by Chrome as the initial transaction attempt fallback period (before
+  // exponential backoff and dynamic period determination based on previous
+  // attempts.)
+  base::TimeDelta fallback_period;
   // Maximum number of attempts, see res_state.retry.
   int attempts;
   // Maximum number of times a DoH server is attempted per attempted per DNS
@@ -92,9 +94,8 @@ struct NET_EXPORT DnsConfig {
   // as it may cause them to return incorrect results.
   bool use_local_ipv6;
 
-  // List of servers to query over HTTPS, queried in order
-  // (https://tools.ietf.org/id/draft-ietf-doh-dns-over-https-12.txt).
-  std::vector<DnsOverHttpsServerConfig> dns_over_https_servers;
+  // DNS over HTTPS server configuration.
+  DnsOverHttpsConfig doh_config;
 
   // The default SecureDnsMode to use when resolving queries. It can be
   // overridden for individual requests (such as requests to resolve a DoH
@@ -106,10 +107,6 @@ struct NET_EXPORT DnsConfig {
   // to use DoH server(s) operated by the same provider(s) when the user is
   // in AUTOMATIC mode and has not pre-specified DoH servers.
   bool allow_dns_over_https_upgrade;
-
-  // List of providers to exclude from upgrade mapping. See the
-  // mapping in net/dns/dns_util.cc for provider ids.
-  std::vector<std::string> disabled_upgrade_providers;
 };
 
 }  // namespace net

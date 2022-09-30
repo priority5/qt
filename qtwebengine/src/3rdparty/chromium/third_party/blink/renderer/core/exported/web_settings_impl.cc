@@ -107,12 +107,6 @@ void WebSettingsImpl::SetFantasyFontFamily(const WebString& font,
     settings_->NotifyGenericFontFamilyChange();
 }
 
-void WebSettingsImpl::SetPictographFontFamily(const WebString& font,
-                                              UScriptCode script) {
-  if (settings_->GetGenericFontFamilySettings().UpdatePictograph(font, script))
-    settings_->NotifyGenericFontFamilyChange();
-}
-
 void WebSettingsImpl::SetDefaultFontSize(int size) {
   settings_->SetDefaultFontSize(size);
 }
@@ -133,7 +127,7 @@ void WebSettingsImpl::SetMinimumLogicalFontSize(int size) {
   settings_->SetMinimumLogicalFontSize(size);
 }
 
-void WebSettingsImpl::SetAutoplayPolicy(web_pref::AutoplayPolicy policy) {
+void WebSettingsImpl::SetAutoplayPolicy(mojom::blink::AutoplayPolicy policy) {
   settings_->SetAutoplayPolicy(
       static_cast<blink::AutoplayPolicy::Type>(policy));
 }
@@ -235,7 +229,7 @@ void WebSettingsImpl::SetLoadsImagesAutomatically(
 }
 
 void WebSettingsImpl::SetImageAnimationPolicy(
-    web_pref::ImageAnimationPolicy policy) {
+    mojom::blink::ImageAnimationPolicy policy) {
   settings_->SetImageAnimationPolicy(policy);
 }
 
@@ -259,7 +253,7 @@ void WebSettingsImpl::SetAvailablePointerTypes(int pointers) {
   dev_tools_emulator_->SetAvailablePointerTypes(pointers);
 }
 
-void WebSettingsImpl::SetPrimaryPointerType(ui::PointerType pointer) {
+void WebSettingsImpl::SetPrimaryPointerType(mojom::blink::PointerType pointer) {
   dev_tools_emulator_->SetPrimaryPointerType(pointer);
 }
 
@@ -267,7 +261,7 @@ void WebSettingsImpl::SetAvailableHoverTypes(int types) {
   dev_tools_emulator_->SetAvailableHoverTypes(types);
 }
 
-void WebSettingsImpl::SetPrimaryHoverType(ui::HoverType type) {
+void WebSettingsImpl::SetPrimaryHoverType(mojom::blink::HoverType type) {
   dev_tools_emulator_->SetPrimaryHoverType(type);
 }
 
@@ -285,7 +279,7 @@ void WebSettingsImpl::SetDOMPasteAllowed(bool enabled) {
 
 void WebSettingsImpl::SetShrinksViewportContentToFit(
     bool shrink_viewport_content) {
-  settings_->SetShrinksViewportContentToFit(shrink_viewport_content);
+  dev_tools_emulator_->SetShrinksViewportContentToFit(shrink_viewport_content);
 }
 
 void WebSettingsImpl::SetSpatialNavigationEnabled(bool enabled) {
@@ -432,10 +426,6 @@ void WebSettingsImpl::SetBarrelButtonForDragEnabled(bool enabled) {
   settings_->SetBarrelButtonForDragEnabled(enabled);
 }
 
-void WebSettingsImpl::SetOfflineWebApplicationCacheEnabled(bool enabled) {
-  settings_->SetOfflineWebApplicationCacheEnabled(enabled);
-}
-
 void WebSettingsImpl::SetWebGL1Enabled(bool enabled) {
   settings_->SetWebGL1Enabled(enabled);
 }
@@ -465,7 +455,7 @@ void WebSettingsImpl::SetShowContextMenuOnMouseUp(bool enabled) {
 }
 
 void WebSettingsImpl::SetEditingBehavior(
-    web_pref::EditingBehaviorType behavior) {
+    mojom::blink::EditingBehavior behavior) {
   settings_->SetEditingBehaviorType(behavior);
 }
 
@@ -537,12 +527,6 @@ void WebSettingsImpl::SetStrictlyBlockBlockableMixedContent(bool enabled) {
   settings_->SetStrictlyBlockBlockableMixedContent(enabled);
 }
 
-void WebSettingsImpl::SetPassiveEventListenerDefault(
-    PassiveEventListenerDefault default_value) {
-  settings_->SetPassiveListenerDefault(
-      static_cast<PassiveListenerDefault>(default_value));
-}
-
 void WebSettingsImpl::SetPasswordEchoEnabled(bool flag) {
   settings_->SetPasswordEchoEnabled(flag);
 }
@@ -592,10 +576,6 @@ void WebSettingsImpl::SetPictureInPictureEnabled(bool enabled) {
   settings_->SetPictureInPictureEnabled(enabled);
 }
 
-void WebSettingsImpl::SetDataSaverHoldbackWebApi(bool enabled) {
-  settings_->SetDataSaverHoldbackWebApi(enabled);
-}
-
 void WebSettingsImpl::SetWebAppScope(const WebString& scope) {
   settings_->SetWebAppScope(scope);
 }
@@ -613,15 +593,24 @@ void WebSettingsImpl::SetImmersiveModeEnabled(bool enabled) {
 }
 
 void WebSettingsImpl::SetViewportEnabled(bool enabled) {
-  settings_->SetViewportEnabled(enabled);
+  dev_tools_emulator_->SetViewportEnabled(enabled);
 }
 
 void WebSettingsImpl::SetViewportMetaEnabled(bool enabled) {
-  settings_->SetViewportMetaEnabled(enabled);
+  dev_tools_emulator_->SetViewportMetaEnabled(enabled);
 }
 
 void WebSettingsImpl::SetSyncXHRInDocumentsEnabled(bool enabled) {
   settings_->SetSyncXHRInDocumentsEnabled(enabled);
+}
+
+void WebSettingsImpl::SetTargetBlankImpliesNoOpenerEnabledWillBeRemoved(
+    bool enabled) {
+  settings_->SetTargetBlankImpliesNoOpenerEnabledWillBeRemoved(enabled);
+}
+
+void WebSettingsImpl::SetAllowNonEmptyNavigatorPlugins(bool enabled) {
+  settings_->SetAllowNonEmptyNavigatorPlugins(enabled);
 }
 
 void WebSettingsImpl::SetCaretBrowsingEnabled(bool enabled) {
@@ -664,7 +653,7 @@ void WebSettingsImpl::SetV8CacheOptions(mojom::blink::V8CacheOptions options) {
   settings_->SetV8CacheOptions(options);
 }
 
-void WebSettingsImpl::SetViewportStyle(web_pref::ViewportStyle style) {
+void WebSettingsImpl::SetViewportStyle(mojom::blink::ViewportStyle style) {
   dev_tools_emulator_->SetViewportStyle(style);
 }
 
@@ -746,33 +735,18 @@ void WebSettingsImpl::SetLazyImageLoadingDistanceThresholdPx4G(
   settings_->SetLazyImageLoadingDistanceThresholdPx4G(distance_px);
 }
 
-void WebSettingsImpl::SetLazyImageFirstKFullyLoadUnknown(int num_images) {
-  settings_->SetLazyImageFirstKFullyLoadUnknown(num_images);
-}
-
-void WebSettingsImpl::SetLazyImageFirstKFullyLoadSlow2G(int num_images) {
-  settings_->SetLazyImageFirstKFullyLoadSlow2G(num_images);
-}
-
-void WebSettingsImpl::SetLazyImageFirstKFullyLoad2G(int num_images) {
-  settings_->SetLazyImageFirstKFullyLoad2G(num_images);
-}
-
-void WebSettingsImpl::SetLazyImageFirstKFullyLoad3G(int num_images) {
-  settings_->SetLazyImageFirstKFullyLoad3G(num_images);
-}
-
-void WebSettingsImpl::SetLazyImageFirstKFullyLoad4G(int num_images) {
-  settings_->SetLazyImageFirstKFullyLoad4G(num_images);
-}
-
 void WebSettingsImpl::SetForceDarkModeEnabled(bool enabled) {
   settings_->SetForceDarkModeEnabled(enabled);
 }
 
 void WebSettingsImpl::SetPreferredColorScheme(
-    PreferredColorScheme color_scheme) {
+    mojom::blink::PreferredColorScheme color_scheme) {
   settings_->SetPreferredColorScheme(color_scheme);
+}
+
+void WebSettingsImpl::SetPreferredContrast(
+    mojom::blink::PreferredContrast contrast) {
+  settings_->SetPreferredContrast(contrast);
 }
 
 void WebSettingsImpl::SetNavigationControls(
@@ -794,6 +768,16 @@ void WebSettingsImpl::SetSelectionClipboardBufferAvailable(bool available) {
 
 void WebSettingsImpl::SetAccessibilityIncludeSvgGElement(bool include) {
   settings_->SetAccessibilityIncludeSvgGElement(include);
+}
+
+void WebSettingsImpl::SetWebXRImmersiveArAllowed(
+    bool webxr_immersive_ar_allowed) {
+  settings_->SetWebXRImmersiveArAllowed(webxr_immersive_ar_allowed);
+}
+
+void WebSettingsImpl::SetLitePageSubresourceRedirectOrigin(
+    const WebString& origin) {
+  settings_->SetLitePageSubresourceRedirectOrigin(origin);
 }
 
 }  // namespace blink

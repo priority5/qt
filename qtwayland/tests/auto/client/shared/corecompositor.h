@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef MOCKCOMPOSITOR_CORECOMPOSITOR_H
 #define MOCKCOMPOSITOR_CORECOMPOSITOR_H
@@ -48,11 +23,17 @@ public:
 class CoreCompositor
 {
 public:
-    explicit CoreCompositor();
+    enum CompositorType {
+        Default,
+        Legacy // wl-shell
+    };
+
+    CompositorType m_type = Default;
+    explicit CoreCompositor(CompositorType t = Default);
     ~CoreCompositor();
     bool isClean();
     QString dirtyMessage();
-    void dispatch();
+    void dispatch(int timeout = 0);
 
     template<typename function_type, typename... arg_types>
     auto exec(function_type func, arg_types&&... args) -> decltype(func())
@@ -145,10 +126,10 @@ public:
      * \brief Returns all globals with the given type, if any
      */
     template<typename global_type>
-    QVector<global_type *> getAll()
+    QList<global_type *> getAll()
     {
         warnIfNotLockedByThread(Q_FUNC_INFO);
-        QVector<global_type *> matching;
+        QList<global_type *> matching;
         for (auto *global : qAsConst(m_globals)) {
             if (auto *casted = qobject_cast<global_type *>(global))
                 matching.append(casted);
@@ -164,6 +145,7 @@ public:
 public:
     // Only use this carefully from the test thread (i.e. lock first)
     wl_display *m_display = nullptr;
+
 protected:
     class Lock {
     public:
@@ -199,7 +181,7 @@ protected:
     QByteArray m_socketName;
     wl_event_loop *m_eventLoop = nullptr;
     bool m_running = true;
-    QVector<Global *> m_globals;
+    QList<Global *> m_globals;
     QElapsedTimer m_timer;
 
 private:

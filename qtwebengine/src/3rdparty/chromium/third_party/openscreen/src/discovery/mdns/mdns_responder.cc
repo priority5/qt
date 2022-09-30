@@ -4,6 +4,7 @@
 
 #include "discovery/mdns/mdns_responder.h"
 
+#include <array>
 #include <string>
 #include <utility>
 
@@ -20,7 +21,7 @@ namespace openscreen {
 namespace discovery {
 namespace {
 
-const std::array<std::string, 3> kServiceEnumerationDomainLabels{
+constexpr std::array<const char*, 3> kServiceEnumerationDomainLabels{
     "_services", "_dns-sd", "_udp"};
 
 enum AddResult { kNonePresent = 0, kAdded, kAlreadyKnown };
@@ -52,8 +53,7 @@ std::chrono::seconds GetTtlForNsecTargetingType(DnsType type) {
       break;
   }
 
-  OSP_NOTREACHED() << "NSEC records do not support type " << type;
-  return std::chrono::seconds(0);
+  OSP_NOTREACHED();
 }
 
 MdnsRecord CreateNsecRecord(DomainName target_name,
@@ -171,8 +171,8 @@ void ApplyQueryResults(MdnsMessage* message,
 
     // Add A and AAAA records associated with an added SRV record to the
     // additional records section.
-    const int max = message->additional_records().size();
-    for (int i = 0; i < max; i++) {
+    const size_t max = message->additional_records().size();
+    for (size_t i = 0; i < max; i++) {
       if (message->additional_records()[i].dns_type() != DnsType::kSRV) {
         continue;
       }

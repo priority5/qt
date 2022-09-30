@@ -6,11 +6,14 @@
 
 #include <stddef.h>
 
+#include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/raster/raster_source.h"
 #include "components/viz/common/resources/platform_color.h"
 #include "components/viz/common/resources/resource_format_utils.h"
+#include "skia/ext/legacy_display_globals.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkMath.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "ui/gfx/geometry/axis_transform2d.h"
@@ -37,6 +40,7 @@ bool IsSupportedPlaybackToMemoryFormat(viz::ResourceFormat format) {
     case viz::RED_8:
     case viz::LUMINANCE_F16:
     case viz::R16_EXT:
+    case viz::RG16_EXT:
     case viz::BGR_565:
     case viz::RG_88:
     case viz::RGBX_8888:
@@ -83,8 +87,7 @@ void RasterBufferProvider::PlaybackToMemory(
   // Use unknown pixel geometry to disable LCD text.
   SkSurfaceProps surface_props(0, kUnknown_SkPixelGeometry);
   if (playback_settings.use_lcd_text) {
-    // LegacyFontHost will get LCD text and skia figures out what type to use.
-    surface_props = SkSurfaceProps(SkSurfaceProps::kLegacyFontHost_InitType);
+    surface_props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
   }
 
   if (!stride)
@@ -121,12 +124,13 @@ void RasterBufferProvider::PlaybackToMemory(
                    "RasterBufferProvider::PlaybackToMemory::ConvertRGBA4444");
       SkImageInfo dst_info = info.makeColorType(
           ResourceFormatToClosestSkColorType(gpu_compositing, format));
-      auto dst_canvas = SkCanvas::MakeRasterDirect(dst_info, memory, stride);
+      auto dst_canvas =
+          SkCanvas::MakeRasterDirect(dst_info, memory, stride, &surface_props);
       DCHECK(dst_canvas);
       SkPaint paint;
       paint.setDither(true);
       paint.setBlendMode(SkBlendMode::kSrc);
-      surface->draw(dst_canvas.get(), 0, 0, &paint);
+      surface->draw(dst_canvas.get(), 0, 0, SkSamplingOptions(), &paint);
       return;
     }
     case viz::ETC1:
@@ -136,6 +140,7 @@ void RasterBufferProvider::PlaybackToMemory(
     case viz::RED_8:
     case viz::LUMINANCE_F16:
     case viz::R16_EXT:
+    case viz::RG16_EXT:
     case viz::BGR_565:
     case viz::RG_88:
     case viz::RGBX_8888:

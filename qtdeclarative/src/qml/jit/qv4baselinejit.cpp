@@ -1,46 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qv4baselinejit_p.h"
 #include "qv4baselineassembler_p.h"
 #include <private/qv4lookup_p.h>
 #include <private/qv4generatorobject_p.h>
+
+#if QT_CONFIG(qml_jit)
 
 QT_USE_NAMESPACE
 using namespace QV4;
@@ -281,6 +247,13 @@ void BaselineJIT::generate_LoadProperty(int name)
     BASELINEJIT_GENERATE_RUNTIME_CALL(LoadProperty, CallResultDestination::InAccumulator);
 }
 
+void BaselineJIT::generate_LoadOptionalProperty(int name, int offset)
+{
+    labels.insert(as->jumpEqNull(absoluteOffset(offset)));
+
+    generate_LoadProperty(name);
+}
+
 void BaselineJIT::generate_GetLookup(int index)
 {
     STORE_IP();
@@ -291,6 +264,13 @@ void BaselineJIT::generate_GetLookup(int index)
     as->passFunctionAsArg(1);
     as->passEngineAsArg(0);
     BASELINEJIT_GENERATE_RUNTIME_CALL(GetLookup, CallResultDestination::InAccumulator);
+}
+
+void BaselineJIT::generate_GetOptionalLookup(int index, int offset)
+{
+    labels.insert(as->jumpEqNull(absoluteOffset(offset)));
+
+    generate_GetLookup(index);
 }
 
 void BaselineJIT::generate_StoreProperty(int name, int base)
@@ -829,6 +809,7 @@ void BaselineJIT::generate_CmpStrictNotEqual(int lhs) { as->cmpStrictNotEqual(lh
 
 void BaselineJIT::generate_CmpIn(int lhs)
 {
+    STORE_IP();
     STORE_ACC();
     as->prepareCallWithArgCount(3);
     as->passAccumulatorAsArg(2);
@@ -845,6 +826,16 @@ void BaselineJIT::generate_CmpInstanceOf(int lhs)
     as->passJSSlotAsArg(lhs, 1);
     as->passEngineAsArg(0);
     BASELINEJIT_GENERATE_RUNTIME_CALL(Instanceof, CallResultDestination::InAccumulator);
+}
+
+void BaselineJIT::generate_As(int lhs)
+{
+    STORE_ACC();
+    as->prepareCallWithArgCount(3);
+    as->passAccumulatorAsArg(2);
+    as->passJSSlotAsArg(lhs, 1);
+    as->passEngineAsArg(0);
+    BASELINEJIT_GENERATE_RUNTIME_CALL(As, CallResultDestination::InAccumulator);
 }
 
 void BaselineJIT::generate_UNot() { as->unot(); }
@@ -930,3 +921,6 @@ void BaselineJIT::endInstruction(Instr::Type instr)
 {
     Q_UNUSED(instr);
 }
+
+#endif // QT_CONFIG(qml_jit)
+

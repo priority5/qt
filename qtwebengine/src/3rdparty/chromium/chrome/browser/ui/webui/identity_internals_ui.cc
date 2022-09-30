@@ -10,8 +10,7 @@
 
 #include "base/bind.h"
 #include "base/i18n/time_formatting.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
@@ -25,12 +24,13 @@
 #include "content/public/browser/web_ui_message_handler.h"
 #include "extensions/browser/extension_registry.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace {
 
 // RevokeToken message parameter offsets.
-const int kRevokeTokenExtensionOffset = 0;
-const int kRevokeTokenTokenOffset = 1;
+const int kRevokeTokenExtensionOffset = 1;
+const int kRevokeTokenTokenOffset = 2;
 
 class IdentityInternalsTokenRevoker;
 
@@ -43,7 +43,8 @@ class IdentityInternalsUIMessageHandler : public content::WebUIMessageHandler {
   // Ensures that a proper clean up happens after a token is revoked. That
   // includes deleting the |token_revoker|, removing the token from Identity API
   // cache and updating the UI that the token is gone.
-  void OnTokenRevokerDone(IdentityInternalsTokenRevoker* token_revoker);
+  void OnTokenRevokerDone(IdentityInternalsTokenRevoker* token_revoker,
+                          const std::string& callback_id);
 
   // WebUIMessageHandler implementation.
   void RegisterMessages() override;
@@ -66,7 +67,7 @@ class IdentityInternalsUIMessageHandler : public content::WebUIMessageHandler {
 
   // Gets a string representation of an expiration time of the access token in
   // |token_cache_value|.
-  base::string16 GetExpirationTime(
+  std::u16string GetExpirationTime(
       const extensions::IdentityTokenCacheValue& token_cache_value);
 
   // Converts a pair of |access_tokens_key| and |token_cache_value| to a
@@ -99,8 +100,14 @@ class IdentityInternalsTokenRevoker : public GaiaAuthConsumer {
   // notified when revocation succeeds via |OnTokenRevokerDone()|.
   IdentityInternalsTokenRevoker(const std::string& extension_id,
                                 const std::string& access_token,
+                                const std::string& callback_id,
                                 Profile* profile,
                                 IdentityInternalsUIMessageHandler* consumer);
+
+  IdentityInternalsTokenRevoker(const IdentityInternalsTokenRevoker&) = delete;
+  IdentityInternalsTokenRevoker& operator=(
+      const IdentityInternalsTokenRevoker&) = delete;
+
   ~IdentityInternalsTokenRevoker() override;
 
   // Returns the access token being revoked.
@@ -120,10 +127,10 @@ class IdentityInternalsTokenRevoker : public GaiaAuthConsumer {
   const std::string extension_id_;
   // The access token to revoke.
   const std::string access_token_;
+  // The JS callback to resolve when revoking is done.
+  const std::string callback_id_;
   // An object that needs to be notified once the access token is revoked.
-  IdentityInternalsUIMessageHandler* consumer_;  // weak.
-
-  DISALLOW_COPY_AND_ASSIGN(IdentityInternalsTokenRevoker);
+  raw_ptr<IdentityInternalsUIMessageHandler> consumer_;  // weak.
 };
 
 IdentityInternalsUIMessageHandler::IdentityInternalsUIMessageHandler() {}
@@ -131,7 +138,8 @@ IdentityInternalsUIMessageHandler::IdentityInternalsUIMessageHandler() {}
 IdentityInternalsUIMessageHandler::~IdentityInternalsUIMessageHandler() {}
 
 void IdentityInternalsUIMessageHandler::OnTokenRevokerDone(
-    IdentityInternalsTokenRevoker* token_revoker) {
+    IdentityInternalsTokenRevoker* token_revoker,
+    const std::string& callback_id) {
   extensions::IdentityAPI* api =
       extensions::IdentityAPI::GetFactoryInstance()->Get(
           Profile::FromWebUI(web_ui()));
@@ -145,10 +153,8 @@ void IdentityInternalsUIMessageHandler::OnTokenRevokerDone(
                                        token_revoker->access_token());
 
   // Update view about the token being removed.
-  base::ListValue result;
-  result.AppendString(token_revoker->access_token());
-  web_ui()->CallJavascriptFunctionUnsafe("identity_internals.tokenRevokeDone",
-                                         result);
+  ResolveJavascriptCallback(base::Value(callback_id),
+                            base::Value(token_revoker->access_token()));
 
   // Erase the revoker.
   for (auto iter = token_revokers_.begin(); iter != token_revokers_.end();
@@ -176,7 +182,7 @@ std::unique_ptr<base::ListValue> IdentityInternalsUIMessageHandler::GetScopes(
     const extensions::IdentityTokenCacheValue& token_cache_value) {
   auto scopes_value = std::make_unique<base::ListValue>();
   for (const auto& scope : token_cache_value.granted_scopes()) {
-    scopes_value->AppendString(scope);
+    scopes_value->Append(scope);
   }
   return scopes_value;
 }
@@ -184,7 +190,6 @@ std::unique_ptr<base::ListValue> IdentityInternalsUIMessageHandler::GetScopes(
 std::string IdentityInternalsUIMessageHandler::GetStatus(
     const extensions::IdentityTokenCacheValue& token_cache_value) {
   switch (token_cache_value.status()) {
-    case extensions::IdentityTokenCacheValue::CACHE_STATUS_ADVICE:
     case extensions::IdentityTokenCacheValue::CACHE_STATUS_REMOTE_CONSENT:
     case extensions::IdentityTokenCacheValue::
         CACHE_STATUS_REMOTE_CONSENT_APPROVED:
@@ -199,7 +204,7 @@ std::string IdentityInternalsUIMessageHandler::GetStatus(
   return std::string();
 }
 
-base::string16 IdentityInternalsUIMessageHandler::GetExpirationTime(
+std::u16string IdentityInternalsUIMessageHandler::GetExpirationTime(
     const extensions::IdentityTokenCacheValue& token_cache_value) {
   return base::TimeFormatFriendlyDateAndTime(
       token_cache_value.expiration_time());
@@ -210,18 +215,26 @@ IdentityInternalsUIMessageHandler::GetInfoForToken(
     const extensions::IdentityTokenCache::AccessTokensKey& access_tokens_key,
     const extensions::IdentityTokenCacheValue& token_cache_value) {
   auto token_data = std::make_unique<base::DictionaryValue>();
-  token_data->SetString("extensionId", access_tokens_key.extension_id);
-  token_data->SetString("accountId", access_tokens_key.account_id.ToString());
-  token_data->SetString("extensionName", GetExtensionName(access_tokens_key));
-  token_data->Set("scopes", GetScopes(token_cache_value));
-  token_data->SetString("status", GetStatus(token_cache_value));
-  token_data->SetString("accessToken", token_cache_value.token());
-  token_data->SetString("expirationTime", GetExpirationTime(token_cache_value));
+  token_data->SetStringKey("extensionId", access_tokens_key.extension_id);
+  token_data->SetStringKey("accountId",
+                           access_tokens_key.account_id.ToString());
+  token_data->SetStringKey("extensionName",
+                           GetExtensionName(access_tokens_key));
+  token_data->SetKey(
+      "scopes", base::Value::FromUniquePtrValue(GetScopes(token_cache_value)));
+  token_data->SetStringKey("status", GetStatus(token_cache_value));
+  token_data->SetStringKey("accessToken", token_cache_value.token());
+  token_data->SetStringKey("expirationTime",
+                           GetExpirationTime(token_cache_value));
   return token_data;
 }
 
 void IdentityInternalsUIMessageHandler::GetInfoForAllTokens(
     const base::ListValue* args) {
+  const std::string& callback_id = args->GetListDeprecated()[0].GetString();
+  CHECK(!callback_id.empty());
+
+  AllowJavascript();
   base::ListValue results;
   extensions::IdentityTokenCache::AccessTokensCache tokens;
   // The API can be null in incognito.
@@ -235,18 +248,16 @@ void IdentityInternalsUIMessageHandler::GetInfoForAllTokens(
       results.Append(GetInfoForToken(key_tokens.first, token));
     }
   }
-
-  web_ui()->CallJavascriptFunctionUnsafe("identity_internals.returnTokens",
-                                         results);
+  ResolveJavascriptCallback(base::Value(callback_id), results);
 }
 
 void IdentityInternalsUIMessageHandler::RegisterMessages() {
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "identityInternalsGetTokens",
       base::BindRepeating(
           &IdentityInternalsUIMessageHandler::GetInfoForAllTokens,
           base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "identityInternalsRevokeToken",
       base::BindRepeating(&IdentityInternalsUIMessageHandler::RevokeToken,
                           base::Unretained(this)));
@@ -254,22 +265,36 @@ void IdentityInternalsUIMessageHandler::RegisterMessages() {
 
 void IdentityInternalsUIMessageHandler::RevokeToken(
     const base::ListValue* args) {
+  const auto& list = args->GetListDeprecated();
+  const std::string& callback_id = list[0].GetString();
+  CHECK(!callback_id.empty());
   std::string extension_id;
   std::string access_token;
-  args->GetString(kRevokeTokenExtensionOffset, &extension_id);
-  args->GetString(kRevokeTokenTokenOffset, &access_token);
+  if (!list.empty() && list[kRevokeTokenExtensionOffset].is_string()) {
+    extension_id =
+        args->GetListDeprecated()[kRevokeTokenExtensionOffset].GetString();
+  }
+  if (list.size() > kRevokeTokenTokenOffset &&
+      list[kRevokeTokenTokenOffset].is_string()) {
+    access_token =
+        args->GetListDeprecated()[kRevokeTokenTokenOffset].GetString();
+  }
+
   token_revokers_.push_back(std::make_unique<IdentityInternalsTokenRevoker>(
-      extension_id, access_token, Profile::FromWebUI(web_ui()), this));
+      extension_id, access_token, callback_id, Profile::FromWebUI(web_ui()),
+      this));
 }
 
 IdentityInternalsTokenRevoker::IdentityInternalsTokenRevoker(
     const std::string& extension_id,
     const std::string& access_token,
+    const std::string& callback_id,
     Profile* profile,
     IdentityInternalsUIMessageHandler* consumer)
     : fetcher_(this, gaia::GaiaSource::kChrome, profile->GetURLLoaderFactory()),
       extension_id_(extension_id),
       access_token_(access_token),
+      callback_id_(callback_id),
       consumer_(consumer) {
   DCHECK(consumer_);
   fetcher_.StartRevokeOAuth2Token(access_token);
@@ -279,7 +304,7 @@ IdentityInternalsTokenRevoker::~IdentityInternalsTokenRevoker() {}
 
 void IdentityInternalsTokenRevoker::OnOAuth2RevokeTokenCompleted(
     GaiaAuthConsumer::TokenRevocationStatus status) {
-  consumer_->OnTokenRevokerDone(this);
+  consumer_->OnTokenRevokerDone(this, callback_id_);
 }
 
 }  // namespace

@@ -41,15 +41,14 @@ class ContentClientCreator {
 };
 
 // TODO(qinmin/hanxi): split this function into 2 separate methods: One to
-// start the ServiceManager and one to start the remainder of the browser
+// start the minimal browser and one to start the remainder of the browser
 // process. The first method should always be called upon browser start, and
 // the second method can be deferred. See http://crbug.com/854209.
-static jint JNI_ContentMain_Start(JNIEnv* env,
-                                  jboolean start_service_manager_only) {
+static jint JNI_ContentMain_Start(JNIEnv* env, jboolean start_minimal_browser) {
   TRACE_EVENT0("startup", "content::Start");
   ContentMainParams params(g_content_main_delegate.Get().get());
-  params.minimal_browser_mode = start_service_manager_only;
-  return RunContentProcess(params, GetContentMainRunner());
+  params.minimal_browser_mode = start_minimal_browser;
+  return RunContentProcess(std::move(params), GetContentMainRunner());
 }
 
 void SetContentMainDelegate(ContentMainDelegate* delegate) {
@@ -61,7 +60,7 @@ void SetContentMainDelegate(ContentMainDelegate* delegate) {
     ContentClientCreator::Create(delegate);
 }
 
-ContentMainDelegate* GetContentMainDelegateForTesting() {
+ContentMainDelegate* GetContentMainDelegate() {
   DCHECK(g_content_main_delegate.Get().get());
   return g_content_main_delegate.Get().get();
 }

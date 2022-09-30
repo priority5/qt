@@ -6,12 +6,13 @@
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_DEVICE_BUFFER_QUEUE_H_
 
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "base/cancelable_callback.h"
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/viz/service/display_embedder/output_presenter.h"
 #include "components/viz/service/display_embedder/skia_output_device.h"
 #include "components/viz/service/viz_service_export.h"
@@ -30,7 +31,9 @@ class VIZ_SERVICE_EXPORT SkiaOutputDeviceBufferQueue : public SkiaOutputDevice {
       SkiaOutputSurfaceDependency* deps,
       gpu::SharedImageRepresentationFactory* representation_factory,
       gpu::MemoryTracker* memory_tracker,
-      const DidSwapBufferCompleteCallback& did_swap_buffer_complete_callback);
+      const DidSwapBufferCompleteCallback& did_swap_buffer_complete_callback,
+      bool needs_background_image,
+      bool supports_non_backed_solid_color_images);
 
   ~SkiaOutputDeviceBufferQueue() override;
 
@@ -39,26 +42,27 @@ class VIZ_SERVICE_EXPORT SkiaOutputDeviceBufferQueue : public SkiaOutputDevice {
       delete;
 
   // SkiaOutputDevice overrides.
-  void PreGrContextSubmit() override;
+  void Submit(bool sync_cpu, base::OnceClosure callback) override;
   void SwapBuffers(BufferPresentedCallback feedback,
-                   std::vector<ui::LatencyInfo> latency_info) override;
+                   OutputSurfaceFrame frame) override;
   void PostSubBuffer(const gfx::Rect& rect,
                      BufferPresentedCallback feedback,
-                     std::vector<ui::LatencyInfo> latency_info) override;
+                     OutputSurfaceFrame frame) override;
   void CommitOverlayPlanes(BufferPresentedCallback feedback,
-                           std::vector<ui::LatencyInfo> latency_info) override;
-  bool Reshape(const gfx::Size& size,
-               float device_scale_factor,
+                           OutputSurfaceFrame frame) override;
+  bool Reshape(const SkSurfaceCharacterization& characterization,
                const gfx::ColorSpace& color_space,
-               gfx::BufferFormat format,
+               float device_scale_factor,
                gfx::OverlayTransform transform) override;
+  void SetViewportSize(const gfx::Size& viewport_size) override;
   SkSurface* BeginPaint(
       std::vector<GrBackendSemaphore>* end_semaphores) override;
   void EndPaint() override;
+  bool EnsureMinNumberOfBuffers(size_t n) override;
 
   bool IsPrimaryPlaneOverlay() const override;
   void SchedulePrimaryPlane(
-      const base::Optional<
+      const absl::optional<
           OverlayProcessorInterface::OutputSurfaceOverlayPlane>& plane)
       override;
   void ScheduleOverlays(SkiaOutputSurface::OverlayList overlays) override;
@@ -70,36 +74,51 @@ class VIZ_SERVICE_EXPORT SkiaOutputDeviceBufferQueue : public SkiaOutputDevice {
       base::CancelableOnceCallback<void(gfx::SwapCompletionResult)>;
 
   OutputPresenter::Image* GetNextImage();
-  void PageFlipComplete(OutputPresenter::Image* image);
+  void PageFlipComplete(OutputPresenter::Image* image,
+                        gfx::GpuFenceHandle release_fence);
   void FreeAllSurfaces();
   // Used as callback for SwapBuffersAsync and PostSubBufferAsync to finish
   // operation
   void DoFinishSwapBuffers(const gfx::Size& size,
-                           std::vector<ui::LatencyInfo> latency_info,
+                           OutputSurfaceFrame frame,
                            const base::WeakPtr<OutputPresenter::Image>& image,
                            std::vector<gpu::Mailbox> overlay_mailboxes,
                            gfx::SwapCompletionResult result);
 
   gfx::Size GetSwapBuffersSize();
+  bool RecreateImages();
+
+  void MaybeScheduleBackgroundImage();
+
+  // Given an overlay mailbox, returns the corresponding OverlayData* from
+  // |overlays_|. Inserts an OverlayData if mailbox is not in |overlays_|.
+  OverlayData* GetOrCreateOverlayData(const gpu::Mailbox& mailbox);
 
   std::unique_ptr<OutputPresenter> presenter_;
 
-  SkiaOutputSurfaceDependency* const dependency_;
-  gpu::SharedImageRepresentationFactory* const representation_factory_;
+  scoped_refptr<gpu::SharedContextState> context_state_;
+  const raw_ptr<gpu::SharedImageRepresentationFactory> representation_factory_;
   // Format of images
   gfx::ColorSpace color_space_;
   gfx::Size image_size_;
+  int sample_count_ = 1;
+  gfx::Size viewport_size_;
   gfx::OverlayTransform overlay_transform_ = gfx::OVERLAY_TRANSFORM_NONE;
 
+  // Number of images to allocate. Equals to `capabilities_.number_of_buffers`
+  // when `capabilities_.supports_dynamic_frame_buffer_allocation` is false.
+  // Can be increased with `EnsureMinNumberOfBuffers` when
+  // `capabilities_.supports_dynamic_frame_buffer_allocation` is true.
+  size_t number_of_images_to_allocate_ = 0u;
   // All allocated images.
   std::vector<std::unique_ptr<OutputPresenter::Image>> images_;
   // This image is currently used by Skia as RenderTarget. This may be nullptr
   // if there is no drawing for the current frame or if allocation failed.
-  OutputPresenter::Image* current_image_ = nullptr;
+  raw_ptr<OutputPresenter::Image> current_image_ = nullptr;
   // The last image submitted for presenting.
-  OutputPresenter::Image* submitted_image_ = nullptr;
+  raw_ptr<OutputPresenter::Image> submitted_image_ = nullptr;
   // The image currently on the screen, if any.
-  OutputPresenter::Image* displayed_image_ = nullptr;
+  raw_ptr<OutputPresenter::Image> displayed_image_ = nullptr;
   // These are free for use, and are not nullptr.
   base::circular_deque<OutputPresenter::Image*> available_images_;
   // These cancelable callbacks bind images that have been scheduled to display
@@ -124,8 +143,31 @@ class VIZ_SERVICE_EXPORT SkiaOutputDeviceBufferQueue : public SkiaOutputDevice {
   // key.
   base::flat_set<OverlayData, OverlayDataComparator> overlays_;
 
+#if defined(USE_OZONE)
+  const gpu::Mailbox GetImageMailboxForColor(const SkColor& color);
+
+  // All in-flight solid color images are held in this container until a swap
+  // buffer with the identifying mailbox releases them.
+  base::flat_map<gpu::Mailbox,
+                 std::pair<SkColor, std::unique_ptr<OutputPresenter::Image>>>
+      solid_color_images_;
+
+  std::unordered_multimap<SkColor, std::unique_ptr<OutputPresenter::Image>>
+      solid_color_cache_;
+#endif
   // Set to true if no image is to be used for the primary plane of this frame.
   bool current_frame_has_no_primary_plane_ = false;
+  // Whether or not the platform needs occluded background images. Wayland needs
+  // it for opaque accelerated widgets and event wiring. Please see details on
+  // the number of background images below.
+  bool needs_background_image_ = false;
+  // Whether the platform supports non-backed solid color overlays. The Wayland
+  // backend is able to delegate these overlays without buffer backings
+  // depending on the availability of a certain protocol.
+  bool supports_non_backed_solid_color_images_ = false;
+  // Whether |SchedulePrimaryPlane| needs to wait for a paint before scheduling
+  // This works around an edge case for unpromoting fullscreen quads.
+  bool primary_plane_waiting_on_paint_ = false;
 };
 
 }  // namespace viz

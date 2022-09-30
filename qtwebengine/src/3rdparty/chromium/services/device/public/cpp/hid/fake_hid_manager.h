@@ -19,7 +19,12 @@ namespace device {
 
 class FakeHidConnection : public mojom::HidConnection {
  public:
-  explicit FakeHidConnection(mojom::HidDeviceInfoPtr device);
+  FakeHidConnection(
+      mojom::HidDeviceInfoPtr device,
+      mojo::PendingReceiver<mojom::HidConnection> receiver,
+      mojo::PendingRemote<mojom::HidConnectionClient> connection_client,
+      mojo::PendingRemote<mojom::HidConnectionWatcher> watcher,
+      bool allow_fido_reports);
   FakeHidConnection(FakeHidConnection&) = delete;
   FakeHidConnection& operator=(FakeHidConnection&) = delete;
   ~FakeHidConnection() override;
@@ -37,7 +42,11 @@ class FakeHidConnection : public mojom::HidConnection {
                          SendFeatureReportCallback callback) override;
 
  private:
+  mojo::Receiver<mojom::HidConnection> receiver_;
   mojom::HidDeviceInfoPtr device_;
+  mojo::Remote<mojom::HidConnectionClient> client_;
+  mojo::Remote<mojom::HidConnectionWatcher> watcher_;
+  bool allow_fido_reports_;
 };
 
 class FakeHidManager : public mojom::HidManager {
@@ -59,6 +68,8 @@ class FakeHidManager : public mojom::HidManager {
       const std::string& device_guid,
       mojo::PendingRemote<mojom::HidConnectionClient> connection_client,
       mojo::PendingRemote<mojom::HidConnectionWatcher> watcher,
+      bool allow_protected_reports,
+      bool allow_fido_reports,
       ConnectCallback callback) override;
 
   mojom::HidDeviceInfoPtr CreateAndAddDevice(
@@ -79,6 +90,7 @@ class FakeHidManager : public mojom::HidManager {
       uint16_t usage);
   void AddDevice(mojom::HidDeviceInfoPtr device);
   void RemoveDevice(const std::string& guid);
+  void ChangeDevice(mojom::HidDeviceInfoPtr device);
   void SimulateConnectionError();
 
  private:

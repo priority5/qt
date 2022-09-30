@@ -4,21 +4,19 @@
 
 #include "components/signin/core/browser/account_reconcilor_delegate.h"
 
+#include <set>
+
+#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/time/time.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
 namespace signin {
 
+AccountReconcilorDelegate::AccountReconcilorDelegate() = default;
+AccountReconcilorDelegate::~AccountReconcilorDelegate() = default;
+
 bool AccountReconcilorDelegate::IsReconcileEnabled() const {
-  return false;
-}
-
-bool AccountReconcilorDelegate::IsMultiloginEndpointEnabled() const {
-  return true;
-}
-
-bool AccountReconcilorDelegate::IsAccountConsistencyEnforced() const {
   return false;
 }
 
@@ -192,10 +190,6 @@ AccountReconcilorDelegate::RevokeTokenOption
 AccountReconcilorDelegate::ShouldRevokeSecondaryTokensBeforeReconcile(
     const std::vector<gaia::ListedAccount>& gaia_accounts) {
   return RevokeTokenOption::kDoNotRevoke;
-}
-
-bool AccountReconcilorDelegate::ShouldRevokeTokensNotInCookies() const {
-  return false;
 }
 
 bool AccountReconcilorDelegate::ShouldRevokeTokensOnCookieDeleted() {

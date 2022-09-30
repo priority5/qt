@@ -7,23 +7,24 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/web_package/web_bundle_parser_factory.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "services/data_decoder/gzipper.h"
 #include "services/data_decoder/json_parser_impl.h"
 #include "services/data_decoder/public/mojom/image_decoder.mojom.h"
 #include "services/data_decoder/web_bundler.h"
 #include "services/data_decoder/xml_parser.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "services/data_decoder/ble_scan_parser_impl.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 #include "services/data_decoder/image_decoder_impl.h"
 #endif
 
@@ -45,7 +46,7 @@ void DataDecoderService::BindReceiver(
 
 void DataDecoderService::BindImageDecoder(
     mojo::PendingReceiver<mojom::ImageDecoder> receiver) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   LOG(FATAL) << "ImageDecoder not supported on iOS.";
 #else
   if (drop_image_decoders_)
@@ -91,12 +92,17 @@ void DataDecoderService::BindWebBundler(
   }
 }
 
-#ifdef OS_CHROMEOS
+void DataDecoderService::BindGzipper(
+    mojo::PendingReceiver<mojom::Gzipper> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<Gzipper>(), std::move(receiver));
+}
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void DataDecoderService::BindBleScanParser(
     mojo::PendingReceiver<mojom::BleScanParser> receiver) {
   mojo::MakeSelfOwnedReceiver(std::make_unique<BleScanParserImpl>(),
                               std::move(receiver));
 }
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace data_decoder

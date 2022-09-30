@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/webui/settings/extension_control_handler.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,9 +26,8 @@ void ExtensionControlHandler::RegisterMessages() {
 }
 
 void ExtensionControlHandler::HandleDisableExtension(
-    const base::ListValue* args) {
-  std::string extension_id;
-  CHECK(args->GetString(0, &extension_id));
+    const base::Value::List& args) {
+  const std::string& extension_id = args[0].GetString();
   extensions::ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(Profile::FromWebUI(web_ui()))
           ->extension_service();

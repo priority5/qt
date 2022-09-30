@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "media/base/renderer_factory.h"
 #include "media/mojo/buildflags.h"
@@ -30,10 +30,14 @@ class MojoRenderer;
 // wrapper factories that use MRF, rather than creating derived MojoRenderer
 // types, or extending MRF. See DecryptingRendererFactory and
 // MediaPlayerRendererClientFactory for examples of small wrappers around MRF.
-class MojoRendererFactory : public RendererFactory {
+class MojoRendererFactory final : public RendererFactory {
  public:
   explicit MojoRendererFactory(
       media::mojom::InterfaceFactory* interface_factory);
+
+  MojoRendererFactory(const MojoRendererFactory&) = delete;
+  MojoRendererFactory& operator=(const MojoRendererFactory&) = delete;
+
   ~MojoRendererFactory() final;
 
   std::unique_ptr<Renderer> CreateRenderer(
@@ -44,13 +48,24 @@ class MojoRendererFactory : public RendererFactory {
       RequestOverlayInfoCB request_overlay_info_cb,
       const gfx::ColorSpace& target_color_space) final;
 
+#if BUILDFLAG(IS_WIN)
+  std::unique_ptr<MojoRenderer> CreateMediaFoundationRenderer(
+      mojo::PendingRemote<mojom::MediaLog> media_log_remote,
+      mojo::PendingReceiver<mojom::MediaFoundationRendererExtension>
+          renderer_extension_receiver,
+      mojo::PendingRemote<mojom::MediaFoundationRendererClientExtension>
+          client_extension_remote,
+      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
+      VideoRendererSink* video_renderer_sink);
+#endif  // BUILDFLAG(IS_WIN)
+
 #if BUILDFLAG(ENABLE_CAST_RENDERER)
   std::unique_ptr<MojoRenderer> CreateCastRenderer(
       const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
       VideoRendererSink* video_renderer_sink);
 #endif  // BUILDFLAG(ENABLE_CAST_RENDERER)
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   std::unique_ptr<MojoRenderer> CreateFlingingRenderer(
       const std::string& presentation_id,
       mojo::PendingRemote<mojom::FlingingRendererClientExtension>
@@ -70,9 +85,7 @@ class MojoRendererFactory : public RendererFactory {
  private:
   // InterfaceFactory or InterfaceProvider used to create or connect to remote
   // renderer.
-  media::mojom::InterfaceFactory* interface_factory_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(MojoRendererFactory);
+  raw_ptr<media::mojom::InterfaceFactory> interface_factory_ = nullptr;
 };
 
 }  // namespace media

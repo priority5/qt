@@ -11,10 +11,11 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/capture/video/chromeos/camera_buffer_factory.h"
 #include "media/capture/video/chromeos/camera_device_context.h"
@@ -45,6 +46,9 @@ namespace {
 class MockCameraDevice : public cros::mojom::Camera3DeviceOps {
  public:
   MockCameraDevice() = default;
+
+  MockCameraDevice(const MockCameraDevice&) = delete;
+  MockCameraDevice& operator=(const MockCameraDevice&) = delete;
 
   ~MockCameraDevice() = default;
 
@@ -103,19 +107,27 @@ class MockCameraDevice : public cros::mojom::Camera3DeviceOps {
   void Close(CloseCallback callback) override { DoClose(callback); }
   MOCK_METHOD1(DoClose, void(CloseCallback& callback));
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockCameraDevice);
+  void ConfigureStreamsAndGetAllocatedBuffers(
+      cros::mojom::Camera3StreamConfigurationPtr config,
+      ConfigureStreamsAndGetAllocatedBuffersCallback callback) override {
+    DoConfigureStreamsAndGetAllocatedBuffers(config, callback);
+  }
+  MOCK_METHOD2(DoConfigureStreamsAndGetAllocatedBuffers,
+               void(cros::mojom::Camera3StreamConfigurationPtr& config,
+                    ConfigureStreamsAndGetAllocatedBuffersCallback& callback));
 };
 
 constexpr int32_t kJpegMaxBufferSize = 1024;
 constexpr size_t kDefaultWidth = 1280, kDefaultHeight = 720;
 constexpr int32_t kDefaultMinFrameRate = 1, kDefaultMaxFrameRate = 30;
 
-VideoCaptureParams GetDefaultCaptureParams() {
+base::flat_map<ClientType, VideoCaptureParams> GetDefaultCaptureParams() {
   VideoCaptureParams params;
+  base::flat_map<ClientType, VideoCaptureParams> capture_params;
   params.requested_format = {gfx::Size(kDefaultWidth, kDefaultHeight),
                              float{kDefaultMaxFrameRate}, PIXEL_FORMAT_I420};
-  return params;
+  capture_params[ClientType::kPreviewClient] = params;
+  return capture_params;
 }
 
 }  // namespace
@@ -126,6 +138,9 @@ class CameraDeviceDelegateTest : public ::testing::Test {
       : mock_camera_device_receiver_(&mock_camera_device_),
         device_delegate_thread_("DeviceDelegateThread"),
         hal_delegate_thread_("HalDelegateThread") {}
+
+  CameraDeviceDelegateTest(const CameraDeviceDelegateTest&) = delete;
+  CameraDeviceDelegateTest& operator=(const CameraDeviceDelegateTest&) = delete;
 
   void SetUp() override {
     VideoCaptureDeviceFactoryChromeOS::SetGpuBufferManager(
@@ -162,7 +177,7 @@ class CameraDeviceDelegateTest : public ::testing::Test {
 
     camera_device_delegate_ = std::make_unique<CameraDeviceDelegate>(
         devices_info[0].descriptor, camera_hal_delegate_,
-        device_delegate_thread_.task_runner(), nullptr);
+        device_delegate_thread_.task_runner());
   }
 
   void GetNumberOfFakeCameras(
@@ -354,7 +369,7 @@ class CameraDeviceDelegateTest : public ::testing::Test {
         .Times(1)
         .WillOnce(
             Invoke(this, &CameraDeviceDelegateTest::GetNumberOfFakeCameras));
-    EXPECT_CALL(mock_camera_module_, DoSetCallbacks(_, _)).Times(1);
+    EXPECT_CALL(mock_camera_module_, DoSetCallbacksAssociated(_, _)).Times(1);
     EXPECT_CALL(mock_camera_module_, DoGetVendorTagOps(_, _))
         .Times(1)
         .WillOnce(Invoke(this, &CameraDeviceDelegateTest::GetFakeVendorTagOps));
@@ -381,12 +396,11 @@ class CameraDeviceDelegateTest : public ::testing::Test {
         .Times(1)
         .WillOnce(
             Invoke(this, &CameraDeviceDelegateTest::ConfigureFakeStreams));
-    EXPECT_CALL(
-        mock_gpu_memory_buffer_manager_,
-        CreateGpuMemoryBuffer(
-            _, gfx::BufferFormat::YUV_420_BIPLANAR,
-            gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE,
-            gpu::kNullSurfaceHandle))
+    EXPECT_CALL(mock_gpu_memory_buffer_manager_,
+                CreateGpuMemoryBuffer(
+                    _, gfx::BufferFormat::YUV_420_BIPLANAR,
+                    gfx::BufferUsage::VEA_READ_CAMERA_AND_CPU_READ_WRITE,
+                    gpu::kNullSurfaceHandle, nullptr))
         .Times(1)
         .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
                              CreateFakeGpuMemoryBuffer));
@@ -394,17 +408,16 @@ class CameraDeviceDelegateTest : public ::testing::Test {
         mock_gpu_memory_buffer_manager_,
         CreateGpuMemoryBuffer(_, gfx::BufferFormat::R_8,
                               gfx::BufferUsage::CAMERA_AND_CPU_READ_WRITE,
-                              gpu::kNullSurfaceHandle))
+                              gpu::kNullSurfaceHandle, nullptr))
         .Times(AtMost(1))
         .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
                              CreateFakeGpuMemoryBuffer));
-    EXPECT_CALL(
-        mock_gpu_memory_buffer_manager_,
-        CreateGpuMemoryBuffer(
-            gfx::Size(kDefaultWidth, kDefaultHeight),
-            gfx::BufferFormat::YUV_420_BIPLANAR,
-            gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE,
-            gpu::kNullSurfaceHandle))
+    EXPECT_CALL(mock_gpu_memory_buffer_manager_,
+                CreateGpuMemoryBuffer(
+                    gfx::Size(kDefaultWidth, kDefaultHeight),
+                    gfx::BufferFormat::YUV_420_BIPLANAR,
+                    gfx::BufferUsage::VEA_READ_CAMERA_AND_CPU_READ_WRITE,
+                    gpu::kNullSurfaceHandle, nullptr))
         .Times(1)
         .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
                              CreateFakeGpuMemoryBuffer));
@@ -412,7 +425,7 @@ class CameraDeviceDelegateTest : public ::testing::Test {
                 CreateGpuMemoryBuffer(
                     gfx::Size(kJpegMaxBufferSize, 1), gfx::BufferFormat::R_8,
                     gfx::BufferUsage::CAMERA_AND_CPU_READ_WRITE,
-                    gpu::kNullSurfaceHandle))
+                    gpu::kNullSurfaceHandle, nullptr))
         .Times(AtMost(1))
         .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
                              CreateFakeGpuMemoryBuffer));
@@ -456,21 +469,23 @@ class CameraDeviceDelegateTest : public ::testing::Test {
                                         device_closed->Signal();
                                       },
                                       base::Unretained(&device_closed))));
-    base::TimeDelta kWaitTimeoutSecs = base::TimeDelta::FromSeconds(3);
+    base::TimeDelta kWaitTimeoutSecs = base::Seconds(3);
     EXPECT_TRUE(device_closed.TimedWait(kWaitTimeoutSecs));
     EXPECT_EQ(CameraDeviceContext::State::kStopped, GetState());
   }
 
   unittest_internal::NiceMockVideoCaptureClient* ResetDeviceContext() {
+    client_type_ = ClientType::kPreviewClient;
     auto mock_client =
         std::make_unique<unittest_internal::NiceMockVideoCaptureClient>();
     auto* client_ptr = mock_client.get();
-    device_context_ =
-        std::make_unique<CameraDeviceContext>(std::move(mock_client));
+    device_context_ = std::make_unique<CameraDeviceContext>();
+    device_context_->AddClient(client_type_, std::move(mock_client));
     return client_ptr;
   }
 
   void ResetDevice() {
+    device_context_->RemoveClient(client_type_);
     ASSERT_TRUE(device_delegate_thread_.IsRunning());
     ASSERT_TRUE(camera_device_delegate_);
     ASSERT_TRUE(device_delegate_thread_.task_runner()->DeleteSoon(
@@ -479,7 +494,7 @@ class CameraDeviceDelegateTest : public ::testing::Test {
   }
 
   void DoLoop() {
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
 
@@ -516,11 +531,11 @@ class CameraDeviceDelegateTest : public ::testing::Test {
   base::Thread device_delegate_thread_;
 
   std::unique_ptr<CameraDeviceContext> device_context_;
+  ClientType client_type_;
 
  private:
   base::Thread hal_delegate_thread_;
   std::unique_ptr<base::RunLoop> run_loop_;
-  DISALLOW_COPY_AND_ASSIGN(CameraDeviceDelegateTest);
 };
 
 // Test the complete capture flow: initialize, configure stream, capture one
@@ -604,7 +619,7 @@ TEST_F(CameraDeviceDelegateTest, StopBeforeOpened) {
                      base::BindOnce(&base::WaitableEvent::Signal,
                                     base::Unretained(&device_closed))));
   stop_posted.Signal();
-  EXPECT_TRUE(device_closed.TimedWait(base::TimeDelta::FromSeconds(3)));
+  EXPECT_TRUE(device_closed.TimedWait(base::Seconds(3)));
   EXPECT_EQ(CameraDeviceContext::State::kStopped, GetState());
 
   ResetDevice();

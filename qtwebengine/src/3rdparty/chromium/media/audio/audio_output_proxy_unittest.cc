@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -174,7 +174,7 @@ class AudioOutputProxyTest : public testing::Test {
     // RunUntilIdle() will never terminate.
     params_ = AudioParameters(AudioParameters::AUDIO_PCM_LINEAR,
                               CHANNEL_LAYOUT_STEREO, 8000, 2048);
-    InitDispatcher(base::TimeDelta::FromMilliseconds(kTestCloseDelayMs));
+    InitDispatcher(base::Milliseconds(kTestCloseDelayMs));
   }
 
   void TearDown() override {
@@ -512,8 +512,7 @@ class AudioOutputResamplerTest : public AudioOutputProxyTest {
     // Let Start() run for a bit.
     base::RunLoop run_loop;
     task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(),
-        base::TimeDelta::FromMilliseconds(kStartRunTimeMs));
+        FROM_HERE, run_loop.QuitClosure(), base::Milliseconds(kStartRunTimeMs));
     run_loop.Run();
   }
 
@@ -640,6 +639,32 @@ TEST_F(AudioOutputResamplerTest, DispatcherDestroyed_AfterStop) {
   DispatcherDestroyed_AfterStop(std::move(resampler_));
 }
 
+TEST_F(AudioOutputProxyTest, DispatcherDeviceChangeClosesIdleStreams) {
+  // Set close delay so long that it triggers a test timeout if relied upon.
+  InitDispatcher(base::Seconds(1000));
+
+  MockAudioOutputStream stream(&manager_, params_);
+
+  EXPECT_CALL(manager(), MakeAudioOutputStream(_, _, _))
+      .WillOnce(Return(&stream));
+  EXPECT_CALL(stream, Open()).WillOnce(Return(true));
+
+  AudioOutputProxy* proxy = dispatcher_impl_->CreateStreamProxy();
+  EXPECT_TRUE(proxy->Open());
+
+  // Close the stream and verify it doesn't happen immediately.
+  proxy->Close();
+  Mock::VerifyAndClear(&stream);
+
+  // This should trigger a true close on the stream.
+  dispatcher_impl_->OnDeviceChange();
+
+  base::RunLoop run_loop;
+  EXPECT_CALL(stream, Close())
+      .WillOnce(testing::InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
+  run_loop.Run();
+}
+
 // Simulate AudioOutputStream::Create() failure with a low latency stream and
 // ensure AudioOutputResampler falls back to the high latency path.
 TEST_F(AudioOutputResamplerTest, LowLatencyCreateFailedFallback) {
@@ -684,7 +709,7 @@ TEST_F(AudioOutputResamplerTest, HighLatencyFallbackFailed) {
 
 // Only Windows has a high latency output driver that is not the same as the low
 // latency path.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   static const int kFallbackCount = 2;
 #else
   static const int kFallbackCount = 1;
@@ -720,7 +745,7 @@ TEST_F(AudioOutputResamplerTest, HighLatencyFallbackFailed) {
 TEST_F(AudioOutputResamplerTest, AllFallbackFailed) {
 // Only Windows has a high latency output driver that is not the same as the low
 // latency path.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   static const int kFallbackCount = 3;
 #else
   static const int kFallbackCount = 2;
@@ -798,7 +823,7 @@ TEST_F(AudioOutputResamplerTest, FallbackRecovery) {
   MockAudioOutputStream fake_stream(&manager_, params_);
 
   // Trigger the fallback mechanism until a fake output stream is created.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   static const int kFallbackCount = 2;
 #else
   static const int kFallbackCount = 1;
@@ -826,7 +851,7 @@ TEST_F(AudioOutputResamplerTest, FallbackRecovery) {
   base::RunLoop run_loop;
   task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(),
-      base::TimeDelta::FromMilliseconds(2 * kTestCloseDelayMs));
+      base::Milliseconds(2 * kTestCloseDelayMs));
   run_loop.Run();
 
   // Verify a non-fake stream can be created.

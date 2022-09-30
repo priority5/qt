@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qsgrendernode.h"
 #include "qsgrendernode_p.h"
@@ -77,8 +41,6 @@ QSGRenderNodePrivate::QSGRenderNodePrivate()
     : m_matrix(nullptr)
     , m_clip_list(nullptr)
     , m_opacity(1)
-    , m_needsExternalRendering(true)
-    , m_prepareCallback(nullptr)
 {
 }
 
@@ -101,8 +63,8 @@ QSGRenderNodePrivate::QSGRenderNodePrivate()
 
     With APIs other than OpenGL, the only relevant values are the ones that
     correspond to dynamic state changes recorded on the command list/buffer.
-    For example, RSSetViewports, RSSetScissorRects, OMSetBlendFactor,
-    OMSetStencilRef in case of D3D12, or vkCmdSetViewport, vkCmdSetScissor,
+    For example, RSSetViewports, RSSetScissorRects, OMSetBlendState,
+    OMSetDepthStencilState in case of D3D11, or vkCmdSetViewport, vkCmdSetScissor,
     vkCmdSetBlendConstants, vkCmdSetStencilRef in case of Vulkan, and only when
     such commands were added to the scenegraph's command list queried via the
     QSGRendererInterface::CommandList resource enum. States set in pipeline
@@ -134,6 +96,24 @@ QSGRenderNodePrivate::QSGRenderNodePrivate()
 QSGRenderNode::StateFlags QSGRenderNode::changedStates() const
 {
     return {};
+}
+
+/*!
+    Called from the frame preparation phase. There is a call to this function
+    before each invocation of render().
+
+    Unlike render(), this function is called before the scenegraph starts
+    recording the render pass for the current frame on the underlying command
+    buffer. This is useful when doing rendering with graphics APIs, such as
+    Vulkan, where copy type of operations will need to be recorded before the
+    render pass.
+
+    The default implementation is empty.
+
+    \since 6.0
+ */
+void QSGRenderNode::prepare()
+{
 }
 
 /*!
@@ -223,13 +203,14 @@ QSGRenderNode::StateFlags QSGRenderNode::changedStates() const
     Assume nothing about the pipelines and dynamic states bound on the command
     list/buffer when this function is called.
 
-    With some graphics APIs it can be necessary to also connect to the
-    QQuickWindow::beforeRendering() signal, because that is emitted before
-    recording the beginning of a renderpass on the command buffer
-    (vkCmdBeginRenderPass with Vulkan, or starting to encode via
-    MTLRenderCommandEncoder in case of Metal). Recording copy operations cannot
-    be done inside render() with such APIs. Rather, do it in the slot connected
-    (with DirectConnection) to the beforeRendering signal.
+    With some graphics APIs it can be necessary to reimplement prepare() in
+    addition, or alternatively connect to the QQuickWindow::beforeRendering()
+    signal. These are called/emitted before recording the beginning of a
+    renderpass on the command buffer (vkCmdBeginRenderPass with Vulkan, or
+    starting to encode via MTLRenderCommandEncoder in case of Metal. Recording
+    copy operations cannot be done inside render() with such APIs. Rather, do
+    such operations either in prepare() or the slot connected to
+    beforeRendering (with DirectConnection).
 
     \sa QSGRendererInterface, QQuickWindow::rendererInterface()
   */
@@ -300,6 +281,8 @@ void QSGRenderNode::releaseResources()
     renderers must assume that render() can also output semi or fully
     transparent pixels. Setting this flag can improve performance in some
     cases.
+
+    \omitvalue NoExternalRendering
 
     \sa render(), rect()
  */
@@ -383,11 +366,6 @@ QSGRenderNode::RenderState::~RenderState()
 
     \return the current scissor rectangle when clipping is active. x and y are
     the bottom left coordinates.
-
-    \note Be aware of the differences between graphics APIs: for some the
-    scissor rect is only active when scissoring is enabled (for example,
-    OpenGL), while for others the scissor rect is equal to the viewport rect
-    when there is no need to scissor away anything (for example, Direct3D 12).
  */
 
 /*!

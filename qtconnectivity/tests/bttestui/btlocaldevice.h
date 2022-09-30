@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtBluetooth module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef BTLOCALDEVICE_H
 #define BTLOCALDEVICE_H
@@ -46,12 +21,12 @@ public:
     Q_PROPERTY(int secFlags READ secFlags WRITE setSecFlags
                NOTIFY secFlagsChanged)
 
-    int secFlags() const;
+    QBluetooth::SecurityFlags secFlags() const;
     void setSecFlags(int);
     QString hostMode() const;
 
 signals:
-    void error(QBluetoothLocalDevice::Error error);
+    void errorOccurred(QBluetoothLocalDevice::Error error);
     void hostModeStateChanged();
     void socketStateUpdate(int foobar);
     void secFlagsChanged();
@@ -66,9 +41,6 @@ public slots:
     void pairingFinished(const QBluetoothAddress &address, QBluetoothLocalDevice::Pairing pairing);
     void connected(const QBluetoothAddress &addr);
     void disconnected(const QBluetoothAddress &addr);
-    void pairingDisplayConfirmation(const QBluetoothAddress &address, const QString &pin);
-    void pairingDisplayPinCode(const QBluetoothAddress &address, const QString &pin);
-    void confirmPairing();
     void cycleSecurityFlags();
 
     //QBluetoothDeviceDiscoveryAgent
@@ -116,11 +88,11 @@ public slots:
 private:
     void dumpLocalDevice(QBluetoothLocalDevice *dev);
 
-    QBluetoothLocalDevice *localDevice;
-    QBluetoothDeviceDiscoveryAgent *deviceAgent;
-    QBluetoothServiceDiscoveryAgent *serviceAgent;
-    QBluetoothSocket *socket;
-    QBluetoothServer *server;
+    QBluetoothLocalDevice *localDevice = nullptr;
+    QBluetoothDeviceDiscoveryAgent *deviceAgent = nullptr;
+    QBluetoothServiceDiscoveryAgent *serviceAgent = nullptr;
+    QBluetoothSocket *socket = nullptr;
+    QBluetoothServer *server = nullptr;
     QList<QBluetoothSocket *> serverSockets;
     QBluetoothServiceInfo serviceInfo;
 

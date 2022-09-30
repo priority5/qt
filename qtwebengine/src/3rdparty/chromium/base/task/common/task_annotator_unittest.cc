@@ -8,16 +8,15 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/pending_task.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
-#include "base/test/bind_test_util.h"
+#include "base/task/thread_pool.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -39,7 +38,7 @@ TEST(TaskAnnotatorTest, QueueAndRunTask) {
   TaskAnnotator annotator;
   annotator.WillQueueTask("TaskAnnotatorTest::Queue", &pending_task, "?");
   EXPECT_EQ(0, result);
-  annotator.RunTask("TaskAnnotatorTest::Queue", &pending_task);
+  annotator.RunTask("TaskAnnotator::RunTask", pending_task);
   EXPECT_EQ(123, result);
 }
 
@@ -54,6 +53,11 @@ class TaskAnnotatorBacktraceIntegrationTest
   using ExpectedTrace = std::vector<const void*>;
 
   TaskAnnotatorBacktraceIntegrationTest() = default;
+
+  TaskAnnotatorBacktraceIntegrationTest(
+      const TaskAnnotatorBacktraceIntegrationTest&) = delete;
+  TaskAnnotatorBacktraceIntegrationTest& operator=(
+      const TaskAnnotatorBacktraceIntegrationTest&) = delete;
 
   ~TaskAnnotatorBacktraceIntegrationTest() override = default;
 
@@ -147,8 +151,6 @@ class TaskAnnotatorBacktraceIntegrationTest
       last_task_backtrace_ = {};
 
   uint32_t last_ipc_hash_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(TaskAnnotatorBacktraceIntegrationTest);
 };
 
 // Ensure the task backtrace populates correctly.
@@ -414,7 +416,8 @@ TEST_F(TaskAnnotatorBacktraceIntegrationTest, SingleThreadedNested) {
   {
     TaskAnnotator::ScopedSetIpcHash scoped_ipc_hash(dummy_ipc_hash2);
     ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, BindOnce(&RunLoop::Run, Unretained(&nested_run_loop1)));
+        FROM_HERE,
+        BindOnce(&RunLoop::Run, Unretained(&nested_run_loop1), FROM_HERE));
   }
 
   run_loop.Run();

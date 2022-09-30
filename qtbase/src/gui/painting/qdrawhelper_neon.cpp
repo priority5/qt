@@ -1,45 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtGui module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <private/qdrawhelper_neon_p.h>
 #include <private/qblendfunctions_p.h>
 #include <private/qmath_p.h>
+#include <private/qpixellayout_p.h>
 
 #ifdef __ARM_NEON__
 
@@ -1311,81 +1276,81 @@ static inline void convertARGBFromARGB32PM_neon(uint *buffer, const uint *src, i
     }
 }
 
-void QT_FASTCALL convertARGB32ToARGB32PM_neon(uint *buffer, int count, const QVector<QRgb> *)
+void QT_FASTCALL convertARGB32ToARGB32PM_neon(uint *buffer, int count, const QList<QRgb> *)
 {
     convertARGBToARGB32PM_neon<false>(buffer, buffer, count);
 }
 
-void QT_FASTCALL convertRGBA8888ToARGB32PM_neon(uint *buffer, int count, const QVector<QRgb> *)
+void QT_FASTCALL convertRGBA8888ToARGB32PM_neon(uint *buffer, int count, const QList<QRgb> *)
 {
     convertARGBToARGB32PM_neon<true>(buffer, buffer, count);
 }
 
 const uint *QT_FASTCALL fetchARGB32ToARGB32PM_neon(uint *buffer, const uchar *src, int index, int count,
-                                                   const QVector<QRgb> *, QDitherInfo *)
+                                                   const QList<QRgb> *, QDitherInfo *)
 {
     convertARGBToARGB32PM_neon<false>(buffer, reinterpret_cast<const uint *>(src) + index, count);
     return buffer;
 }
 
 const uint *QT_FASTCALL fetchRGBA8888ToARGB32PM_neon(uint *buffer, const uchar *src, int index, int count,
-                                                     const QVector<QRgb> *, QDitherInfo *)
+                                                     const QList<QRgb> *, QDitherInfo *)
 {
     convertARGBToARGB32PM_neon<true>(buffer, reinterpret_cast<const uint *>(src) + index, count);
     return buffer;
 }
 
 const QRgba64 * QT_FASTCALL convertARGB32ToRGBA64PM_neon(QRgba64 *buffer, const uint *src, int count,
-                                                         const QVector<QRgb> *, QDitherInfo *)
+                                                         const QList<QRgb> *, QDitherInfo *)
 {
     convertARGB32ToRGBA64PM_neon<false>(buffer, src, count);
     return buffer;
 }
 
 const QRgba64 * QT_FASTCALL convertRGBA8888ToRGBA64PM_neon(QRgba64 *buffer, const uint *src, int count,
-                                                           const QVector<QRgb> *, QDitherInfo *)
+                                                           const QList<QRgb> *, QDitherInfo *)
 {
     convertARGB32ToRGBA64PM_neon<true>(buffer, src, count);
     return buffer;
 }
 
 const QRgba64 *QT_FASTCALL fetchARGB32ToRGBA64PM_neon(QRgba64 *buffer, const uchar *src, int index, int count,
-                                                      const QVector<QRgb> *, QDitherInfo *)
+                                                      const QList<QRgb> *, QDitherInfo *)
 {
     convertARGB32ToRGBA64PM_neon<false>(buffer, reinterpret_cast<const uint *>(src) + index, count);
     return buffer;
 }
 
 const QRgba64 *QT_FASTCALL fetchRGBA8888ToRGBA64PM_neon(QRgba64 *buffer, const uchar *src, int index, int count,
-                                                        const QVector<QRgb> *, QDitherInfo *)
+                                                        const QList<QRgb> *, QDitherInfo *)
 {
     convertARGB32ToRGBA64PM_neon<true>(buffer, reinterpret_cast<const uint *>(src) + index, count);
     return buffer;
 }
 
 void QT_FASTCALL storeRGB32FromARGB32PM_neon(uchar *dest, const uint *src, int index, int count,
-                                             const QVector<QRgb> *, QDitherInfo *)
+                                             const QList<QRgb> *, QDitherInfo *)
 {
     uint *d = reinterpret_cast<uint *>(dest) + index;
     convertARGBFromARGB32PM_neon<false,true>(d, src, count);
 }
 
 void QT_FASTCALL storeARGB32FromARGB32PM_neon(uchar *dest, const uint *src, int index, int count,
-                                              const QVector<QRgb> *, QDitherInfo *)
+                                              const QList<QRgb> *, QDitherInfo *)
 {
     uint *d = reinterpret_cast<uint *>(dest) + index;
     convertARGBFromARGB32PM_neon<false,false>(d, src, count);
 }
 
 void QT_FASTCALL storeRGBA8888FromARGB32PM_neon(uchar *dest, const uint *src, int index, int count,
-                                                const QVector<QRgb> *, QDitherInfo *)
+                                                const QList<QRgb> *, QDitherInfo *)
 {
     uint *d = reinterpret_cast<uint *>(dest) + index;
     convertARGBFromARGB32PM_neon<true,false>(d, src, count);
 }
 
 void QT_FASTCALL storeRGBXFromARGB32PM_neon(uchar *dest, const uint *src, int index, int count,
-                                            const QVector<QRgb> *, QDitherInfo *)
+                                            const QList<QRgb> *, QDitherInfo *)
 {
     uint *d = reinterpret_cast<uint *>(dest) + index;
     convertARGBFromARGB32PM_neon<true,true>(d, src, count);

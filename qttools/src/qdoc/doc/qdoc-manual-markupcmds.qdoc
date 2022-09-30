@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \page 03-qdoc-commands-markup.html
@@ -67,10 +43,10 @@
     \li \l {list-command} {\\list}
     \li \l {meta-command} {\\meta}
     \li \l {noautolist-command} {\\noautolist}
-    \li \l {newcode-command} {\\newcode}
+    \li \l {newcode-command} {\\newcode, deprecated}
     \li \l {li-command} {\\o} (deprecated, use \\li)
     \li \l {note-command} {\\note}
-    \li \l {oldcode-command} {\\oldcode}
+    \li \l {oldcode-command} {\\oldcode, deprecated}
     \li \l {omit-command} {\\omit}
     \li \l {printline-command} {\\printline}
     \li \l {printto-command} {\\printto}
@@ -183,13 +159,13 @@
     entire text in curly brackets.
 
     \code
-      \c {QLineEdit::QLineEdit(const QString &contents, QWidget *parent) :QWidget(parent)}
+      \c {QLineEdit::QLineEdit(const QString &contents, QWidget *parent) : QWidget(parent)}
     \endcode
 
     QDoc renders this as:
 
     \quotation
-      \c {QLineEdit::QLineEdit(const QString &contents, QWidget *parent) :QWidget(parent)}
+      \c {QLineEdit::QLineEdit(const QString &contents, QWidget *parent) : QWidget(parent)}
     \endquotation
 
     The \\c command accepts the special character \c \ within its
@@ -888,11 +864,9 @@
     content that is not in a Qt language recognized by QDoc, use
     \l {badcode-command}{\\badcode} instead.
 
-    When processing any of the \\code, \l {newcode-command} {\\newcode} or \l
-    {oldcode-command} {\\oldcode} commands, QDoc removes all
-    indentation that is common for the verbatim code blocks within a
-    \c{/}\c{*!} ... \c{*}\c{/} comment before it adds the standard
-    indentation.
+    When processing the \\code command, QDoc removes all indentation
+    that is common for the verbatim code blocks within a \c{/}\c{*!}
+    ... \c{*}\c{/} comment before it adds the standard indentation.
 
     \note This doesn't apply to externally quoted code using the \l
     {quotefromfile-command} {\\quotefromfile} or \l
@@ -959,10 +933,9 @@
     \l{07-0-qdoc-commands-includingexternalcode.html#codeline-command}
     {\\codeline} commands.
 
-    See also \l {c-command} {\\c}, \l {badcode-command} {\\badcode}, \l
-    {07-0-qdoc-commands-includingexternalcode.html#quotefromfile-command}
-    {\\quotefromfile}, \l{newcode-command} {\\newcode}, and \l {oldcode-command}
-    {\\oldcode}.
+    See also \l {c-command} {\\c}, \l {badcode-command} {\\badcode}, and
+    \l {07-0-qdoc-commands-includingexternalcode.html#quotefromfile-command}
+    {\\quotefromfile}.
 
     \target badcode-command
     \section1 \\badcode
@@ -981,57 +954,14 @@
     \target newcode-command
     \section1 \\newcode
 
-    The \\newcode, \\oldcode, and \\endcode commands enable you to
-    show how to port a snippet of code to a new version of an API.
-
-    The \\newcode command and its companion the \\oldcode command are
-    a convenience combination of the \l {code-command} {\\code} commands:
-    this combination provides a text relating the two code snippets to each
-    other.
-
-    The \\newcode command requires a preceding \\oldcode statement.
-
-    Like the \l{code-command}{\\code} command, the \\newcode command renders its
-    code on a new line in the documentation using a monospace font and the
-    standard indentation.
-
-           \code
-           / *!
-               \oldcode
-                   if (printer->setup(parent))
-                       ...
-               \newcode
-                   QPrintDialog dialog(printer, parent);
-                       if (dialog.exec())
-                           ...
-               \ endcode
-           * /
-           \endcode
-
-    QDoc renders this as:
-
-           \quotation
-               \oldcode
-                   if (printer->setup(parent))
-                       ...
-               \newcode
-                   QPrintDialog dialog(printer, parent);
-                       if (dialog.exec())
-                           ...
-               \endcode
-           \endquotation
-
-    Other QDoc commands are disabled within \\oldcode ... \\endcode,
-    and the '\\' character doesn't need to be escaped.
+    The \\newcode command is deprecated and marked for
+    removal in Qt 6.4.
 
     \target oldcode-command
     \section1 \\oldcode
 
-    The \\oldcode command requires a corresponding
-    \\newcode statement; otherwise QDoc fails to parse the command
-    and emits a warning.
-
-    See also \l {newcode-command} {\\newcode}.
+    The \\oldcode command is deprecated and marked for
+    removal in Qt 6.4.
 
     \target qml-command
     \section1 \\qml
@@ -1296,7 +1226,7 @@
     \target substring
 
     If the substring argument is surrounded by slashes it is
-    interpreted as a \l {QRegExp}{regular expression}.
+    interpreted as a \l {QRegularExpression}{regular expression}.
 
            \code
            / *!
@@ -1435,10 +1365,10 @@
                \printuntil hello
 
                First we create a \l
-               {http://doc.qt.io/qt-5/qapplication.html} {QApplication}
+               {http://doc.qt.io/qt-6/qapplication.html} {QApplication}
                object using the \c argc and \c argv parameters, then we
                create a \l
-               {http://doc.qt.io/qt-5/qpushbutton.html} {QPushButton}.
+               {http://doc.qt.io/qt-6/qpushbutton.html} {QPushButton}.
            \endquotation
 
     See also \l {printline-command} {\\printline} and \l
@@ -1702,7 +1632,7 @@
     By default, QDoc looks for \c{//!} as a code snippet marker.
     For \c{.pro}, \c{.py}, \c{.cmake}, and \c{CMakeLists.txt}
     files, \c {#!} is detected. Finally, \c{<!--} is accepted in
-    \c{.html}, \c{.qrc}, \c{.ui}, \c{.xml}, \c{.dita}, and \c{.xq} files.
+    \c{.html}, \c{.qrc}, \c{.ui}, \c{.xml}, and \c{.xq} files.
 
     \target codeline-command
     \section1 \\codeline
@@ -1742,16 +1672,16 @@
 
     \code
        / *!
-          Read the \l {http://doc.qt.io/qt-5/}
-          {Qt 5.0 Documentation} carefully.
+          Read the \l {http://doc.qt.io/qt-6/}
+          {Qt 6 Documentation} carefully.
        * /
     \endcode
 
     QDoc renders this as:
 
     \quotation
-       Read the \l {http://doc.qt.io/qt-5/}
-       {Qt 5.0 Documentation} carefully.
+       Read the \l {http://doc.qt.io/qt-6/}
+       {Qt 6 Documentation} carefully.
     \endquotation
 
     If the link target is equivalent to the link text, the second
@@ -2035,11 +1965,11 @@
     * /
     \endcode
 
-    The target name \e{capturing parentheses} can be linked from
-    within the same document containing the target in the following way:
+    The target name \e{capturing parentheses} can be linked to
+    in the following way:
 
     \list
-      \li \c {\l {capturing parentheses}} (from within the same QDoc comment)
+      \li \c {\l {capturing parentheses}}
     \endlist
 
     \note The brackets in the link example are required because the
@@ -2069,9 +1999,9 @@
 
     \code
     / *!
-        \class QRegExp
+        \class QRegularExpression
         \reentrant
-        \brief The QRegExp class provides pattern
+        \brief The QRegularExpression class provides pattern
                matching using regular expressions.
         \ingroup tools
         \ingroup misc
@@ -2091,7 +2021,7 @@
     \code
     / *!
         When a string is surrounded by slashes, it is
-        interpreted as a \l {QRegExp}{regular expression}.
+        interpreted as a \l {regular expression}.
     * /
     \endcode
 
@@ -2281,9 +2211,9 @@
     / *!
       \table 100%
         \row
-          \li \image windowsvista-pushbutton.png
+          \li \image windows-pushbutton.png
              \caption The QPushButton widget provides a command button.
-          \li \image windowsvista-toolbutton.png
+          \li \image windows-toolbutton.png
              \caption The QToolButton class provides a quick-access button to commands
              or options, usually used inside a QToolBar.
        \endtable
@@ -2294,9 +2224,9 @@
 
     \table 100%
       \row
-        \li \image windowsvista-pushbutton.png
+        \li \image windows-pushbutton.png
            \caption The QPushButton widget provides a command button.
-        \li \image windowsvista-toolbutton.png
+        \li \image windows-toolbutton.png
            \caption The QToolButton class provides a quick-access button to commands
            or options, usually used inside a QToolBar.
     \endtable
@@ -2383,7 +2313,7 @@
 
                <tr valign="top" bgcolor="#d0d0d0">
                    <td>
-                   <a href="http://doc.qt.io/qt-5/signalsandslots.html">
+                   <a href="http://doc.qt.io/qt-6/signalsandslots.html">
                        Signals and Slots</a>
                    </td>
                    <td>Signals and slots are used for communication
@@ -2392,7 +2322,7 @@
 
                <tr valign="top" bgcolor="#c0c0c0">
                    <td>
-                   <a href="http://doc.qt.io/qt-5/layout.html">
+                   <a href="http://doc.qt.io/qt-6/layout.html">
                        Layout Management</a></td>
                    <td>The Qt layout system provides a simple
                        and powerful way of specifying the layout
@@ -2401,7 +2331,7 @@
 
                <tr valign="top" bgcolor="#d0d0d0">
                    <td>
-                   <a href="http://doc.qt.io/qt-5/dnd.html">
+                   <a href="http://doc.qt.io/qt-6/dnd.html">
                        Drag and Drop</a></td>
                    <td>Drag and drop provides a simple visual
                        mechanism which users can use to transfer
@@ -2502,7 +2432,7 @@
 
                <tr valign="top" bgcolor="#d0d0d0">
                    <td>
-                   <a href="http://doc.qt.io/qt-5/signalsandslots.html">
+                   <a href="http://doc.qt.io/qt-6/signalsandslots.html">
                        Signals and Slots</a>
                    </td>
                    <td>Signals and slots are used for communication
@@ -2564,7 +2494,7 @@
 
                <tr valign="top" bgcolor="#d0d0d0">
                    <td>
-                   <a href="http://doc.qt.io/qt-5/signalsandslots.html">
+                   <a href="http://doc.qt.io/qt-6/signalsandslots.html">
                        Signals and Slots</a>
                    </td>
                    <td>Signals and slots are used for communication
@@ -2573,7 +2503,7 @@
 
                <tr valign="top" bgcolor="#c0c0c0">
                    <td>
-                   <a href="http://doc.qt.io/qt-5/layout.html">
+                   <a href="http://doc.qt.io/qt-6/layout.html">
                        Layout Management</a></td>
                    <td>The Qt layout system provides a simple
                        and powerful way of specifying the layout
@@ -2582,7 +2512,7 @@
 
                <tr valign="top" bgcolor="#d0d0d0">
                    <td>
-                   <a href="http://doc.qt.io/qt-5/dnd.html">
+                   <a href="http://doc.qt.io/qt-6/dnd.html">
                        Drag and Drop</a></td>
                    <td>Drag and drop provides a simple visual
                        mechanism which users can use to transfer
@@ -2637,9 +2567,11 @@
     The \\omitvalue command excludes a C++ enum item from the
     documentation.
 
-    The command's only argument is the name of the enum item that will
-    be omitted. See the \l {enum-command} {\\enum} documentation for
-    an example.
+    The command's only mandatory argument is the name of the enum item
+    that will be omitted. If the enum item is followed by a single-line
+    description, that is also omitted.
+
+    See the \l {enum-command} {\\enum} documentation for an example.
 
     See also \l {enum-command} {\\enum} and \l {value-command}
     {\\value} \l {since-command}{\\since}
@@ -2989,7 +2921,7 @@
            \quotation
                \raw HTML
                    <h3>geometry :
-                   <a href="http://doc.qt.io/qt-5/qrect.html">QRect</a>
+                   <a href="http://doc.qt.io/qt-6/qrect.html">QRect</a>
                    </h3>
                \endraw
 
@@ -3234,16 +3166,16 @@
 
     Ideally, the license text is located with the licensed code.
 
-   Elsewhere, the documentation identified as \e{\\legalese} command
-   can be accumulated using \l {generatelist-command} {\\generatelist}
-   with \c {legalese} as the argument. This is useful for generating
-   an overview of the license agreements associated with the source
-   code.
+    Elsewhere, the documentation identified as \e{\\legalese} command
+    can be accumulated using \l {generatelist-command} {\\generatelist}
+    with \c {legalese} as the argument. This is useful for generating
+    an overview of the license agreements associated with the source
+    code.
 
-   \note The output of the \c {\generatelist legalese} command includes
-   the \\legalese texts in the current documentation project only. If
-   the current documentation project depends on other modules, their
-   license texts will not be listed.
+    \note The output of the \c {\generatelist legalese} command includes
+    the \\legalese texts in the current documentation project only. If
+    the current documentation project depends on other modules, their
+    license texts will not be listed.
 
     \target warning-command
     \section1 \\warning
@@ -3311,6 +3243,38 @@
     the \e{draganddrop} group. A C++ class or QML type in the
     \e{draganddrop} group will have \e{\\ingroup draganddrop} in its
     \e{\\class} or \e{\\qmltype} comment.
+
+
+    \target qtcmakepackage-command
+    \section1 \\qtcmakepackage
+
+    Use the \\qtcmakepackage command to add CMake package information to classes
+    and namespaces. This information will then appear in a table at the top of
+    the class or namespace documentation page. For example:
+
+    \badcode *
+    /*!
+        \namespace Foo
+        \inheaderfile Bar
+        \qtcmakepackage Baz
+        \brief A namespace.
+
+        ...
+    \1/
+    \endcode
+
+    QDoc will output this as
+
+    \raw HTML
+        <blockquote>
+        <h1 class="title">Foo Namespace</h1>
+        <p>A namespace. <a>More...</a></p>
+        <div class="table"><table class="alignedsummary">
+        <tr><td class="memItemLeft rightAlign topAlign"> Header:</td><td class="memItemRight bottomAlign"> <span class="preprocessor">#include &lt;Bar&gt;</span></td></tr>
+        <tr><td class="memItemLeft rightAlign topAlign"> CMake:</td><td class="memItemRight bottomAlign"> find_package(Qt6 REQUIRED COMPONENTS Baz)</td></tr>
+        </table></div>
+        </blockquote>
+    \endraw
 
 
     \target generatelist-command
@@ -3651,25 +3615,25 @@
     \l{sources.fileextensions-variable}{sources.fileextensions};
     for example, \c .qdocinc.
 
-    The command can have either one or two arguments. The first
+    The command can have one or more arguments. The first
     argument is always a file name. The contents of the file must be
     QDoc input, in other words, a sequence of QDoc commands and text, but
     without the enclosing QDoc comment \c{/}\c{*!} ... \c{*}\c{/} delimiters.
-    If you want to include the entire named file, don't use the second
-    argument. If you want to include only part of the file, see the
+    If you want to include the entire named file, leave the second argument
+    empty. If you want to include only part of the file, see the
     \l{2-argument-form}{two argument form} below. Here is an example
     of the one argument form:
 
-            \code
-            / *!
-                \page corefeatures.html
-                \title Core Features
+    \code *
+    /\1!
+        \page corefeatures.html
+        \title Core Features
 
-                \include examples/signalandslots.qdocinc
-                \include examples/objectmodel.qdocinc
-                \include examples/layoutmanagement.qdocinc
-            * /
-            \endcode
+        \include examples/signalandslots.qdocinc
+        \include examples/objectmodel.qdocinc
+        \include examples/layoutmanagement.qdocinc
+    \1/
+    \endcode
 
     QDoc renders this page \l{corefeatures.html} {as shown here}.
 
@@ -3679,19 +3643,19 @@
     It is a waste of time to make a separate \c .qdocinc file for every
     QDoc include snippet you want to use in multiple places in the
     documentation, especially given that you probably have to put the
-    copyright/license notice in every one of these files. So if you
-    have a large number of snippets to be included, you can put them all in a
-    single file if you want, and surround each one with:
+    copyright/license notice in every one of these files. If you
+    have multiple snippets to be included, you can put them all in a
+    single file and surround each one with:
     \code
-        //! [snippet-id1]
+    //! [snippet-id1]
 
-           QDoc commands and text...
+    QDoc commands and text...
 
     //! [snippet-id1]
 
-        //! [snippet-id2]
+    //! [snippet-id2]
 
-           More QDoc commands and text...
+    More QDoc commands and text...
 
     //! [snippet-id2]
     \endcode
@@ -3699,18 +3663,50 @@
     Then you can use the two-argument form of the command:
 
     \code
-        \input examples/signalandslots.qdocinc snippet-id2
-        \input examples/objectmodel.qdocinc another-snippet-id
+        \include examples/signalandslots.qdocinc snippet-id2
+        \include examples/objectmodel.qdocinc another-snippet-id
     \endcode
 
-    It works as expected. The sequence of QDoc commands and text found
-    between the two tags with the same name as the second argument is
-    sent to the QDoc input stream. You can even have nested snippets.
+    The sequence of QDoc commands and text found between the two tags
+    with the same name as the second argument is sent to the QDoc input
+    stream. You can even have nested snippets.
 
     \note Snippet identifiers work also within documentation comment
     (\beginqdoc .. \endqdoc) blocks, so it's not necessary to use a
     separate \c .qdocinc file. When processing a comment block, QDoc
     removes any \c {//!} comment lines from the generated output.
+
+    \section2 Extra arguments
+
+    Since QDoc 6.3, any further arguments passed to the \\include command
+    are used for injecting strings into the included content. To inject a
+    string to a specific location in the content, add a backslash followed
+    by a digit (1..9). The digits correspond with the order of the argument
+    list.
+
+    For example, given the following snippet in a file \c includes.qdocinc:
+
+    \badcode
+    //! [usage]
+    To enable \e{\1}, select \uicontrol {\2} > \uicontrol Enable.
+    //! [usage]
+    \endcode
+
+    Then, the following \\include line:
+
+    \badcode
+    \include includes.qdocinc {usage} {detailed output} {Verbose}
+    \endcode
+
+    Renders
+    \quotation
+    To enable \e {detailed output}, select \uicontrol {Verbose} >
+    \uicontrol Enable.
+    \endquotation
+
+    \important Each additional argument (including the snippet ID) must be
+               enclosed in braces. If you want to include the entire file,
+               use an empty snippet ID: \c {{}}.
 
     \target meta-command
     \section1 \\meta
@@ -3751,7 +3747,7 @@
     and module name. These tags are displayed in Qt Creator's Welcome mode,
     helping users navigate the list of examples.
 
-    Additional tags can be created with \c {\\meta {tag} {tag1,[tag2,...]}}.
+    Additional tags can be created with \c {\meta {tag} {tag1,[tag2,...]}}.
     For example:
     \badcode
     / *!
@@ -3763,6 +3759,15 @@
 
     This would result in the following tags: \e {tutorial,basic,hello,world}.
     Common words such as \e example are ignored.
+
+    \b {Excluding Examples}
+
+    Marking an example \e broken will exclude it from the generated manifest
+    file, effectively removing it from Qt Creator's Welcome mode.
+
+    \badcode
+        \meta tag broken
+    \endcode
 
     \b {Example Install Paths}
 
@@ -3790,15 +3795,12 @@
     also be used with the \l {group-command}{\\group} command to omit
     the list of group members, when they are listed manually.
 
-    The command must stand on its own line. See \l {Qt Sensors QML Types} for
-    an example. The page is generated from \c {qtsensors5.qdoc}. There you will
-    find a QDoc comment containing the \c{\qmlmodule} command for the QtSensors
-    module. The same QDoc comment contains two \c {\annotated-list} commands to
-    list the QML types in two separate groups. The QML types have been divided
-    into these two groups because it makes more sense to list them this way than
-    it does to list them in a single alphabetical list. At the bottom of the
-    comment, \c {\noautolist} has been used to tell QDoc not to generate the
-    automatic annotated list.
+    The command must stand on its own line. See \l {Qt Quick Controls QML Types}
+    for an example. The page is generated from \c {qtquickcontrols2-qmlmodule.qdoc}.
+    There you will find a QDoc comment containing the \c{\qmlmodule} command for
+    the QtQuick.Controls module. The same comment contains a \c {\noautolist}
+    command to disable automatic list generation, and a \l {generatelist-command}
+    {\\generatelist} to list the QML types in a specific section of the document.
 
     This command was introduced in QDoc 5.6.
 

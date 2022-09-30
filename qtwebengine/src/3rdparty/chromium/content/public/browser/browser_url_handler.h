@@ -35,7 +35,7 @@ class CONTENT_EXPORT BrowserURLHandler {
   static URLHandler null_handler();
 
   // Returns the singleton instance.
-  static  BrowserURLHandler* GetInstance();
+  static BrowserURLHandler* GetInstance();
 
   // RewriteURLIfNecessary gives all registered URLHandlers a shot at processing
   // the given URL, and modifies it in place.
@@ -50,11 +50,6 @@ class CONTENT_EXPORT BrowserURLHandler {
   virtual std::vector<GURL> GetPossibleRewrites(
       const GURL& url,
       BrowserContext* browser_context) = 0;
-
-  // Set the specified handler as a preliminary fixup phase to be done before
-  // rewriting.  This allows minor cleanup for the URL without having it affect
-  // the virtual URL.
-  virtual void SetFixupHandler(URLHandler handler) = 0;
 
   // Add the specified handler pair to the list of URL handlers.
   //

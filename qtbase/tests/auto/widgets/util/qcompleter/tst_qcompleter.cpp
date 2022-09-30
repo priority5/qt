@@ -1,38 +1,14 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <QtGui>
 #include <QtWidgets>
 #include <QtDebug>
 #include <QPair>
 #include <QList>
 #include <QPointer>
+#include <QSignalSpy>
 
 #include <QtTest/private/qtesthelpers_p.h>
 
@@ -107,10 +83,6 @@ private slots:
     void csMatchingOnCiSortedModel_data();
     void csMatchingOnCiSortedModel();
 
-#if QT_CONFIG(dirmodel) && QT_DEPRECATED_SINCE(5, 15)
-    void directoryModel_data();
-    void directoryModel();
-#endif
     void fileSystemModel_data();
     void fileSystemModel();
     void fileDialog_data();
@@ -148,6 +120,7 @@ private slots:
     void QTBUG_14292_filesystem();
     void QTBUG_52028_tabAutoCompletes();
     void QTBUG_51889_activatedSentTwice();
+    void showPopupInGraphicsView();
 
 private:
     void filter(bool assync = false);
@@ -155,7 +128,6 @@ private:
     enum ModelType {
         CASE_SENSITIVELY_SORTED_MODEL,
         CASE_INSENSITIVELY_SORTED_MODEL,
-        DIRECTORY_MODEL,
         HISTORY_MODEL,
         FILESYSTEM_MODEL
     };
@@ -178,6 +150,16 @@ tst_QCompleter::~tst_QCompleter()
     delete treeWidget;
     delete completer;
 }
+
+#ifdef Q_OS_ANDROID
+static QString androidHomePath()
+{
+    const auto homePaths = QStandardPaths::standardLocations(QStandardPaths::HomeLocation);
+    QDir dir = homePaths.isEmpty() ? QDir() : homePaths.first();
+    dir.cdUp();
+    return dir.path();
+}
+#endif
 
 void tst_QCompleter::setSourceModel(ModelType type)
 {
@@ -227,21 +209,17 @@ void tst_QCompleter::setSourceModel(ModelType type)
         parent = new QTreeWidgetItem(treeWidget);
         parent->setText(completionColumn, QLatin1String("p2,c4p2"));
         break;
-    case DIRECTORY_MODEL:
-#if QT_CONFIG(dirmodel) && QT_DEPRECATED_SINCE(5, 15)
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-        completer->setCsvCompletion(false);
-        completer->setModel(new QDirModel(completer));
-        completer->setCompletionColumn(0);
-QT_WARNING_POP
-#endif // QT_CONFIG(dirmodel) && QT_DEPRECATED_SINCE(5, 15)
-        break;
     case FILESYSTEM_MODEL:
         completer->setCsvCompletion(false);
         {
             auto m = new QFileSystemModel(completer);
+#ifdef Q_OS_ANDROID
+            // Android 11 and above doesn't allow accessing root filesystem as before,
+            // so let's opt int for the app's home.
+            m->setRootPath(androidHomePath());
+#else
             m->setRootPath("/");
+#endif
             completer->setModel(m);
         }
         completer->setCompletionColumn(0);
@@ -599,58 +577,6 @@ void tst_QCompleter::csMatchingOnCiSortedModel()
     filter();
 }
 
-#if QT_CONFIG(dirmodel) && QT_DEPRECATED_SINCE(5, 15)
-void tst_QCompleter::directoryModel_data()
-{
-    delete completer;
-
-    completer = new CsvCompleter;
-    completer->setModelSorting(QCompleter::CaseSensitivelySortedModel);
-    setSourceModel(DIRECTORY_MODEL);
-    completer->setCaseSensitivity(Qt::CaseInsensitive);
-
-    QTest::addColumn<QString>("filterText");
-    QTest::addColumn<QString>("step");
-    QTest::addColumn<QString>("completion");
-    QTest::addColumn<QString>("completionText");
-
-    // NOTE: Add tests carefully, ensurely the paths exist on all systems
-    // Output is the sourceText; currentCompletionText()
-
-    for (int i = 0; i < 2; i++) {
-        if (i == 1)
-            QTest::newRow("FILTERING_OFF") << "FILTERING_OFF" << "" << "" << "";
-
-#if defined(Q_OS_WIN)
-        QTest::newRow("()") << "C" << "" << "C:" << "C:";
-        QTest::newRow("()") << "C:\\Program" << "" << "Program Files" << "C:\\Program Files";
-#elif defined (Q_OS_MAC)
-        QTest::newRow("()") << "" << "" << "/" << "/";
-        QTest::newRow("(/a)") << "/a" << "" << "Applications" << "/Applications";
-        QTest::newRow("(/u)") << "/u" << "" << "Users" << "/Users";
-#elif defined(Q_OS_ANDROID)
-        QTest::newRow("()") << "" << "" << "/" << "/";
-        QTest::newRow("(/et)") << "/et" << "" << "etc" << "/etc";
-#else
-        QTest::newRow("()") << "" << "" << "/" << "/";
-#if !defined(Q_OS_AIX) && !defined(Q_OS_HPUX) && !defined(Q_OS_QNX)
-        QTest::newRow("(/h)") << "/h" << "" << "home" << "/home";
-#endif
-        QTest::newRow("(/et)") << "/et" << "" << "etc" << "/etc";
-        QTest::newRow("(/etc/passw)") << "/etc/passw" << "" << "passwd" << "/etc/passwd";
-#endif
-    }
-}
-
-void tst_QCompleter::directoryModel()
-{
-#ifdef Q_OS_WINRT
-    QSKIP("WinRT cannot access directories outside of the application's sandbox");
-#endif
-    filter();
-}
-#endif // QT_CONFIG(dirmodel) && QT_DEPRECATED_SINCE(5, 15)
-
 void tst_QCompleter::fileSystemModel_data()
 {
     delete completer;
@@ -680,7 +606,9 @@ void tst_QCompleter::fileSystemModel_data()
 //        QTest::newRow("(/d)") << "/d" << "" << "Developer" << "/Developer";
 #elif defined(Q_OS_ANDROID)
         QTest::newRow("()") << "" << "" << "/" << "/";
-        QTest::newRow("(/et)") << "/et" << "" << "etc" << "/etc";
+        const QString androidDir = androidHomePath();
+        const QString tag = QStringLiteral("%1/fil").arg(androidDir);
+        QTest::newRow(tag.toUtf8().data()) << tag << "" << "files" << androidDir + "/files";
 #else
         QTest::newRow("()") << "" << "" << "/" << "/";
 #if !defined(Q_OS_AIX) && !defined(Q_OS_HPUX) && !defined(Q_OS_QNX)
@@ -694,9 +622,6 @@ void tst_QCompleter::fileSystemModel_data()
 
 void tst_QCompleter::fileSystemModel()
 {
-#ifdef Q_OS_WINRT
-    QSKIP("WinRT cannot access directories outside of the application's sandbox");
-#endif
     //QFileSystemModel is async.
     filter(true);
 }
@@ -713,9 +638,6 @@ void tst_QCompleter::fileDialog_data()
 
 void tst_QCompleter::fileDialog()
 {
-#ifdef Q_OS_WINRT
-    QSKIP("WinRT cannot access directories outside of the application's sandbox");
-#endif
     //QFileSystemModel is async.
     filter(true);
 }
@@ -1732,6 +1654,7 @@ void tst_QCompleter::QTBUG_14292_filesystem()
     // to pop up the completion list due to file changed signals.
     FileSystem fs;
     QFileSystemModel model;
+    QSignalSpy filesAddedSpy(&model, &QAbstractItemModel::rowsInserted);
     model.setRootPath(fs.path());
 
     QVERIFY(fs.createDirectory(QLatin1String(testDir1)));
@@ -1753,9 +1676,6 @@ void tst_QCompleter::QTBUG_14292_filesystem()
 
     // Wait for all file system model slots/timers to trigger
     // until the model sees the subdirectories.
-#ifdef Q_OS_WINRT
-    QEXPECT_FAIL("", "Fails on WinRT - QTBUG-68297", Abort);
-#endif
     QTRY_VERIFY(testFileSystemReady(model));
     // But this should not cause the combo to pop up.
     QVERIFY(!comp.popup()->isVisible());
@@ -1771,13 +1691,16 @@ void tst_QCompleter::QTBUG_14292_filesystem()
     QTest::keyClick(&edit, 'r');
     QTRY_VERIFY(!comp.popup()->isVisible());
     QVERIFY(fs.createDirectory(QStringLiteral("hero")));
+    if (!filesAddedSpy.wait())
+        QSKIP("File system model didn't notify about new directory, skipping tests");
     QTRY_VERIFY(comp.popup()->isVisible());
     QCOMPARE(comp.popup()->model()->rowCount(), 1);
     QTest::keyClick(comp.popup(), Qt::Key_Escape);
     QTRY_VERIFY(!comp.popup()->isVisible());
     QVERIFY(fs.createDirectory(QStringLiteral("nothingThere")));
     //there is no reason creating a file should open a popup, it did in Qt 4.7.0
-    QTest::qWait(60);
+    if (!filesAddedSpy.wait())
+        QSKIP("File system model didn't notify about new file, skipping tests");
     QVERIFY(!comp.popup()->isVisible());
 
     QTest::keyClick(&edit, Qt::Key_Backspace);
@@ -1795,7 +1718,8 @@ void tst_QCompleter::QTBUG_14292_filesystem()
 
     QVERIFY(fs.createDirectory(QStringLiteral("hemo")));
     //there is no reason creating a file should open a popup, it did in Qt 4.7.0
-    QTest::qWait(60);
+    if (!filesAddedSpy.wait())
+        QSKIP("File system model didn't notify about new file, skipping tests");
     QVERIFY(!comp.popup()->isVisible());
 }
 
@@ -1828,7 +1752,7 @@ void tst_QCompleter::QTBUG_52028_tabAutoCompletes()
     QApplication::setActiveWindow(&w);
     QVERIFY(QTest::qWaitForWindowActive(&w));
 
-    QSignalSpy activatedSpy(&cbox, QOverload<int>::of(&QComboBox::activated));
+    QSignalSpy activatedSpy(&cbox, &QComboBox::activated);
 
     // Tab key will complete but not activate
     cbox.lineEdit()->clear();
@@ -1872,7 +1796,7 @@ void tst_QCompleter::QTBUG_51889_activatedSentTwice()
     QApplication::setActiveWindow(&w);
     QVERIFY(QTest::qWaitForWindowActive(&w));
 
-    QSignalSpy activatedSpy(&cbox, QOverload<int>::of(&QComboBox::activated));
+    QSignalSpy activatedSpy(&cbox, &QComboBox::activated);
 
     // Navigate + enter activates only once (first item)
     cbox.lineEdit()->clear();
@@ -1901,6 +1825,37 @@ void tst_QCompleter::QTBUG_51889_activatedSentTwice()
     QTRY_VERIFY(cbox.completer()->popup()->isVisible());
     QTest::keyClick(&cbox, Qt::Key_Return);
     QTRY_COMPARE(activatedSpy.count(), 1);
+}
+
+void tst_QCompleter::showPopupInGraphicsView()
+{
+    QGraphicsView view;
+    QGraphicsScene scene;
+    view.setScene(&scene);
+
+    QLineEdit lineEdit;
+    lineEdit.setCompleter(new QCompleter({"alpha", "omega", "omicron", "zeta"}));
+    scene.addWidget(&lineEdit);
+
+    view.move(view.screen()->availableGeometry().topLeft() + QPoint(10, 10));
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    // show popup under line edit
+    QTest::keyClick(&lineEdit, Qt::Key_A);
+    QVERIFY(lineEdit.completer()->popup());
+    QVERIFY(lineEdit.completer()->popup()->isVisible());
+    QCOMPARE(lineEdit.completer()->popup()->geometry().x(), lineEdit.mapToGlobal(QPoint(0, 0)).x());
+    QVERIFY(lineEdit.completer()->popup()->geometry().top() >= (lineEdit.mapToGlobal(QPoint(0, lineEdit.height() - 1)).y() - 1));
+
+    // move widget to the bottom of screen
+    lineEdit.clear();
+    int y = view.screen()->availableGeometry().height() - lineEdit.geometry().y();
+    view.move(view.geometry().x(), y);
+
+    // show popup above line edit
+    QTest::keyClick(&lineEdit, Qt::Key_A);
+    QVERIFY(lineEdit.completer()->popup()->geometry().bottom() < lineEdit.mapToGlobal(QPoint(0, 0)).y());
 }
 
 QTEST_MAIN(tst_QCompleter)

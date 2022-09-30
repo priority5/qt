@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <qtest.h>
 
 #include <QSignalSpy>
@@ -36,9 +11,9 @@
 #include <QtQuick/qquickview.h>
 #include <private/qquickloader_p.h>
 #include <private/qquickwindowmodule_p.h>
-#include "testhttpserver.h"
-#include "../../shared/util.h"
-#include "../shared/geometrytestutil.h"
+#include <QtQuickTestUtils/private/geometrytestutils_p.h>
+#include <QtQuickTestUtils/private/qmlutils_p.h>
+#include <QtQuickTestUtils/private/testhttpserver_p.h>
 #include <QQmlApplicationEngine>
 
 Q_LOGGING_CATEGORY(lcTests, "qt.quick.tests")
@@ -63,11 +38,11 @@ public:
     bool incubated = false;
 
 protected:
-    virtual void timerEvent(QTimerEvent *) {
+    void timerEvent(QTimerEvent *) override {
         incubateFor(15);
     }
 
-    virtual void incubatingObjectCountChanged(int count) {
+    void incubatingObjectCountChanged(int count) override {
         if (count)
             incubated = true;
     }
@@ -114,6 +89,7 @@ private slots:
     void asyncToSync1();
     void asyncToSync2();
     void loadedSignal();
+    void selfSetSource();
 
     void parented();
     void sizeBound();
@@ -132,11 +108,14 @@ private slots:
     void statusChangeOnlyEmittedOnce();
 
     void setSourceAndCheckStatus();
+    void asyncLoaderRace();
+    void noEngine();
 };
 
 Q_DECLARE_METATYPE(QList<QQmlError>)
 
 tst_QQuickLoader::tst_QQuickLoader()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
 {
     qmlRegisterType<SlowComponent>("LoaderTest", 1, 0, "SlowComponent");
     qRegisterMetaType<QList<QQmlError>>();
@@ -216,13 +195,13 @@ void tst_QQuickLoader::sourceOrComponent_data()
     QTest::addColumn<QUrl>("sourceUrl");
     QTest::addColumn<QString>("errorString");
 
-    QTest::newRow("source") << "source" << "source: 'Rect120x60.qml'\n" << testFileUrl("Rect120x60.qml") << "";
-    QTest::newRow("source with subdir") << "source" << "source: 'subdir/Test.qml'\n" << testFileUrl("subdir/Test.qml") << "";
-    QTest::newRow("source with encoded subdir literal") << "source" << "source: 'subdir%2fTest.qml'\n" << testFileUrl("subdir/Test.qml") << "";
-    QTest::newRow("source with encoded subdir optimized binding") << "source" << "source: 'subdir' + '%2fTest.qml'\n" << testFileUrl("subdir/Test.qml") << "";
-    QTest::newRow("source with encoded subdir binding") << "source" << "source: encodeURIComponent('subdir/Test.qml')\n" << testFileUrl("subdir/Test.qml") << "";
+    QTest::newRow("source") << "source" << "source: 'Rect120x60.qml'\n" << QUrl("Rect120x60.qml") << "";
+    QTest::newRow("source with subdir") << "source" << "source: 'subdir/Test.qml'\n" << QUrl("subdir/Test.qml") << "";
+    QTest::newRow("source with encoded subdir literal") << "source" << "source: 'subdir%2fTest.qml'\n" << QUrl("subdir%2FTest.qml") << "";
+    QTest::newRow("source with encoded subdir optimized binding") << "source" << "source: 'subdir' + '%2fTest.qml'\n" << QUrl("subdir%2FTest.qml") << "";
+    QTest::newRow("source with encoded subdir binding") << "source" << "source: encodeURIComponent('subdir/Test.qml')\n" << QUrl("subdir%2FTest.qml") << "";
     QTest::newRow("sourceComponent") << "component" << "Component { id: comp; Rectangle { width: 100; height: 50 } }\n sourceComponent: comp\n" << QUrl() << "";
-    QTest::newRow("invalid source") << "source" << "source: 'IDontExist.qml'\n" << testFileUrl("IDontExist.qml")
+    QTest::newRow("invalid source") << "source" << "source: 'IDontExist.qml'\n" << QUrl("IDontExist.qml")
             << QString(testFileUrl("IDontExist.qml").toString() + ": No such file or directory");
 }
 
@@ -705,6 +684,11 @@ void tst_QQuickLoader::initialPropertyValues_data()
             << QStringList()
             << (QStringList() << "i")
             << (QVariantList() << 12);
+
+    QTest::newRow("initial property errors get reported") << testFileUrl("initialPropertyTriggerException.qml")
+                                                          << (QStringList() << "^.*:10: Error: Cannot assign JavaScript function to int")
+                                                          << QStringList()
+                                                          << QVariantList();
 }
 
 void tst_QQuickLoader::initialPropertyValues()
@@ -717,7 +701,7 @@ void tst_QQuickLoader::initialPropertyValues()
     ThreadedTestHTTPServer server(dataDirectory());
 
     foreach (const QString &warning, expectedWarnings)
-        QTest::ignoreMessage(QtWarningMsg, warning.toLatin1().constData());
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(warning.toLatin1().constData()));
 
     QQmlEngine engine;
     QQmlComponent component(&engine, qmlFile);
@@ -806,7 +790,7 @@ void tst_QQuickLoader::deleteComponentCrash()
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     QCoreApplication::processEvents();
     QTRY_COMPARE(static_cast<QQuickItem*>(loader)->childItems().count(), 1);
-    QCOMPARE(loader->source(), testFileUrl("BlueRect.qml"));
+    QCOMPARE(loader->source(), QUrl("BlueRect.qml"));
 }
 
 void tst_QQuickLoader::nonItem()
@@ -1140,6 +1124,17 @@ void tst_QQuickLoader::loadedSignal()
         QCOMPARE(obj->property("loadCount").toInt(), 0);
         QVERIFY(obj->property("success").toBool());
     }
+}
+
+void tst_QQuickLoader::selfSetSource()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("selfSetSourceTest.qml"));
+
+    QScopedPointer<QObject> obj(component.create());
+    QVERIFY(obj);
+
+    QTRY_COMPARE(obj->property("source").toUrl(), testFileUrl("empty.qml"));
 }
 
 void tst_QQuickLoader::parented()
@@ -1494,6 +1489,38 @@ void tst_QQuickLoader::setSourceAndCheckStatus()
 
     QMetaObject::invokeMethod(loader, "load", Q_ARG(QVariant, QVariant()));
     QCOMPARE(loader->status(), QQuickLoader::Null);
+}
+
+void tst_QQuickLoader::asyncLoaderRace()
+{
+    QQmlApplicationEngine engine;
+    auto url = testFileUrl("loader-async-race.qml");
+    engine.load(url);
+    auto root = engine.rootObjects().at(0);
+    QVERIFY(root);
+
+    QQuickLoader *loader = root->findChild<QQuickLoader *>();
+    QCOMPARE(loader->active(), false);
+    QCOMPARE(loader->status(), QQuickLoader::Null);
+    QCOMPARE(loader->item(), nullptr);
+
+    QSignalSpy spy(loader, &QQuickLoader::itemChanged);
+    QVERIFY(!spy.wait(100));
+    QCOMPARE(loader->item(), nullptr);
+}
+
+void tst_QQuickLoader::noEngine()
+{
+    QQmlEngine engine;
+    const QUrl url = testFileUrl("noEngine.qml");
+    QQmlComponent component(&engine, url);
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QScopedPointer<QObject> o(component.create());
+
+    const QString message = url.toString()
+            + QStringLiteral(":27:13: QML Loader: createComponent: Cannot find a QML engine.");
+    QTest::ignoreMessage(QtWarningMsg, qPrintable(message));
+    QTRY_COMPARE(o->property("changes").toInt(), 1);
 }
 
 QTEST_MAIN(tst_QQuickLoader)

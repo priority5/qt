@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/input/event_handling_util.h"
 
 #include "third_party/blink/public/common/input/web_mouse_event.h"
+#include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
@@ -13,7 +14,6 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 namespace event_handling_util {
@@ -118,11 +118,11 @@ ContainerNode* ParentForClickEvent(const Node& node) {
 
 PhysicalOffset ContentPointFromRootFrame(
     LocalFrame* frame,
-    const FloatPoint& point_in_root_frame) {
+    const gfx::PointF& point_in_root_frame) {
   LocalFrameView* view = frame->View();
   // FIXME: Is it really OK to use the wrong coordinates here when view is 0?
   // Historically the code would just crash; this is clearly no worse than that.
-  return PhysicalOffset::FromFloatPointRound(
+  return PhysicalOffset::FromPointFRound(
       view ? view->ConvertFromRootFrame(point_in_root_frame)
            : point_in_root_frame);
 }
@@ -135,8 +135,7 @@ MouseEventWithHitTestResults PerformMouseEventHitTest(
   DCHECK(frame->GetDocument());
 
   return frame->GetDocument()->PerformMouseEventHitTest(
-      request,
-      ContentPointFromRootFrame(frame, FloatPoint(mev.PositionInRootFrame())),
+      request, ContentPointFromRootFrame(frame, mev.PositionInRootFrame()),
       mev);
 }
 
@@ -165,12 +164,11 @@ LocalFrame* SubframeForTargetNode(Node* node, bool* is_remote_frame) {
   if (!node)
     return nullptr;
 
-  LayoutObject* layout_object = node->GetLayoutObject();
-  if (!layout_object || !layout_object->IsLayoutEmbeddedContent())
+  auto* embedded = DynamicTo<LayoutEmbeddedContent>(node->GetLayoutObject());
+  if (!embedded)
     return nullptr;
 
-  FrameView* frame_view =
-      ToLayoutEmbeddedContent(layout_object)->ChildFrameView();
+  FrameView* frame_view = embedded->ChildFrameView();
   if (!frame_view)
     return nullptr;
   auto* local_frame_view = DynamicTo<LocalFrameView>(frame_view);
@@ -196,6 +194,7 @@ LocalFrame* GetTargetSubframe(
 void PointerEventTarget::Trace(Visitor* visitor) const {
   visitor->Trace(target_element);
   visitor->Trace(target_frame);
+  visitor->Trace(scrollbar);
 }
 
 }  // namespace event_handling_util

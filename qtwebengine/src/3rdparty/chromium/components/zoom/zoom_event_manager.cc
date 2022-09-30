@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/observer_list.h"
 #include "components/zoom/zoom_event_manager_observer.h"
 #include "content/public/browser/browser_context.h"
 
@@ -34,8 +35,7 @@ void ZoomEventManager::OnZoomLevelChanged(
   zoom_level_changed_callbacks_.Notify(change);
 }
 
-std::unique_ptr<content::HostZoomMap::Subscription>
-ZoomEventManager::AddZoomLevelChangedCallback(
+base::CallbackListSubscription ZoomEventManager::AddZoomLevelChangedCallback(
     content::HostZoomMap::ZoomLevelChangedCallback callback) {
   return zoom_level_changed_callbacks_.Add(std::move(callback));
 }

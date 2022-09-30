@@ -1,52 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtNfc module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:BSD$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** BSD License Usage
-** Alternatively, you may use this file under the terms of the BSD license
-** as follows:
-**
-** "Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions are
-** met:
-**   * Redistributions of source code must retain the above copyright
-**     notice, this list of conditions and the following disclaimer.
-**   * Redistributions in binary form must reproduce the above copyright
-**     notice, this list of conditions and the following disclaimer in
-**     the documentation and/or other materials provided with the
-**     distribution.
-**   * Neither the name of The Qt Company Ltd nor the names of its
-**     contributors may be used to endorse or promote products derived
-**     from this software without specific prior written permission.
-**
-**
-** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-** "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-** LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-** A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-** OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-** SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-** LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-** OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
@@ -67,6 +20,9 @@
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QScroller>
+#include <QtWidgets/QApplication>
+#include <QtGui/QScreen>
 
 class EmptyRecordLabel : public QLabel
 {
@@ -102,7 +58,7 @@ private:
     QNdefRecord m_record;
 };
 
-template <typename T>
+template<typename T>
 void addRecord(Ui::MainWindow *ui, const QNdefRecord &record = QNdefRecord())
 {
     QVBoxLayout *vbox = qobject_cast<QVBoxLayout *>(ui->scrollAreaWidgetContents->layout());
@@ -120,10 +76,10 @@ void addRecord(Ui::MainWindow *ui, const QNdefRecord &record = QNdefRecord())
     T *recordEditor = new T;
     recordEditor->setObjectName(QStringLiteral("record-editor"));
 
+    vbox->addWidget(recordEditor);
+
     if (!record.isEmpty())
         recordEditor->setRecord(record);
-
-    vbox->addWidget(recordEditor);
 }
 
 MainWindow::MainWindow(QWidget *parent)
@@ -131,15 +87,23 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
-    QMenu *addRecordMenu = new QMenu(this);
-    addRecordMenu->addAction(tr("NFC Text Record"), this, SLOT(addNfcTextRecord()));
-    addRecordMenu->addAction(tr("NFC URI Record"), this, SLOT(addNfcUriRecord()));
-    addRecordMenu->addAction(tr("MIME Image Record"), this, SLOT(addMimeImageRecord()));
-    addRecordMenu->addAction(tr("Empty Record"), this, SLOT(addEmptyRecord()));
-    ui->addRecord->setMenu(addRecordMenu);
+    connect(ui->addRecord, &QPushButton::clicked, this, &MainWindow::showMenu);
 
     QVBoxLayout *vbox = new QVBoxLayout;
     ui->scrollAreaWidgetContents->setLayout(vbox);
+#if (defined(Q_OS_ANDROID) && !defined(Q_OS_ANDROID_EMBEDDED)) || defined(Q_OS_IOS)
+    QScroller::grabGesture(ui->scrollArea, QScroller::TouchGesture);
+    ui->scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ui->scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+#endif
+
+    // Detect keyboard show/hide. We can't directly update the UI to ensure
+    // that the focused widget is active. Instead we wait for a resizeEvent
+    // that happens shortly after the keyboard is shown, and do all the
+    // processing there.
+    QInputMethod *inputMethod = qApp->inputMethod();
+    connect(inputMethod, &QInputMethod::visibleChanged,
+            [this, inputMethod]() { m_keyboardVisible = inputMethod->isVisible(); });
 
     //! [QNearFieldManager init]
     m_manager = new QNearFieldManager(this);
@@ -153,6 +117,20 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+void MainWindow::resizeEvent(QResizeEvent *e)
+{
+    QMainWindow::resizeEvent(e);
+    if (m_keyboardVisible) {
+        QWidget *areaWidget = ui->scrollAreaWidgetContents;
+        QList<QWidget *> childWidgets = areaWidget->findChildren<QWidget *>();
+        for (const auto widget : childWidgets) {
+            if (widget->hasFocus()) {
+                ui->scrollArea->ensureWidgetVisible(widget);
+            }
+        }
+    }
 }
 
 void MainWindow::addNfcTextRecord()
@@ -213,9 +191,8 @@ void MainWindow::touchReceive()
 
     m_touchAction = ReadNdef;
 
-    m_manager->setTargetAccessModes(QNearFieldManager::NdefReadTargetAccess);
     //! [QNearFieldManager start detection]
-    m_manager->startTargetDetection();
+    m_manager->startTargetDetection(QNearFieldTarget::NdefAccess);
     //! [QNearFieldManager start detection]
 }
 
@@ -225,8 +202,7 @@ void MainWindow::touchStore()
 
     m_touchAction = WriteNdef;
 
-    m_manager->setTargetAccessModes(QNearFieldManager::NdefWriteTargetAccess);
-    m_manager->startTargetDetection();
+    m_manager->startTargetDetection(QNearFieldTarget::NdefAccess);
 }
 
 //! [QNearFieldTarget detected]
@@ -244,7 +220,7 @@ void MainWindow::targetDetected(QNearFieldTarget *target)
             targetError(QNearFieldTarget::NdefReadError, m_request);
         break;
     case WriteNdef:
-        connect(target, &QNearFieldTarget::ndefMessagesWritten, this, &MainWindow::ndefMessageWritten);
+        connect(target, &QNearFieldTarget::requestCompleted, this, &MainWindow::ndefMessageWritten);
         connect(target, &QNearFieldTarget::error, this, &MainWindow::targetError);
 
         m_request = target->writeNdefMessages(QList<QNdefMessage>() << ndefMessage());
@@ -282,7 +258,6 @@ void MainWindow::ndefMessageRead(const QNdefMessage &message)
     }
 
     ui->status->setStyleSheet(QString());
-    m_manager->setTargetAccessModes(QNearFieldManager::NoTargetAccess);
     //! [QNearFieldManager stop detection]
     m_manager->stopTargetDetection();
     //! [QNearFieldManager stop detection]
@@ -290,13 +265,14 @@ void MainWindow::ndefMessageRead(const QNdefMessage &message)
     ui->statusBar->clearMessage();
 }
 
-void MainWindow::ndefMessageWritten()
+void MainWindow::ndefMessageWritten(const QNearFieldTarget::RequestId &id)
 {
-    ui->status->setStyleSheet(QString());
-    m_manager->setTargetAccessModes(QNearFieldManager::NoTargetAccess);
-    m_manager->stopTargetDetection();
-    m_request = QNearFieldTarget::RequestId();
-    ui->statusBar->clearMessage();
+    if (id == m_request) {
+        ui->status->setStyleSheet(QString());
+        m_manager->stopTargetDetection();
+        m_request = QNearFieldTarget::RequestId();
+        ui->statusBar->clearMessage();
+    }
 }
 
 void MainWindow::targetError(QNearFieldTarget::Error error, const QNearFieldTarget::RequestId &id)
@@ -335,10 +311,31 @@ void MainWindow::targetError(QNearFieldTarget::Error error, const QNearFieldTarg
         }
 
         ui->status->setStyleSheet(QString());
-        m_manager->setTargetAccessModes(QNearFieldManager::NoTargetAccess);
         m_manager->stopTargetDetection();
         m_request = QNearFieldTarget::RequestId();
     }
+}
+
+void MainWindow::showMenu()
+{
+    // We have to manually call QMenu::popup() because of QTBUG-98651.
+    // And we need to re-create menu each time because of QTBUG-97482.
+    if (m_menu) {
+        m_menu->setParent(nullptr);
+        delete m_menu;
+    }
+    m_menu = new QMenu(this);
+    m_menu->addAction(tr("NFC Text Record"), this, &MainWindow::addNfcTextRecord);
+    m_menu->addAction(tr("NFC URI Record"), this, &MainWindow::addNfcUriRecord);
+    m_menu->addAction(tr("MIME Image Record"), this, &MainWindow::addMimeImageRecord);
+    m_menu->addAction(tr("Empty Record"), this, &MainWindow::addEmptyRecord);
+
+    // Use menu's sizeHint() to position it so that its right side is aligned
+    // with button's right side.
+    QPushButton *button = ui->addRecord;
+    const int x = button->x() + button->width() - m_menu->sizeHint().width();
+    const int y = button->y() + button->height();
+    m_menu->popup(mapToGlobal(QPoint(x, y)));
 }
 
 void MainWindow::clearMessage()

@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/core/html/html_table_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
-#include "third_party/blink/renderer/core/layout/layout_analyzer.h"
 #include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/core/layout/layout_table_caption.h"
 #include "third_party/blink/renderer/core/layout/layout_table_cell.h"
@@ -81,6 +80,16 @@ LayoutTable::LayoutTable(Element* element)
 
 LayoutTable::~LayoutTable() = default;
 
+void LayoutTable::Trace(Visitor* visitor) const {
+  visitor->Trace(captions_);
+  visitor->Trace(column_layout_objects_);
+  visitor->Trace(head_);
+  visitor->Trace(foot_);
+  visitor->Trace(first_body_);
+  visitor->Trace(table_layout_);
+  LayoutBlock::Trace(visitor);
+}
+
 void LayoutTable::StyleDidChange(StyleDifference diff,
                                  const ComputedStyle* old_style) {
   NOT_DESTROYED();
@@ -108,9 +117,9 @@ void LayoutTable::StyleDidChange(StyleDifference diff,
     // explicit width is specified on the table. Auto width implies auto table
     // layout.
     if (StyleRef().IsFixedTableLayout())
-      table_layout_ = std::make_unique<TableLayoutAlgorithmFixed>(this);
+      table_layout_ = MakeGarbageCollected<TableLayoutAlgorithmFixed>(this);
     else
-      table_layout_ = std::make_unique<TableLayoutAlgorithmAuto>(this);
+      table_layout_ = MakeGarbageCollected<TableLayoutAlgorithmAuto>(this);
   }
 
   if (!old_style)
@@ -128,8 +137,9 @@ void LayoutTable::StyleDidChange(StyleDifference diff,
     MarkAllCellsWidthsDirtyAndOrNeedsLayout(kMarkDirtyAndNeedsLayout);
 }
 
-static inline void ResetSectionPointerIfNotBefore(LayoutTableSection*& ptr,
-                                                  LayoutObject* before) {
+static inline void ResetSectionPointerIfNotBefore(
+    Member<LayoutTableSection>& ptr,
+    LayoutObject* before) {
   if (!before || !ptr)
     return;
   LayoutObject* o = before->PreviousSibling();
@@ -177,7 +187,7 @@ void LayoutTable::AddChild(LayoutObject* child, LayoutObject* before_child) {
           wrap_in_anonymous_section = false;
           break;
         }
-        FALLTHROUGH;
+        [[fallthrough]];
       case EDisplay::kTableRowGroup:
         ResetSectionPointerIfNotBefore(first_body_, before_child);
         if (!first_body_)
@@ -306,7 +316,8 @@ LayoutNGTableSectionInterface* LayoutTable::SectionBelowInterface(
     const LayoutNGTableSectionInterface* section,
     SkipEmptySectionsValue skip_empty_sections) const {
   NOT_DESTROYED();
-  return SectionBelow(section->ToLayoutTableSection(), skip_empty_sections);
+  return SectionBelow(To<LayoutTableSection>(section->ToLayoutObject()),
+                      skip_empty_sections);
 }
 LayoutNGTableSectionInterface* LayoutTable::BottomNonEmptySectionInterface()
     const {
@@ -319,7 +330,7 @@ bool LayoutTable::IsLogicalWidthAuto() const {
   const Length& style_logical_width = StyleRef().LogicalWidth();
   return (!style_logical_width.IsSpecified() ||
           !style_logical_width.IsPositive()) &&
-         !style_logical_width.IsIntrinsic();
+         !style_logical_width.IsContentOrIntrinsicOrFillAvailable();
 }
 
 void LayoutTable::UpdateLogicalWidth() {
@@ -408,7 +419,7 @@ void LayoutTable::UpdateLogicalWidth() {
   const Length& style_max_logical_width = StyleRef().LogicalMaxWidth();
   if ((style_max_logical_width.IsSpecified() &&
        !style_max_logical_width.IsNegative()) ||
-      style_max_logical_width.IsIntrinsic()) {
+      style_max_logical_width.IsContentOrIntrinsicOrFillAvailable()) {
     LayoutUnit computed_max_logical_width =
         ConvertStyleLogicalWidthToComputedWidth(style_max_logical_width,
                                                 available_logical_width);
@@ -426,7 +437,7 @@ void LayoutTable::UpdateLogicalWidth() {
   const Length& style_min_logical_width = StyleRef().LogicalMinWidth();
   if ((style_min_logical_width.IsSpecified() &&
        !style_min_logical_width.IsNegative()) ||
-      style_min_logical_width.IsIntrinsic()) {
+      style_min_logical_width.IsContentOrIntrinsicOrFillAvailable()) {
     LayoutUnit computed_min_logical_width =
         ConvertStyleLogicalWidthToComputedWidth(style_min_logical_width,
                                                 available_logical_width);
@@ -459,7 +470,7 @@ LayoutUnit LayoutTable::ConvertStyleLogicalWidthToComputedWidth(
     const Length& style_logical_width,
     LayoutUnit available_width) const {
   NOT_DESTROYED();
-  if (style_logical_width.IsIntrinsic()) {
+  if (style_logical_width.IsContentOrIntrinsicOrFillAvailable()) {
     return ComputeIntrinsicLogicalWidthUsing(style_logical_width,
                                              available_width);
   }
@@ -505,10 +516,10 @@ LayoutUnit LayoutTable::ConvertStyleLogicalHeightToComputedHeight(
   } else if (style_logical_height.IsPercentOrCalc()) {
     computed_logical_height =
         ComputePercentageLogicalHeight(style_logical_height);
-  } else if (style_logical_height.IsIntrinsic()) {
+  } else if (style_logical_height.IsContentOrIntrinsicOrFillAvailable()) {
     computed_logical_height = ComputeIntrinsicLogicalContentHeightUsing(
-        style_logical_height, LogicalHeight() - border_and_padding,
-        border_and_padding);
+        kMainOrPreferredSize, style_logical_height,
+        LogicalHeight() - border_and_padding, border_and_padding);
   } else {
     NOTREACHED();
   }
@@ -575,7 +586,7 @@ LayoutUnit LayoutTable::LogicalHeightFromStyle() const {
   NOT_DESTROYED();
   LayoutUnit computed_logical_height;
   const Length& logical_height_length = StyleRef().LogicalHeight();
-  if (logical_height_length.IsIntrinsic() ||
+  if (logical_height_length.IsContentOrIntrinsicOrFillAvailable() ||
       (logical_height_length.IsSpecified() &&
        logical_height_length.IsPositive())) {
     computed_logical_height =
@@ -603,7 +614,7 @@ LayoutUnit LayoutTable::LogicalHeightFromStyle() const {
       logical_min_height_length.IsFitContent())
     logical_min_height_length = Length::Auto();
 
-  if (logical_min_height_length.IsIntrinsic() ||
+  if (logical_min_height_length.IsContentOrIntrinsicOrFillAvailable() ||
       (logical_min_height_length.IsSpecified() &&
        !logical_min_height_length.IsNegative())) {
     LayoutUnit computed_min_logical_height =
@@ -634,7 +645,7 @@ void LayoutTable::SimplifiedNormalFlowLayout() {
   // FIXME: We should walk through the items in the tree in tree order to do the
   // layout here instead of walking through individual parts of the tree.
   // crbug.com/442737
-  for (auto*& caption : captions_)
+  for (auto& caption : captions_)
     caption->LayoutIfNeeded();
 
   for (LayoutTableSection* section = TopSection(); section;
@@ -675,7 +686,7 @@ RecalcLayoutOverflowResult LayoutTable::RecalcLayoutOverflow() {
 
 void LayoutTable::RecalcVisualOverflow() {
   NOT_DESTROYED();
-  for (auto* caption : captions_) {
+  for (const auto& caption : captions_) {
     if (!caption->HasSelfPaintingLayer())
       caption->RecalcVisualOverflow();
   }
@@ -686,14 +697,12 @@ void LayoutTable::RecalcVisualOverflow() {
       section->RecalcVisualOverflow();
   }
 
-  RecalcPositionedDescendantsVisualOverflow();
   RecalcSelfVisualOverflow();
 }
 
 void LayoutTable::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
-  LayoutAnalyzer::Scope analyzer(*this);
 
   if (SimplifiedLayout())
     return;
@@ -1029,7 +1038,7 @@ void LayoutTable::AddVisualOverflowFromChildren() {
   if (ShouldCollapseBorders() && (collapsed_outer_border_start_overflow_ ||
                                   collapsed_outer_border_end_overflow_)) {
     LogicalToPhysical<LayoutUnit> physical_border_overflow(
-        StyleRef().GetWritingMode(), StyleRef().Direction(),
+        StyleRef().GetWritingDirection(),
         LayoutUnit(collapsed_outer_border_start_overflow_),
         LayoutUnit(collapsed_outer_border_end_overflow_), LayoutUnit(),
         LayoutUnit());
@@ -1041,7 +1050,7 @@ void LayoutTable::AddVisualOverflowFromChildren() {
   }
 
   // Add overflow from our caption.
-  for (auto* caption : captions_)
+  for (const auto& caption : captions_)
     AddVisualOverflowFromChild(*caption);
 
   // Add overflow from our sections.
@@ -1061,7 +1070,7 @@ void LayoutTable::AddLayoutOverflowFromChildren() {
   if (ShouldCollapseBorders() && (collapsed_outer_border_start_overflow_ ||
                                   collapsed_outer_border_end_overflow_)) {
     LogicalToPhysical<LayoutUnit> physical_border_overflow(
-        StyleRef().GetWritingMode(), StyleRef().Direction(),
+        StyleRef().GetWritingDirection(),
         LayoutUnit(collapsed_outer_border_start_overflow_),
         LayoutUnit(collapsed_outer_border_end_overflow_), LayoutUnit(),
         LayoutUnit());
@@ -1156,7 +1165,7 @@ MinMaxSizes LayoutTable::PreferredLogicalWidths() const {
   table_layout_->ApplyPreferredLogicalWidthQuirks(sizes.min_size,
                                                   sizes.max_size);
 
-  for (const auto* caption : captions_) {
+  for (const auto& caption : captions_) {
     LayoutUnit min_preferred_logical_width =
         caption->PreferredLogicalWidths().min_size;
     sizes.Encompass(min_preferred_logical_width);
@@ -1267,7 +1276,7 @@ LayoutTableCol* LayoutTable::FirstColumn() const {
   for (LayoutObject* child = FirstChild(); child;
        child = child->NextSibling()) {
     if (child->IsLayoutTableCol())
-      return ToLayoutTableCol(child);
+      return To<LayoutTableCol>(child);
   }
 
   return nullptr;
@@ -1698,10 +1707,10 @@ bool LayoutTable::NodeAtPoint(HitTestResult& result,
        hit_test_location.Intersects(OverflowClipRect(accumulated_offset)))) {
     for (LayoutObject* child = LastChild(); child;
          child = child->PreviousSibling()) {
-      if (child->IsBox() && !ToLayoutBox(child)->HasSelfPaintingLayer() &&
+      if (child->IsBox() && !To<LayoutBox>(child)->HasSelfPaintingLayer() &&
           (child->IsTableSection() || child->IsTableCaption())) {
         PhysicalOffset child_accumulated_offset =
-            accumulated_offset + ToLayoutBox(child)->PhysicalLocation(this);
+            accumulated_offset + To<LayoutBox>(child)->PhysicalLocation(this);
         if (child->NodeAtPoint(result, hit_test_location,
                                child_accumulated_offset, action)) {
           UpdateHitTestResult(result,
@@ -1862,10 +1871,10 @@ void LayoutTable::UpdateCollapsedOuterBorders() const {
   // widths of all cells in the last row. See the CSS 2.1 spec, section 17.6.2.
   const auto* bottom_section = BottomNonEmptySection();
   DCHECK(bottom_section);
-  unsigned row = bottom_section->NumRows() - 1;
-  unsigned bottom_cols = bottom_section->NumCols(row);
+  unsigned row_index = bottom_section->NumRows() - 1;
+  unsigned bottom_cols = bottom_section->NumCols(row_index);
   for (unsigned col = 0; col < bottom_cols; ++col) {
-    if (const auto* cell = bottom_section->PrimaryCellAt(row, col)) {
+    if (const auto* cell = bottom_section->PrimaryCellAt(row_index, col)) {
       collapsed_outer_border_after_ = std::max(
           collapsed_outer_border_after_, cell->CollapsedOuterBorderAfter());
     }
@@ -1907,7 +1916,8 @@ void LayoutTable::UpdateCollapsedOuterBorders() const {
 // LayoutNGTableCellInterface API
 bool LayoutTable::IsFirstCell(const LayoutNGTableCellInterface& cell) const {
   NOT_DESTROYED();
-  const LayoutTableCell& layout_cell = *cell.ToLayoutTableCell();
+  const LayoutTableCell& layout_cell =
+      To<LayoutTableCell>(*cell.ToLayoutObject());
   return !(CellPreceding(layout_cell) || CellAbove(layout_cell));
 }
 

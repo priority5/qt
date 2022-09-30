@@ -5,8 +5,9 @@
 #include "cc/animation/scroll_offset_animation_curve_factory.h"
 
 #include "base/memory/ptr_util.h"
-#include "cc/animation/timing_function.h"
+#include "base/notreached.h"
 #include "cc/base/features.h"
+#include "ui/gfx/animation/keyframe/timing_function.h"
 
 namespace cc {
 namespace {
@@ -29,7 +30,7 @@ ScrollOffsetAnimationCurve::DurationBehavior GetDurationBehaviorFromScrollType(
 // static
 std::unique_ptr<ScrollOffsetAnimationCurve>
 ScrollOffsetAnimationCurveFactory::CreateAnimation(
-    const gfx::ScrollOffset& target_value,
+    const gfx::PointF& target_value,
     ScrollType scroll_type) {
   if (scroll_type == ScrollType::kAutoScroll)
     return CreateLinearAnimation(target_value);
@@ -44,7 +45,7 @@ ScrollOffsetAnimationCurveFactory::CreateAnimation(
 // static
 std::unique_ptr<ScrollOffsetAnimationCurve>
 ScrollOffsetAnimationCurveFactory::CreateEaseInOutAnimationForTesting(
-    const gfx::ScrollOffset& target_value,
+    const gfx::PointF& target_value,
     ScrollOffsetAnimationCurve::DurationBehavior duration_behavior) {
   return CreateEaseInOutAnimation(target_value, duration_behavior);
 }
@@ -52,21 +53,21 @@ ScrollOffsetAnimationCurveFactory::CreateEaseInOutAnimationForTesting(
 // static
 std::unique_ptr<ScrollOffsetAnimationCurve>
 ScrollOffsetAnimationCurveFactory::CreateLinearAnimationForTesting(
-    const gfx::ScrollOffset& target_value) {
+    const gfx::PointF& target_value) {
   return CreateLinearAnimation(target_value);
 }
 
 // static
 std::unique_ptr<ScrollOffsetAnimationCurve>
 ScrollOffsetAnimationCurveFactory::CreateImpulseAnimationForTesting(
-    const gfx::ScrollOffset& target_value) {
+    const gfx::PointF& target_value) {
   return CreateImpulseAnimation(target_value);
 }
 
 // static
 std::unique_ptr<ScrollOffsetAnimationCurve>
 ScrollOffsetAnimationCurveFactory::CreateEaseInOutAnimation(
-    const gfx::ScrollOffset& target_value,
+    const gfx::PointF& target_value,
     ScrollOffsetAnimationCurve::DurationBehavior duration_behavior) {
   return base::WrapUnique(new ScrollOffsetAnimationCurve(
       target_value, ScrollOffsetAnimationCurve::AnimationType::kEaseOutNatural,
@@ -76,7 +77,7 @@ ScrollOffsetAnimationCurveFactory::CreateEaseInOutAnimation(
 // static
 std::unique_ptr<ScrollOffsetAnimationCurve>
 ScrollOffsetAnimationCurveFactory::CreateLinearAnimation(
-    const gfx::ScrollOffset& target_value) {
+    const gfx::PointF& target_value) {
   return base::WrapUnique(new ScrollOffsetAnimationCurve(
       target_value, ScrollOffsetAnimationCurve::AnimationType::kLinear));
 }
@@ -84,7 +85,7 @@ ScrollOffsetAnimationCurveFactory::CreateLinearAnimation(
 // static
 std::unique_ptr<ScrollOffsetAnimationCurve>
 ScrollOffsetAnimationCurveFactory::CreateImpulseAnimation(
-    const gfx::ScrollOffset& target_value) {
+    const gfx::PointF& target_value) {
   return base::WrapUnique(new ScrollOffsetAnimationCurve(
       target_value, ScrollOffsetAnimationCurve::AnimationType::kImpulse));
 }

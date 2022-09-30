@@ -102,6 +102,22 @@ void WontCompile() {
   span<int, 3> span = v;
 }
 
+#elif defined(NCTEST_STD_SET_ITER_SIZE_CONVERSION_DISALLOWED)  // [r"fatal error: no matching constructor for initialization of 'span<int>'"]
+
+// A std::set() should not satisfy the requirements for conversion to a span.
+void WontCompile() {
+  std::set<int> set;
+  span<int> span(set.begin(), 0);
+}
+
+#elif defined(NCTEST_STD_SET_ITER_ITER_CONVERSION_DISALLOWED)  // [r"fatal error: no matching constructor for initialization of 'span<int>'"]
+
+// A std::set() should not satisfy the requirements for conversion to a span.
+void WontCompile() {
+  std::set<int> set;
+  span<int> span(set.begin(), set.end());
+}
+
 #elif defined(NCTEST_STD_SET_CONVERSION_DISALLOWED)  // [r"fatal error: no matching constructor for initialization of 'span<int>'"]
 
 // A std::set() should not satisfy the requirements for conversion to a span.
@@ -188,6 +204,13 @@ void WontCompile() {
   span<uint8_t> bytes = as_writable_bytes(make_span(v));
 }
 
+#elif defined(NCTEST_MAKE_SPAN_FROM_SET_ITER_CONVERSION_DISALLOWED)  // [r"fatal error: no matching constructor for initialization of 'span<T>'"]
+// A std::set() should not satisfy the requirements for conversion to a span.
+void WontCompile() {
+  std::set<int> set;
+  auto span = make_span(set.begin(), set.end());
+}
+
 #elif defined(NCTEST_MAKE_SPAN_FROM_SET_CONVERSION_DISALLOWED)  // [r"fatal error: no matching function for call to 'data'"]
 
 // A std::set() should not satisfy the requirements for conversion to a span.
@@ -196,11 +219,33 @@ void WontCompile() {
   auto span = make_span(set);
 }
 
-#elif defined(NCTEST_CONST_VECTOR_DEDUCES_AS_CONST_SPAN)  // [r"fatal error: no viable conversion from 'span<const int, \[...\]>' to 'span<int, \[...\]>'"]
+#elif defined(NCTEST_CONST_VECTOR_DEDUCES_AS_CONST_SPAN)  // [r"fatal error: no viable conversion from 'span<(T|const int), \[...\]>' to 'span<int, \[...\]>'"]
 
 int WontCompile() {
   const std::vector<int> v;
   span<int> s = make_span(v);
+}
+
+#elif defined(NCTEST_STATIC_MAKE_SPAN_FROM_ITER_AND_SIZE_CHECKS)  // [r"constexpr variable 'made_span' must be initialized by a constant expression"]
+
+// The static make_span<N>(begin, size) should CHECK whether N matches size.
+// This should result in compilation failures when evaluated at compile
+// time.
+int WontCompile() {
+  constexpr StringPiece str = "Foo";
+  // Intentional extent mismatch causing CHECK failure.
+  constexpr auto made_span = make_span<2>(str.begin(), 3);
+}
+
+#elif defined(NCTEST_STATIC_MAKE_SPAN_FROM_ITERS_CHECKS_SIZE)  // [r"constexpr variable 'made_span' must be initialized by a constant expression"]
+
+// The static make_span<N>(begin, end) should CHECK whether N matches end -
+// begin. This should result in compilation failures when evaluated at compile
+// time.
+int WontCompile() {
+  constexpr StringPiece str = "Foo";
+  // Intentional extent mismatch causing CHECK failure.
+  constexpr auto made_span = make_span<2>(str.begin(), str.end());
 }
 
 #elif defined(NCTEST_STATIC_MAKE_SPAN_CHECKS_SIZE)  // [r"constexpr variable 'made_span' must be initialized by a constant expression"]
@@ -220,6 +265,20 @@ int WontCompile() {
 void WontCompile() {
   std::vector<uint8_t> vector;
   static_assert(EXTENT(vector) == 0, "Should not compile");
+}
+
+#elif defined(NCTEST_DANGLING_STD_ARRAY)  // [r"object backing the pointer will be destroyed at the end of the full-expression"]
+
+void WontCompile() {
+  span<const int, 3> s{std::array<int, 3>()};
+  (void)s;
+}
+
+#elif defined(NCTEST_DANGLING_CONTAINER)  // [r"object backing the pointer will be destroyed at the end of the full-expression"]
+
+void WontCompile() {
+  span<const int> s{std::vector<int>({1, 2, 3})};
+  (void)s;
 }
 
 #endif

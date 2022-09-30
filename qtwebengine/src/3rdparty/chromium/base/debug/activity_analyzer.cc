@@ -4,18 +4,19 @@
 
 #include "base/debug/activity_analyzer.h"
 
-#include <algorithm>
 #include <utility>
 
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
-#include "base/stl_util.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
+#include "build/build_config.h"
 
 namespace base {
 namespace debug {
@@ -115,7 +116,7 @@ GlobalActivityAnalyzer::CreateWithAllocator(
   return std::make_unique<GlobalActivityAnalyzer>(std::move(allocator));
 }
 
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
 // static
 std::unique_ptr<GlobalActivityAnalyzer> GlobalActivityAnalyzer::CreateWithFile(
     const FilePath& file_path) {
@@ -135,7 +136,7 @@ std::unique_ptr<GlobalActivityAnalyzer> GlobalActivityAnalyzer::CreateWithFile(
   return CreateWithAllocator(std::make_unique<FilePersistentMemoryAllocator>(
       std::move(mmfile), 0, 0, StringPiece(), /*readonly=*/true));
 }
-#endif  // !defined(OS_NACL)
+#endif  // !BUILDFLAG(IS_NACL)
 
 // static
 std::unique_ptr<GlobalActivityAnalyzer>
@@ -282,7 +283,7 @@ GlobalActivityAnalyzer::GetModules(int64_t pid) {
 
 GlobalActivityAnalyzer::ProgramLocation
 GlobalActivityAnalyzer::GetProgramLocationFromAddress(uint64_t address) {
-  // TODO(bcwhite): Implement this.
+  // This should be implemented but it's never been a priority.
   return { 0, 0 };
 }
 
@@ -398,7 +399,7 @@ void GlobalActivityAnalyzer::PrepareAllAnalyzers() {
   }
 
   // Reverse the list of PIDs so that they get popped in the order found.
-  std::reverse(process_ids_.begin(), process_ids_.end());
+  ranges::reverse(process_ids_);
 }
 
 }  // namespace debug

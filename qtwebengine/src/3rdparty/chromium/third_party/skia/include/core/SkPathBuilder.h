@@ -11,6 +11,7 @@
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkPathTypes.h"
+#include "include/core/SkRefCnt.h"
 #include "include/private/SkTDArray.h"
 
 class SK_API SkPathBuilder {
@@ -202,6 +203,8 @@ public:
         return this->addPolygon(list.begin(), SkToInt(list.size()), isClosed);
     }
 
+    SkPathBuilder& addPath(const SkPath&);
+
     // Performance hint, to reserve extra storage for subsequent calls to lineTo, quadTo, etc.
 
     void incReserve(int extraPtCount, int extraVerbCount);
@@ -226,6 +229,7 @@ private:
 
     unsigned    fSegmentMask;
     SkPoint     fLastMovePoint;
+    int         fLastMoveIndex; // only needed until SkPath is immutable
     bool        fNeedsMoveVerb;
 
     enum IsA {
@@ -237,9 +241,6 @@ private:
     IsA fIsA      = kIsA_JustMoves;
     int fIsAStart = -1;     // tracks direction iff fIsA is not unknown
     bool fIsACCW  = false;  // tracks direction iff fIsA is not unknown
-
-    // for testing
-    SkPathConvexity fOverrideConvexity = SkPathConvexity::kUnknown;
 
     int countVerbs() const { return fVerbs.count(); }
 
@@ -254,9 +255,6 @@ private:
     SkPath make(sk_sp<SkPathRef>) const;
 
     SkPathBuilder& privateReverseAddPath(const SkPath&);
-
-    // For testing
-    void privateSetConvexity(SkPathConvexity c) { fOverrideConvexity = c; }
 
     friend class SkPathPriv;
 };

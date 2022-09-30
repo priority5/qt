@@ -25,9 +25,9 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/status.h"
 #include "src/trace_processor/sqlite/scoped_db.h"
@@ -39,7 +39,7 @@ namespace trace_processor {
 // Implements the SPAN JOIN operation between two tables on a particular column.
 //
 // Span:
-// A span is a row with a timestamp and a duration. It can is used to model
+// A span is a row with a timestamp and a duration. It is used to model
 // operations which run for a particular *span* of time.
 //
 // We draw spans like so (time on the x-axis):
@@ -165,8 +165,16 @@ class SpanJoinOperatorTable : public SqliteTable {
     Query(Query&&) noexcept = default;
     Query& operator=(Query&&) = default;
 
+    enum class InitialEofBehavior {
+      kTreatAsEof,
+      kTreatAsMissingPartitionShadow
+    };
+
     // Initializes the query with the given constraints and query parameters.
-    util::Status Initialize(const QueryConstraints& qc, sqlite3_value** argv);
+    util::Status Initialize(
+        const QueryConstraints& qc,
+        sqlite3_value** argv,
+        InitialEofBehavior eof_behavior = InitialEofBehavior::kTreatAsEof);
 
     // Forwards the query to the next valid slice.
     util::Status Next();
@@ -420,7 +428,7 @@ class SpanJoinOperatorTable : public SqliteTable {
   TableDefinition t1_defn_;
   TableDefinition t2_defn_;
   PartitioningType partitioning_;
-  std::unordered_map<size_t, ColumnLocator> global_index_to_column_locator_;
+  base::FlatHashMap<size_t, ColumnLocator> global_index_to_column_locator_;
 
   sqlite3* const db_;
 };

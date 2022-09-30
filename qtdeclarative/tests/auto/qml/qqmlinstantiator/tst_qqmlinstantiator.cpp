@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 Research In Motion.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 Research In Motion.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 #include <qtest.h>
 #include <QSignalSpy>
 #include <QDebug>
@@ -34,12 +9,15 @@
 #include <QtQmlModels/private/qqmlinstantiator_p.h>
 #include <QtQml/qqmlcontext.h>
 #include <QtQml/qqmlincubator.h>
-#include "../../shared/util.h"
+#include <QtQuickTestUtils/private/qmlutils_p.h>
 #include "stringmodel.h"
 
 class tst_qqmlinstantiator: public QQmlDataTest
 {
     Q_OBJECT
+
+public:
+    tst_qqmlinstantiator();
 
 private slots:
     void createNone();
@@ -47,18 +25,28 @@ private slots:
     void createMultiple();
     void stringModel();
     void activeProperty();
+    void activeModelChangeInteraction();
     void intModelChange();
     void createAndRemove();
 
     void asynchronous_data();
     void asynchronous();
+
+    void handlerWithParent();
+    void boundDelegateComponent();
 };
+
+tst_qqmlinstantiator::tst_qqmlinstantiator()
+    : QQmlDataTest(QT_QMLTEST_DATADIR)
+{
+}
 
 void tst_qqmlinstantiator::createNone()
 {
     QQmlEngine engine;
     QQmlComponent component(&engine, testFileUrl("createNone.qml"));
-    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(component.create());
+    QScopedPointer<QObject> o(component.create());
+    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(o.data());
     QVERIFY(instantiator != nullptr);
     QCOMPARE(instantiator->isActive(), true);
     QCOMPARE(instantiator->count(), 0);
@@ -70,7 +58,8 @@ void tst_qqmlinstantiator::createSingle()
 {
     QQmlEngine engine;
     QQmlComponent component(&engine, testFileUrl("createSingle.qml"));
-    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(component.create());
+    QScopedPointer<QObject> o(component.create());
+    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(o.data());
     QVERIFY(instantiator != nullptr);
     QCOMPARE(instantiator->isActive(), true);
     QCOMPARE(instantiator->count(), 1);
@@ -87,7 +76,8 @@ void tst_qqmlinstantiator::createMultiple()
 {
     QQmlEngine engine;
     QQmlComponent component(&engine, testFileUrl("createMultiple.qml"));
-    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(component.create());
+    QScopedPointer<QObject> o(component.create());
+    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(o.data());
     QVERIFY(instantiator != nullptr);
     QCOMPARE(instantiator->isActive(), true);
     QCOMPARE(instantiator->count(), 10);
@@ -105,7 +95,8 @@ void tst_qqmlinstantiator::stringModel()
 {
     QQmlEngine engine;
     QQmlComponent component(&engine, testFileUrl("stringModel.qml"));
-    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(component.create());
+    QScopedPointer<QObject> o(component.create());
+    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(o.data());
     QVERIFY(instantiator != nullptr);
     QCOMPARE(instantiator->isActive(), true);
     QCOMPARE(instantiator->count(), 4);
@@ -122,7 +113,8 @@ void tst_qqmlinstantiator::activeProperty()
 {
     QQmlEngine engine;
     QQmlComponent component(&engine, testFileUrl("inactive.qml"));
-    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(component.create());
+    QScopedPointer<QObject> o(component.create());
+    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(o.data());
     QVERIFY(instantiator != nullptr);
     QSignalSpy activeSpy(instantiator, SIGNAL(activeChanged()));
     QSignalSpy countSpy(instantiator, SIGNAL(countChanged()));
@@ -153,11 +145,32 @@ void tst_qqmlinstantiator::activeProperty()
     QCOMPARE(object->property("idx").toInt(), 0);
 }
 
+void tst_qqmlinstantiator::activeModelChangeInteraction()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("activeModelChangeInteraction.qml"));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY(root);
+
+    // If the instantiator is inactive, a model change does not lead to items being loaded
+    bool ok = false;
+    int count = root->property("instanceCount").toInt(&ok);
+    QVERIFY(ok);
+    QCOMPARE(count, 0);
+
+    // When turning the instantiator active, it will however reflect the model
+    root->setProperty("active", true);
+    count = root->property("instanceCount").toInt(&ok);
+    QVERIFY(ok);
+    QCOMPARE(count, 3);
+}
+
 void tst_qqmlinstantiator::intModelChange()
 {
     QQmlEngine engine;
     QQmlComponent component(&engine, testFileUrl("createMultiple.qml"));
-    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(component.create());
+    QScopedPointer<QObject> o(component.create());
+    QQmlInstantiator *instantiator = qobject_cast<QQmlInstantiator*>(o.data());
     QVERIFY(instantiator != nullptr);
     QSignalSpy activeSpy(instantiator, SIGNAL(activeChanged()));
     QSignalSpy countSpy(instantiator, SIGNAL(countChanged()));
@@ -193,7 +206,7 @@ void tst_qqmlinstantiator::createAndRemove()
     QScopedPointer<StringModel> model {new StringModel("model1")};
     qmlRegisterSingletonInstance("Test", 1, 0, "Model1", model.get());
     QQmlComponent component(&engine, testFileUrl("createAndRemove.qml"));
-    QObject *rootObject = component.create();
+    QScopedPointer<QObject> rootObject(component.create());
     QVERIFY(rootObject != nullptr);
 
     QQmlInstantiator *instantiator =
@@ -245,6 +258,52 @@ void tst_qqmlinstantiator::asynchronous()
         QCOMPARE(object->property("success").toBool(), true);
         QCOMPARE(object->property("idx").toInt(), i);
     }
+}
+
+void tst_qqmlinstantiator::handlerWithParent()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("handlerWithParent.qml"));
+    QScopedPointer<QObject> rootObject(component.create());
+    QVERIFY(rootObject != nullptr);
+    const auto handlers = rootObject->findChildren<QObject *>("pointHandler");
+    QCOMPARE(handlers.count(), 2);
+    for (const auto *h : handlers) {
+        QCOMPARE(h->parent(), rootObject.data());
+    }
+}
+
+void tst_qqmlinstantiator::boundDelegateComponent()
+{
+    QQmlEngine engine;
+    const QUrl url(testFileUrl("boundDelegateComponent.qml"));
+    QQmlComponent component(&engine, url);
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+    for (int i = 0; i < 3; ++i) {
+        QTest::ignoreMessage(
+                QtWarningMsg,
+                qPrintable(QLatin1String("%1:12: ReferenceError: modelData is not defined")
+                                   .arg(url.toString())));
+    }
+
+    QScopedPointer<QObject> o(component.create());
+    QVERIFY2(!o.isNull(), qPrintable(component.errorString()));
+
+    QQmlInstantiator *a = qobject_cast<QQmlInstantiator *>(
+            qmlContext(o.data())->objectForName(QStringLiteral("undefinedModelData")));
+    QVERIFY(a);
+    QCOMPARE(a->count(), 3);
+    for (int i = 0; i < 3; ++i)
+        QCOMPARE(a->objectAt(i)->objectName(), QStringLiteral("rootundefined"));
+
+    QQmlInstantiator *b = qobject_cast<QQmlInstantiator *>(
+            qmlContext(o.data())->objectForName(QStringLiteral("requiredModelData")));
+    QVERIFY(b);
+    QCOMPARE(b->count(), 3);
+    QCOMPARE(b->objectAt(0)->objectName(), QStringLiteral("root1"));
+    QCOMPARE(b->objectAt(1)->objectName(), QStringLiteral("root2"));
+    QCOMPARE(b->objectAt(2)->objectName(), QStringLiteral("root3"));
 }
 
 QTEST_MAIN(tst_qqmlinstantiator)

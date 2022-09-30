@@ -40,7 +40,7 @@ FetchResponseData* FetchResponseData::Create() {
   // message is the empty byte sequence, header list is an empty header list,
   // and body is null."
   return MakeGarbageCollected<FetchResponseData>(
-      Type::kDefault, network::mojom::FetchResponseSource::kUnspecified, 200, g_empty_atom);
+      Type::kDefault, ResponseSource::kUnspecified, 200, g_empty_atom);
 }
 
 FetchResponseData* FetchResponseData::CreateNetworkErrorResponse() {
@@ -48,7 +48,7 @@ FetchResponseData* FetchResponseData::CreateNetworkErrorResponse() {
   // is always the empty byte sequence, header list is aways an empty list,
   // and body is always null."
   return MakeGarbageCollected<FetchResponseData>(
-      Type::kError, network::mojom::FetchResponseSource::kUnspecified, 0, g_empty_atom);
+      Type::kError, ResponseSource::kUnspecified, 0, g_empty_atom);
 }
 
 FetchResponseData* FetchResponseData::CreateWithBuffer(
@@ -174,6 +174,11 @@ String FetchResponseData::InternalMIMEType() const {
   return mime_type_;
 }
 
+bool FetchResponseData::RequestIncludeCredentials() const {
+  return internal_response_ ? internal_response_->RequestIncludeCredentials()
+                            : request_include_credentials_;
+}
+
 void FetchResponseData::SetURLList(const Vector<KURL>& url_list) {
   url_list_ = url_list;
 }
@@ -208,6 +213,11 @@ FetchResponseData* FetchResponseData::Clone(ScriptState* script_state,
   new_response->alpn_negotiated_protocol_ = alpn_negotiated_protocol_;
   new_response->was_fetched_via_spdy_ = was_fetched_via_spdy_;
   new_response->has_range_requested_ = has_range_requested_;
+  new_response->request_include_credentials_ = request_include_credentials_;
+  if (auth_challenge_info_) {
+    new_response->auth_challenge_info_ =
+        std::make_unique<net::AuthChallengeInfo>(*auth_challenge_info_);
+  }
 
   switch (type_) {
     case Type::kBasic:
@@ -282,10 +292,14 @@ mojom::blink::FetchAPIResponsePtr FetchResponseData::PopulateFetchAPIResponse(
   response->alpn_negotiated_protocol = alpn_negotiated_protocol_;
   response->was_fetched_via_spdy = was_fetched_via_spdy_;
   response->has_range_requested = has_range_requested_;
+  response->request_include_credentials = request_include_credentials_;
   for (const auto& header : HeaderList()->List())
     response->headers.insert(header.first, header.second);
   response->parsed_headers = ParseHeaders(
       HeaderList()->GetAsRawString(status_, status_message_), request_url);
+  if (auth_challenge_info_) {
+    response->auth_challenge_info = *auth_challenge_info_;
+  }
   return response;
 }
 
@@ -295,7 +309,6 @@ void FetchResponseData::InitFromResourceResponse(
     const Vector<KURL>& request_url_list,
     const AtomicString& request_method,
     network::mojom::CredentialsMode request_credentials,
-    FetchRequestData::Tainting tainting,
     const ResourceResponse& response) {
   SetStatus(response.HttpStatusCode());
   if (response.CurrentRequestUrl().ProtocolIsAbout() ||
@@ -325,6 +338,7 @@ void FetchResponseData::InitFromResourceResponse(
   SetMimeType(response.MimeType());
   SetRequestMethod(request_method);
   SetResponseTime(response.ResponseTime());
+  SetCacheStorageCacheName(response.CacheStorageCacheName());
 
   if (response.WasCached()) {
     SetResponseSource(network::mojom::FetchResponseSource::kHttpCache);
@@ -359,6 +373,9 @@ void FetchResponseData::InitFromResourceResponse(
       SetPadding(padding);
     }
   }
+
+  SetAuthChallengeInfo(response.AuthChallengeInfo());
+  SetRequestIncludeCredentials(response.RequestIncludeCredentials());
 }
 
 FetchResponseData::FetchResponseData(Type type,
@@ -375,7 +392,22 @@ FetchResponseData::FetchResponseData(Type type,
       connection_info_(net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN),
       alpn_negotiated_protocol_("unknown"),
       was_fetched_via_spdy_(false),
-      has_range_requested_(false) {}
+      has_range_requested_(false),
+      request_include_credentials_(true) {}
+
+void FetchResponseData::SetAuthChallengeInfo(
+    const absl::optional<net::AuthChallengeInfo>& auth_challenge_info) {
+  if (auth_challenge_info) {
+    auth_challenge_info_ =
+        std::make_unique<net::AuthChallengeInfo>(*auth_challenge_info);
+  }
+}
+
+void FetchResponseData::SetRequestIncludeCredentials(
+    bool request_include_credentials) {
+  DCHECK(!internal_response_);
+  request_include_credentials_ = request_include_credentials;
+}
 
 void FetchResponseData::ReplaceBodyStreamBuffer(BodyStreamBuffer* buffer) {
   if (type_ == Type::kBasic || type_ == Type::kCors) {

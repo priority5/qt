@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
-#include "base/task/cancelable_task_tracker.h"
+#include "base/location.h"
+#include "base/memory/raw_ptr.h"
 
 namespace sessions {
 class SessionCommand;
@@ -19,13 +19,21 @@ class CommandStorageManager;
 class CommandStorageManagerTestHelper {
  public:
   explicit CommandStorageManagerTestHelper(
-      CommandStorageManager* command_storage_manager_);
+      CommandStorageManager* command_storage_manager);
+
+  CommandStorageManagerTestHelper(const CommandStorageManagerTestHelper&) =
+      delete;
+  CommandStorageManagerTestHelper& operator=(
+      const CommandStorageManagerTestHelper&) = delete;
+
   ~CommandStorageManagerTestHelper() = default;
 
   // This posts the task to the SequencedWorkerPool, or run immediately
   // if the SequencedWorkerPool has been shutdown.
   void RunTaskOnBackendThread(const base::Location& from_here,
                               base::OnceClosure task);
+
+  void RunMessageLoopUntilBackendDone();
 
   // Returns true if any commands got processed yet - saved or queued.
   bool ProcessedAnyCommands();
@@ -35,10 +43,11 @@ class CommandStorageManagerTestHelper {
 
   scoped_refptr<base::SequencedTaskRunner> GetBackendTaskRunner();
 
- private:
-  CommandStorageManager* command_storage_manager_;
+  // See function of same name in CommandStorageBackend for details.
+  void ForceAppendCommandsToFailForTesting();
 
-  DISALLOW_COPY_AND_ASSIGN(CommandStorageManagerTestHelper);
+ private:
+  raw_ptr<CommandStorageManager> command_storage_manager_;
 };
 
 }  // namespace sessions

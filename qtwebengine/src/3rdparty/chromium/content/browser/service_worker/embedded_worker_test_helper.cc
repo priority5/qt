@@ -8,51 +8,68 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/time/time.h"
+#include "components/services/storage/service_worker/service_worker_storage_control_impl.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/test/fake_network_url_loader_factory.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "storage/browser/test/mock_special_storage_policy.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 
 namespace content {
 
 EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(
     const base::FilePath& user_data_directory)
-    : EmbeddedWorkerTestHelper(user_data_directory,
-                               /*special_storage_policy=*/nullptr) {}
+    : EmbeddedWorkerTestHelper(
+          user_data_directory,
+          base::MakeRefCounted<storage::MockSpecialStoragePolicy>()) {}
 
 EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(
     const base::FilePath& user_data_directory,
-    storage::SpecialStoragePolicy* special_storage_policy)
+    scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy)
     : browser_context_(std::make_unique<TestBrowserContext>()),
       render_process_host_(
           std::make_unique<MockRenderProcessHost>(browser_context_.get())),
       new_render_process_host_(
           std::make_unique<MockRenderProcessHost>(browser_context_.get())),
+      quota_manager_(base::MakeRefCounted<storage::MockQuotaManager>(
+          /*is_incognito=*/false,
+          user_data_directory,
+          base::ThreadTaskRunnerHandle::Get(),
+          special_storage_policy)),
+      quota_manager_proxy_(base::MakeRefCounted<storage::MockQuotaManagerProxy>(
+          quota_manager_.get(),
+          base::SequencedTaskRunnerHandle::Get())),
       wrapper_(base::MakeRefCounted<ServiceWorkerContextWrapper>(
           browser_context_.get())),
+      fake_loader_factory_("HTTP/1.1 200 OK\nContent-Type: text/javascript\n\n",
+                           "/* body */",
+                           /*network_accessed=*/true,
+                           net::OK),
+      user_data_directory_(user_data_directory),
+      database_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       next_thread_id_(0),
       mock_render_process_id_(render_process_host_->GetID()),
       new_mock_render_process_id_(new_render_process_host_->GetID()),
       url_loader_factory_getter_(
           base::MakeRefCounted<URLLoaderFactoryGetter>()) {
-  scoped_refptr<base::SequencedTaskRunner> database_task_runner =
-      base::ThreadTaskRunnerHandle::Get();
-  wrapper_->InitOnCoreThread(
-      user_data_directory, std::move(database_task_runner),
-      /*quota_manager_proxy=*/nullptr, special_storage_policy, nullptr,
-      url_loader_factory_getter_.get(),
-      wrapper_->CreateNonNetworkPendingURLLoaderFactoryBundleForUpdateCheck(
-          browser_context_.get()));
+  wrapper_->SetStorageControlBinderForTest(base::BindRepeating(
+      &EmbeddedWorkerTestHelper::BindStorageControl, base::Unretained(this)));
+  wrapper_->InitInternal(quota_manager_proxy_.get(),
+                         special_storage_policy.get(),
+                         /*blob_context=*/nullptr, browser_context_.get());
   wrapper_->process_manager()->SetProcessIdForTest(mock_render_process_id());
   wrapper_->process_manager()->SetNewProcessIdForTest(new_render_process_id());
-  if (!ServiceWorkerContext::IsServiceWorkerOnUIEnabled())
-    wrapper_->InitializeResourceContext(browser_context_->GetResourceContext());
+  fake_loader_factory_wrapper_ =
+      base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+          &fake_loader_factory_);
+  wrapper_->SetLoaderFactoryForUpdateCheckForTest(fake_loader_factory_wrapper_);
 
   render_process_host_->OverrideBinderForTesting(
       blink::mojom::EmbeddedWorkerInstanceClient::Name_,
@@ -138,6 +155,10 @@ void EmbeddedWorkerTestHelper::RemoveServiceWorker(
 }
 
 EmbeddedWorkerTestHelper::~EmbeddedWorkerTestHelper() {
+  // Call Detach() to invalidate the reference to `fake_loader_factory_` because
+  // some tasks referring to the factory wrapper may use it after its
+  // destruction.
+  fake_loader_factory_wrapper_->Detach();
   if (wrapper_.get())
     wrapper_->Shutdown();
 }
@@ -151,6 +172,10 @@ void EmbeddedWorkerTestHelper::ShutdownContext() {
   wrapper_ = nullptr;
 }
 
+void EmbeddedWorkerTestHelper::SimulateStorageRestartForTesting() {
+  storage_control_.reset();
+}
+
 // static
 std::unique_ptr<ServiceWorkerVersion::MainScriptResponse>
 EmbeddedWorkerTestHelper::CreateMainScriptResponse() {
@@ -160,7 +185,7 @@ EmbeddedWorkerTestHelper::CreateMainScriptResponse() {
       "Content-Type: application/javascript\0"
       "\0";
   response_head.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
-      std::string(data, base::size(data)));
+      std::string(data, std::size(data)));
   return std::make_unique<ServiceWorkerVersion::MainScriptResponse>(
       response_head);
 }
@@ -209,6 +234,13 @@ EmbeddedWorkerTestHelper::CreateInstanceClient() {
 std::unique_ptr<FakeServiceWorker>
 EmbeddedWorkerTestHelper::CreateServiceWorker() {
   return std::make_unique<FakeServiceWorker>(this);
+}
+
+void EmbeddedWorkerTestHelper::BindStorageControl(
+    mojo::PendingReceiver<storage::mojom::ServiceWorkerStorageControl>
+        receiver) {
+  storage_control_ = std::make_unique<storage::ServiceWorkerStorageControlImpl>(
+      user_data_directory_, database_task_runner_, std::move(receiver));
 }
 
 }  // namespace content

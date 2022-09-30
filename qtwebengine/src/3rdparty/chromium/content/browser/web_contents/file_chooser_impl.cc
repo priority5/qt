@@ -4,8 +4,10 @@
 
 #include "content/browser/web_contents/file_chooser_impl.h"
 
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "content/browser/child_process_security_policy_impl.h"
+#include "content/browser/renderer_host/back_forward_cache_disable.h"
 #include "content/browser/renderer_host/render_frame_host_delegate.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -18,9 +20,10 @@ namespace content {
 
 FileChooserImpl::FileSelectListenerImpl::~FileSelectListenerImpl() {
 #if DCHECK_IS_ON()
-  DCHECK(was_file_select_listener_function_called_)
-      << "Must call either FileSelectListener::FileSelected() or "
-         "FileSelectListener::FileSelectionCanceled()";
+  if (!was_file_select_listener_function_called_) {
+    LOG(ERROR) << "Must call either FileSelectListener::FileSelected() or "
+                  "FileSelectListener::FileSelectionCanceled()";
+  }
   // TODO(avi): Turn on the DCHECK on the following line. This cannot yet be
   // done because I can't say for sure that I know who all the callers who bind
   // blink::mojom::FileChooser are. https://crbug.com/1054811
@@ -87,6 +90,16 @@ mojo::Remote<blink::mojom::FileChooser> FileChooserImpl::CreateBoundForTesting(
   return chooser;
 }
 
+// static
+std::pair<FileChooserImpl*, mojo::Remote<blink::mojom::FileChooser>>
+FileChooserImpl::CreateForTesting(RenderFrameHostImpl* render_frame_host) {
+  mojo::Remote<blink::mojom::FileChooser> chooser;
+  FileChooserImpl* impl = new FileChooserImpl(render_frame_host);
+  mojo::MakeSelfOwnedReceiver(base::WrapUnique(impl),
+                              chooser.BindNewPipeAndPassReceiver());
+  return std::make_pair(impl, std::move(chooser));
+}
+
 FileChooserImpl::FileChooserImpl(RenderFrameHostImpl* render_frame_host)
     : render_frame_host_(render_frame_host) {
   Observe(WebContents::FromRenderFrameHost(render_frame_host));
@@ -118,8 +131,10 @@ void FileChooserImpl::OpenFileChooser(blink::mojom::FileChooserParamsPtr params,
 
   // Don't allow page with open FileChooser to enter BackForwardCache to avoid
   // any unexpected behaviour from BackForwardCache.
-  BackForwardCache::DisableForRenderFrameHost(render_frame_host_,
-                                              "FileChooser");
+  BackForwardCache::DisableForRenderFrameHost(
+      render_frame_host_,
+      BackForwardCacheDisable::DisabledReason(
+          BackForwardCacheDisable::DisabledReasonId::kFileChooser));
 
   static_cast<WebContentsImpl*>(web_contents())
       ->RunFileChooser(render_frame_host_, std::move(listener), *params);
@@ -153,8 +168,10 @@ void FileChooserImpl::FileSelected(
   if (listener_impl_)
     listener_impl_->ResetOwner();
   listener_impl_ = nullptr;
-  if (!render_frame_host_)
+  if (!render_frame_host_) {
+    std::move(callback_).Run(nullptr);
     return;
+  }
   storage::FileSystemContext* file_system_context = nullptr;
   const int pid = render_frame_host_->GetProcess()->GetID();
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
@@ -166,13 +183,11 @@ void FileChooserImpl::FileSelected(
       if (file->is_file_system()) {
         if (!file_system_context) {
           file_system_context =
-              BrowserContext::GetStoragePartition(
-                  render_frame_host_->GetProcess()->GetBrowserContext(),
-                  render_frame_host_->GetSiteInstance())
-                  ->GetFileSystemContext();
+              render_frame_host_->GetStoragePartition()->GetFileSystemContext();
         }
         policy->GrantReadFileSystem(
-            pid, file_system_context->CrackURL(file->get_file_system()->url)
+            pid, file_system_context
+                     ->CrackURLInFirstPartyContext(file->get_file_system()->url)
                      .mount_filesystem_id());
       } else {
         policy->GrantReadFile(pid, file->get_native_file()->file_path);
@@ -186,8 +201,6 @@ void FileChooserImpl::FileSelectionCanceled() {
   if (listener_impl_)
     listener_impl_->ResetOwner();
   listener_impl_ = nullptr;
-  if (!render_frame_host_)
-    return;
   std::move(callback_).Run(nullptr);
 }
 

@@ -5,17 +5,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_SCRIPT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_SCRIPT_H_
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/script_fetch_options.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
-class LocalFrame;
+class LocalDOMWindow;
 class WorkerOrWorkletGlobalScope;
 
 // https://html.spec.whatwg.org/C/#concept-script
@@ -26,7 +26,7 @@ class CORE_EXPORT Script : public GarbageCollected<Script> {
   virtual ~Script() {}
 
   virtual mojom::blink::ScriptType GetScriptType() const = 0;
-  static base::Optional<mojom::blink::ScriptType> ParseScriptType(
+  static absl::optional<mojom::blink::ScriptType> ParseScriptType(
       const String& script_type);
 
   // https://html.spec.whatwg.org/C/#run-a-classic-script
@@ -35,7 +35,7 @@ class CORE_EXPORT Script : public GarbageCollected<Script> {
   // depending on the script type,
   // on Window or on WorkerGlobalScope, respectively.
   // RunScriptOnWorkerOrWorklet returns true if evaluated successfully.
-  virtual void RunScript(LocalFrame*) = 0;
+  virtual void RunScript(LocalDOMWindow*) = 0;
   virtual bool RunScriptOnWorkerOrWorklet(WorkerOrWorkletGlobalScope&) = 0;
 
   const ScriptFetchOptions& FetchOptions() const { return fetch_options_; }
@@ -62,4 +62,4 @@ class CORE_EXPORT Script : public GarbageCollected<Script> {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_SCRIPT_H_

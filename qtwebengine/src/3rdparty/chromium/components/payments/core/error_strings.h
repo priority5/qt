@@ -101,6 +101,17 @@ extern const char kTotalRequired[];
 // Used when user dismissed the Payment Request dialog.
 extern const char kUserCancelled[];
 
+// Used when user cancels authentication or when there are no matching
+// credentials
+extern const char kWebAuthnOperationTimedOutOrNotAllowed[];
+
+// Used when the renderer does not provide valid payment details, such as a null
+// struct or missing ID or total.
+extern const char kInvalidPaymentDetails[];
+
+// Used when the renderer does not provide valid options, such as a null struct.
+extern const char kInvalidPaymentOptions[];
+
 }  // namespace errors
 }  // namespace payments
 

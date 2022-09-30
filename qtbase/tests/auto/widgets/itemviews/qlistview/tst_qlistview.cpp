@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
 #include <QListWidget>
@@ -37,6 +12,9 @@
 #include <QTest>
 #include <QTimer>
 #include <QtMath>
+#include <QProxyStyle>
+#include <QVBoxLayout>
+#include <QDialog>
 
 #include <QtTest/private/qtesthelpers_p.h>
 #include <QtWidgets/private/qlistview_p.h>
@@ -44,7 +22,7 @@
 using namespace QTestPrivate;
 
 #if defined(Q_OS_WIN)
-#  include <windows.h>
+#  include <qt_windows.h>
 #  include <QDialog>
 #  include <QGuiApplication>
 #  include <QVBoxLayout>
@@ -62,7 +40,7 @@ static inline HWND getHWNDForWidget(const QWidget *widget)
 Q_DECLARE_METATYPE(QAbstractItemView::ScrollMode)
 Q_DECLARE_METATYPE(QMargins)
 Q_DECLARE_METATYPE(QSize)
-using IntList = QVector<int>;
+using IntList = QList<int>;
 
 static QStringList generateList(const QString &prefix, int size)
 {
@@ -84,7 +62,7 @@ public:
     using QListView::setSelection;
     using QListView::setViewportMargins;
     using QListView::startDrag;
-    using QListView::viewOptions;
+    using QListView::initViewItemOption;
     QRegion getVisualRegionForSelection() const
     {
         return QListView::visualRegionForSelection(selectionModel()->selection());
@@ -109,6 +87,8 @@ private slots:
     void moveCursor();
     void moveCursor2();
     void moveCursor3();
+    void moveCursor4();
+    void moveCursor5();
     void indexAt();
     void clicked();
     void singleSelectionRemoveRow();
@@ -125,7 +105,7 @@ private slots:
     void scrollBarAsNeeded();
     void moveItems();
     void wordWrap();
-#if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
+#if defined(Q_OS_WIN)
     void setCurrentIndexAfterAppendRowCrash();
 #endif
     void emptyItemSize();
@@ -164,11 +144,15 @@ private slots:
     void taskQTBUG_39902_mutualScrollBars();
     void horizontalScrollingByVerticalWheelEvents();
     void taskQTBUG_7232_AllowUserToControlSingleStep();
+    void taskQTBUG_58749_adjustToContent();
     void taskQTBUG_51086_skippingIndexesInSelectedIndexes();
     void taskQTBUG_47694_indexOutOfBoundBatchLayout();
+    void moveLastRow();
     void itemAlignment();
     void internalDragDropMove_data();
     void internalDragDropMove();
+    void spacingWithWordWrap_data();
+    void spacingWithWordWrap();
     void scrollOnRemove_data();
     void scrollOnRemove();
 };
@@ -436,7 +420,7 @@ void tst_QListView::cursorMove()
             }
             break;
         default:
-            QVERIFY(false);
+            QFAIL(qPrintable(QStringLiteral("Unexpected key: %1").arg(key)));
         }
 
         QCoreApplication::processEvents();
@@ -574,6 +558,76 @@ void tst_QListView::moveCursor3()
     QCOMPARE(view.selectionModel()->currentIndex(), model.index(0, 0));
 }
 
+void tst_QListView::moveCursor4()
+{
+    int indexCount = 100;
+    PublicListView listView;
+    QStandardItemModel model;
+    for (int i = 0; i < 100; i++)
+    {
+        QStandardItem* item = new QStandardItem(QString("item 0%0").arg(i));
+        QFont font = item->font();
+        font.setPixelSize(14);
+        item->setFont(font);
+        model.appendRow(item);
+    }
+    QFont font = model.item(0)->font();
+    font.setPixelSize(50);
+    font.setBold(true);
+    model.item(0)->setFont(font);
+    listView.setModel(&model);
+    listView.setFixedSize(200, 200);
+    listView.setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    listView.setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    listView.show();
+    listView.selectionModel()->setCurrentIndex(model.index(0, 0), QItemSelectionModel::SelectCurrent);
+
+    QModelIndex idx = listView.moveCursor(PublicListView::MovePageDown, Qt::NoModifier);
+
+    int actualIndex = 0;
+    int indexHeight = 0;
+    while (indexHeight <= listView.viewport()->height()) {
+        indexHeight +=  listView.visualRect(model.item(actualIndex)->index()).height();
+        actualIndex++;
+    }
+    QTRY_COMPARE(idx, model.index(actualIndex - 2, 0));
+    idx = listView.moveCursor(PublicListView::MoveUp, Qt::NoModifier);
+    QTRY_COMPARE(idx, model.index(0, 0));
+
+    listView.setCurrentIndex(model.index(indexCount - 2, 0));
+    idx = listView.moveCursor(PublicListView::MovePageDown, Qt::NoModifier);
+    QTRY_COMPARE(idx, model.index(99, 0));
+
+    listView.setCurrentIndex(model.index(3, 0));
+    actualIndex = 3;
+    indexHeight = 0;
+    while (indexHeight <= listView.viewport()->height()) {
+        indexHeight +=  listView.visualRect(model.item(actualIndex)->index()).height();
+        actualIndex++;
+    }
+    idx = listView.moveCursor(PublicListView::MovePageDown, Qt::NoModifier);
+    QTRY_COMPARE(idx, model.index(actualIndex - 2, 0));
+}
+
+void tst_QListView::moveCursor5()
+{
+    PublicListView listView;;
+    QStandardItemModel model;
+    QIcon icon(QPixmap(300,300));
+    model.appendRow(new QStandardItem(icon,"11"));
+    model.appendRow(new QStandardItem(icon,"22"));
+    model.appendRow(new QStandardItem(icon,"33"));
+    listView.setModel(&model);
+    listView.setGeometry(10,10,200,200);
+    listView.setIconSize(QSize(300,300));
+    listView.setViewMode(QListView::IconMode);
+    listView.setCurrentIndex(model.index(0, 0));
+
+    QModelIndex idx = listView.moveCursor(PublicListView::MovePageDown, Qt::NoModifier);
+    QTRY_COMPARE(idx, model.index(1, 0));
+    idx = listView.moveCursor(PublicListView::MovePageUp, Qt::NoModifier);
+    QTRY_COMPARE(idx, model.index(0, 0));
+}
 
 class QListViewShowEventListener : public QListView
 {
@@ -1418,13 +1472,10 @@ void tst_QListView::wordWrap()
     lv.showNormal();
 
     QTRY_COMPARE(lv.horizontalScrollBar()->isVisible(), false);
-#ifdef Q_OS_WINRT
-QSKIP("setFixedSize does not work on WinRT. Vertical scroll bar will not be visible.");
-#endif
     QTRY_COMPARE(lv.verticalScrollBar()->isVisible(), true);
 }
 
-#if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
+#if defined(Q_OS_WIN)
 class SetCurrentIndexAfterAppendRowCrashDialog : public QDialog
 {
     Q_OBJECT
@@ -1476,7 +1527,7 @@ void tst_QListView::setCurrentIndexAfterAppendRowCrash()
     SetCurrentIndexAfterAppendRowCrashDialog w;
     w.exec();
 }
-#endif // Q_OS_WIN && !Q_OS_WINRT
+#endif // Q_OS_WIN
 
 void tst_QListView::emptyItemSize()
 {
@@ -2061,9 +2112,6 @@ void tst_QListView::taskQTBUG_21115_scrollToAndHiddenItems_data()
 void tst_QListView::taskQTBUG_21115_scrollToAndHiddenItems()
 {
     QFETCH(QListView::Flow, flow);
-#ifdef Q_OS_WINRT
-    QSKIP("Fails on WinRT - QTBUG-68297");
-#endif
 
     ScrollPerItemListView lv;
     lv.setUniformItemSizes(true);
@@ -2256,9 +2304,6 @@ void tst_QListView::testScrollToWithHidden()
 
     lv.scrollTo(model.index(26, 0));
     int expectedScrollBarValue = lv.verticalScrollBar()->value();
-#ifdef Q_OS_WINRT
-    QSKIP("Might fail on WinRT - QTBUG-68297");
-#endif
     QVERIFY(expectedScrollBarValue != 0);
 
     lv.scrollTo(model.index(25, 0));
@@ -2270,10 +2315,11 @@ void tst_QListView::testScrollToWithHidden()
 void tst_QListView::testViewOptions()
 {
     PublicListView view;
-    QStyleOptionViewItem options = view.viewOptions();
+    QStyleOptionViewItem options;
+    view.initViewItemOption(&options);
     QCOMPARE(options.decorationPosition, QStyleOptionViewItem::Left);
     view.setViewMode(QListView::IconMode);
-    options = view.viewOptions();
+    view.initViewItemOption(&options);
     QCOMPARE(options.decorationPosition, QStyleOptionViewItem::Top);
 }
 
@@ -2481,6 +2527,45 @@ void tst_QListView::taskQTBUG_7232_AllowUserToControlSingleStep()
     QCOMPARE(hStep1, lv.horizontalScrollBar()->singleStep());
 }
 
+void tst_QListView::taskQTBUG_58749_adjustToContent()
+{
+    QStandardItemModel model;
+    model.setRowCount(20);
+    model.setColumnCount(1);
+    const QString rowStr = QStringLiteral("Row number txt:");
+    for (int u = 0; u < model.rowCount(); ++u)
+      model.setData(model.index(u, 0), rowStr + QString::number(u));
+
+    QDialog w; // It really should work for QWidget, too, but sometimes an event (like move)
+               // is needed to get the resize triggered.
+    QVBoxLayout *l = new QVBoxLayout(&w);
+    l->setSizeConstraint(QLayout::SetFixedSize);
+    auto *view = new QListView;
+    view->setModel(&model);
+    view->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
+    l->addWidget(view);
+    l->setSizeConstraint(QLayout::SetFixedSize);
+    w.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&w));
+
+    const QString longText = "Here we have a row text that is somewhat longer ...";
+
+    QFontMetrics fm(w.font(), &w);
+    QRect r = fm.boundingRect(model.data(model.index(0, 0)).toString());
+    const int longTextWidth = fm.horizontalAdvance(longText);
+    QVERIFY(w.height() > r.height() * model.rowCount());
+    // We have a width longer than the width for the given index data.
+    QVERIFY(w.width() > r.width());
+    // but ... the width should not have a width matching the much longer text.
+    QVERIFY(w.width() < longTextWidth);
+
+    // use the long text and make sure the width is adjusted.
+    model.setData(model.index(0, 0), longText);
+    QApplication::processEvents();
+    QVERIFY(w.width() > longTextWidth);
+    QVERIFY(view->width() >= longTextWidth);
+}
+
 void tst_QListView::taskQTBUG_51086_skippingIndexesInSelectedIndexes()
 {
     QStandardItemModel data(10, 1);
@@ -2512,6 +2597,222 @@ void tst_QListView::taskQTBUG_47694_indexOutOfBoundBatchLayout()
     view.setModel(&model);
 
     view.scrollTo(model.index(batchSize - 1, 0));
+}
+
+class TstMoveItem
+{
+    friend class TstMoveModel;
+public:
+    TstMoveItem(TstMoveItem *parent = nullptr)
+        : parentItem(parent)
+    {
+        if (parentItem)
+            parentItem->childItems.append(this);
+    }
+
+    ~TstMoveItem()
+    {
+        QList<TstMoveItem *> delItms;
+        delItms.swap(childItems);
+        qDeleteAll(delItms);
+
+        if (parentItem)
+            parentItem->childItems.removeAll(this);
+    }
+
+    int row()
+    {
+        if (parentItem)
+            return  parentItem->childItems.indexOf(this);
+        return -1;
+    }
+
+public:
+    TstMoveItem *parentItem = nullptr;
+    QList<TstMoveItem *> childItems;
+    QHash<int, QVariant> data;
+};
+
+/*!
+    Test that removing the last row in an IconView mode QListView
+    doesn't crash. The model is specifically crafted to provoke a
+    stale QBspTree by returning a 0 column count for indexes without
+    children, which changes the column count after moving the last row.
+
+    See QTBUG_95463.
+*/
+class TstMoveModel : public QAbstractItemModel
+{
+    Q_OBJECT
+public:
+    TstMoveModel(QObject *parent = nullptr)
+        : QAbstractItemModel(parent)
+    {
+        rootItem = new TstMoveItem;
+        rootItem->data.insert(Qt::DisplayRole, "root");
+
+        TstMoveItem *itm = new TstMoveItem(rootItem);
+        itm->data.insert(Qt::DisplayRole, "parentItem1");
+
+        TstMoveItem *itmCh = new TstMoveItem(itm);
+        itmCh->data.insert(Qt::DisplayRole, "childItem");
+
+        itm = new TstMoveItem(rootItem);
+        itm->data.insert(Qt::DisplayRole, "parentItem2");
+    }
+
+    ~TstMoveModel()
+    {
+        delete rootItem;
+    }
+
+    QModelIndex index(int row, int column, const QModelIndex &idxPar = QModelIndex()) const override
+    {
+        QModelIndex idx;
+        if (hasIndex(row, column, idxPar)) {
+            TstMoveItem *parentItem = nullptr;
+            if (idxPar.isValid())
+                parentItem = static_cast<TstMoveItem *>(idxPar.internalPointer());
+            else
+                parentItem = rootItem;
+
+            Q_ASSERT(parentItem);
+            TstMoveItem *childItem = parentItem->childItems.at(row);
+            if (childItem)
+                idx = createIndex(row, column, childItem);
+        }
+        return idx;
+    }
+
+    QModelIndex parent(const QModelIndex &index) const override
+    {
+        QModelIndex idxPar;
+        if (index.isValid()) {
+            TstMoveItem *childItem = static_cast<TstMoveItem *>(index.internalPointer());
+            TstMoveItem *parentItem = childItem->parentItem;
+            if (parentItem != rootItem)
+                idxPar = createIndex(parentItem->row(), 0, parentItem);
+        }
+        return idxPar;
+    }
+
+    int columnCount(const QModelIndex &idxPar = QModelIndex()) const override
+    {
+        int cnt = 0;
+        if (idxPar.isValid()) {
+            TstMoveItem *parentItem = static_cast<TstMoveItem *>(idxPar.internalPointer());
+            Q_ASSERT(parentItem);
+            cnt = parentItem->childItems.isEmpty() ? 0 : 1;
+        } else {
+            cnt = rootItem->childItems.isEmpty() ? 0 : 1;
+        }
+        return cnt;
+    }
+
+    int rowCount(const QModelIndex &idxPar = QModelIndex()) const override
+    {
+        int cnt = 0;
+        if (idxPar.isValid()) {
+            TstMoveItem *parentItem = static_cast<TstMoveItem *>(idxPar.internalPointer());
+            Q_ASSERT(parentItem);
+            cnt = parentItem->childItems.count();
+        } else {
+            cnt = rootItem->childItems.count();
+        }
+        return cnt;
+    }
+
+    Qt::ItemFlags flags(const QModelIndex &index) const override
+    {
+        Q_UNUSED(index)
+        return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    }
+
+    bool hasChildren(const QModelIndex &parent = QModelIndex()) const override
+    {
+        bool ret = false;
+        if (parent.isValid()) {
+            TstMoveItem *parentItem = static_cast<TstMoveItem *>(parent.internalPointer());
+            Q_ASSERT(parentItem);
+            ret = parentItem->childItems.count() > 0;
+        } else {
+            ret = rootItem->childItems.count() > 0;
+        }
+        return ret;
+    }
+
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override
+    {
+        QVariant dt;
+        if (index.isValid()) {
+            TstMoveItem *item = static_cast<TstMoveItem *>(index.internalPointer());
+            if (item)
+                dt = item->data.value(role);
+        }
+        return dt;
+    }
+
+    bool moveRows(const QModelIndex &sourceParent, int sourceRow, int count, const QModelIndex &destinationParent, int destinationChild) override
+    {
+        TstMoveItem *itmSrcParent = itemAt(sourceParent);
+        TstMoveItem *itmDestParent = itemAt(destinationParent);
+
+        if (itmSrcParent && sourceRow >= 0
+            && sourceRow + count <= itmSrcParent->childItems.count()
+            && itmDestParent && destinationChild <= itmDestParent->childItems.count()) {
+            beginMoveRows(sourceParent, sourceRow, sourceRow + count - 1,
+                          destinationParent, destinationChild);
+            QList<TstMoveItem *> itemsToMove;
+            for (int i = 0; i < count; ++i) {
+                TstMoveItem *itm = itmSrcParent->childItems.at(sourceRow+i);
+                itemsToMove.append(itm);
+            }
+            for (int i = itemsToMove.count() -1; i >= 0; --i) {
+                TstMoveItem *itm = itemsToMove.at(i);
+                itm->parentItem->childItems.removeAll(itm);
+                itm->parentItem = itmDestParent;
+                itmDestParent->childItems.insert(destinationChild, itm);
+            }
+            endMoveRows();
+            return true;
+        }
+        return false;
+    }
+
+private:
+    TstMoveItem *itemAt(const QModelIndex &index) const
+    {
+        TstMoveItem *item = nullptr;
+        if (index.isValid()) {
+            Q_ASSERT(index.model() == this);
+            item = static_cast<TstMoveItem *>(index.internalPointer());
+        } else {
+            item = rootItem;
+        }
+        return item;
+    }
+
+private:
+    TstMoveItem *rootItem = nullptr;
+};
+
+void tst_QListView::moveLastRow()
+{
+    TstMoveModel model;
+    QListView view;
+    view.setModel(&model);
+    view.setRootIndex(model.index(0, 0, QModelIndex()));
+    view.setViewMode(QListView::IconMode);
+    view.show();
+
+    QApplication::setActiveWindow(&view);
+    QVERIFY(QTest::qWaitForWindowActive(&view));
+
+    QModelIndex sourceParent = model.index(0, 0);
+    QModelIndex destinationParent = model.index(1, 0);
+    // must not crash when paint event is processed
+    model.moveRow(sourceParent, 0, destinationParent, 0);
+    QTest::qWait(100);
 }
 
 void tst_QListView::itemAlignment()
@@ -2723,6 +3024,88 @@ void tst_QListView::internalDragDropMove()
     }
 }
 
+/*!
+    Verify fix for QTBUG-92366
+*/
+void tst_QListView::spacingWithWordWrap_data()
+{
+    QTest::addColumn<bool>("scrollBarOverlap");
+
+    QTest::addRow("Without overlap") << false;
+    QTest::addRow("With overlap") << true;
+}
+
+void tst_QListView::spacingWithWordWrap()
+{
+    QFETCH(bool, scrollBarOverlap);
+
+    class MyStyle : public QProxyStyle
+    {
+        bool scrollBarOverlap;
+    public:
+        MyStyle(bool scrollBarOverlap) : scrollBarOverlap(scrollBarOverlap) {}
+
+        int pixelMetric(PixelMetric metric, const QStyleOption *option = nullptr,
+                        const QWidget *widget = nullptr) const override{
+            switch (metric) {
+                case QStyle::PM_ScrollView_ScrollBarOverlap: return scrollBarOverlap;
+                default:
+                    break;
+                }
+                return QProxyStyle::pixelMetric(metric, option, widget);
+        }
+    };
+
+    QApplication::setStyle(new MyStyle(scrollBarOverlap));
+
+    const int listViewResizeCount = 200;
+    QWidget window;
+    window.resize(300, 200);
+    QListView lv(&window);
+
+    lv.setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    lv.setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    lv.setFlow(QListView::TopToBottom);
+    lv.setWordWrap(true);
+    lv.setSpacing(0);
+    lv.setGeometry(0, 0, 200, 150);
+
+    QStandardItem *it1 = new QStandardItem("qqqqqqqqqqqqqqqqqqqqq-ttttttttttttttttt");
+    QStandardItem *it2 = new QStandardItem("qqqqqqqqqqqqqqqq-tttttttttttt");
+    QStandardItemModel model;
+    lv.setModel(&model);
+    model.appendRow(it1);
+    model.appendRow(it2);
+
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    QVERIFY(!lv.verticalScrollBar()->isVisible());
+    for (int i = 0; i < listViewResizeCount; ++i) {
+        lv.resize(lv.width() + 1, lv.height());
+        QRect rectForRowOne = lv.visualRect(model.index(0, 0));
+        QRect rectForRowTwo = lv.visualRect(model.index(1, 0));
+
+        QCOMPARE(rectForRowOne.y() + rectForRowOne.height(), rectForRowTwo.y());
+    }
+
+    lv.resize(200, 150);
+    const QStringList &stringList = generateList(QStringLiteral("Test_Abnormal_Spacing"), 30);
+    for (const QString &item_string : stringList) {
+        QStandardItem *item = new QStandardItem(item_string);
+        model.appendRow(item);
+    }
+
+    // test whether the height of item is correct if the vbar is shown.
+    QTRY_VERIFY(lv.verticalScrollBar()->isVisible());
+    for (int i = 0; i < listViewResizeCount; ++i) {
+        lv.resize(lv.width() + 1, lv.height());
+        QRect rectForRowOne = lv.visualRect(model.index(0, 0));
+        QRect rectForRowTwo = lv.visualRect(model.index(1, 0));
+
+        QCOMPARE(rectForRowOne.y() + rectForRowOne.height(), rectForRowTwo.y());
+    }
+}
 
 void tst_QListView::scrollOnRemove_data()
 {

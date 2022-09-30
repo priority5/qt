@@ -13,16 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { Product } from '../common/Product.js';
 /**
  * Supported platforms.
  * @public
  */
 export declare type Platform = 'linux' | 'mac' | 'win32' | 'win64';
-/**
- * Supported products.
- * @public
- */
-export declare type Product = 'chrome' | 'firefox';
 /**
  * @public
  */
@@ -77,11 +73,13 @@ export declare class BrowserFetcher {
     constructor(projectRoot: string, options?: BrowserFetcherOptions);
     private setPlatform;
     /**
-     * @returns Returns the current `Platform`.
+     * @returns Returns the current `Platform`, which is one of `mac`, `linux`,
+     * `win32` or `win64`.
      */
     platform(): Platform;
     /**
-     * @returns Returns the current `Product`.
+     * @returns Returns the current `Product`, which is one of `chrome` or
+     * `firefox`.
      */
     product(): Product;
     /**

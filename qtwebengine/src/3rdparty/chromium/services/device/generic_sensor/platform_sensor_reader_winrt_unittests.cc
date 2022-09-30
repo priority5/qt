@@ -7,7 +7,7 @@
 #include <objbase.h>
 
 #include "base/numerics/math_constants.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/win/core_winrt_util.h"
 #include "base/win/scoped_com_initializer.h"
@@ -675,8 +675,7 @@ TEST_F(PlatformSensorReaderTestWinrt, SensorTimestampConversion) {
   EXPECT_EQ(lastReportedTimestamp, 0);
 
   auto second_timestamp =
-      base::TimeDelta::FromSeconds(expectedTimestampDeltaSecs)
-          .ToWinrtDateTime();
+      base::Seconds(expectedTimestampDeltaSecs).ToWinrtDateTime();
   reading =
       Microsoft::WRL::Make<FakeLightSensorReadingWinrt>(second_timestamp, 0.0f);
   fake_sensor->TriggerFakeSensorReading(reading);

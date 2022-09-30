@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <qglobal.h>
 // To prevent windows system header files from re-defining min/max
@@ -38,7 +13,9 @@
 #define INVALID_SOCKET -1
 #endif
 
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QSignalSpy>
+#include <QTimer>
 
 #ifndef Q_OS_WIN
 #include <unistd.h>
@@ -55,12 +32,12 @@
 #include <qstringlist.h>
 #include <qplatformdefs.h>
 #include <qhostinfo.h>
+#include <qnetworkinterface.h>
 
 #include <QNetworkProxy>
+#include <QSet>
+#include <QList>
 
-#include <QNetworkSession>
-#include <QNetworkConfiguration>
-#include <QNetworkConfigurationManager>
 #include "../../../network-settings.h"
 
 #if defined(Q_OS_LINUX)
@@ -90,9 +67,7 @@ private slots:
     void maxPendingConnections();
     void listenError();
     void waitForConnectionTest();
-#ifndef Q_OS_WINRT
     void setSocketDescriptor();
-#endif
     void listenWhileListening();
     void addressReusable();
     void setNewSocketDescriptorBlocking();
@@ -117,15 +92,17 @@ private slots:
 
     void canAccessPendingConnectionsWhileNotListening();
 
+    void pauseAccepting();
+
+    void pendingConnectionAvailable_data();
+    void pendingConnectionAvailable();
+
 private:
     bool shouldSkipIpv6TestsForBrokenGetsockopt();
 #ifdef SHOULD_CHECK_SYSCALL_SUPPORT
     bool ipv6GetsockoptionMissing(int level, int optname);
 #endif
 
-#ifndef QT_NO_BEARERMANAGEMENT
-    QNetworkSession *networkSession;
-#endif
     QString crashingServerDir;
 };
 
@@ -168,12 +145,6 @@ void tst_QTcpServer::initTestCase()
 #else
     if (!QtNetworkSettings::verifyTestNetworkSettings())
         QSKIP("No network test server available");
-#endif
-#ifndef QT_NO_BEARERMANAGEMENT
-    QNetworkConfigurationManager man;
-    networkSession = new QNetworkSession(man.defaultConfiguration(), this);
-    networkSession->open();
-    QVERIFY(networkSession->waitForOpened());
 #endif
 }
 
@@ -487,7 +458,7 @@ public:
     }
 
 protected:
-    void run()
+    void run() override
     {
         sleep(2);
 
@@ -538,7 +509,6 @@ void tst_QTcpServer::waitForConnectionTest()
 }
 
 //----------------------------------------------------------------------------------
-#ifndef Q_OS_WINRT
 void tst_QTcpServer::setSocketDescriptor()
 {
     QTcpServer server;
@@ -568,7 +538,6 @@ void tst_QTcpServer::setSocketDescriptor()
     WSACleanup();
 #endif
 }
-#endif // !Q_OS_WINRT
 
 //----------------------------------------------------------------------------------
 void tst_QTcpServer::listenWhileListening()
@@ -590,8 +559,7 @@ public:
     bool ok;
 
 protected:
-#ifndef Q_OS_WINRT
-    void incomingConnection(qintptr socketDescriptor)
+    void incomingConnection(qintptr socketDescriptor) override
     {
         // how a user woulddo it (qabstractsocketengine is not public)
         unsigned long arg = 0;
@@ -603,7 +571,6 @@ protected:
         ::close(socketDescriptor);
 #endif
     }
-#endif // !Q_OS_WINRT
 };
 
 void tst_QTcpServer::addressReusable()
@@ -730,7 +697,7 @@ public:
         lastQuery = QNetworkProxyQuery();
     }
 
-    virtual QList<QNetworkProxy> queryProxy(const QNetworkProxyQuery &query)
+    virtual QList<QNetworkProxy> queryProxy(const QNetworkProxyQuery &query) override
     {
         lastQuery = query;
         ++callCount;
@@ -958,6 +925,12 @@ void tst_QTcpServer::linkLocal()
             // (we don't know why)
             if (iface.name().startsWith("utun"))
                 continue;
+            // Do not use the iBridge interfae
+            if (iface.hardwareAddress() == "AC:DE:48:00:11:22")
+                continue;
+            // Do no use the Apple Wireless Direct Link interfaces
+            if (iface.name().startsWith("awdl"))
+                continue;
 #endif
             foreach (QNetworkAddressEntry addressEntry, iface.addressEntries()) {
                 QHostAddress addr = addressEntry.ip();
@@ -1061,6 +1034,105 @@ void tst_QTcpServer::canAccessPendingConnectionsWhileNotListening()
     QTcpSocket socket;
     server.addSocketFromOutside(&socket);
     QCOMPARE(&socket, server.nextPendingConnection());
+}
+
+void tst_QTcpServer::pauseAccepting()
+{
+    QTcpServer server;
+    QSignalSpy spy(&server, &QTcpServer::newConnection);
+    QVERIFY(server.listen());
+
+    QFETCH_GLOBAL(bool, setProxy);
+    const auto address = QHostAddress(setProxy ? QtNetworkSettings::socksProxyServerIp()
+                                               : QHostAddress::LocalHost);
+
+    const int NumSockets = 6;
+    QTcpSocket sockets[NumSockets];
+    sockets[0].connectToHost(address, server.serverPort());
+    QVERIFY(spy.wait());
+    QCOMPARE(spy.count(), 1);
+
+    server.pauseAccepting();
+    for (int i = 1; i < NumSockets; ++i)
+        sockets[i].connectToHost(address, server.serverPort());
+    QVERIFY(!spy.wait(400));
+    QCOMPARE(spy.count(), 1);
+
+    server.resumeAccepting();
+    if (setProxy) {
+        QEXPECT_FAIL("", "The socks proxy does weird things after accepting the first connection",
+                     Abort);
+    }
+    QVERIFY(spy.wait());
+    QCOMPARE(spy.count(), 6);
+}
+
+
+// Only adds the socket to the pending connections list after emitNextSocket is
+// called. It's very artificial, but it allows us to test the behavior of
+// the pendingConnectionAvailable signal when a server doesn't add the socket
+// during the incomingConnection virtual function.
+class DerivedServer : public QTcpServer
+{
+public:
+    explicit DerivedServer(QObject *parent = nullptr)
+        : QTcpServer(parent)
+    {
+    }
+
+    void emitNextSocket()
+    {
+        if (m_socketDescriptors.isEmpty())
+            return;
+        auto *socket = new QTcpSocket(this);
+        socket->setSocketDescriptor(m_socketDescriptors.back());
+        m_socketDescriptors.pop_back();
+        addPendingConnection(socket);
+    }
+protected:
+    void incomingConnection(qintptr socketDescriptor) override
+    {
+        m_socketDescriptors.push_back(socketDescriptor);
+    }
+private:
+    QList<qintptr> m_socketDescriptors;
+};
+
+void tst_QTcpServer::pendingConnectionAvailable_data()
+{
+    QTest::addColumn<bool>("useDerivedServer");
+    QTest::newRow("QTcpServer") << false;
+    QTest::newRow("DerivedServer") << true;
+}
+
+void tst_QTcpServer::pendingConnectionAvailable()
+{
+    QFETCH_GLOBAL(bool, setProxy);
+    if (setProxy)
+        QSKIP("This feature does not differentiate with or without proxy");
+    QFETCH(bool, useDerivedServer);
+
+    QTcpServer *server = useDerivedServer ? new DerivedServer : new QTcpServer;
+    if (!server->listen(QHostAddress::LocalHost, 0)) {
+        qWarning() << "Server failed to listen:" << server->errorString();
+        QSKIP("Server failed to listen");
+    }
+    QSignalSpy newConnectionSpy(server, &QTcpServer::newConnection);
+    QSignalSpy pendingConnectionSpy(server, &QTcpServer::pendingConnectionAvailable);
+
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, server->serverPort());
+
+    QVERIFY(newConnectionSpy.wait());
+    QVERIFY(socket.waitForConnected());
+    QCOMPARE(socket.state(), QTcpSocket::ConnectedState);
+
+    int expectedPendingConnections = useDerivedServer ? 0 : 1;
+    QCOMPARE(pendingConnectionSpy.count(), expectedPendingConnections);
+
+    if (useDerivedServer)
+        static_cast<DerivedServer *>(server)->emitNextSocket();
+    QCOMPARE(pendingConnectionSpy.count(), 1);
 }
 
 QTEST_MAIN(tst_QTcpServer)

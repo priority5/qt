@@ -1,40 +1,14 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Charts module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include <private/splineanimation_p.h>
 #include <private/splinechartitem_p.h>
 #include <QtCore/QDebug>
 
-Q_DECLARE_METATYPE(QVector<QPointF>)
+Q_DECLARE_METATYPE(QList<QPointF>)
 Q_DECLARE_METATYPE(SplineVector)
 
-QT_CHARTS_BEGIN_NAMESPACE
+QT_BEGIN_NAMESPACE
 
 SplineAnimation::SplineAnimation(SplineChartItem *item, int duration, QEasingCurve &curve)
     : XYAnimation(item, duration, curve),
@@ -47,7 +21,9 @@ SplineAnimation::~SplineAnimation()
 {
 }
 
-void SplineAnimation::setup(QVector<QPointF> &oldPoints, QVector<QPointF> &newPoints, QVector<QPointF> &oldControlPoints, QVector<QPointF> &newControlPoints, int index)
+void SplineAnimation::setup(const QList<QPointF> &oldPoints, const QList<QPointF> &newPoints,
+                            const QList<QPointF> &oldControlPoints,
+                            const QList<QPointF> &newControlPoints, int index)
 {
     if (newPoints.count() * 2 - 2 != newControlPoints.count() || newControlPoints.count() < 2) {
         m_valid = false;
@@ -179,7 +155,7 @@ QVariant SplineAnimation::interpolated(const QVariant &start, const QVariant &en
 void SplineAnimation::updateCurrentValue(const QVariant &value)
 {
     if (state() != QAbstractAnimation::Stopped && m_valid) { //workaround
-        QPair<QVector<QPointF >, QVector<QPointF > > pair = qvariant_cast< QPair< QVector<QPointF>, QVector<QPointF> > >(value);
+        const auto pair = qvariant_cast<QPair<QList<QPointF>, QList<QPointF>>>(value);
         m_item->setGeometryPoints(pair.first);
         m_item->setControlGeometryPoints(pair.second);
         m_item->updateGeometry();
@@ -216,4 +192,4 @@ void SplineAnimation::updateState(QAbstractAnimation::State newState, QAbstractA
     }
 }
 
-QT_CHARTS_END_NAMESPACE
+QT_END_NAMESPACE

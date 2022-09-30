@@ -33,8 +33,9 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
-#include "third_party/blink/public/mojom/file_system_access/native_file_system_drag_drop_token.mojom-shared.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_data_transfer_token.mojom-shared.h"
 #include "third_party/blink/public/platform/cross_variant_mojo_util.h"
+#include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -45,9 +46,9 @@ namespace blink {
 template <typename T>
 class WebVector;
 
-using NativeFileSystemDropData =
+using FileSystemAccessDropData =
     base::RefCountedData<blink::CrossVariantMojoRemote<
-        mojom::NativeFileSystemDragDropTokenInterfaceBase>>;
+        mojom::FileSystemAccessDataTransferTokenInterfaceBase>>;
 
 // Holds data that may be exchanged through a drag-n-drop operation. It is
 // inexpensive to copy a WebDragData object.
@@ -84,10 +85,11 @@ class WebDragData {
     // Only valid when storage_type == kStorageTypeFilename.
     WebString filename_data;
     WebString display_name_data;
-    scoped_refptr<NativeFileSystemDropData> native_file_system_entry;
+    scoped_refptr<FileSystemAccessDropData> file_system_access_entry;
 
     // Only valid when storage_type == kStorageTypeBinaryData.
     WebData binary_data;
+    bool binary_data_image_accessible;
     WebURL binary_data_source_url;
     WebString binary_data_filename_extension;
     WebString binary_data_content_disposition;
@@ -96,6 +98,7 @@ class WebDragData {
     WebURL file_system_url;
     int64_t file_system_file_size;
     WebString file_system_id;
+    WebBlobInfo file_system_blob_info;
   };
 
   WebDragData() = default;
@@ -143,4 +146,4 @@ class WebDragData {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_DRAG_DATA_H_

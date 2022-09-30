@@ -7,11 +7,10 @@
 
 #include <string>
 
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_delegate.h"
 #include "components/password_manager/core/browser/bulk_leak_check_service.h"
 #include "extensions/browser/extension_function.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace extensions {
 
@@ -120,7 +119,7 @@ class PasswordsPrivateRequestPlaintextPasswordFunction
   ResponseAction Run() override;
 
  private:
-  void GotPassword(base::Optional<base::string16> password);
+  void GotPassword(absl::optional<std::u16string> password);
 };
 
 class PasswordsPrivateGetSavedPasswordListFunction : public ExtensionFunction {
@@ -156,13 +155,14 @@ class PasswordsPrivateGetPasswordExceptionListFunction
   void GotList(const PasswordsPrivateDelegate::ExceptionEntries& entries);
 };
 
-class PasswordsPrivateMovePasswordToAccountFunction : public ExtensionFunction {
+class PasswordsPrivateMovePasswordsToAccountFunction
+    : public ExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.movePasswordToAccount",
-                             PASSWORDSPRIVATE_MOVEPASSWORDTOACCOUNT)
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.movePasswordsToAccount",
+                             PASSWORDSPRIVATE_MOVEPASSWORDSTOACCOUNT)
 
  protected:
-  ~PasswordsPrivateMovePasswordToAccountFunction() override = default;
+  ~PasswordsPrivateMovePasswordsToAccountFunction() override = default;
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;
@@ -285,7 +285,7 @@ class PasswordsPrivateGetPlaintextInsecurePasswordFunction
 
  private:
   void GotCredential(
-      base::Optional<api::passwords_private::InsecureCredential> credential);
+      absl::optional<api::passwords_private::InsecureCredential> credential);
 };
 
 class PasswordsPrivateChangeInsecureCredentialFunction
@@ -309,6 +309,32 @@ class PasswordsPrivateRemoveInsecureCredentialFunction
 
  protected:
   ~PasswordsPrivateRemoveInsecureCredentialFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateMuteInsecureCredentialFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.muteInsecureCredential",
+                             PASSWORDSPRIVATE_MUTEINSECURECREDENTIAL)
+
+ protected:
+  ~PasswordsPrivateMuteInsecureCredentialFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateUnmuteInsecureCredentialFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.unmuteInsecureCredential",
+                             PASSWORDSPRIVATE_UNMUTEINSECURECREDENTIAL)
+
+ protected:
+  ~PasswordsPrivateUnmuteInsecureCredentialFunction() override;
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;
@@ -349,6 +375,42 @@ class PasswordsPrivateGetPasswordCheckStatusFunction
 
  protected:
   ~PasswordsPrivateGetPasswordCheckStatusFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateIsAccountStoreDefaultFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.isAccountStoreDefault",
+                             PASSWORDSPRIVATE_ISACCOUNTSTOREDEFAULT)
+
+ protected:
+  ~PasswordsPrivateIsAccountStoreDefaultFunction() override = default;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateGetUrlCollectionFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.getUrlCollection",
+                             PASSWORDSPRIVATE_GETURLCOLLECTION)
+
+ protected:
+  ~PasswordsPrivateGetUrlCollectionFunction() override = default;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class PasswordsPrivateAddPasswordFunction : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("passwordsPrivate.addPassword",
+                             PASSWORDSPRIVATE_ADDPASSWORD)
+
+ protected:
+  ~PasswordsPrivateAddPasswordFunction() override = default;
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;

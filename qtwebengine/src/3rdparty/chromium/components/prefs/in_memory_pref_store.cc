@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/observer_list.h"
 #include "base/values.h"
 
 InMemoryPrefStore::InMemoryPrefStore() {}
@@ -36,7 +37,7 @@ void InMemoryPrefStore::RemoveObserver(PrefStore::Observer* observer) {
 }
 
 bool InMemoryPrefStore::HasObservers() const {
-  return observers_.might_have_observers();
+  return !observers_.empty();
 }
 
 bool InMemoryPrefStore::IsInitializationComplete() const {

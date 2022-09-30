@@ -11,10 +11,11 @@
 #include <type_traits>
 #include <utility>
 
+#include "base/as_const.h"
+#include "base/check.h"
 #include "base/check_op.h"
 #include "base/containers/vector_buffer.h"
-#include "base/macros.h"
-#include "base/stl_util.h"
+#include "base/ranges/algorithm.h"
 #include "base/template_util.h"
 
 // base::circular_deque is similar to std::deque. Unlike std::deque, the
@@ -313,7 +314,12 @@ class circular_deque_const_iterator {
   inline void CheckComparable(const circular_deque_const_iterator&) const {}
 #endif  // DCHECK_IS_ON()
 
+  // `parent_deque_` is not a raw_ptr<...> for performance reasons: Usually
+  // on-stack pointer, pointing back to the collection being iterated, owned by
+  // object that iterates over it.  Additionally this is supported by the
+  // analysis of sampling profiler data and tab_search:top100:2020.
   const circular_deque<T>* parent_deque_;
+
   size_t index_;
 
 #if DCHECK_IS_ON()
@@ -1097,7 +1103,7 @@ class circular_deque {
 // Implementations of base::Erase[If] (see base/stl_util.h).
 template <class T, class Value>
 size_t Erase(circular_deque<T>& container, const Value& value) {
-  auto it = std::remove(container.begin(), container.end(), value);
+  auto it = ranges::remove(container, value);
   size_t removed = std::distance(it, container.end());
   container.erase(it, container.end());
   return removed;
@@ -1105,7 +1111,7 @@ size_t Erase(circular_deque<T>& container, const Value& value) {
 
 template <class T, class Predicate>
 size_t EraseIf(circular_deque<T>& container, Predicate pred) {
-  auto it = std::remove_if(container.begin(), container.end(), pred);
+  auto it = ranges::remove_if(container, pred);
   size_t removed = std::distance(it, container.end());
   container.erase(it, container.end());
   return removed;

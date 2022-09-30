@@ -5,8 +5,9 @@
 #include "base/task/thread_pool/pooled_single_thread_task_runner_manager.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/atomic_flag.h"
 #include "base/synchronization/lock.h"
 #include "base/task/task_traits.h"
@@ -15,7 +16,7 @@
 #include "base/task/thread_pool/environment_config.h"
 #include "base/task/thread_pool/task_tracker.h"
 #include "base/task/thread_pool/test_utils.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/gtest_util.h"
 #include "base/test/test_timeouts.h"
 #include "base/test/test_waitable_event.h"
@@ -26,12 +27,12 @@
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 
 #include "base/win/com_init_util.h"
 #include "base/win/current_module.h"
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 namespace base {
 namespace internal {
@@ -39,9 +40,14 @@ namespace internal {
 namespace {
 
 class PooledSingleThreadTaskRunnerManagerTest : public testing::Test {
+ public:
+  PooledSingleThreadTaskRunnerManagerTest(
+      const PooledSingleThreadTaskRunnerManagerTest&) = delete;
+  PooledSingleThreadTaskRunnerManagerTest& operator=(
+      const PooledSingleThreadTaskRunnerManagerTest&) = delete;
+
  protected:
-  PooledSingleThreadTaskRunnerManagerTest()
-      : service_thread_("ThreadPoolServiceThread") {}
+  PooledSingleThreadTaskRunnerManagerTest() = default;
 
   void SetUp() override {
     service_thread_.Start();
@@ -67,14 +73,11 @@ class PooledSingleThreadTaskRunnerManagerTest : public testing::Test {
     single_thread_task_runner_manager_.reset();
   }
 
-  Thread service_thread_;
-  TaskTracker task_tracker_{"Test"};
+  Thread service_thread_{"ThreadPoolServiceThread"};
+  TaskTracker task_tracker_;
   DelayedTaskManager delayed_task_manager_;
   std::unique_ptr<PooledSingleThreadTaskRunnerManager>
       single_thread_task_runner_manager_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PooledSingleThreadTaskRunnerManagerTest);
 };
 
 void CaptureThreadRef(PlatformThreadRef* thread_ref) {
@@ -224,15 +227,16 @@ class PooledSingleThreadTaskRunnerManagerCommonTest
       public ::testing::WithParamInterface<SingleThreadTaskRunnerThreadMode> {
  public:
   PooledSingleThreadTaskRunnerManagerCommonTest() = default;
+  PooledSingleThreadTaskRunnerManagerCommonTest(
+      const PooledSingleThreadTaskRunnerManagerCommonTest&) = delete;
+  PooledSingleThreadTaskRunnerManagerCommonTest& operator=(
+      const PooledSingleThreadTaskRunnerManagerCommonTest&) = delete;
 
   scoped_refptr<SingleThreadTaskRunner> CreateTaskRunner(
       TaskTraits traits = {}) {
     return single_thread_task_runner_manager_->CreateSingleThreadTaskRunner(
         traits, GetParam());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PooledSingleThreadTaskRunnerManagerCommonTest);
 };
 
 }  // namespace
@@ -434,6 +438,9 @@ class CallJoinFromDifferentThread : public SimpleThread {
       : SimpleThread("PooledSingleThreadTaskRunnerManagerJoinThread"),
         manager_to_join_(manager_to_join) {}
 
+  CallJoinFromDifferentThread(const CallJoinFromDifferentThread&) = delete;
+  CallJoinFromDifferentThread& operator=(const CallJoinFromDifferentThread&) =
+      delete;
   ~CallJoinFromDifferentThread() override = default;
 
   void Run() override {
@@ -444,16 +451,18 @@ class CallJoinFromDifferentThread : public SimpleThread {
   void WaitForRunToStart() { run_started_event_.Wait(); }
 
  private:
-  PooledSingleThreadTaskRunnerManager* const manager_to_join_;
+  const raw_ptr<PooledSingleThreadTaskRunnerManager> manager_to_join_;
   TestWaitableEvent run_started_event_;
-
-  DISALLOW_COPY_AND_ASSIGN(CallJoinFromDifferentThread);
 };
 
 class PooledSingleThreadTaskRunnerManagerJoinTest
     : public PooledSingleThreadTaskRunnerManagerTest {
  public:
   PooledSingleThreadTaskRunnerManagerJoinTest() = default;
+  PooledSingleThreadTaskRunnerManagerJoinTest(
+      const PooledSingleThreadTaskRunnerManagerJoinTest&) = delete;
+  PooledSingleThreadTaskRunnerManagerJoinTest& operator=(
+      const PooledSingleThreadTaskRunnerManagerJoinTest&) = delete;
   ~PooledSingleThreadTaskRunnerManagerJoinTest() override = default;
 
  protected:
@@ -461,9 +470,6 @@ class PooledSingleThreadTaskRunnerManagerJoinTest
     // The tests themselves are responsible for calling JoinForTesting().
     single_thread_task_runner_manager_.reset();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PooledSingleThreadTaskRunnerManagerJoinTest);
 };
 
 }  // namespace
@@ -526,7 +532,7 @@ TEST_F(PooledSingleThreadTaskRunnerManagerJoinTest,
   join_from_different_thread.Join();
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 TEST_P(PooledSingleThreadTaskRunnerManagerCommonTest, COMSTAInitialized) {
   scoped_refptr<SingleThreadTaskRunner> com_task_runner =
@@ -572,6 +578,10 @@ class PooledSingleThreadTaskRunnerManagerTestWin
     : public PooledSingleThreadTaskRunnerManagerTest {
  public:
   PooledSingleThreadTaskRunnerManagerTestWin() = default;
+  PooledSingleThreadTaskRunnerManagerTestWin(
+      const PooledSingleThreadTaskRunnerManagerTestWin&) = delete;
+  PooledSingleThreadTaskRunnerManagerTestWin& operator=(
+      const PooledSingleThreadTaskRunnerManagerTestWin&) = delete;
 
   void SetUp() override {
     PooledSingleThreadTaskRunnerManagerTest::SetUp();
@@ -602,8 +612,6 @@ class PooledSingleThreadTaskRunnerManagerTestWin
   }
 
   bool register_class_succeeded_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PooledSingleThreadTaskRunnerManagerTestWin);
 };
 
 }  // namespace
@@ -636,7 +644,7 @@ TEST_F(PooledSingleThreadTaskRunnerManagerTestWin, PumpsMessages) {
   test::ShutdownTaskTracker(&task_tracker_);
 }
 
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 namespace {
 
@@ -644,13 +652,15 @@ class PooledSingleThreadTaskRunnerManagerStartTest
     : public PooledSingleThreadTaskRunnerManagerTest {
  public:
   PooledSingleThreadTaskRunnerManagerStartTest() = default;
+  PooledSingleThreadTaskRunnerManagerStartTest(
+      const PooledSingleThreadTaskRunnerManagerStartTest&) = delete;
+  PooledSingleThreadTaskRunnerManagerStartTest& operator=(
+      const PooledSingleThreadTaskRunnerManagerStartTest&) = delete;
 
  private:
   void StartSingleThreadTaskRunnerManagerFromSetUp() override {
     // Start() is called in the test body rather than in SetUp().
   }
-
-  DISALLOW_COPY_AND_ASSIGN(PooledSingleThreadTaskRunnerManagerStartTest);
 };
 
 }  // namespace

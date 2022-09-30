@@ -28,14 +28,13 @@
 #include "third_party/blink/renderer/core/svg/svg_tests.h"
 #include "third_party/blink/renderer/core/svg/svg_unit_types.h"
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 class PatternAttributes;
 class SVGAnimatedLength;
 class SVGAnimatedTransformList;
-class SVGResource;
 
 class SVGPatternElement final : public SVGElement,
                                 public SVGURIReference,
@@ -76,6 +75,7 @@ class SVGPatternElement final : public SVGElement,
   }
 
   void InvalidatePattern(LayoutInvalidationReasonForTracing);
+  void InvalidateDependentPatterns();
 
   const SVGPatternElement* ReferencedElement() const;
 
@@ -89,7 +89,7 @@ class SVGPatternElement final : public SVGElement,
       const AtomicString&,
       MutableCSSPropertyValueSet*) override;
 
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
   InsertionNotificationRequest InsertedInto(ContainerNode&) final;
   void RemovedFrom(ContainerNode&) final;
   void ChildrenChanged(const ChildrenChange&) override;
@@ -109,7 +109,7 @@ class SVGPatternElement final : public SVGElement,
   Member<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> pattern_units_;
   Member<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>>
       pattern_content_units_;
-  Member<SVGResource> resource_;
+  Member<IdTargetObserver> target_id_observer_;
 };
 
 }  // namespace blink

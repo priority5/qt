@@ -5,6 +5,7 @@
 #include "content/browser/xr/metrics/session_metrics_helper.h"
 
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "content/browser/xr/metrics/session_timer.h"
 #include "content/browser/xr/metrics/webxr_session_tracker.h"
@@ -21,31 +22,30 @@ const void* const kSessionMetricsHelperDataKey = &kSessionMetricsHelperDataKey;
 
 // minimum duration: 7 seconds for video, no minimum for headset/vr modes
 // maximum gap: 7 seconds between videos.  no gap for headset/vr-modes
-constexpr base::TimeDelta kMinimumVideoSessionDuration(
-    base::TimeDelta::FromSecondsD(7));
-constexpr base::TimeDelta kMaximumVideoSessionGap(
-    base::TimeDelta::FromSecondsD(7));
+constexpr base::TimeDelta kMinimumVideoSessionDuration(base::Seconds(7));
+constexpr base::TimeDelta kMaximumVideoSessionGap(base::Seconds(7));
 
-constexpr base::TimeDelta kMinimumHeadsetSessionDuration(
-    base::TimeDelta::FromSecondsD(0));
-constexpr base::TimeDelta kMaximumHeadsetSessionGap(
-    base::TimeDelta::FromSecondsD(0));
+constexpr base::TimeDelta kMinimumHeadsetSessionDuration(base::Seconds(0));
+constexpr base::TimeDelta kMaximumHeadsetSessionGap(base::Seconds(0));
 
 // Handles the lifetime of the helper which is attached to a WebContents.
 class SessionMetricsHelperData : public base::SupportsUserData::Data {
  public:
+  SessionMetricsHelperData() = delete;
+
   explicit SessionMetricsHelperData(
       SessionMetricsHelper* session_metrics_helper)
       : session_metrics_helper_(session_metrics_helper) {}
+
+  SessionMetricsHelperData(const SessionMetricsHelperData&) = delete;
+  SessionMetricsHelperData& operator=(const SessionMetricsHelperData&) = delete;
 
   ~SessionMetricsHelperData() override { delete session_metrics_helper_; }
 
   SessionMetricsHelper* get() const { return session_metrics_helper_; }
 
  private:
-  SessionMetricsHelper* session_metrics_helper_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(SessionMetricsHelperData);
+  raw_ptr<SessionMetricsHelper> session_metrics_helper_;
 };
 
 // Helper method to log out both the mode and the initially requested features
@@ -53,7 +53,8 @@ class SessionMetricsHelperData : public base::SupportsUserData::Data {
 void ReportInitialSessionData(
     WebXRSessionTracker* webxr_session_tracker,
     const device::mojom::XRSessionOptions& session_options,
-    const std::set<device::mojom::XRSessionFeature>& enabled_features) {
+    const std::unordered_set<device::mojom::XRSessionFeature>&
+        enabled_features) {
   DCHECK(webxr_session_tracker);
 
   webxr_session_tracker->ukm_entry()->SetMode(
@@ -104,7 +105,7 @@ SessionMetricsHelper::~SessionMetricsHelper() {
 mojo::PendingRemote<device::mojom::XRSessionMetricsRecorder>
 SessionMetricsHelper::StartInlineSession(
     const device::mojom::XRSessionOptions& session_options,
-    const std::set<device::mojom::XRSessionFeature>& enabled_features,
+    const std::unordered_set<device::mojom::XRSessionFeature>& enabled_features,
     size_t session_id) {
   DVLOG(1) << __func__;
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -147,7 +148,8 @@ void SessionMetricsHelper::StopAndRecordInlineSession(size_t session_id) {
 mojo::PendingRemote<device::mojom::XRSessionMetricsRecorder>
 SessionMetricsHelper::StartImmersiveSession(
     const device::mojom::XRSessionOptions& session_options,
-    const std::set<device::mojom::XRSessionFeature>& enabled_features) {
+    const std::unordered_set<device::mojom::XRSessionFeature>&
+        enabled_features) {
   DVLOG(1) << __func__;
   DCHECK(!webxr_immersive_session_tracker_);
   base::Time start_time = base::Time::Now();
@@ -249,26 +251,21 @@ void SessionMetricsHelper::MediaStoppedPlaying(
   }
 }
 
-void SessionMetricsHelper::DidStartNavigation(
-    content::NavigationHandle* handle) {
+void SessionMetricsHelper::PrimaryPageChanged(content::Page& page) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  // All sessions are terminated on navigations, so to ensure that we log
+  // everything that we have, cleanup any outstanding session trackers now.
+  if (webxr_immersive_session_tracker_)
+    StopAndRecordImmersiveSession();
 
-  if (handle && handle->IsInMainFrame() && !handle->IsSameDocument()) {
-    // All sessions are terminated on navigations, so to ensure that we log
-    // everything that we have, cleanup any outstanding session trackers now.
-    if (webxr_immersive_session_tracker_) {
-      StopAndRecordImmersiveSession();
-    }
-
-    for (auto& inline_session_tracker : webxr_inline_session_trackers_) {
-      inline_session_tracker.second->SetSessionEnd(base::Time::Now());
-      inline_session_tracker.second->ukm_entry()->SetDuration(
-          inline_session_tracker.second->GetRoundedDurationInSeconds());
-      inline_session_tracker.second->RecordEntry();
-    }
-
-    webxr_inline_session_trackers_.clear();
+  for (auto& inline_session_tracker : webxr_inline_session_trackers_) {
+    inline_session_tracker.second->SetSessionEnd(base::Time::Now());
+    inline_session_tracker.second->ukm_entry()->SetDuration(
+        inline_session_tracker.second->GetRoundedDurationInSeconds());
+    inline_session_tracker.second->RecordEntry();
   }
+
+  webxr_inline_session_trackers_.clear();
 }
 
 }  // namespace content

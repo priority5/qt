@@ -118,7 +118,7 @@ std::unique_ptr<DeviceInfo> GetLocalDeviceInfo(const std::string& extension_id,
 
 ExtensionFunction::ResponseAction SignedInDevicesGetFunction::Run() {
   std::unique_ptr<api::signed_in_devices::Get::Params> params(
-      api::signed_in_devices::Get::Params::Create(*args_));
+      api::signed_in_devices::Get::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   bool is_local = params->is_local.get() ? *params->is_local : false;
@@ -129,9 +129,10 @@ ExtensionFunction::ResponseAction SignedInDevicesGetFunction::Run() {
         GetLocalDeviceInfo(extension_id(), profile);
     std::unique_ptr<base::ListValue> result(new base::ListValue());
     if (device.get()) {
-      result->Append(device->ToValue());
+      result->Append(base::Value::FromUniquePtrValue(device->ToValue()));
     }
-    return RespondNow(OneArgument(std::move(result)));
+    return RespondNow(
+        OneArgument(base::Value::FromUniquePtrValue(std::move(result))));
   }
 
   std::vector<std::unique_ptr<DeviceInfo>> devices =
@@ -140,9 +141,10 @@ ExtensionFunction::ResponseAction SignedInDevicesGetFunction::Run() {
   std::unique_ptr<base::ListValue> result(new base::ListValue());
 
   for (const std::unique_ptr<DeviceInfo>& device : devices)
-    result->Append(device->ToValue());
+    result->Append(base::Value::FromUniquePtrValue(device->ToValue()));
 
-  return RespondNow(OneArgument(std::move(result)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(result))));
 }
 
 }  // namespace extensions

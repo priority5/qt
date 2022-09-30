@@ -7,16 +7,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ash/constants/ash_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/display/display_features.h"
 #include "ui/display/fake/fake_display_snapshot.h"
 #include "ui/display/manager/test/action_logger_util.h"
 #include "ui/display/manager/test/test_native_display_delegate.h"
+#include "ui/display/types/display_constants.h"
 #include "ui/display/util/display_util.h"
 
 namespace display {
@@ -25,6 +27,11 @@ namespace test {
 namespace {
 
 constexpr int64_t kDisplayIds[3] = {123, 456, 789};
+
+// Non-zero generic connector IDs.
+constexpr uint64_t kEdpConnectorId = 71u;
+constexpr uint64_t kSecondConnectorId = kEdpConnectorId + 10u;
+constexpr uint64_t kThirdConnectorId = kEdpConnectorId + 20u;
 
 std::unique_ptr<DisplayMode> MakeDisplayMode(int width,
                                              int height,
@@ -41,11 +48,11 @@ enum CallbackResult {
 };
 
 // Expected immediate configurations should be done without any delays.
-constexpr base::TimeDelta kNoDelay = base::TimeDelta::FromMilliseconds(0);
+constexpr base::TimeDelta kNoDelay = base::Milliseconds(0);
 
 // The expected configuration delay when resuming from suspend while in 2+
 // display mode.
-constexpr base::TimeDelta kLongDelay = base::TimeDelta::FromMilliseconds(
+constexpr base::TimeDelta kLongDelay = base::Milliseconds(
     DisplayConfigurator::kResumeConfigureMultiDisplayDelayMs);
 
 class TestObserver : public DisplayConfigurator::Observer {
@@ -55,6 +62,10 @@ class TestObserver : public DisplayConfigurator::Observer {
     Reset();
     configurator_->AddObserver(this);
   }
+
+  TestObserver(const TestObserver&) = delete;
+  TestObserver& operator=(const TestObserver&) = delete;
+
   ~TestObserver() override { configurator_->RemoveObserver(this); }
 
   int num_changes() const { return num_changes_; }
@@ -112,13 +123,15 @@ class TestObserver : public DisplayConfigurator::Observer {
   MultipleDisplayState latest_failed_state_;
   // Value most recently passed to OnPowerStateChanged().
   chromeos::DisplayPowerState latest_power_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
 
 class TestStateController : public DisplayConfigurator::StateController {
  public:
   TestStateController() : state_(MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED) {}
+
+  TestStateController(const TestStateController&) = delete;
+  TestStateController& operator=(const TestStateController&) = delete;
+
   ~TestStateController() override = default;
 
   void set_state(MultipleDisplayState state) { state_ = state; }
@@ -136,14 +149,16 @@ class TestStateController : public DisplayConfigurator::StateController {
 
  private:
   MultipleDisplayState state_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestStateController);
 };
 
 class TestMirroringController
     : public DisplayConfigurator::SoftwareMirroringController {
  public:
   TestMirroringController() : software_mirroring_enabled_(false) {}
+
+  TestMirroringController(const TestMirroringController&) = delete;
+  TestMirroringController& operator=(const TestMirroringController&) = delete;
+
   ~TestMirroringController() override = default;
 
   void SetSoftwareMirroring(bool enabled) override {
@@ -158,8 +173,6 @@ class TestMirroringController
 
  private:
   bool software_mirroring_enabled_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestMirroringController);
 };
 
 // Abstracts waiting for the display configuration to be completed and getting
@@ -168,6 +181,9 @@ class ConfigurationWaiter {
  public:
   explicit ConfigurationWaiter(DisplayConfigurator::TestApi* test_api)
       : test_api_(test_api), callback_result_(CALLBACK_NOT_CALLED) {}
+
+  ConfigurationWaiter(const ConfigurationWaiter&) = delete;
+  ConfigurationWaiter& operator=(const ConfigurationWaiter&) = delete;
 
   ~ConfigurationWaiter() = default;
 
@@ -184,7 +200,7 @@ class ConfigurationWaiter {
   // runs it and returns base::TimeDelta(). Otherwise, triggers the
   // configuration timer and returns its delay. If the timer wasn't running,
   // returns base::TimeDelta::Max().
-  base::TimeDelta Wait() WARN_UNUSED_RESULT {
+  [[nodiscard]] base::TimeDelta Wait() {
     base::RunLoop().RunUntilIdle();
     if (callback_result_ != CALLBACK_NOT_CALLED)
       return base::TimeDelta();
@@ -206,21 +222,29 @@ class ConfigurationWaiter {
 
   // The status of the display configuration.
   CallbackResult callback_result_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfigurationWaiter);
 };
 
 class DisplayConfiguratorTest : public testing::Test {
  public:
   DisplayConfiguratorTest() = default;
+
+  DisplayConfiguratorTest(const DisplayConfiguratorTest&) = delete;
+  DisplayConfiguratorTest& operator=(const DisplayConfiguratorTest&) = delete;
+
   ~DisplayConfiguratorTest() override = default;
 
   void SetUp() override {
     log_ = std::make_unique<ActionLogger>();
 
+    // TODO(crbug.com/1161556): |kEnableHardwareMirrorMode| is disabled by
+    // default. We enable it here to maintain test coverage for hardware mirror
+    // mode until it is permanently removed.
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kEnableHardwareMirrorMode);
+
     // Force system compositor mode to simulate on-device configurator behavior.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        chromeos::switches::kForceSystemCompositorMode);
+        ash::switches::kForceSystemCompositorMode);
 
     native_display_delegate_ = new TestNativeDisplayDelegate(log_.get());
     configurator_.SetDelegateForTesting(
@@ -234,6 +258,7 @@ class DisplayConfiguratorTest : public testing::Test {
                       .SetNativeMode(small_mode_.Clone())
                       .SetCurrentMode(small_mode_.Clone())
                       .SetType(DISPLAY_CONNECTION_TYPE_INTERNAL)
+                      .SetBaseConnectorId(kEdpConnectorId)
                       .SetIsAspectPerservingScaling(true)
                       .Build();
 
@@ -243,6 +268,7 @@ class DisplayConfiguratorTest : public testing::Test {
                       .SetCurrentMode(big_mode_.Clone())
                       .AddMode(small_mode_.Clone())
                       .SetType(DISPLAY_CONNECTION_TYPE_HDMI)
+                      .SetBaseConnectorId(kSecondConnectorId)
                       .SetIsAspectPerservingScaling(true)
                       .Build();
 
@@ -251,6 +277,7 @@ class DisplayConfiguratorTest : public testing::Test {
                       .SetNativeMode(small_mode_.Clone())
                       .SetCurrentMode(small_mode_.Clone())
                       .SetType(DISPLAY_CONNECTION_TYPE_HDMI)
+                      .SetBaseConnectorId(kThirdConnectorId)
                       .SetIsAspectPerservingScaling(true)
                       .Build();
 
@@ -272,7 +299,7 @@ class DisplayConfiguratorTest : public testing::Test {
   // output-change events to |configurator_| and triggers the configure
   // timeout if one was scheduled.
   void UpdateOutputs(size_t num_outputs, bool send_events) {
-    ASSERT_LE(num_outputs, base::size(outputs_));
+    ASSERT_LE(num_outputs, std::size(outputs_));
     std::vector<DisplaySnapshot*> outputs;
     for (size_t i = 0; i < num_outputs; ++i)
       outputs.push_back(outputs_[i].get());
@@ -330,6 +357,7 @@ class DisplayConfiguratorTest : public testing::Test {
   TestNativeDisplayDelegate* native_display_delegate_;  // not owned
   DisplayConfigurator::TestApi test_api_{&configurator_};
   ConfigurationWaiter config_waiter_{&test_api_};
+  base::test::ScopedFeatureList scoped_feature_list_;
 
   static constexpr size_t kNumOutputs = 3;
   std::unique_ptr<DisplaySnapshot> outputs_[kNumOutputs];
@@ -360,8 +388,6 @@ class DisplayConfiguratorTest : public testing::Test {
     return rest.empty() ? action
                         : JoinActions(action.c_str(), rest.c_str(), nullptr);
   }
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayConfiguratorTest);
 };
 
 }  // namespace
@@ -823,12 +849,27 @@ TEST_F(DisplayConfiguratorTest, InvalidMultipleDisplayStates) {
   EXPECT_EQ(2, observer_.num_failures());
 }
 
-TEST_F(DisplayConfiguratorTest, GetMultipleDisplayStateForMirroredDisplays) {
+TEST_F(DisplayConfiguratorTest, GetMultipleDisplayStateForHWMirroredDisplays) {
   UpdateOutputs(2, false);
   Init(false);
   state_controller_.set_state(MULTIPLE_DISPLAY_STATE_MULTI_MIRROR);
   configurator_.ForceInitialConfigure();
   EXPECT_EQ(MULTIPLE_DISPLAY_STATE_MULTI_MIRROR, configurator_.display_state());
+  EXPECT_FALSE(mirroring_controller_.SoftwareMirroringEnabled());
+}
+
+TEST_F(DisplayConfiguratorTest, GetMultipleDisplayStateForSWMirroredDisplays) {
+  // Disable hardware mirroring.
+  scoped_feature_list_.Reset();
+  scoped_feature_list_.InitAndDisableFeature(
+      features::kEnableHardwareMirrorMode);
+  UpdateOutputs(2, false);
+  Init(false);
+  state_controller_.set_state(MULTIPLE_DISPLAY_STATE_MULTI_MIRROR);
+  configurator_.ForceInitialConfigure();
+  EXPECT_EQ(MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED,
+            configurator_.display_state());
+  EXPECT_TRUE(mirroring_controller_.SoftwareMirroringEnabled());
 }
 
 TEST_F(DisplayConfiguratorTest, UpdateCachedOutputsEvenAfterFailure) {
@@ -937,28 +978,78 @@ TEST_F(DisplayConfiguratorTest, HandleConfigureCrtcFailure) {
                     .AddMode(modes[3]->Clone())
                     .AddMode(modes[4]->Clone())
                     .SetType(DISPLAY_CONNECTION_TYPE_INTERNAL)
+                    .SetBaseConnectorId(kEdpConnectorId)
                     .SetIsAspectPerservingScaling(true)
                     .Build();
 
-  // First test simply fails in MULTIPLE_DISPLAY_STATE_SINGLE mode. This is
-  // probably unrealistic but we want to make sure any assumptions don't creep
-  // in.
+  // Since Chrome restricts the internal display to its native mode it should
+  // not attempt other available modes. The likelihood of an internal display
+  // failing to pass a modeset test is low, but we cover this case here.
   native_display_delegate_->set_max_configurable_pixels(
       modes[2]->size().GetArea());
   state_controller_.set_state(MULTIPLE_DISPLAY_STATE_SINGLE);
   UpdateOutputs(1, true);
 
-  EXPECT_EQ(JoinActions(GetCrtcAction({outputs_[0]->display_id(),
-                                       gfx::Point(0, 0), modes[0].get()})
-                            .c_str(),
-                        GetCrtcAction({outputs_[0]->display_id(),
-                                       gfx::Point(0, 0), modes[3].get()})
-                            .c_str(),
-                        GetCrtcAction({outputs_[0]->display_id(),
-                                       gfx::Point(0, 0), modes[2].get()})
-                            .c_str(),
-                        nullptr),
+  EXPECT_EQ(JoinActions(
+                // Initial attempt fails. Initiate retry logic.
+                GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                               outputs_[0]->native_mode()})
+                    .c_str(),
+                // Retry fails since it cannot downgrade the internal display.
+                GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                               outputs_[0]->native_mode()})
+                    .c_str(),
+                nullptr),
             log_->GetActionsAndClear());
+
+  outputs_[0] = FakeDisplaySnapshot::Builder()
+                    .SetId(kDisplayIds[0])
+                    .SetNativeMode(modes[0]->Clone())
+                    .SetCurrentMode(modes[0]->Clone())
+                    .AddMode(modes[1]->Clone())
+                    .AddMode(modes[2]->Clone())
+                    .AddMode(modes[3]->Clone())
+                    .AddMode(modes[4]->Clone())
+                    .SetType(DISPLAY_CONNECTION_TYPE_DISPLAYPORT)
+                    .SetBaseConnectorId(kEdpConnectorId)
+                    .SetIsAspectPerservingScaling(true)
+                    .Build();
+
+  // This test simply fails in MULTIPLE_DISPLAY_STATE_SINGLE mode for an
+  // external display (assuming the internal display is disabled; e.g. the lid
+  // is closed).
+  UpdateOutputs(1, true);
+
+  EXPECT_EQ(JoinActions(
+                // Initial attempt fails. Initiate retry logic.
+                GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                               modes[0].get()})
+                    .c_str(),
+                // Retry attempts trying all available modes.
+                GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                               modes[0].get()})
+                    .c_str(),
+                GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                               modes[3].get()})
+                    .c_str(),
+                GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                               modes[2].get()})
+                    .c_str(),
+                nullptr),
+            log_->GetActionsAndClear());
+
+  outputs_[0] = FakeDisplaySnapshot::Builder()
+                    .SetId(kDisplayIds[0])
+                    .SetNativeMode(modes[0]->Clone())
+                    .SetCurrentMode(modes[0]->Clone())
+                    .AddMode(modes[1]->Clone())
+                    .AddMode(modes[2]->Clone())
+                    .AddMode(modes[3]->Clone())
+                    .AddMode(modes[4]->Clone())
+                    .SetType(DISPLAY_CONNECTION_TYPE_INTERNAL)
+                    .SetBaseConnectorId(kEdpConnectorId)
+                    .SetIsAspectPerservingScaling(true)
+                    .Build();
 
   outputs_[1] = FakeDisplaySnapshot::Builder()
                     .SetId(kDisplayIds[1])
@@ -969,52 +1060,83 @@ TEST_F(DisplayConfiguratorTest, HandleConfigureCrtcFailure) {
                     .AddMode(modes[3]->Clone())
                     .AddMode(modes[4]->Clone())
                     .SetType(DISPLAY_CONNECTION_TYPE_HDMI)
+                    .SetBaseConnectorId(kSecondConnectorId)
                     .SetIsAspectPerservingScaling(true)
                     .Build();
 
   // This test should attempt to configure a mirror mode that will not succeed
   // and should end up in extended mode.
   native_display_delegate_->set_max_configurable_pixels(
-      modes[3]->size().GetArea());
+      modes[1]->size().GetArea());
   state_controller_.set_state(MULTIPLE_DISPLAY_STATE_MULTI_MIRROR);
   UpdateOutputs(2, true);
 
   EXPECT_EQ(
       JoinActions(
-          GetCrtcAction(
-              {outputs_[0]->display_id(), gfx::Point(0, 0), modes[0].get()})
+          // Initial attempt fails. Initiate retry logic.
+          GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                         outputs_[0]->native_mode()})
               .c_str(),
-          // Then attempt to configure crtc1 with the first mode.
           GetCrtcAction(
               {outputs_[1]->display_id(), gfx::Point(0, 0), modes[0].get()})
               .c_str(),
-          // First mode tried is expected to fail and it will
-          // retry wil the 4th mode in the list.
+          // Retry logic fails to modeset internal display. Since internal
+          // displays are restricted to their preferred mode, there are no other
+          // modes to try. The configuration fails completely, but the external
+          // display will still try to modeset.
+          GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                         outputs_[0]->native_mode()})
+              .c_str(),
+          // The external display will cycle through all its available modes
+          // before failing completely.
           GetCrtcAction(
-              {outputs_[0]->display_id(), gfx::Point(0, 0), modes[3].get()})
+              {outputs_[1]->display_id(), gfx::Point(0, 0), modes[0].get()})
               .c_str(),
           GetCrtcAction(
               {outputs_[1]->display_id(), gfx::Point(0, 0), modes[3].get()})
               .c_str(),
-          // Since it was requested to go into mirror mode
-          // and the configured modes were different, it
-          // should now try and setup a valid configurable
-          // extended mode.
           GetCrtcAction(
-              {outputs_[0]->display_id(), gfx::Point(0, 0), modes[0].get()})
+              {outputs_[1]->display_id(), gfx::Point(0, 0), modes[2].get()})
+              .c_str(),
+          GetCrtcAction(
+              {outputs_[1]->display_id(), gfx::Point(0, 0), modes[1].get()})
+              .c_str(),
+          // Since mirror mode configuration failed it should now attempt to
+          // configure in extended mode. However, initial attempt fails.
+          // Initiate retry logic.
+          GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                         outputs_[0]->native_mode()})
               .c_str(),
           GetCrtcAction({outputs_[1]->display_id(),
                          gfx::Point(0, modes[0]->size().height() +
                                            DisplayConfigurator::kVerticalGap),
                          modes[0].get()})
               .c_str(),
-          GetCrtcAction(
-              {outputs_[0]->display_id(), gfx::Point(0, 0), modes[3].get()})
+          // Just as above, retry logic fails to modeset internal display.
+          GetCrtcAction({outputs_[0]->display_id(), gfx::Point(0, 0),
+                         outputs_[0]->native_mode()})
+              .c_str(),
+          //  The configuration fails completely but still attempts to modeset
+          // the external display.
+          GetCrtcAction({outputs_[1]->display_id(),
+                         gfx::Point(0, modes[0]->size().height() +
+                                           DisplayConfigurator::kVerticalGap),
+                         modes[0].get()})
               .c_str(),
           GetCrtcAction({outputs_[1]->display_id(),
                          gfx::Point(0, modes[0]->size().height() +
                                            DisplayConfigurator::kVerticalGap),
                          modes[3].get()})
+              .c_str(),
+          GetCrtcAction({outputs_[1]->display_id(),
+                         gfx::Point(0, modes[0]->size().height() +
+                                           DisplayConfigurator::kVerticalGap),
+                         modes[2].get()})
+              .c_str(),
+          GetCrtcAction({outputs_[1]->display_id(),
+                         gfx::Point(0, modes[0]->size().height() +
+                                           DisplayConfigurator::kVerticalGap),
+                         modes[1].get()})
               .c_str(),
           nullptr),
       log_->GetActionsAndClear());
@@ -1182,9 +1304,8 @@ TEST_F(DisplayConfiguratorTest,
             log_->GetActionsAndClear());
 
   config_waiter_.Reset();
-  EXPECT_EQ(
-      base::TimeDelta::FromMilliseconds(DisplayConfigurator::kConfigureDelayMs),
-      config_waiter_.Wait());
+  EXPECT_EQ(base::Milliseconds(DisplayConfigurator::kConfigureDelayMs),
+            config_waiter_.Wait());
   EXPECT_EQ(CALLBACK_NOT_CALLED, config_waiter_.callback_result());
   EXPECT_EQ(kNoDelay, config_waiter_.Wait());
   EXPECT_EQ(CALLBACK_SUCCESS, config_waiter_.callback_result());
@@ -1216,8 +1337,12 @@ TEST_F(DisplayConfiguratorTest,
   EXPECT_EQ(0, observer_.num_changes());
   EXPECT_EQ(1, observer_.num_failures());
 
-  EXPECT_EQ(GetCrtcActions(DisplayConfig::kOff, &small_mode_, &big_mode_),
-            log_->GetActionsAndClear());
+  EXPECT_EQ(
+      JoinActions(
+          GetCrtcActions(DisplayConfig::kOff, &small_mode_, &big_mode_).c_str(),
+          GetCrtcActions(DisplayConfig::kOff, &small_mode_, &big_mode_).c_str(),
+          nullptr),
+      log_->GetActionsAndClear());
 
   // This configuration should trigger a display configuration since the
   // previous configuration failed.
@@ -1233,6 +1358,11 @@ TEST_F(DisplayConfiguratorTest,
       JoinActions(
           GetCrtcActions(&small_mode_, &big_mode_).c_str(),
           GetCrtcActions(&small_mode_).c_str(),
+          GetCrtcAction({outputs_[1]->display_id(),
+                         gfx::Point(0, small_mode_.size().height() +
+                                           DisplayConfigurator::kVerticalGap),
+                         &big_mode_})
+              .c_str(),
           GetCrtcAction({outputs_[1]->display_id(),
                          gfx::Point(0, small_mode_.size().height() +
                                            DisplayConfigurator::kVerticalGap),
@@ -1440,9 +1570,8 @@ TEST_F(DisplayConfiguratorTest, PowerStateChange) {
   EXPECT_EQ(CALLBACK_SUCCESS, config_waiter_.callback_result());
   config_waiter_.Reset();
   // Run the task posted by OnConfigured().
-  EXPECT_EQ(
-      base::TimeDelta::FromMilliseconds(DisplayConfigurator::kConfigureDelayMs),
-      config_waiter_.Wait());
+  EXPECT_EQ(base::Milliseconds(DisplayConfigurator::kConfigureDelayMs),
+            config_waiter_.Wait());
   EXPECT_EQ(CALLBACK_NOT_CALLED, config_waiter_.callback_result());
   config_waiter_.Reset();
   // Run the task posted by TestNativeDisplayDelegate::GetDisplays().
@@ -1455,6 +1584,12 @@ TEST_F(DisplayConfiguratorTest, PowerStateChange) {
 class DisplayConfiguratorMultiMirroringTest : public DisplayConfiguratorTest {
  public:
   DisplayConfiguratorMultiMirroringTest() = default;
+
+  DisplayConfiguratorMultiMirroringTest(
+      const DisplayConfiguratorMultiMirroringTest&) = delete;
+  DisplayConfiguratorMultiMirroringTest& operator=(
+      const DisplayConfiguratorMultiMirroringTest&) = delete;
+
   ~DisplayConfiguratorMultiMirroringTest() override = default;
 
   void SetUp() override { DisplayConfiguratorTest::SetUp(); }
@@ -1486,9 +1621,6 @@ class DisplayConfiguratorMultiMirroringTest : public DisplayConfiguratorTest {
     EXPECT_TRUE(mirroring_controller_.SoftwareMirroringEnabled());
     EXPECT_EQ(1, observer_.num_changes());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DisplayConfiguratorMultiMirroringTest);
 };
 
 TEST_F(DisplayConfiguratorMultiMirroringTest,

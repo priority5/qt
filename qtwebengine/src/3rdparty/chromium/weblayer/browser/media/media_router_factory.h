@@ -5,12 +5,8 @@
 #ifndef WEBLAYER_BROWSER_MEDIA_MEDIA_ROUTER_FACTORY_H_
 #define WEBLAYER_BROWSER_MEDIA_MEDIA_ROUTER_FACTORY_H_
 
+#include "base/no_destructor.h"
 #include "components/media_router/browser/media_router_factory.h"
-
-namespace base {
-template <typename T>
-class NoDestructor;
-}
 
 namespace content {
 class BrowserContext;
@@ -24,6 +20,9 @@ class MediaRouterFactory : public media_router::MediaRouterFactory {
   MediaRouterFactory& operator=(const MediaRouterFactory&) = delete;
 
   static MediaRouterFactory* GetInstance();
+
+  // Determines if media router related features should be enabled.
+  static bool IsFeatureEnabled();
 
   // Performs platform and WebLayer-specific initialization for media_router.
   static void DoPlatformInitIfNeeded();

@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <QtCore>
 #include <QtTest>
@@ -84,7 +59,7 @@ public:
         typedef Type InnerType;
         typedef void(QOAuth1::*ConstSignalType)(const Type &);
         typedef void(QOAuth1::*SignalType)(Type);
-        typedef QVector<std::function<void(Type *, QOAuth1 *object)>> SetterFunctions;
+        typedef QList<std::function<void(Type *, QOAuth1 *object)>> SetterFunctions;
 
     private:
         // Each entry in setters should set its first parameter to an expected value
@@ -121,10 +96,10 @@ public:
         }
     };
 
-    QVariantMap parseAuthorizationString(const QString &string)
+    QMultiMap<QString, QVariant> parseAuthorizationString(const QString &string)
     {
         const QString prefix = QStringLiteral("OAuth ");
-        QVariantMap ret;
+        QMultiMap<QString, QVariant> ret;
         Q_ASSERT(string.startsWith(prefix));
         QRegularExpression rx("(?<key>.[^=]*)=\"(?<value>.[^\"]*)\",?");
         auto globalMatch = rx.globalMatch(string, prefix.size());
@@ -427,7 +402,7 @@ void tst_OAuth1::getToken()
     StringPair tokenReceived;
     QNetworkAccessManager networkAccessManager;
     QNetworkReplyPtr reply;
-    QVariantMap oauthHeaders;
+    QMultiMap<QString, QVariant> oauthHeaders;
 
     WebServer webServer([&](const WebServer::HttpRequest &request, QTcpSocket *socket) {
         oauthHeaders = parseAuthorizationString(request.headers["Authorization"]);
@@ -464,12 +439,12 @@ void tst_OAuth1::getToken()
     });
     QVERIFY(waitForFinish(reply) == Success);
     QCOMPARE(tokenReceived, expectedToken);
-    QCOMPARE(oauthHeaders["oauth_consumer_key"], clientCredentials.first);
-    QCOMPARE(oauthHeaders["oauth_version"], "1.0");
+    QCOMPARE(oauthHeaders.value("oauth_consumer_key"), clientCredentials.first);
+    QCOMPARE(oauthHeaders.value("oauth_version"), "1.0");
     QString expectedSignature;
     {
-        QVariantMap modifiedHeaders = oauthHeaders;
-        modifiedHeaders.insert(parameters);
+        QMultiMap<QString, QVariant> modifiedHeaders = oauthHeaders;
+        modifiedHeaders.unite(QMultiMap<QString, QVariant>(parameters));
         modifiedHeaders.remove("oauth_signature");
         QOAuth1Signature signature(url,
                                    clientCredentials.second,
@@ -488,7 +463,7 @@ void tst_OAuth1::getToken()
             break;
         }
     }
-    QCOMPARE(oauthHeaders["oauth_signature"], expectedSignature);
+    QCOMPARE(oauthHeaders.value("oauth_signature"), expectedSignature);
 }
 
 void tst_OAuth1::prepareRequestSignature_data()
@@ -569,7 +544,7 @@ void tst_OAuth1::prepareRequestSignature()
     o1.prepareRequest(&request, operation, body);
 
     // extract oauth parameters from the headers
-    QVariantMap authArgs;
+    QMultiMap<QString, QVariant> authArgs;
     const auto authHeader = request.rawHeader("Authorization");
     QCOMPARE(authHeader.mid(0, 6), "OAuth ");
     const auto values = authHeader.mid(6).split(',');
@@ -582,8 +557,8 @@ void tst_OAuth1::prepareRequestSignature()
     }
 
     //compare known parameters
-    QCOMPARE(authArgs.value(oauthConsumerKey).toByteArray(), consumerKey);
-    QCOMPARE(authArgs.value(oauthToken).toByteArray(), accessKey);
+    QCOMPARE(authArgs.value(oauthConsumerKey).toByteArray(), consumerKey.toLatin1());
+    QCOMPARE(authArgs.value(oauthToken).toByteArray(), accessKey.toLatin1());
     QCOMPARE(authArgs.value(oauthSignatureMethod).toByteArray(), QByteArray("HMAC-SHA1"));
     QCOMPARE(authArgs.value(oauthVersion).toByteArray(), QByteArray("1.0"));
     QVERIFY(authArgs.contains(oauthNonce));
@@ -594,7 +569,7 @@ void tst_OAuth1::prepareRequestSignature()
     const auto sigString = QUrl::fromPercentEncoding(authArgs.take(oauthSignature)
                                                      .toByteArray()).toUtf8();
 
-    authArgs.insert(extraParams);
+    authArgs.unite(QMultiMap<QString, QVariant>(extraParams));
     QOAuth1Signature signature(request.url(),
                                consumerSecret,
                                accessKeySecret,

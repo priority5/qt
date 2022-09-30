@@ -5,10 +5,10 @@
 #ifndef V8_EXECUTION_ARM64_POINTER_AUTHENTICATION_ARM64_H_
 #define V8_EXECUTION_ARM64_POINTER_AUTHENTICATION_ARM64_H_
 
-#include "src/execution/pointer-authentication.h"
-
 #include "src/common/globals.h"
+#include "src/deoptimizer/deoptimizer.h"
 #include "src/execution/arm64/simulator-arm64.h"
+#include "src/execution/pointer-authentication.h"
 
 namespace v8 {
 namespace internal {
@@ -24,7 +24,7 @@ namespace internal {
 V8_INLINE Address PointerAuthentication::AuthenticatePC(
     Address* pc_address, unsigned offset_from_sp) {
   uint64_t sp = reinterpret_cast<uint64_t>(pc_address) + offset_from_sp;
-  uint64_t pc = reinterpret_cast<uint64_t>(*pc_address);
+  uint64_t pc = static_cast<uint64_t>(*pc_address);
 #ifdef USE_SIMULATOR
   pc = Simulator::AuthPAC(pc, sp, Simulator::kPACKeyIB,
                           Simulator::kInstructionPointer);
@@ -47,15 +47,17 @@ V8_INLINE Address PointerAuthentication::StripPAC(Address pc) {
 #ifdef USE_SIMULATOR
   return Simulator::StripPAC(pc, Simulator::kInstructionPointer);
 #else
+  // x30 == lr, but use 'x30' instead of 'lr' below, as GCC does not accept
+  // 'lr' in the clobbers list.
   asm volatile(
-      "  mov x16, lr\n"
-      "  mov lr, %[pc]\n"
+      "  mov x16, x30\n"
+      "  mov x30, %[pc]\n"
       "  xpaclri\n"
-      "  mov %[pc], lr\n"
-      "  mov lr, x16\n"
+      "  mov %[pc], x30\n"
+      "  mov x30, x16\n"
       : [pc] "+r"(pc)
       :
-      : "x16", "lr");
+      : "x16", "x30");
   return pc;
 #endif
 }
@@ -67,7 +69,7 @@ V8_INLINE void PointerAuthentication::ReplacePC(Address* pc_address,
                                                 Address new_pc,
                                                 int offset_from_sp) {
   uint64_t sp = reinterpret_cast<uint64_t>(pc_address) + offset_from_sp;
-  uint64_t old_pc = reinterpret_cast<uint64_t>(*pc_address);
+  uint64_t old_pc = static_cast<uint64_t>(*pc_address);
 #ifdef USE_SIMULATOR
   uint64_t auth_old_pc = Simulator::AuthPAC(old_pc, sp, Simulator::kPACKeyIB,
                                             Simulator::kInstructionPointer);

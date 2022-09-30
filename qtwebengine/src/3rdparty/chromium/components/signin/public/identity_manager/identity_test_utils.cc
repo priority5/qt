@@ -9,45 +9,52 @@
 #include "base/guid.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
+#include "components/signin/internal/identity_manager/account_fetcher_service.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/internal/identity_manager/gaia_cookie_manager_service.h"
 #include "components/signin/internal/identity_manager/primary_account_manager.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate.h"
 #include "components/signin/public/base/list_accounts_test_utils.h"
-#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/primary_account_mutator.h"
 #include "components/signin/public/identity_manager/test_identity_manager_observer.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/components/account_manager/account_manager.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "components/account_manager_core/account.h"
+#include "components/account_manager_core/account_manager_facade.h"
 #endif
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "components/account_manager_core/chromeos/account_manager_facade_factory.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+
+#if BUILDFLAG(IS_ANDROID)
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate_android.h"
+#include "components/signin/public/android/test_support_jni_headers/AccountManagerFacadeUtil_jni.h"
 #endif
 
 namespace signin {
 
 namespace {
 
-void WaitForLoadCredentialsToComplete(IdentityManager* identity_manager) {
-  base::RunLoop run_loop;
-  TestIdentityManagerObserver load_credentials_observer(identity_manager);
-  load_credentials_observer.SetOnRefreshTokensLoadedCallback(
-      run_loop.QuitClosure());
-
-  if (identity_manager->AreRefreshTokensLoaded())
-    return;
-
-  // Do NOT explicitly load credentials here:
-  // 1. It is not re-entrant and will DCHECK fail.
-  // 2. It should have been called by IdentityManager during its initialization.
-
-  run_loop.Run();
+#if BUILDFLAG(IS_CHROMEOS)
+// Whether identity_test_utils uses `AccountManagerFacade` or
+// `ProfileOAuth2TokenService` for managing credentials.
+bool ShouldUseAccountManagerFacade(IdentityManager* identity_manager) {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // If account consistency is `kMirror` - use `AccountManagerFacade` for
+  // managing credentials, otherwise use `ProfileOAuth2TokenService`.
+  return identity_manager->GetAccountConsistency() ==
+         AccountConsistencyMethod::kMirror;
+#else
+  // In Ash - always use `AccountManagerFacade` for managing credentials.
+  return true;
+#endif
 }
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 // Helper function that updates the refresh token for |account_id| to
 // |new_token|. Before updating the refresh token, blocks until refresh tokens
@@ -56,9 +63,6 @@ void WaitForLoadCredentialsToComplete(IdentityManager* identity_manager) {
 void UpdateRefreshTokenForAccount(
     ProfileOAuth2TokenService* token_service,
     AccountTrackerService* account_tracker_service,
-#if defined(OS_CHROMEOS)
-    chromeos::AccountManager* account_manager,
-#endif
     IdentityManager* identity_manager,
     const CoreAccountId& account_id,
     const std::string& new_token) {
@@ -71,26 +75,29 @@ void UpdateRefreshTokenForAccount(
   // that refresh token mutation cannot occur until refresh tokens are loaded,
   // and it is desired to eventually enforce that invariant across all
   // platforms.
-  WaitForLoadCredentialsToComplete(identity_manager);
+  WaitForRefreshTokensLoaded(identity_manager);
 
   base::RunLoop run_loop;
   TestIdentityManagerObserver token_updated_observer(identity_manager);
   token_updated_observer.SetOnRefreshTokenUpdatedCallback(
       run_loop.QuitClosure());
 
-#if defined(OS_CHROMEOS)
-  const AccountInfo& account_info =
-      account_tracker_service->GetAccountInfo(account_id);
-
-  DCHECK(account_manager);
-  account_manager->UpsertAccount(
-      chromeos::AccountManager::AccountKey{
-          account_info.gaia,
-          chromeos::account_manager::AccountType::ACCOUNT_TYPE_GAIA},
-      account_info.email, new_token);
-#else
-  token_service->UpdateCredentials(account_id, new_token);
-#endif
+  // TODO(crbug.com/1226041): simplify this when all Lacros Profiles use Mirror.
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  if (ShouldUseAccountManagerFacade(identity_manager)) {
+    const AccountInfo& account_info =
+        account_tracker_service->GetAccountInfo(account_id);
+    account_manager::Account account{
+        account_manager::AccountKey{account_info.gaia,
+                                    account_manager::AccountType::kGaia},
+        account_info.email};
+    GetAccountManagerFacade(identity_manager)
+        ->UpsertAccountForTesting(account, new_token);
+  } else
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  {
+    token_service->UpdateCredentials(account_id, new_token);
+  }
 
   run_loop.Run();
 }
@@ -110,29 +117,44 @@ AccountInfo EnsureAccountExists(AccountTrackerService* account_tracker_service,
   return account_info;
 }
 
-}  // namespace
-
-CoreAccountInfo SetPrimaryAccount(IdentityManager* identity_manager,
-                                  const std::string& email) {
-  DCHECK(!identity_manager->HasPrimaryAccount());
-  PrimaryAccountManager* primary_account_manager =
-      identity_manager->GetPrimaryAccountManager();
-  DCHECK(!primary_account_manager->IsAuthenticated());
-
-  AccountInfo account_info =
-      EnsureAccountExists(identity_manager->GetAccountTrackerService(), email);
-  DCHECK(!account_info.gaia.empty());
-
-  primary_account_manager->SignIn(email);
-
-  DCHECK(primary_account_manager->IsAuthenticated());
-  DCHECK(identity_manager->HasPrimaryAccount());
-  return identity_manager->GetPrimaryAccountInfo();
+// Helper for `WaitForErrorStateOfRefreshTokenUpdatedForAccount` - checks the
+// current error status using a predicate and calls quit_closure if the
+// predicate returns `true`.
+void CompareErrorStatusAndCallClosure(
+    IdentityManager* identity_manager,
+    const CoreAccountId& account_id,
+    base::RepeatingCallback<bool(const GoogleServiceAuthError&)> predicate,
+    const base::RepeatingClosure& quit_closure) {
+  GoogleServiceAuthError error =
+      identity_manager->GetErrorStateOfRefreshTokenForAccount(account_id);
+  if (predicate.Run(error))
+    quit_closure.Run();
 }
 
-CoreAccountInfo SetUnconsentedPrimaryAccount(IdentityManager* identity_manager,
-                                             const std::string& email) {
-  DCHECK(!identity_manager->HasPrimaryAccount(ConsentLevel::kNotRequired));
+}  // namespace
+
+void WaitForRefreshTokensLoaded(IdentityManager* identity_manager) {
+  base::RunLoop run_loop;
+  TestIdentityManagerObserver load_credentials_observer(identity_manager);
+  load_credentials_observer.SetOnRefreshTokensLoadedCallback(
+      run_loop.QuitClosure());
+
+  if (identity_manager->AreRefreshTokensLoaded())
+    return;
+
+  // Do NOT explicitly load credentials here:
+  // 1. It is not re-entrant and will DCHECK fail.
+  // 2. It should have been called by IdentityManager during its initialization.
+
+  run_loop.Run();
+
+  DCHECK(identity_manager->AreRefreshTokensLoaded());
+}
+
+CoreAccountInfo SetPrimaryAccount(IdentityManager* identity_manager,
+                                  const std::string& email,
+                                  ConsentLevel consent_level) {
+  DCHECK(!identity_manager->HasPrimaryAccount(consent_level));
 
   AccountInfo account_info =
       EnsureAccountExists(identity_manager->GetAccountTrackerService(), email);
@@ -140,104 +162,114 @@ CoreAccountInfo SetUnconsentedPrimaryAccount(IdentityManager* identity_manager,
 
   PrimaryAccountManager* primary_account_manager =
       identity_manager->GetPrimaryAccountManager();
-  primary_account_manager->SetUnconsentedPrimaryAccountInfo(account_info);
+  primary_account_manager->SetPrimaryAccountInfo(account_info, consent_level);
 
-  DCHECK(identity_manager->HasPrimaryAccount(ConsentLevel::kNotRequired));
+  DCHECK(identity_manager->HasPrimaryAccount(consent_level));
   DCHECK_EQ(account_info.gaia,
-            identity_manager
-                ->GetPrimaryAccountInfo(signin::ConsentLevel::kNotRequired)
-                .gaia);
-  return identity_manager->GetPrimaryAccountInfo(
-      signin::ConsentLevel::kNotRequired);
+            identity_manager->GetPrimaryAccountInfo(consent_level).gaia);
+  return identity_manager->GetPrimaryAccountInfo(consent_level);
 }
 
 void SetRefreshTokenForPrimaryAccount(IdentityManager* identity_manager,
                                       const std::string& token_value) {
-  DCHECK(identity_manager->HasPrimaryAccount());
-  CoreAccountId account_id = identity_manager->GetPrimaryAccountId();
+  // Primary account for ConsentLevel::kSync (if one exists) is always the
+  // same as the one with ConsentLevel::kSignin.
+  DCHECK(identity_manager->HasPrimaryAccount(ConsentLevel::kSignin));
+  CoreAccountId account_id =
+      identity_manager->GetPrimaryAccountId(ConsentLevel::kSignin);
   SetRefreshTokenForAccount(identity_manager, account_id, token_value);
 }
 
 void SetInvalidRefreshTokenForPrimaryAccount(
     IdentityManager* identity_manager) {
-  DCHECK(identity_manager->HasPrimaryAccount());
-  CoreAccountId account_id = identity_manager->GetPrimaryAccountId();
+  DCHECK(identity_manager->HasPrimaryAccount(ConsentLevel::kSync));
+  CoreAccountId account_id =
+      identity_manager->GetPrimaryAccountId(ConsentLevel::kSync);
 
   SetInvalidRefreshTokenForAccount(identity_manager, account_id);
 }
 
 void RemoveRefreshTokenForPrimaryAccount(IdentityManager* identity_manager) {
-  if (!identity_manager->HasPrimaryAccount())
+  if (!identity_manager->HasPrimaryAccount(ConsentLevel::kSync))
     return;
 
-  CoreAccountId account_id = identity_manager->GetPrimaryAccountId();
+  CoreAccountId account_id =
+      identity_manager->GetPrimaryAccountId(ConsentLevel::kSync);
 
   RemoveRefreshTokenForAccount(identity_manager, account_id);
 }
 
 AccountInfo MakePrimaryAccountAvailable(IdentityManager* identity_manager,
-                                        const std::string& email) {
-  CoreAccountInfo account_info = SetPrimaryAccount(identity_manager, email);
+                                        const std::string& email,
+                                        ConsentLevel consent_level) {
+  CoreAccountInfo account_info =
+      SetPrimaryAccount(identity_manager, email, consent_level);
   SetRefreshTokenForPrimaryAccount(identity_manager);
-  base::Optional<AccountInfo> primary_account_info =
-      identity_manager
-          ->FindExtendedAccountInfoForAccountWithRefreshTokenByAccountId(
-              account_info.account_id);
+  AccountInfo primary_account_info =
+      identity_manager->FindExtendedAccountInfoByAccountId(
+          account_info.account_id);
   // Ensure that extended information for the account is available after setting
   // the refresh token.
-  DCHECK(primary_account_info.has_value());
-  return primary_account_info.value();
+  DCHECK(!primary_account_info.IsEmpty());
+  return primary_account_info;
 }
 
-void ClearPrimaryAccount(IdentityManager* identity_manager,
-                         ClearPrimaryAccountPolicy policy) {
-#if defined(OS_CHROMEOS)
+void RevokeSyncConsent(IdentityManager* identity_manager) {
+  if (!identity_manager->HasPrimaryAccount(ConsentLevel::kSync))
+    return;
+
+  DCHECK(identity_manager->GetPrimaryAccountMutator());
+  base::RunLoop run_loop;
+  TestIdentityManagerObserver signout_observer(identity_manager);
+  signout_observer.SetOnPrimaryAccountChangedCallback(base::BindOnce(
+      [](base::RunLoop* run_loop, PrimaryAccountChangeEvent event) {
+        if (event.GetEventTypeFor(ConsentLevel::kSync) ==
+            PrimaryAccountChangeEvent::Type::kCleared) {
+          run_loop->Quit();
+        }
+      },
+      &run_loop));
+  identity_manager->GetPrimaryAccountMutator()->RevokeSyncConsent(
+      signin_metrics::SIGNOUT_TEST,
+      signin_metrics::SignoutDelete::kIgnoreMetric);
+  run_loop.Run();
+}
+
+void ClearPrimaryAccount(IdentityManager* identity_manager) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // TODO(blundell): If we ever need this functionality on ChromeOS (which seems
   // unlikely), plumb this through to just clear the primary account info
   // synchronously with IdentityManager.
   NOTREACHED();
 #else
-  if (!identity_manager->HasPrimaryAccount(ConsentLevel::kNotRequired))
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  DCHECK_NE(identity_manager->GetAccountConsistency(),
+            AccountConsistencyMethod::kMirror);
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+
+  if (!identity_manager->HasPrimaryAccount(ConsentLevel::kSignin))
     return;
 
-  if (!identity_manager->HasPrimaryAccount(ConsentLevel::kSync)) {
-    PrimaryAccountManager* primary_account_manager =
-        identity_manager->GetPrimaryAccountManager();
-    primary_account_manager->SetUnconsentedPrimaryAccountInfo(
-        CoreAccountInfo());
-    RemoveRefreshTokenForAccount(
-        identity_manager,
-        identity_manager->GetPrimaryAccountId(ConsentLevel::kNotRequired));
-    return;
-  }
-
+  DCHECK(identity_manager->GetPrimaryAccountMutator());
+  bool wait_for_primary_acount_cleared_notification =
+      identity_manager->HasPrimaryAccount(ConsentLevel::kSync);
   base::RunLoop run_loop;
   TestIdentityManagerObserver signout_observer(identity_manager);
-  signout_observer.SetOnPrimaryAccountClearedCallback(run_loop.QuitClosure());
+  signout_observer.SetOnPrimaryAccountChangedCallback(base::BindOnce(
+      [](base::RunLoop* run_loop, PrimaryAccountChangeEvent event) {
+        if (event.GetEventTypeFor(ConsentLevel::kSignin) ==
+            PrimaryAccountChangeEvent::Type::kCleared) {
+          run_loop->Quit();
+        }
+      },
+      &run_loop));
+  identity_manager->GetPrimaryAccountMutator()->ClearPrimaryAccount(
+      signin_metrics::SIGNOUT_TEST,
+      signin_metrics::SignoutDelete::kIgnoreMetric);
 
-  PrimaryAccountManager* primary_account_manager =
-      identity_manager->GetPrimaryAccountManager();
-  signin_metrics::ProfileSignout signout_source_metric =
-      signin_metrics::SIGNOUT_TEST;
-  signin_metrics::SignoutDelete signout_delete_metric =
-      signin_metrics::SignoutDelete::IGNORE_METRIC;
-
-  switch (policy) {
-    case ClearPrimaryAccountPolicy::DEFAULT:
-      primary_account_manager->SignOut(signout_source_metric,
-                                       signout_delete_metric);
-      break;
-    case ClearPrimaryAccountPolicy::KEEP_ALL_ACCOUNTS:
-      primary_account_manager->SignOutAndKeepAllAccounts(signout_source_metric,
-                                                         signout_delete_metric);
-      break;
-    case ClearPrimaryAccountPolicy::REMOVE_ALL_ACCOUNTS:
-      primary_account_manager->SignOutAndRemoveAllAccounts(
-          signout_source_metric, signout_delete_metric);
-      break;
-  }
-
-  run_loop.Run();
+  if (wait_for_primary_acount_cleared_notification)
+    run_loop.Run();
 #endif
 }
 
@@ -251,7 +283,7 @@ AccountInfo MakeAccountAvailable(IdentityManager* identity_manager,
 
   // Wait until tokens are loaded, otherwise the account will be removed as soon
   // as tokens finish loading.
-  WaitForLoadCredentialsToComplete(identity_manager);
+  WaitForRefreshTokensLoaded(identity_manager);
 
   std::string gaia_id = GetTestGaiaIdForEmail(email);
   account_tracker_service->SeedAccountInfo(gaia_id, email);
@@ -278,7 +310,7 @@ AccountInfo MakeAccountAvailableWithCookies(
 
   // Wait until tokens are loaded, otherwise the account will be removed as soon
   // as tokens finish loading.
-  WaitForLoadCredentialsToComplete(identity_manager);
+  WaitForRefreshTokensLoaded(identity_manager);
 
   SetCookieAccounts(identity_manager, test_url_loader_factory,
                     {{email, gaia_id}});
@@ -299,13 +331,10 @@ void SetRefreshTokenForAccount(IdentityManager* identity_manager,
                                const std::string& token_value) {
   UpdateRefreshTokenForAccount(
       identity_manager->GetTokenService(),
-      identity_manager->GetAccountTrackerService(),
-#if defined(OS_CHROMEOS)
-      identity_manager->GetChromeOSAccountManager(),
-#endif
-      identity_manager, account_id,
-      token_value.empty() ? "refresh_token_for_" + account_id.ToString()
-                                + "_" + base::GenerateGUID()
+      identity_manager->GetAccountTrackerService(), identity_manager,
+      account_id,
+      token_value.empty() ? "refresh_token_for_" + account_id.ToString() + "_" +
+                                base::GenerateGUID()
                           : token_value);
 }
 
@@ -314,9 +343,6 @@ void SetInvalidRefreshTokenForAccount(IdentityManager* identity_manager,
   UpdateRefreshTokenForAccount(identity_manager->GetTokenService(),
 
                                identity_manager->GetAccountTrackerService(),
-#if defined(OS_CHROMEOS)
-                               identity_manager->GetChromeOSAccountManager(),
-#endif
                                identity_manager, account_id,
                                GaiaConstants::kInvalidRefreshToken);
 }
@@ -331,17 +357,20 @@ void RemoveRefreshTokenForAccount(IdentityManager* identity_manager,
   token_updated_observer.SetOnRefreshTokenRemovedCallback(
       run_loop.QuitClosure());
 
-#if defined(OS_CHROMEOS)
-  const AccountInfo& account_info =
-      identity_manager->GetAccountTrackerService()->GetAccountInfo(account_id);
-
-  identity_manager->GetChromeOSAccountManager()->RemoveAccount(
-      chromeos::AccountManager::AccountKey{
-          account_info.gaia,
-          chromeos::account_manager::AccountType::ACCOUNT_TYPE_GAIA});
-#else
-  identity_manager->GetTokenService()->RevokeCredentials(account_id);
-#endif
+  // TODO(crbug.com/1226041): simplify this when all Lacros Profiles use Mirror.
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  if (ShouldUseAccountManagerFacade(identity_manager)) {
+    const AccountInfo& account_info =
+        identity_manager->GetAccountTrackerService()->GetAccountInfo(
+            account_id);
+    GetAccountManagerFacade(identity_manager)
+        ->RemoveAccountForTesting(account_manager::AccountKey{
+            account_info.gaia, account_manager::AccountType::kGaia});
+  } else
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  {
+    identity_manager->GetTokenService()->RevokeCredentials(account_id);
+  }
 
   run_loop.Run();
 }
@@ -422,15 +451,39 @@ void UpdatePersistentErrorOfRefreshTokenForAccount(
       account_id, auth_error);
 }
 
+void WaitForErrorStateOfRefreshTokenUpdatedForAccount(
+    IdentityManager* identity_manager,
+    const CoreAccountId& account_id,
+    base::RepeatingCallback<bool(const GoogleServiceAuthError&)> predicate) {
+  DCHECK(identity_manager->HasAccountWithRefreshToken(account_id));
+
+  base::RunLoop run_loop;
+  base::RepeatingClosure check_error_status =
+      base::BindRepeating(&CompareErrorStatusAndCallClosure, identity_manager,
+                          account_id, predicate, run_loop.QuitClosure());
+  TestIdentityManagerObserver token_updated_observer(identity_manager);
+  token_updated_observer.SetOnErrorStateOfRefreshTokenUpdatedCallback(
+      check_error_status);
+  // Call callback explicitly to check the current error state before waiting.
+  check_error_status.Run();
+
+  run_loop.Run();
+}
+
 void DisableAccessTokenFetchRetries(IdentityManager* identity_manager) {
   identity_manager->GetTokenService()
       ->set_max_authorization_token_fetch_retries_for_testing(0);
 }
 
-#if defined(OS_ANDROID)
-void DisableInteractionWithSystemAccounts() {
-  ProfileOAuth2TokenServiceDelegateAndroid::
-      set_disable_interaction_with_system_accounts();
+void EnableAccountCapabilitiesFetches(IdentityManager* identity_manager) {
+  identity_manager->GetAccountFetcherService()
+      ->EnableAccountCapabilitiesFetcherForTest(true);
+}
+
+#if BUILDFLAG(IS_ANDROID)
+void SetUpMockAccountManagerFacade() {
+  Java_AccountManagerFacadeUtil_setUpMockFacade(
+      base::android::AttachCurrentThread());
 }
 #endif
 
@@ -460,5 +513,12 @@ void SimulateSuccessfulFetchOfAccountInfo(IdentityManager* identity_manager,
       identity_manager->GetAccountTrackerService();
   account_tracker_service->SetAccountInfoFromUserInfo(account_id, &user_info);
 }
+
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+account_manager::AccountManagerFacade* GetAccountManagerFacade(
+    IdentityManager* identity_manager) {
+  return identity_manager->GetAccountManagerFacade();
+}
+#endif
 
 }  // namespace signin

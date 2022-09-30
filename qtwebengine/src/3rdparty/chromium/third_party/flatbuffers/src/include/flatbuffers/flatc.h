@@ -14,18 +14,29 @@
  * limitations under the License.
  */
 
+#ifndef FLATBUFFERS_FLATC_H_
+#define FLATBUFFERS_FLATC_H_
+
 #include <functional>
 #include <limits>
 #include <string>
 
+#include "flatbuffers/bfbs_generator.h"
 #include "flatbuffers/flatbuffers.h"
 #include "flatbuffers/idl.h"
 #include "flatbuffers/util.h"
 
-#ifndef FLATC_H_
-#  define FLATC_H_
-
 namespace flatbuffers {
+
+extern void LogCompilerWarn(const std::string &warn);
+extern void LogCompilerError(const std::string &err);
+
+struct FlatCOption {
+  std::string short_opt;
+  std::string long_opt;
+  std::string parameter;
+  std::string description;
+};
 
 class FlatCompiler {
  public:
@@ -40,14 +51,13 @@ class FlatCompiler {
                                       const std::string &file_name);
 
     GenerateFn generate;
-    const char *generator_opt_short;
-    const char *generator_opt_long;
     const char *lang_name;
     bool schema_only;
     GenerateFn generateGRPC;
     flatbuffers::IDLOptions::Language lang;
-    const char *generator_help;
+    FlatCOption option;
     MakeRuleFn make_rule;
+    BfbsGenerator *bfbs_generator;
   };
 
   typedef void (*WarnFn)(const FlatCompiler *flatc, const std::string &warn,
@@ -94,4 +104,4 @@ class FlatCompiler {
 
 }  // namespace flatbuffers
 
-#endif  // FLATC_H_
+#endif  // FLATBUFFERS_FLATC_H_

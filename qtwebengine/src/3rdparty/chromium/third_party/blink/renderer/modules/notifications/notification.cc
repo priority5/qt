@@ -36,16 +36,18 @@
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/common/notifications/notification_constants.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value_factory.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_notification_action.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_notification_options.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/scoped_window_focus_allowed_indicator.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/performance_monitor.h"
@@ -59,7 +61,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/document_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -316,8 +317,8 @@ String Notification::badge() const {
   return data_->badge.GetString();
 }
 
-NavigatorVibration::VibrationPattern Notification::vibrate() const {
-  NavigatorVibration::VibrationPattern pattern;
+VibrationController::VibrationPattern Notification::vibrate() const {
+  VibrationController::VibrationPattern pattern;
   if (data_->vibration_pattern.has_value()) {
     pattern.AppendRange(data_->vibration_pattern->begin(),
                         data_->vibration_pattern->end());
@@ -388,8 +389,10 @@ Vector<v8::Local<v8::Value>> Notification::actions(
     // Both the Action dictionaries themselves and the sequence they'll be
     // returned in are expected to the frozen. This cannot be done with
     // WebIDL.
-    result[i] =
-        FreezeV8Object(ToV8(action, script_state), script_state->GetIsolate());
+    result[i] = FreezeV8Object(
+        ToV8Traits<NotificationAction>::ToV8(script_state, action)
+            .ToLocalChecked(),
+        script_state->GetIsolate());
   }
 
   return result;
@@ -502,6 +505,7 @@ bool Notification::HasPendingActivity() const {
 
 void Notification::Trace(Visitor* visitor) const {
   visitor->Trace(show_trigger_);
+  visitor->Trace(prepare_show_timer_);
   visitor->Trace(loader_);
   visitor->Trace(listener_receiver_);
   EventTargetWithInlineData::Trace(visitor);

@@ -28,13 +28,13 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace cc {
 class AnimationHost;
@@ -46,7 +46,6 @@ class CompositorAnimationTimeline;
 class LocalFrame;
 class LocalFrameView;
 class Page;
-class PaintLayerScrollableArea;
 class ScrollableArea;
 
 using MainThreadScrollingReasons = uint32_t;
@@ -64,6 +63,8 @@ class CORE_EXPORT ScrollingCoordinator final
       public CompositorScrollCallbacks {
  public:
   explicit ScrollingCoordinator(Page*);
+  ScrollingCoordinator(const ScrollingCoordinator&) = delete;
+  ScrollingCoordinator& operator=(const ScrollingCoordinator&) = delete;
   ~ScrollingCoordinator() override;
   void Trace(Visitor*) const;
 
@@ -77,20 +78,6 @@ class CORE_EXPORT ScrollingCoordinator final
 
   void WillBeDestroyed();
 
-  // Return whether this scrolling coordinator handles scrolling for the given
-  // frame view.
-  bool CoordinatesScrollingForFrameView(LocalFrameView*) const;
-
-  // Called when any frame has done its layout or compositing has changed.
-  void NotifyGeometryChanged(LocalFrameView*);
-
-  // Update non-fast scrollable regions and touch event target rects.
-  // TODO(pdr): Refactor this out of ScrollingCoordinator.
-  void UpdateAfterPaint(LocalFrameView*);
-
-  // Should be called whenever the root layer for the given frame view changes.
-  void FrameViewRootLayerDidChange(LocalFrameView*);
-
   void WillDestroyScrollableArea(ScrollableArea*);
 
   // Updates scroll offset in cc scroll tree immediately. We don't wait for
@@ -101,23 +88,6 @@ class CORE_EXPORT ScrollingCoordinator final
   // in normal document lifecycle update instead of here.
   // Returns whether the update is successful.
   bool UpdateCompositorScrollOffset(const LocalFrame&, const ScrollableArea&);
-
-  // Updates composited layers after changes to scrollable area  properties
-  // like content and container sizes, scrollbar existence, scrollability, etc.
-  // Scroll offset changes are updated by UpdateCompositedScrollOffset.
-  // TODO(pdr): Factor the container bounds change out of this function. The
-  // compositor tracks scroll container bounds on the scroll layer whereas
-  // blink uses a separate layer. To ensure the compositor scroll layer has the
-  // updated scroll container bounds, this needs to be called when the scrolling
-  // contents layer is resized.
-  void ScrollableAreaScrollLayerDidChange(PaintLayerScrollableArea*);
-  void ScrollableAreaScrollbarLayerDidChange(PaintLayerScrollableArea*,
-                                             ScrollbarOrientation);
-  // LocalFrame* must be a local root if non-null.
-  void TouchEventTargetRectsDidChange(LocalFrame*);
-
-  void UpdateNonFastScrollableRegions(LocalFrame*);
-  void UpdateTouchEventTargetRectsIfNeeded(LocalFrame*);
 
   cc::AnimationHost* GetCompositorAnimationHost() { return animation_host_; }
   CompositorAnimationTimeline* GetCompositorAnimationTimeline() {
@@ -131,9 +101,10 @@ class CORE_EXPORT ScrollingCoordinator final
       const CompositorElementId&);
 
   // ScrollCallbacks implementation
-  void DidScroll(CompositorElementId,
-                 const gfx::ScrollOffset&,
-                 const base::Optional<cc::TargetSnapAreaElementIds>&) override;
+  void DidCompositorScroll(
+      CompositorElementId,
+      const gfx::PointF&,
+      const absl::optional<cc::TargetSnapAreaElementIds>&) override;
   void DidChangeScrollbarsHidden(CompositorElementId, bool hidden) override;
 
   base::WeakPtr<ScrollingCoordinator> GetWeakPtr() {
@@ -146,14 +117,7 @@ class CORE_EXPORT ScrollingCoordinator final
   void Reset(LocalFrame*);
 
  protected:
-  bool IsForMainFrame(ScrollableArea*) const;
-
   Member<Page> page_;
-
-  // Dirty flags used to identify what really needs to be computed after
-  // compositing is updated.
-  bool touch_event_target_rects_are_dirty_;
-  bool should_scroll_on_main_thread_dirty_;
 
  private:
   void SetScrollbarLayer(ScrollableArea*,
@@ -173,8 +137,6 @@ class CORE_EXPORT ScrollingCoordinator final
   ScrollbarMap vertical_scrollbars_;
 
   base::WeakPtrFactory<ScrollingCoordinator> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ScrollingCoordinator);
 };
 
 }  // namespace blink

@@ -8,11 +8,11 @@
 #include "base/callback_helpers.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
-#include "base/task_runner.h"
+#include "base/task/task_runner.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/native_file_system_entry_factory.h"
+#include "content/public/browser/file_system_access_entry_factory.h"
 #include "storage/browser/file_system/isolated_context.h"
-#include "third_party/blink/public/mojom/file_system_access/native_file_system_manager.mojom.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 namespace content {
@@ -26,35 +26,41 @@ class WebContents;
 // All of this class has to be called on the UI thread.
 class CONTENT_EXPORT FileSystemChooser : public ui::SelectFileDialog::Listener {
  public:
-  using PathType = NativeFileSystemEntryFactory::PathType;
+  using PathType = FileSystemAccessEntryFactory::PathType;
   struct ResultEntry {
     PathType type;
     base::FilePath path;
   };
 
   using ResultCallback =
-      base::OnceCallback<void(blink::mojom::NativeFileSystemErrorPtr,
+      base::OnceCallback<void(blink::mojom::FileSystemAccessErrorPtr,
                               std::vector<ResultEntry>)>;
 
   class CONTENT_EXPORT Options {
    public:
-    Options(blink::mojom::ChooseFileSystemEntryType type,
-            std::vector<blink::mojom::ChooseFileSystemEntryAcceptsOptionPtr>
-                accepts,
-            bool include_accepts_all);
+    Options(ui::SelectFileDialog::Type type,
+            blink::mojom::AcceptsTypesInfoPtr accepts_types_info,
+            base::FilePath default_directory,
+            base::FilePath suggested_name);
     Options(const Options&) = default;
     Options& operator=(const Options&) = default;
 
-    blink::mojom::ChooseFileSystemEntryType type() const { return type_; }
+    ui::SelectFileDialog::Type type() const { return type_; }
     const ui::SelectFileDialog::FileTypeInfo& file_type_info() const {
       return file_types_;
     }
+    const base::FilePath& default_path() const { return default_path_; }
     int default_file_type_index() const { return default_file_type_index_; }
 
    private:
-    blink::mojom::ChooseFileSystemEntryType type_;
+    base::FilePath ResolveSuggestedNameExtension(
+        base::FilePath suggested_name,
+        ui::SelectFileDialog::FileTypeInfo& file_types);
+
+    ui::SelectFileDialog::Type type_;
     ui::SelectFileDialog::FileTypeInfo file_types_;
     int default_file_type_index_ = 0;
+    base::FilePath default_path_;
   };
 
   static void CreateAndShow(WebContents* web_contents,
@@ -62,7 +68,13 @@ class CONTENT_EXPORT FileSystemChooser : public ui::SelectFileDialog::Listener {
                             ResultCallback callback,
                             base::ScopedClosureRunner fullscreen_block);
 
-  FileSystemChooser(blink::mojom::ChooseFileSystemEntryType type,
+  // Returns whether the specified extension receives special handling by the
+  // Windows shell. These extensions should be sanitized before being shown in
+  // the "save as" file picker.
+  static bool IsShellIntegratedExtension(
+      const base::FilePath::StringType& extension);
+
+  FileSystemChooser(ui::SelectFileDialog::Type type,
                     ResultCallback callback,
                     base::ScopedClosureRunner fullscreen_block);
 
@@ -84,7 +96,7 @@ class CONTENT_EXPORT FileSystemChooser : public ui::SelectFileDialog::Listener {
   void FileSelectionCanceled(void* params) override;
 
   ResultCallback callback_;
-  blink::mojom::ChooseFileSystemEntryType type_;
+  ui::SelectFileDialog::Type type_;
   base::ScopedClosureRunner fullscreen_block_;
 
   scoped_refptr<ui::SelectFileDialog> dialog_;
@@ -92,4 +104,4 @@ class CONTENT_EXPORT FileSystemChooser : public ui::SelectFileDialog::Listener {
 
 }  // namespace content
 
-#endif  // CONTENT_BROWSER_NATIVE_FILE_SYSTEM_FILE_SYSTEM_CHOOSER_H_
+#endif  // CONTENT_BROWSER_FILE_SYSTEM_ACCESS_FILE_SYSTEM_CHOOSER_H_

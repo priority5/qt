@@ -10,6 +10,7 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorFilter.h"
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontTypes.h"
 #include "include/core/SkPaint.h"
@@ -25,6 +26,9 @@
 #include "include/core/SkTypes.h"
 #include "include/effects/SkGradientShader.h"
 #include "include/effects/SkLumaColorFilter.h"
+#include "include/effects/SkRuntimeEffect.h"
+#include "src/core/SkColorFilterPriv.h"
+#include "tools/Resources.h"
 #include "tools/ToolUtils.h"
 
 #include <string.h>
@@ -95,8 +99,8 @@ static void draw_scene(SkCanvas* canvas, const sk_sp<SkColorFilter>& filter, SkB
 }
 
 class LumaFilterGM : public skiagm::GM {
-public:
-    LumaFilterGM() {
+protected:
+    void onOnceBeforeDraw() override {
         SkColor  g1Colors[] = { kColor1, SkColorSetA(kColor1, 0x20) };
         SkColor  g2Colors[] = { kColor2, SkColorSetA(kColor2, 0x20) };
         SkPoint  g1Points[] = { { 0, 0 }, { 0,     100 } };
@@ -109,8 +113,6 @@ public:
         fGr2 = SkGradientShader::MakeLinear(g2Points, g2Colors, pos, SK_ARRAY_COUNT(g2Colors),
                                             SkTileMode::kClamp);
     }
-
-protected:
 
     SkString onShortName() override {
         return SkString("lumafilter");
@@ -167,3 +169,35 @@ private:
 //////////////////////////////////////////////////////////////////////////////
 
 DEF_GM(return new LumaFilterGM;)
+
+DEF_SIMPLE_GM(AlternateLuma, canvas, 384,128) {
+    sk_sp<SkImage> img = GetResourceAsImage("images/mandrill_128.png");
+    if (!img) {
+        return;
+    }
+
+    // Normal luma colorfilter on the left.
+    SkPaint paint;
+    paint.setColorFilter(SkLumaColorFilter::Make());
+    canvas->drawImage(img, 0,0, SkSamplingOptions{}, &paint);
+    canvas->translate(128,0);
+
+    // Original image in the middle for reference.
+    canvas->drawImage(img, 0,0);
+    canvas->translate(128,0);
+
+    // Here, RGB holds CIE XYZ. Splatting the G (Y) channel should result in (near) greyscale.
+    auto [effect, err] = SkRuntimeEffect::MakeForColorFilter(SkString{
+            "half4 main(half4 inColor) { return inColor.ggga; }"});
+    SkASSERT(effect && err.isEmpty());
+
+    sk_sp<SkColorFilter> filter = effect->makeColorFilter(SkData::MakeEmpty());
+    SkASSERT(filter);
+
+    SkAlphaType unpremul = kUnpremul_SkAlphaType;
+    paint.setColorFilter(SkColorFilterPriv::WithWorkingFormat(std::move(filter),
+                                                              &SkNamedTransferFn::kLinear,
+                                                              &SkNamedGamut::kXYZ,
+                                                              &unpremul));
+    canvas->drawImage(img, 0,0, SkSamplingOptions{}, &paint);
+}

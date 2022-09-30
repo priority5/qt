@@ -6,6 +6,7 @@
 
 #include "core/fxcrt/fx_system.h"
 #include "public/fpdfview.h"
+#include "third_party/base/check.h"
 
 #ifdef PDF_ENABLE_V8
 #include "testing/v8_test_environment.h"
@@ -18,12 +19,12 @@ EmbedderTestEnvironment* g_environment = nullptr;
 }  // namespace
 
 EmbedderTestEnvironment::EmbedderTestEnvironment() {
-  ASSERT(!g_environment);
+  DCHECK(!g_environment);
   g_environment = this;
 }
 
 EmbedderTestEnvironment::~EmbedderTestEnvironment() {
-  ASSERT(g_environment);
+  DCHECK(g_environment);
   g_environment = nullptr;
 }
 
@@ -38,6 +39,9 @@ void EmbedderTestEnvironment::SetUp() {
   config.m_pUserFontPaths = nullptr;
   config.m_v8EmbedderSlot = 0;
   config.m_pPlatform = nullptr;
+
+  config.m_pUserFontPaths = test_fonts_.font_paths();
+
 #ifdef PDF_ENABLE_V8
   config.m_pIsolate = V8TestEnvironment::GetInstance()->isolate();
   config.m_pPlatform = V8TestEnvironment::GetInstance()->platform();
@@ -47,6 +51,8 @@ void EmbedderTestEnvironment::SetUp() {
 #endif  // PDF_ENABLE_V8
 
   FPDF_InitLibraryWithConfig(&config);
+
+  test_fonts_.InstallFontMapper();
 }
 
 void EmbedderTestEnvironment::TearDown() {

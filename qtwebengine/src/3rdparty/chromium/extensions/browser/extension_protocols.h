@@ -10,12 +10,11 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/metrics/ukm_source_id.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 namespace base {
 class FilePath;
-class Time;
 }
 
 namespace content {
@@ -29,15 +28,8 @@ class HttpResponseHeaders;
 namespace extensions {
 
 using ExtensionProtocolTestHandler =
-    base::Callback<void(base::FilePath* directory_path,
-                        base::FilePath* relative_path)>;
-
-// Builds HTTP headers for an extension request. Hashes the time to avoid
-// exposing the exact user installation time of the extension.
-scoped_refptr<net::HttpResponseHeaders> BuildHttpHeaders(
-    const std::string& content_security_policy,
-    bool send_cors_header,
-    const base::Time& last_modified_time);
+    base::RepeatingCallback<void(base::FilePath* directory_path,
+                                 base::FilePath* relative_path)>;
 
 // Allows tests to set a special handler for chrome-extension:// urls. Note
 // that this goes through all the normal security checks; it's essentially a
@@ -49,7 +41,7 @@ void SetExtensionProtocolTestHandler(ExtensionProtocolTestHandler* handler);
 mojo::PendingRemote<network::mojom::URLLoaderFactory>
 CreateExtensionNavigationURLLoaderFactory(
     content::BrowserContext* browser_context,
-    base::UkmSourceId ukm_source_id,
+    ukm::SourceIdObj ukm_source_id,
     bool is_web_view_request);
 
 // Creates a new network::mojom::URLLoaderFactory implementation suitable for
@@ -61,8 +53,8 @@ CreateExtensionWorkerMainResourceURLLoaderFactory(
 
 // Creates a new network::mojom::URLLoaderFactory implementation suitable for
 // handling service worker main/imported script requests initiated by the
-// browser process to extension URLs during service worker update check when
-// ServiceWorkerImportedScriptUpdateCheck is enabled.
+// browser process to extension URLs when PlzServiceWorker is enabled or during
+// service worker update check.
 mojo::PendingRemote<network::mojom::URLLoaderFactory>
 CreateExtensionServiceWorkerScriptURLLoaderFactory(
     content::BrowserContext* browser_context);

@@ -4,9 +4,19 @@
 
 #include "components/autofill_assistant/browser/web/element_finder.h"
 
+#include <utility>
+
+#include "base/barrier_callback.h"
+#include "base/time/time.h"
 #include "components/autofill_assistant/browser/devtools/devtools_client.h"
 #include "components/autofill_assistant/browser/service.pb.h"
+#include "components/autofill_assistant/browser/user_data.h"
+#include "components/autofill_assistant/browser/user_data_util.h"
+#include "components/autofill_assistant/browser/web/element.h"
+#include "components/autofill_assistant/browser/web/js_filter_builder.h"
 #include "components/autofill_assistant/browser/web/web_controller_util.h"
+#include "components/autofill_assistant/content/browser/content_autofill_assistant_driver.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 
@@ -14,8 +24,7 @@ namespace autofill_assistant {
 
 namespace {
 // Javascript code to get document root element.
-const char kGetDocumentElement[] =
-    "(function() { return document.documentElement; }())";
+const char kGetDocumentElement[] = "document.documentElement;";
 
 const char kGetArrayElement[] = "function(index) { return this[index]; }";
 
@@ -72,223 +81,478 @@ bool ConvertPseudoType(const PseudoType pseudo_type,
   }
   return false;
 }
+
+void AddHostToList(std::vector<content::GlobalRenderFrameHostId>& host_ids,
+                   content::RenderFrameHost* host) {
+  host_ids.push_back(host->GetGlobalId());
+}
+
+ElementFinderInfoProto::SemanticInferenceStatus
+NodeDataStatusToSemanticInferenceStatus(
+    mojom::NodeDataStatus node_data_status) {
+  switch (node_data_status) {
+    case mojom::NodeDataStatus::kSuccess:
+      return ElementFinderInfoProto::SUCCESS;
+    case mojom::NodeDataStatus::kUnexpectedError:
+      return ElementFinderInfoProto::UNEXPECTED_ERROR;
+    case mojom::NodeDataStatus::kInitializationError:
+      return ElementFinderInfoProto::INITIALIZATION_ERROR;
+    case mojom::NodeDataStatus::kModelLoadError:
+      return ElementFinderInfoProto::MODEL_LOAD_ERROR;
+    case mojom::NodeDataStatus::kModelLoadTimeout:
+      return ElementFinderInfoProto::MODEL_LOAD_TIMEOUT;
+  }
+}
+
 }  // namespace
 
-ElementFinder::JsFilterBuilder::JsFilterBuilder() = default;
-ElementFinder::JsFilterBuilder::~JsFilterBuilder() = default;
+ElementFinderResult::ElementFinderResult() = default;
 
-std::vector<std::unique_ptr<runtime::CallArgument>>
-ElementFinder::JsFilterBuilder::BuildArgumentList() const {
-  auto str_array_arg = std::make_unique<base::Value>(base::Value::Type::LIST);
-  for (const std::string& str : arguments_) {
-    str_array_arg->Append(str);
-  }
-  std::vector<std::unique_ptr<runtime::CallArgument>> arguments;
-  arguments.emplace_back(runtime::CallArgument::Builder()
-                             .SetValue(std::move(str_array_arg))
-                             .Build());
-  return arguments;
+ElementFinderResult::~ElementFinderResult() = default;
+
+ElementFinderResult::ElementFinderResult(const ElementFinderResult&) = default;
+
+ElementFinderResult ElementFinderResult::EmptyResult() {
+  return ElementFinderResult();
 }
 
-// clang-format off
-std::string ElementFinder::JsFilterBuilder::BuildFunction() const {
-  return base::StrCat({
-    R"(
-    function(args) {
-      let elements = [this];
-    )",
-    base::JoinString(lines_, "\n"),
-    R"(
-      if (elements.length == 0) return null;
-      if (elements.length == 1) { return elements[0] }
-      return elements;
-    })"
-  });
-}
-// clang-format on
-
-bool ElementFinder::JsFilterBuilder::AddFilter(
-    const SelectorProto::Filter& filter) {
-  switch (filter.filter_case()) {
-    case SelectorProto::Filter::kCssSelector:
-      // clang-format off
-      AddLine({
-        "elements = elements.flatMap((e) => Array.from(e.querySelectorAll(",
-        AddArgument(filter.css_selector()),
-        ")));"
-      });
-
-      // Elements are temporarily put into a set to get rid of duplicates, which
-      // are likely when using inner text before CSS selector filters. We must
-      // not return duplicates as they cause incorrect TOO_MANY_ELEMENTS errors.
-      AddLine(R"(if (elements.length > 1) {
-        elements = Array.from(new Set(elements));
-      })");
-      // clang-format on
-      return true;
-
-    case SelectorProto::Filter::kInnerText:
-      AddRegexpFilter(filter.inner_text(), "innerText");
-      return true;
-
-    case SelectorProto::Filter::kValue:
-      AddRegexpFilter(filter.value(), "value");
-      return true;
-
-    case SelectorProto::Filter::kBoundingBox:
-      AddLine(
-          "elements = elements.filter((e) => e.getClientRects().length > 0);");
-      return true;
-
-    case SelectorProto::Filter::kPseudoElementContent: {
-      // When a content is set, window.getComputedStyle().content contains a
-      // double-quoted string with the content, unquoted here by JSON.parse().
-      std::string re_var =
-          AddRegexpInstance(filter.pseudo_element_content().content());
-      std::string pseudo_type =
-          PseudoTypeName(filter.pseudo_element_content().pseudo_type());
-
-      AddLine("elements = elements.filter((e) => {");
-      AddLine({"  const s = window.getComputedStyle(e, '", pseudo_type, "');"});
-      AddLine("  if (!s || !s.content || !s.content.startsWith('\"')) {");
-      AddLine("    return false;");
-      AddLine("  }");
-      AddLine({"  return ", re_var, ".test(JSON.parse(s.content));"});
-      AddLine("});");
-      return true;
-    }
-
-    case SelectorProto::Filter::kLabelled:
-      AddLine(R"(elements = elements.flatMap((e) => {
-  if (e.tagName != 'LABEL') return [];
-  let element = null;
-  const id = e.getAttribute('for');
-  if (id) {
-    element = document.getElementById(id)
-  }
-  if (!element) {
-    element = e.querySelector(
-      'button,input,keygen,meter,output,progress,select,textarea');
-  }
-  if (element) return [element];
-  return [];
-});
-)");
-      // The selector above for the case where there's no "for" corresponds to
-      // the list of labelable elements listed on "W3C's HTML5: Edition for Web
-      // Authors":
-      // https://www.w3.org/TR/2011/WD-html5-author-20110809/forms.html#category-label
-      return true;
-
-    case SelectorProto::Filter::kEnterFrame:
-    case SelectorProto::Filter::kPseudoType:
-    case SelectorProto::Filter::kPickOne:
-    case SelectorProto::Filter::kClosest:
-    case SelectorProto::Filter::FILTER_NOT_SET:
-      return false;
-  }
-}
-
-std::string ElementFinder::JsFilterBuilder::AddRegexpInstance(
-    const SelectorProto::TextFilter& filter) {
-  std::string re_flags = filter.case_sensitive() ? "" : "i";
-  std::string re_var = DeclareVariable();
-  AddLine({"const ", re_var, " = RegExp(", AddArgument(filter.re2()), ", '",
-           re_flags, "');"});
-  return re_var;
-}
-
-void ElementFinder::JsFilterBuilder::AddRegexpFilter(
-    const SelectorProto::TextFilter& filter,
-    const std::string& property) {
-  std::string re_var = AddRegexpInstance(filter);
-  AddLine({"elements = elements.filter((e) => ", re_var, ".test(e.", property,
-           "));"});
-}
-
-std::string ElementFinder::JsFilterBuilder::DeclareVariable() {
-  return base::StrCat({"v", base::NumberToString(variable_counter_++)});
-}
-
-std::string ElementFinder::JsFilterBuilder::AddArgument(
-    const std::string& value) {
-  int index = arguments_.size();
-  arguments_.emplace_back(value);
-  return base::StrCat({"args[", base::NumberToString(index), "]"});
-}
-
-ElementFinder::Result::Result() = default;
-
-ElementFinder::Result::~Result() = default;
-
-ElementFinder::Result::Result(const Result&) = default;
-
-ElementFinder::ElementFinder(content::WebContents* web_contents,
-                             DevtoolsClient* devtools_client,
-                             const Selector& selector,
-                             ResultType result_type)
+ElementFinder::ElementFinder(
+    content::WebContents* web_contents,
+    DevtoolsClient* devtools_client,
+    const UserData* user_data,
+    ProcessedActionStatusDetailsProto* log_info,
+    AnnotateDomModelService* annotate_dom_model_service,
+    const Selector& selector,
+    ResultType result_type)
     : web_contents_(web_contents),
       devtools_client_(devtools_client),
+      user_data_(user_data),
+      log_info_(log_info),
+      annotate_dom_model_service_(annotate_dom_model_service),
       selector_(selector),
       result_type_(result_type) {}
 
 ElementFinder::~ElementFinder() = default;
 
-void ElementFinder::Start(Callback callback) {
-  StartInternal(std::move(callback), web_contents_->GetMainFrame(),
-                /* frame_id= */ "", /* document_object_id= */ "");
-}
-
-void ElementFinder::StartInternal(Callback callback,
-                                  content::RenderFrameHost* frame,
-                                  const std::string& frame_id,
-                                  const std::string& document_object_id) {
+void ElementFinder::Start(const ElementFinderResult& start_element,
+                          Callback callback) {
   callback_ = std::move(callback);
 
   if (selector_.empty()) {
-    SendResult(ClientStatus(INVALID_SELECTOR));
+    SendResult(ClientStatus(INVALID_SELECTOR),
+               std::make_unique<ElementFinderResult>(
+                   ElementFinderResult::EmptyResult()));
     return;
   }
 
-  current_frame_ = frame;
-  current_frame_id_ = frame_id;
-  current_frame_root_ = document_object_id;
-  if (current_frame_root_.empty()) {
+  // TODO(b/224747076): Coordinate the dom_model_service experiment in the
+  // backend. So that we don't get semantic selectors if the client doesn't
+  // support the model.
+  if (selector_.proto.has_semantic_information()) {
+    if (!annotate_dom_model_service_) {
+      SendResult(ClientStatus(PRECONDITION_FAILED),
+                 std::make_unique<ElementFinderResult>(
+                     ElementFinderResult::EmptyResult()));
+      return;
+    }
+
+    if (selector_.proto.semantic_information().check_matches_css_element()) {
+      // This will return the element being used.
+      AddAndStartRunner(start_element,
+                        std::make_unique<CssElementFinder>(
+                            web_contents_, devtools_client_, user_data_,
+                            result_type_, selector_));
+    }
+
+    AddAndStartRunner(start_element,
+                      std::make_unique<SemanticElementFinder>(
+                          web_contents_, devtools_client_,
+                          annotate_dom_model_service_, selector_));
+    return;
+  }
+
+  AddAndStartRunner(start_element, std::make_unique<CssElementFinder>(
+                                       web_contents_, devtools_client_,
+                                       user_data_, result_type_, selector_));
+}
+
+void ElementFinder::AddAndStartRunner(
+    const ElementFinderResult& start_element,
+    std::unique_ptr<ElementFinderBase> runner) {
+  auto* runner_ptr = runner.get();
+  runners_.emplace_back(std::move(runner));
+  results_.resize(runners_.size());
+  runner_ptr->Start(
+      start_element,
+      base::BindOnce(&ElementFinder::OnResult, weak_ptr_factory_.GetWeakPtr(),
+                     /* index= */ runners_.size() - 1));
+}
+
+void ElementFinder::UpdateLogInfo(const ClientStatus& status) {
+  if (log_info_ == nullptr) {
+    return;
+  }
+
+  auto* info = log_info_->add_element_finder_info();
+  for (const auto& runner : runners_) {
+    info->MergeFrom(runner->GetLogInfo());
+  }
+
+  info->set_status(status.proto_status());
+  if (selector_.proto.has_tracking_id()) {
+    info->set_tracking_id(selector_.proto.tracking_id());
+  }
+
+  if (runners_.size() > 1u) {
+    // By convention the 0th result is used as the result being returned for
+    // usage. If there's more than one runner, use it to compare it to the
+    // semantic results.
+    int css_backend_node_id = runners_[0]->GetBackendNodeId();
+    for (auto& predicted_element : *info->mutable_semantic_inference_result()
+                                        ->mutable_predicted_elements()) {
+      predicted_element.set_matches_css_element(
+          predicted_element.backend_node_id() == css_backend_node_id);
+    }
+  }
+}
+
+void ElementFinder::SendResult(const ClientStatus& status,
+                               std::unique_ptr<ElementFinderResult> result) {
+  UpdateLogInfo(status);
+  DCHECK(callback_);
+  std::move(callback_).Run(
+      ClientStatus(status.proto_status(), status.details()), std::move(result));
+}
+
+void ElementFinder::OnResult(size_t index,
+                             const ClientStatus& status,
+                             std::unique_ptr<ElementFinderResult> result) {
+  results_[index] = std::make_pair(status, std::move(result));
+  ++num_results_;
+
+  if (num_results_ < results_.size()) {
+    return;
+  }
+
+  DCHECK(!results_.empty());
+  DCHECK(!runners_.empty());
+  SendResult(results_[0].first, std::move(results_[0].second));
+}
+
+ElementFinder::ElementFinderBase::~ElementFinderBase() = default;
+
+ElementFinder::SemanticElementFinder::SemanticElementFinder(
+    content::WebContents* web_contents,
+    DevtoolsClient* devtools_client,
+    AnnotateDomModelService* annotate_dom_model_service,
+    const Selector& selector)
+    : web_contents_(web_contents),
+      devtools_client_(devtools_client),
+      annotate_dom_model_service_(annotate_dom_model_service),
+      selector_(selector) {
+  DCHECK(annotate_dom_model_service_);
+}
+ElementFinder::SemanticElementFinder::~SemanticElementFinder() = default;
+
+void ElementFinder::SemanticElementFinder::GiveUpWithError(
+    const ClientStatus& status) {
+  DCHECK(!status.ok());
+  if (!callback_) {
+    return;
+  }
+
+  SendResult(status, ElementFinderResult::EmptyResult());
+}
+
+void ElementFinder::SemanticElementFinder::ResultFound(
+    content::RenderFrameHost* render_frame_host,
+    const std::string& object_id) {
+  if (!callback_) {
+    return;
+  }
+
+  ElementFinderResult result;
+  result.SetRenderFrameHost(render_frame_host);
+  result.SetObjectId(object_id);
+
+  SendResult(OkClientStatus(), result);
+}
+
+void ElementFinder::SemanticElementFinder::SendResult(
+    const ClientStatus& status,
+    const ElementFinderResult& result) {
+  DCHECK(callback_);
+  std::move(callback_).Run(status,
+                           std::make_unique<ElementFinderResult>(result));
+}
+
+void ElementFinder::SemanticElementFinder::Start(
+    const ElementFinderResult& start_element,
+    Callback callback) {
+  callback_ = std::move(callback);
+
+  auto* start_frame = start_element.render_frame_host();
+  if (!start_frame) {
+    start_frame = web_contents_->GetMainFrame();
+  }
+  RunAnnotateDomModel(start_frame);
+}
+
+ElementFinderInfoProto ElementFinder::SemanticElementFinder::GetLogInfo()
+    const {
+  DCHECK(!callback_);  // Run after finish.
+
+  ElementFinderInfoProto info;
+  DCHECK(selector_.proto.has_semantic_information());
+  for (auto node_data_status : node_data_frame_status_) {
+    info.mutable_semantic_inference_result()->add_status_per_frame(
+        NodeDataStatusToSemanticInferenceStatus(node_data_status));
+  }
+  for (const auto& semantic_node_result : semantic_node_results_) {
+    auto* predicted_element =
+        info.mutable_semantic_inference_result()->add_predicted_elements();
+    predicted_element->set_backend_node_id(
+        semantic_node_result.backend_node_id());
+    *predicted_element->mutable_semantic_information() =
+        selector_.proto.semantic_information();
+    // TODO(b/217160707): For the ignore_objective case this is not correct
+    // and the inferred objective should be returned from the Agent and used
+    // here.
+  }
+
+  return info;
+}
+
+int ElementFinder::SemanticElementFinder::GetBackendNodeId() const {
+  if (semantic_node_results_.empty()) {
+    return 0;
+  }
+  return semantic_node_results_[0].backend_node_id();
+}
+
+void ElementFinder::SemanticElementFinder::RunAnnotateDomModel(
+    content::RenderFrameHost* start_frame) {
+  std::vector<content::GlobalRenderFrameHostId> host_ids;
+  start_frame->ForEachRenderFrameHost(
+      base::BindRepeating(&AddHostToList, std::ref(host_ids)));
+  const auto run_on_frame =
+      base::BarrierCallback<std::vector<GlobalBackendNodeId>>(
+          host_ids.size(),
+          base::BindOnce(&SemanticElementFinder::OnRunAnnotateDomModel,
+                         weak_ptr_factory_.GetWeakPtr()));
+  for (const auto& host_id : host_ids) {
+    RunAnnotateDomModelOnFrame(host_id, run_on_frame);
+  }
+}
+
+void ElementFinder::SemanticElementFinder::RunAnnotateDomModelOnFrame(
+    const content::GlobalRenderFrameHostId& host_id,
+    base::OnceCallback<void(std::vector<GlobalBackendNodeId>)> callback) {
+  content::RenderFrameHost* render_frame_host =
+      content::RenderFrameHost::FromID(host_id);
+  if (!render_frame_host) {
+    std::move(callback).Run(std::vector<GlobalBackendNodeId>());
+    return;
+  }
+
+  auto* driver = ContentAutofillAssistantDriver::GetOrCreateForRenderFrameHost(
+      render_frame_host, annotate_dom_model_service_);
+  if (!driver) {
+    NOTREACHED();
+    std::move(callback).Run(std::vector<GlobalBackendNodeId>());
+    return;
+  }
+
+  driver->GetAutofillAssistantAgent()->GetSemanticNodes(
+      selector_.proto.semantic_information().semantic_role(),
+      selector_.proto.semantic_information().objective(),
+      selector_.proto.semantic_information().ignore_objective(),
+      base::Milliseconds(
+          selector_.proto.semantic_information().model_timeout_ms()),
+      base::BindOnce(&SemanticElementFinder::OnRunAnnotateDomModelOnFrame,
+                     weak_ptr_factory_.GetWeakPtr(), host_id,
+                     std::move(callback)));
+}
+
+void ElementFinder::SemanticElementFinder::OnRunAnnotateDomModelOnFrame(
+    const content::GlobalRenderFrameHostId& host_id,
+    base::OnceCallback<void(std::vector<GlobalBackendNodeId>)> callback,
+    mojom::NodeDataStatus status,
+    const std::vector<NodeData>& node_data) {
+  node_data_frame_status_.emplace_back(status);
+
+  std::vector<GlobalBackendNodeId> node_ids;
+  for (const auto& node : node_data) {
+    node_ids.emplace_back(GlobalBackendNodeId(host_id, node.backend_node_id));
+  }
+  std::move(callback).Run(node_ids);
+}
+
+void ElementFinder::SemanticElementFinder::OnRunAnnotateDomModel(
+    const std::vector<std::vector<GlobalBackendNodeId>>& all_nodes) {
+  for (const auto& node_ids : all_nodes) {
+    semantic_node_results_.insert(semantic_node_results_.end(),
+                                  node_ids.begin(), node_ids.end());
+  }
+
+  // For now we only support finding a single element.
+  // TODO(b/224746702): Emit multiple ResolveNode calls for the case where the
+  // result type is not ResultType::kExactlyOneMatch.
+  if (semantic_node_results_.size() > 1) {
+    VLOG(1) << __func__ << " Got " << semantic_node_results_.size()
+            << " matches for " << selector_ << ", when only 1 was expected.";
+    GiveUpWithError(ClientStatus(TOO_MANY_ELEMENTS));
+    return;
+  }
+  if (semantic_node_results_.empty()) {
+    GiveUpWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+    return;
+  }
+
+  // We need to set the empty string for the frame id. The expectation is that
+  // backend node ids are global and devtools is able to resolve the node
+  // without an explicit frame id.
+  devtools_client_->GetDOM()->ResolveNode(
+      dom::ResolveNodeParams::Builder()
+          .SetBackendNodeId(semantic_node_results_[0].backend_node_id())
+          .Build(),
+      /* current_frame_id= */ std::string(),
+      base::BindOnce(&SemanticElementFinder::OnResolveNodeForAnnotateDom,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     semantic_node_results_[0].host_id()));
+}
+
+void ElementFinder::SemanticElementFinder::OnResolveNodeForAnnotateDom(
+    content::GlobalRenderFrameHostId host_id,
+    const DevtoolsClient::ReplyStatus& reply_status,
+    std::unique_ptr<dom::ResolveNodeResult> result) {
+  if (result && result->GetObject() && result->GetObject()->HasObjectId()) {
+    ResultFound(content::RenderFrameHost::FromID(host_id),
+                result->GetObject()->GetObjectId());
+    return;
+  }
+  SendResult(ClientStatus(ELEMENT_RESOLUTION_FAILED),
+             ElementFinderResult::EmptyResult());
+}
+
+ElementFinder::CssElementFinder::CssElementFinder(
+    content::WebContents* web_contents,
+    DevtoolsClient* devtools_client,
+    const UserData* user_data,
+    const ResultType result_type,
+    const Selector& selector)
+    : web_contents_(web_contents),
+      devtools_client_(devtools_client),
+      user_data_(user_data),
+      result_type_(result_type),
+      selector_(selector) {}
+ElementFinder::CssElementFinder::~CssElementFinder() = default;
+
+void ElementFinder::CssElementFinder::Start(
+    const ElementFinderResult& start_element,
+    Callback callback) {
+  callback_ = std::move(callback);
+
+  selector_proto_ = selector_.proto;
+  ClientStatus resolve_status =
+      user_data::ResolveSelectorUserData(&selector_proto_, user_data_);
+  if (!resolve_status.ok()) {
+    SendResult(resolve_status, ElementFinderResult::EmptyResult());
+    return;
+  }
+
+  current_frame_ = start_element.render_frame_host();
+  if (current_frame_ == nullptr) {
+    current_frame_ = web_contents_->GetMainFrame();
+  }
+  current_frame_id_ = start_element.node_frame_id();
+  frame_stack_ = start_element.frame_stack();
+
+  if (start_element.object_id().empty()) {
     GetDocumentElement();
   } else {
-    current_matches_.emplace_back(current_frame_root_);
+    current_matches_.emplace_back(start_element.object_id());
     ExecuteNextTask();
   }
 }
 
-void ElementFinder::SendResult(const ClientStatus& status) {
-  if (!callback_)
+ElementFinderInfoProto ElementFinder::CssElementFinder::GetLogInfo() const {
+  DCHECK(!callback_);  // Run after finish.
+
+  ElementFinderInfoProto info;
+  if (!client_status_.ok()) {
+    info.set_failed_filter_index_range_start(current_filter_index_range_start_);
+    info.set_failed_filter_index_range_end(next_filter_index_);
+    info.set_get_document_failed(get_document_failed_);
+  }
+
+  return info;
+}
+
+int ElementFinder::CssElementFinder::GetBackendNodeId() const {
+  return backend_node_id_.value_or(0);
+}
+
+void ElementFinder::CssElementFinder::GiveUpWithError(
+    const ClientStatus& status) {
+  DCHECK(!status.ok());
+  if (!callback_) {
     return;
+  }
 
-  std::move(callback_).Run(status, std::make_unique<Result>());
+  SendResult(status, ElementFinderResult::EmptyResult());
 }
 
-void ElementFinder::SendSuccessResult(const std::string& object_id) {
-  if (!callback_)
+void ElementFinder::CssElementFinder::ResultFound(
+    const std::string& object_id) {
+  if (!callback_) {
     return;
+  }
 
-  // Fill in result and return
-  std::unique_ptr<Result> result =
-      std::make_unique<Result>(BuildResult(object_id));
-  result->frame_stack = frame_stack_;
-  std::move(callback_).Run(OkClientStatus(), std::move(result));
+  if (selector_.proto.has_semantic_information()) {
+    devtools_client_->GetDOM()->DescribeNode(
+        dom::DescribeNodeParams::Builder().SetObjectId(object_id).Build(),
+        current_frame_id_,
+        base::BindOnce(&CssElementFinder::OnDescribeNodeForId,
+                       weak_ptr_factory_.GetWeakPtr(), object_id));
+    return;
+  }
+
+  BuildAndSendResult(object_id);
 }
 
-ElementFinder::Result ElementFinder::BuildResult(const std::string& object_id) {
-  Result result;
-  result.container_frame_host = current_frame_;
-  result.object_id = object_id;
-  result.node_frame_id = current_frame_id_;
-  return result;
+void ElementFinder::CssElementFinder::OnDescribeNodeForId(
+    const std::string& object_id,
+    const DevtoolsClient::ReplyStatus& reply_status,
+    std::unique_ptr<dom::DescribeNodeResult> node_result) {
+  if (node_result && node_result->GetNode()) {
+    backend_node_id_ = node_result->GetNode()->GetBackendNodeId();
+  }
+  BuildAndSendResult(object_id);
 }
 
-void ElementFinder::ExecuteNextTask() {
-  const auto& filters = selector_.proto.filters();
+void ElementFinder::CssElementFinder::BuildAndSendResult(
+    const std::string& object_id) {
+  ElementFinderResult result;
+  result.SetRenderFrameHost(current_frame_);
+  result.SetObjectId(object_id);
+  result.SetNodeFrameId(current_frame_id_);
+  result.SetFrameStack(frame_stack_);
+
+  SendResult(OkClientStatus(), result);
+}
+
+void ElementFinder::CssElementFinder::SendResult(
+    const ClientStatus& status,
+    const ElementFinderResult& result) {
+  client_status_ = status;
+  DCHECK(callback_);
+  std::move(callback_).Run(status,
+                           std::make_unique<ElementFinderResult>(result));
+}
+
+void ElementFinder::CssElementFinder::ExecuteNextTask() {
+  const auto& filters = selector_proto_.filters();
 
   if (next_filter_index_ >= filters.size()) {
     std::string object_id;
@@ -300,7 +564,7 @@ void ElementFinder::ExecuteNextTask() {
         break;
 
       case ResultType::kAnyMatch:
-        if (!ConsumeAnyMatchOrFail(object_id)) {
+        if (!ConsumeMatchAtOrFail(0, object_id)) {
           return;
         }
         break;
@@ -311,10 +575,11 @@ void ElementFinder::ExecuteNextTask() {
         }
         break;
     }
-    SendSuccessResult(object_id);
+    ResultFound(object_id);
     return;
   }
 
+  current_filter_index_range_start_ = next_filter_index_;
   const auto& filter = filters.Get(next_filter_index_);
   switch (filter.filter_case()) {
     case SelectorProto::Filter::kEnterFrame: {
@@ -342,9 +607,11 @@ void ElementFinder::ExecuteNextTask() {
       return;
     }
 
-    case SelectorProto::Filter::kPickOne: {
+    case SelectorProto::Filter::kNthMatch: {
+      // TODO(b/205676462): This could be done with javascript like in
+      // |SelectorObserver|.
       std::string object_id;
-      if (!ConsumeAnyMatchOrFail(object_id))
+      if (!ConsumeMatchAtOrFail(filter.nth_match().index(), object_id))
         return;
 
       next_filter_index_++;
@@ -356,9 +623,13 @@ void ElementFinder::ExecuteNextTask() {
     case SelectorProto::Filter::kCssSelector:
     case SelectorProto::Filter::kInnerText:
     case SelectorProto::Filter::kValue:
+    case SelectorProto::Filter::kProperty:
     case SelectorProto::Filter::kBoundingBox:
     case SelectorProto::Filter::kPseudoElementContent:
-    case SelectorProto::Filter::kLabelled: {
+    case SelectorProto::Filter::kMatchCssSelector:
+    case SelectorProto::Filter::kCssStyle:
+    case SelectorProto::Filter::kLabelled:
+    case SelectorProto::Filter::kOnTop: {
       std::vector<std::string> matches;
       if (!ConsumeAllMatchesOrFail(matches))
         return;
@@ -374,44 +645,24 @@ void ElementFinder::ExecuteNextTask() {
       return;
     }
 
-    case SelectorProto::Filter::kClosest: {
-      std::string array_object_id;
-      if (!ConsumeMatchArrayOrFail(array_object_id))
-        return;
-
-      ApplyProximityFilter(next_filter_index_++, array_object_id);
-      return;
-    }
-
     case SelectorProto::Filter::FILTER_NOT_SET:
       VLOG(1) << __func__ << " Unset or unknown filter in " << filter << " in "
               << selector_;
-      SendResult(ClientStatus(INVALID_SELECTOR));
+      GiveUpWithError(ClientStatus(INVALID_SELECTOR));
       return;
   }
 }
 
-bool ElementFinder::ConsumeOneMatchOrFail(std::string& object_id_out) {
-  // This logic relies on JsFilterBuilder::BuildFunction guaranteeing that
-  // arrays contain at least 2 elements to avoid having to fetch all matching
-  // elements in the common case where we just want to know whether there is at
-  // least one match.
-
-  if (!current_match_arrays_.empty()) {
-    VLOG(1) << __func__ << " Got " << current_match_arrays_.size()
-            << " arrays of 2 or more matches for " << selector_
-            << ", when only 1 match was expected.";
-    SendResult(ClientStatus(TOO_MANY_ELEMENTS));
-    return false;
-  }
+bool ElementFinder::CssElementFinder::ConsumeOneMatchOrFail(
+    std::string& object_id_out) {
   if (current_matches_.size() > 1) {
     VLOG(1) << __func__ << " Got " << current_matches_.size() << " matches for "
             << selector_ << ", when only 1 was expected.";
-    SendResult(ClientStatus(TOO_MANY_ELEMENTS));
+    GiveUpWithError(ClientStatus(TOO_MANY_ELEMENTS));
     return false;
   }
   if (current_matches_.empty()) {
-    SendResult(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+    GiveUpWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
     return false;
   }
 
@@ -420,159 +671,156 @@ bool ElementFinder::ConsumeOneMatchOrFail(std::string& object_id_out) {
   return true;
 }
 
-bool ElementFinder::ConsumeAnyMatchOrFail(std::string& object_id_out) {
-  // This logic relies on ApplyJsFilters guaranteeing that arrays contain at
-  // least 2 elements to avoid having to fetch all matching elements in the
-  // common case where we just want one match.
-
-  if (current_matches_.size() > 0) {
-    object_id_out = current_matches_[0];
+bool ElementFinder::CssElementFinder::ConsumeMatchAtOrFail(
+    size_t index,
+    std::string& object_id_out) {
+  if (index < current_matches_.size()) {
+    object_id_out = current_matches_[index];
     current_matches_.clear();
-    current_match_arrays_.clear();
     return true;
   }
-  if (!current_match_arrays_.empty()) {
-    std::string array_object_id = current_match_arrays_[0];
-    current_match_arrays_.clear();
-    ResolveMatchArrays({array_object_id}, /* max_count= */ 1);
-    return false;  // Caller should call again to check
-  }
-  SendResult(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+
+  GiveUpWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
   return false;
 }
 
-bool ElementFinder::ConsumeAllMatchesOrFail(
+bool ElementFinder::CssElementFinder::ConsumeAllMatchesOrFail(
     std::vector<std::string>& matches_out) {
-  if (!current_match_arrays_.empty()) {
-    std::vector<std::string> array_object_ids =
-        std::move(current_match_arrays_);
-    ResolveMatchArrays(array_object_ids, /* max_count= */ -1);
-    return false;  // Caller should call again to check
-  }
   if (!current_matches_.empty()) {
     matches_out = std::move(current_matches_);
     current_matches_.clear();
     return true;
   }
-  SendResult(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+  GiveUpWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
   return false;
 }
 
-bool ElementFinder::ConsumeMatchArrayOrFail(std::string& array_object_id) {
-  if (current_matches_.empty() && current_match_arrays_.empty()) {
-    SendResult(ClientStatus(ELEMENT_RESOLUTION_FAILED));
-    return false;
-  }
-
-  if (current_matches_.empty() && current_match_arrays_.size() == 1) {
-    array_object_id = current_match_arrays_[0];
-    current_match_arrays_.clear();
+bool ElementFinder::CssElementFinder::ConsumeMatchArrayOrFail(
+    std::string& array_object_id) {
+  if (!current_matches_js_array_.empty()) {
+    array_object_id = current_matches_js_array_;
+    current_matches_js_array_.clear();
     return true;
   }
 
-  std::vector<std::unique_ptr<runtime::CallArgument>> arguments;
-  std::string object_id;  // Will be "this" in Javascript.
-  std::string function;
-  if (current_match_arrays_.size() > 1) {
-    object_id = current_match_arrays_.back();
-    current_match_arrays_.pop_back();
-    // Merge both arrays into current_match_arrays_[0]
-    function = "function(dest) { dest.push(...this); }";
-    AddRuntimeCallArgumentObjectId(current_match_arrays_[0], &arguments);
-  } else if (!current_matches_.empty()) {
-    object_id = current_matches_.back();
-    current_matches_.pop_back();
-    if (current_match_arrays_.empty()) {
-      // Create an array containing a single element.
-      function = "function() { return [this]; }";
-    } else {
-      // Add an element to an existing array.
-      function = "function(dest) { dest.push(this); }";
-      AddRuntimeCallArgumentObjectId(current_match_arrays_[0], &arguments);
-    }
+  if (current_matches_.empty()) {
+    GiveUpWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+    return false;
   }
+
+  MoveMatchesToJSArrayRecursive(/* index= */ 0);
+  return false;
+}
+
+void ElementFinder::CssElementFinder::MoveMatchesToJSArrayRecursive(
+    size_t index) {
+  if (index >= current_matches_.size()) {
+    current_matches_.clear();
+    ExecuteNextTask();
+    return;
+  }
+
+  // Push the value at |current_matches_[index]| to |current_matches_js_array_|.
+  std::string function;
+  std::vector<std::unique_ptr<runtime::CallArgument>> arguments;
+  if (index == 0) {
+    // Create an array containing a single element.
+    function = "function() { return [this]; }";
+  } else {
+    // Add an element to an existing array.
+    function = "function(dest) { dest.push(this); }";
+    AddRuntimeCallArgumentObjectId(current_matches_js_array_, &arguments);
+  }
+
   devtools_client_->GetRuntime()->CallFunctionOn(
       runtime::CallFunctionOnParams::Builder()
-          .SetObjectId(object_id)
+          .SetObjectId(current_matches_[index])
           .SetArguments(std::move(arguments))
           .SetFunctionDeclaration(function)
           .Build(),
       current_frame_id_,
-      base::BindOnce(&ElementFinder::OnConsumeMatchArray,
-                     weak_ptr_factory_.GetWeakPtr()));
-  return false;
+      base::BindOnce(&CssElementFinder::OnMoveMatchesToJSArrayRecursive,
+                     weak_ptr_factory_.GetWeakPtr(), index));
 }
 
-void ElementFinder::OnConsumeMatchArray(
+void ElementFinder::CssElementFinder::OnMoveMatchesToJSArrayRecursive(
+    size_t index,
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<runtime::CallFunctionOnResult> result) {
   ClientStatus status =
       CheckJavaScriptResult(reply_status, result.get(), __FILE__, __LINE__);
   if (!status.ok()) {
-    VLOG(1) << __func__ << ": Failed to get element from array for "
-            << selector_;
-    SendResult(status);
+    VLOG(1) << __func__ << ": Failed to push value to JS array.";
+    GiveUpWithError(status);
     return;
   }
-  if (current_match_arrays_.empty()) {
-    std::string returned_object_id;
-    if (SafeGetObjectId(result->GetResult(), &returned_object_id)) {
-      current_match_arrays_.push_back(returned_object_id);
-    }
+
+  // We just created an array which contains the first element. We store its ID
+  // in |current_matches_js_array_|.
+  if (index == 0 &&
+      !SafeGetObjectId(result->GetResult(), &current_matches_js_array_)) {
+    VLOG(1) << __func__ << " Failed to get array ID.";
+    GiveUpWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+    return;
   }
-  ExecuteNextTask();
+
+  // Continue the recursion to push the other values into the array.
+  MoveMatchesToJSArrayRecursive(index + 1);
 }
 
-void ElementFinder::GetDocumentElement() {
+void ElementFinder::CssElementFinder::GetDocumentElement() {
   devtools_client_->GetRuntime()->Evaluate(
       std::string(kGetDocumentElement), current_frame_id_,
-      base::BindOnce(&ElementFinder::OnGetDocumentElement,
+      base::BindOnce(&CssElementFinder::OnGetDocumentElement,
                      weak_ptr_factory_.GetWeakPtr()));
 }
 
-void ElementFinder::OnGetDocumentElement(
+void ElementFinder::CssElementFinder::OnGetDocumentElement(
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<runtime::EvaluateResult> result) {
   ClientStatus status =
       CheckJavaScriptResult(reply_status, result.get(), __FILE__, __LINE__);
   if (!status.ok()) {
     VLOG(1) << __func__ << " Failed to get document root element.";
-    SendResult(status);
+    get_document_failed_ = true;
+    GiveUpWithError(status);
     return;
   }
   std::string object_id;
   if (!SafeGetObjectId(result->GetResult(), &object_id)) {
     VLOG(1) << __func__ << " Failed to get document root element.";
-    SendResult(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+    get_document_failed_ = true;
+    GiveUpWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
     return;
   }
 
-  current_frame_root_ = object_id;
   // Use the node as root for the rest of the evaluation.
   current_matches_.emplace_back(object_id);
 
-  DecrementResponseCountAndContinue();
+  ExecuteNextTask();
 }
 
-void ElementFinder::ApplyJsFilters(const JsFilterBuilder& builder,
-                                   const std::vector<std::string>& object_ids) {
+void ElementFinder::CssElementFinder::ApplyJsFilters(
+    const JsFilterBuilder& builder,
+    const std::vector<std::string>& object_ids) {
   DCHECK(!object_ids.empty());  // Guaranteed by ExecuteNextTask()
-  pending_response_count_ = object_ids.size();
+  PrepareBatchTasks(object_ids.size());
   std::string function = builder.BuildFunction();
-  for (const std::string& object_id : object_ids) {
+  for (size_t task_id = 0; task_id < object_ids.size(); task_id++) {
     devtools_client_->GetRuntime()->CallFunctionOn(
         runtime::CallFunctionOnParams::Builder()
-            .SetObjectId(object_id)
+            .SetObjectId(object_ids[task_id])
             .SetArguments(builder.BuildArgumentList())
             .SetFunctionDeclaration(function)
             .Build(),
         current_frame_id_,
-        base::BindOnce(&ElementFinder::OnApplyJsFilters,
-                       weak_ptr_factory_.GetWeakPtr()));
+        base::BindOnce(&CssElementFinder::OnApplyJsFilters,
+                       weak_ptr_factory_.GetWeakPtr(), task_id));
   }
 }
 
-void ElementFinder::OnApplyJsFilters(
+void ElementFinder::CssElementFinder::OnApplyJsFilters(
+    size_t task_id,
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<runtime::CallFunctionOnResult> result) {
   if (!result) {
@@ -582,7 +830,7 @@ void ElementFinder::OnApplyJsFilters(
     // call, it is expected.
     VLOG(1) << __func__ << ": Context doesn't exist yet to query frame "
             << frame_stack_.size() << " of " << selector_;
-    SendResult(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+    GiveUpWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
     return;
   }
   ClientStatus status =
@@ -590,54 +838,61 @@ void ElementFinder::OnApplyJsFilters(
   if (!status.ok()) {
     VLOG(1) << __func__ << ": Failed to query selector for frame "
             << frame_stack_.size() << " of " << selector_ << ": " << status;
-    SendResult(status);
+    GiveUpWithError(status);
     return;
   }
 
-  // The result can be empty (nothing found), a an array (multiple matches
+  // The result can be empty (nothing found), an array (multiple matches
   // found) or a single node.
   std::string object_id;
-  if (SafeGetObjectId(result->GetResult(), &object_id)) {
-    if (result->GetResult()->HasSubtype() &&
-        result->GetResult()->GetSubtype() ==
-            runtime::RemoteObjectSubtype::ARRAY) {
-      current_match_arrays_.emplace_back(object_id);
-    } else {
-      current_matches_.emplace_back(object_id);
-    }
+  if (!SafeGetObjectId(result->GetResult(), &object_id)) {
+    ReportNoMatchingElement(task_id);
+    return;
   }
-  DecrementResponseCountAndContinue();
+
+  if (result->GetResult()->HasSubtype() &&
+      result->GetResult()->GetSubtype() ==
+          runtime::RemoteObjectSubtype::ARRAY) {
+    ReportMatchingElementsArray(task_id, object_id);
+    return;
+  }
+
+  ReportMatchingElement(task_id, object_id);
 }
 
-void ElementFinder::ResolvePseudoElement(
+void ElementFinder::CssElementFinder::ResolvePseudoElement(
     PseudoType proto_pseudo_type,
     const std::vector<std::string>& object_ids) {
   dom::PseudoType pseudo_type;
   if (!ConvertPseudoType(proto_pseudo_type, &pseudo_type)) {
     VLOG(1) << __func__ << ": Unsupported pseudo-type "
             << PseudoTypeName(proto_pseudo_type);
-    SendResult(ClientStatus(INVALID_ACTION));
+    GiveUpWithError(ClientStatus(INVALID_ACTION));
     return;
   }
 
   DCHECK(!object_ids.empty());  // Guaranteed by ExecuteNextTask()
-  pending_response_count_ = object_ids.size();
-  for (const std::string& object_id : object_ids) {
+  PrepareBatchTasks(object_ids.size());
+  for (size_t task_id = 0; task_id < object_ids.size(); task_id++) {
     devtools_client_->GetDOM()->DescribeNode(
-        dom::DescribeNodeParams::Builder().SetObjectId(object_id).Build(),
+        dom::DescribeNodeParams::Builder()
+            .SetObjectId(object_ids[task_id])
+            .Build(),
         current_frame_id_,
-        base::BindOnce(&ElementFinder::OnDescribeNodeForPseudoElement,
-                       weak_ptr_factory_.GetWeakPtr(), pseudo_type));
+        base::BindOnce(&CssElementFinder::OnDescribeNodeForPseudoElement,
+                       weak_ptr_factory_.GetWeakPtr(), pseudo_type, task_id));
   }
 }
 
-void ElementFinder::OnDescribeNodeForPseudoElement(
+void ElementFinder::CssElementFinder::OnDescribeNodeForPseudoElement(
     dom::PseudoType pseudo_type,
+    size_t task_id,
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<dom::DescribeNodeResult> result) {
   if (!result || !result->GetNode()) {
     VLOG(1) << __func__ << " Failed to describe the node for pseudo element.";
-    SendResult(UnexpectedDevtoolsErrorStatus(reply_status, __FILE__, __LINE__));
+    GiveUpWithError(
+        UnexpectedDevtoolsErrorStatus(reply_status, __FILE__, __LINE__));
     return;
   }
 
@@ -651,39 +906,44 @@ void ElementFinder::OnDescribeNodeForPseudoElement(
                 .SetBackendNodeId(pseudo_element->GetBackendNodeId())
                 .Build(),
             current_frame_id_,
-            base::BindOnce(&ElementFinder::OnResolveNodeForPseudoElement,
-                           weak_ptr_factory_.GetWeakPtr()));
+            base::BindOnce(&CssElementFinder::OnResolveNodeForPseudoElement,
+                           weak_ptr_factory_.GetWeakPtr(), task_id));
         return;
       }
     }
   }
-  DecrementResponseCountAndContinue();
+
+  ReportNoMatchingElement(task_id);
 }
 
-void ElementFinder::OnResolveNodeForPseudoElement(
+void ElementFinder::CssElementFinder::OnResolveNodeForPseudoElement(
+    size_t task_id,
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<dom::ResolveNodeResult> result) {
   if (result && result->GetObject() && result->GetObject()->HasObjectId()) {
-    current_matches_.emplace_back(result->GetObject()->GetObjectId());
+    ReportMatchingElement(task_id, result->GetObject()->GetObjectId());
+    return;
   }
-  DecrementResponseCountAndContinue();
+
+  ReportNoMatchingElement(task_id);
 }
 
-void ElementFinder::EnterFrame(const std::string& object_id) {
+void ElementFinder::CssElementFinder::EnterFrame(const std::string& object_id) {
   devtools_client_->GetDOM()->DescribeNode(
       dom::DescribeNodeParams::Builder().SetObjectId(object_id).Build(),
       current_frame_id_,
-      base::BindOnce(&ElementFinder::OnDescribeNodeForFrame,
+      base::BindOnce(&CssElementFinder::OnDescribeNodeForFrame,
                      weak_ptr_factory_.GetWeakPtr(), object_id));
 }
 
-void ElementFinder::OnDescribeNodeForFrame(
+void ElementFinder::CssElementFinder::OnDescribeNodeForFrame(
     const std::string& object_id,
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<dom::DescribeNodeResult> result) {
   if (!result || !result->GetNode()) {
     VLOG(1) << __func__ << " Failed to describe the node.";
-    SendResult(UnexpectedDevtoolsErrorStatus(reply_status, __FILE__, __LINE__));
+    GiveUpWithError(
+        UnexpectedDevtoolsErrorStatus(reply_status, __FILE__, __LINE__));
     return;
   }
 
@@ -691,18 +951,23 @@ void ElementFinder::OnDescribeNodeForFrame(
   std::vector<int> backend_ids;
 
   if (node->GetNodeName() == "IFRAME") {
-    DCHECK(node->HasFrameId());  // Ensure all frames have an id.
+    // See: b/206647825
+    if (!node->HasFrameId()) {
+      NOTREACHED() << "Frame without ID";  // Ensure all frames have an id.
+      GiveUpWithError(ClientStatus(FRAME_HOST_NOT_FOUND));
+      return;
+    }
 
-    frame_stack_.push_back(BuildResult(object_id));
+    frame_stack_.push_back({object_id, current_frame_id_});
 
-    auto* frame = FindCorrespondingRenderFrameHost(node->GetFrameId());
+    auto* frame =
+        FindCorrespondingRenderFrameHost(node->GetFrameId(), web_contents_);
     if (!frame) {
       VLOG(1) << __func__ << " Failed to find corresponding owner frame.";
-      SendResult(ClientStatus(FRAME_HOST_NOT_FOUND));
+      GiveUpWithError(ClientStatus(FRAME_HOST_NOT_FOUND));
       return;
     }
     current_frame_ = frame;
-    current_frame_root_.clear();
 
     if (node->HasContentDocument()) {
       // If the frame has a ContentDocument it's considered a local frame. In
@@ -729,7 +994,7 @@ void ElementFinder::OnDescribeNodeForFrame(
             .SetBackendNodeId(backend_ids[0])
             .Build(),
         current_frame_id_,
-        base::BindOnce(&ElementFinder::OnResolveNode,
+        base::BindOnce(&CssElementFinder::OnResolveNode,
                        weak_ptr_factory_.GetWeakPtr()));
     return;
   }
@@ -738,213 +1003,57 @@ void ElementFinder::OnDescribeNodeForFrame(
   // to remain backward compatible, don't complain and just continue filtering
   // with the current element as root.
   current_matches_.emplace_back(object_id);
-  DecrementResponseCountAndContinue();
+  ExecuteNextTask();
 }
 
-void ElementFinder::OnResolveNode(
+void ElementFinder::CssElementFinder::OnResolveNode(
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<dom::ResolveNodeResult> result) {
   if (!result || !result->GetObject() || !result->GetObject()->HasObjectId()) {
     VLOG(1) << __func__ << " Failed to resolve object id from backend id.";
-    SendResult(UnexpectedDevtoolsErrorStatus(reply_status, __FILE__, __LINE__));
+    GiveUpWithError(
+        UnexpectedDevtoolsErrorStatus(reply_status, __FILE__, __LINE__));
     return;
   }
 
-  std::string object_id = result->GetObject()->GetObjectId();
-  if (current_frame_root_.empty()) {
-    current_frame_root_ = object_id;
-  }
   // Use the node as root for the rest of the evaluation.
-  current_matches_.emplace_back(object_id);
-  DecrementResponseCountAndContinue();
-}
-
-content::RenderFrameHost* ElementFinder::FindCorrespondingRenderFrameHost(
-    std::string frame_id) {
-  for (auto* frame : web_contents_->GetAllFrames()) {
-    if (frame->GetDevToolsFrameToken().ToString() == frame_id) {
-      return frame;
-    }
-  }
-
-  return nullptr;
-}
-
-void ElementFinder::ApplyProximityFilter(int filter_index,
-                                         const std::string& array_object_id) {
-  Selector target_selector;
-  target_selector.proto.mutable_filters()->MergeFrom(
-      selector_.proto.filters(filter_index).closest().target());
-  proximity_target_filter_ =
-      std::make_unique<ElementFinder>(web_contents_, devtools_client_,
-                                      target_selector, ResultType::kMatchArray);
-  proximity_target_filter_->StartInternal(
-      base::BindOnce(&ElementFinder::OnProximityFilterTarget,
-                     weak_ptr_factory_.GetWeakPtr(), filter_index,
-                     array_object_id),
-      current_frame_, current_frame_id_, current_frame_root_);
-}
-
-void ElementFinder::OnProximityFilterTarget(int filter_index,
-                                            const std::string& array_object_id,
-                                            const ClientStatus& status,
-                                            std::unique_ptr<Result> result) {
-  if (!status.ok()) {
-    VLOG(1) << __func__
-            << " Could not find proximity filter target for resolving "
-            << selector_.proto.filters(filter_index);
-    SendResult(status);
-    return;
-  }
-  if (result->container_frame_host != current_frame_) {
-    VLOG(1) << __func__ << " Cannot compare elements on different frames.";
-    SendResult(ClientStatus(INVALID_SELECTOR));
-    return;
-  }
-
-  const auto& filter = selector_.proto.filters(filter_index).closest();
-
-  std::string function = R"(function(targets, maxPairs) {
-  const candidates = this;
-  const pairs = candidates.length * targets.length;
-  if (pairs > maxPairs) {
-    return pairs;
-  }
-  const candidateBoxes = candidates.map((e) => e.getBoundingClientRect());
-  let closest = null;
-  let shortestDistance = Number.POSITIVE_INFINITY;
-  for (target of targets) {
-    const targetBox = target.getBoundingClientRect();
-    for (let i = 0; i < candidates.length; i++) {
-      const box = candidateBoxes[i];
-)";
-
-  if (filter.in_alignment()) {
-    // Rejects candidates that are not on the same row or or the same column as
-    // the target.
-    function.append("if ((box.bottom <= targetBox.top || ");
-    function.append("     box.top >= targetBox.bottom) && ");
-    function.append("    (box.right <= targetBox.left || ");
-    function.append("     box.left >= targetBox.right)) continue;");
-  }
-  switch (filter.relative_position()) {
-    case SelectorProto::ProximityFilter::UNSPECIFIED_POSITION:
-      // No constraints.
-      break;
-
-    case SelectorProto::ProximityFilter::ABOVE:
-      // Candidate must be above target
-      function.append("if (box.bottom > targetBox.top) continue;");
-      break;
-
-    case SelectorProto::ProximityFilter::BELOW:
-      // Candidate must be below target
-      function.append("if (box.top < targetBox.bottom) continue;");
-      break;
-
-    case SelectorProto::ProximityFilter::LEFT:
-      // Candidate must be left of target
-      function.append("if (box.right > targetBox.left) continue;");
-      break;
-
-    case SelectorProto::ProximityFilter::RIGHT:
-      // Candidate must be right of target
-      function.append("if (box.left < targetBox.right) continue;");
-      break;
-  }
-
-  // The algorithm below computes distance to the closest border. If the
-  // distance is 0, then we have got our closest element and can stop there.
-  function.append(R"(
-      let w = 0;
-      if (targetBox.right < box.left) {
-        w = box.left - targetBox.right;
-      } else if (box.right < targetBox.left) {
-        w = targetBox.left - box.right;
-      }
-      let h = 0;
-      if (targetBox.bottom < box.top) {
-        h = box.top - targetBox.bottom;
-      } else if (box.bottom < targetBox.top) {
-        h = targetBox.top - box.bottom;
-      }
-      const dist = Math.sqrt(h * h + w * w);
-      if (dist == 0) return candidates[i];
-      if (dist < shortestDistance) {
-        closest = candidates[i];
-        shortestDistance = dist;
-      }
-    }
-  }
-  return closest;
-})");
-
-  std::vector<std::unique_ptr<runtime::CallArgument>> arguments;
-  AddRuntimeCallArgumentObjectId(result->object_id, &arguments);
-  AddRuntimeCallArgument(filter.max_pairs(), &arguments);
-
-  devtools_client_->GetRuntime()->CallFunctionOn(
-      runtime::CallFunctionOnParams::Builder()
-          .SetObjectId(array_object_id)
-          .SetArguments(std::move(arguments))
-          .SetFunctionDeclaration(function)
-          .Build(),
-      current_frame_id_,
-      base::BindOnce(&ElementFinder::OnProximityFilterJs,
-                     weak_ptr_factory_.GetWeakPtr()));
-}
-
-void ElementFinder::OnProximityFilterJs(
-    const DevtoolsClient::ReplyStatus& reply_status,
-    std::unique_ptr<runtime::CallFunctionOnResult> result) {
-  ClientStatus status =
-      CheckJavaScriptResult(reply_status, result.get(), __FILE__, __LINE__);
-  if (!status.ok()) {
-    VLOG(1) << __func__ << ": Failed to execute proximity filter " << status;
-    SendResult(status);
-    return;
-  }
-
-  std::string object_id;
-  if (SafeGetObjectId(result->GetResult(), &object_id)) {
-    // Function found a match.
-    current_matches_.push_back(object_id);
-    ExecuteNextTask();
-    return;
-  }
-
-  int pair_count = 0;
-  if (SafeGetIntValue(result->GetResult(), &pair_count)) {
-    // Function got too many pairs to check.
-    VLOG(1) << __func__ << ": Too many pairs to consider for proximity checks: "
-            << pair_count;
-    SendResult(ClientStatus(TOO_MANY_CANDIDATES));
-    return;
-  }
-
-  // Function found nothing, which is possible if the relative position
-  // constraints forced the algorithm to discard all candidates.
+  current_matches_.emplace_back(result->GetObject()->GetObjectId());
   ExecuteNextTask();
 }
 
-void ElementFinder::ResolveMatchArrays(
-    const std::vector<std::string>& array_object_ids,
-    int max_count) {
-  if (array_object_ids.empty()) {
-    // Nothing to do
-    ExecuteNextTask();
-    return;
-  }
-  pending_response_count_ = array_object_ids.size();
-  for (const std::string& array_object_id : array_object_ids) {
-    ResolveMatchArrayRecursive(array_object_id, 0, max_count);
-  }
+void ElementFinder::CssElementFinder::PrepareBatchTasks(int n) {
+  tasks_results_.clear();
+  tasks_results_.resize(n);
 }
 
-void ElementFinder::ResolveMatchArrayRecursive(
+void ElementFinder::CssElementFinder::ReportMatchingElement(
+    size_t task_id,
+    const std::string& object_id) {
+  tasks_results_[task_id] =
+      std::make_unique<std::vector<std::string>>(1, object_id);
+  MaybeFinalizeBatchTasks();
+}
+
+void ElementFinder::CssElementFinder::ReportNoMatchingElement(size_t task_id) {
+  tasks_results_[task_id] = std::make_unique<std::vector<std::string>>();
+  MaybeFinalizeBatchTasks();
+}
+
+void ElementFinder::CssElementFinder::ReportMatchingElementsArray(
+    size_t task_id,
+    const std::string& array_object_id) {
+  // Recursively add each element ID to a vector then report it as this task
+  // result.
+  ReportMatchingElementsArrayRecursive(
+      task_id, array_object_id, std::make_unique<std::vector<std::string>>(),
+      /* index= */ 0);
+}
+
+void ElementFinder::CssElementFinder::ReportMatchingElementsArrayRecursive(
+    size_t task_id,
     const std::string& array_object_id,
-    int index,
-    int max_count) {
+    std::unique_ptr<std::vector<std::string>> acc,
+    int index) {
   std::vector<std::unique_ptr<runtime::CallArgument>> arguments;
   AddRuntimeCallArgument(index, &arguments);
   devtools_client_->GetRuntime()->CallFunctionOn(
@@ -954,15 +1063,16 @@ void ElementFinder::ResolveMatchArrayRecursive(
           .SetFunctionDeclaration(std::string(kGetArrayElement))
           .Build(),
       current_frame_id_,
-      base::BindOnce(&ElementFinder::OnResolveMatchArray,
-                     weak_ptr_factory_.GetWeakPtr(), array_object_id, index,
-                     max_count));
+      base::BindOnce(&CssElementFinder::OnReportMatchingElementsArrayRecursive,
+                     weak_ptr_factory_.GetWeakPtr(), task_id, array_object_id,
+                     std::move(acc), index));
 }
 
-void ElementFinder::OnResolveMatchArray(
+void ElementFinder::CssElementFinder::OnReportMatchingElementsArrayRecursive(
+    size_t task_id,
     const std::string& array_object_id,
+    std::unique_ptr<std::vector<std::string>> acc,
     int index,
-    int max_count,
     const DevtoolsClient::ReplyStatus& reply_status,
     std::unique_ptr<runtime::CallFunctionOnResult> result) {
   ClientStatus status =
@@ -970,36 +1080,41 @@ void ElementFinder::OnResolveMatchArray(
   if (!status.ok()) {
     VLOG(1) << __func__ << ": Failed to get element from array for "
             << selector_;
-    SendResult(status);
+    GiveUpWithError(status);
     return;
   }
+
   std::string object_id;
   if (!SafeGetObjectId(result->GetResult(), &object_id)) {
-    // We've reached the end of the array
-    DecrementResponseCountAndContinue();
+    // We've reached the end of the array.
+    tasks_results_[task_id] = std::move(acc);
+    MaybeFinalizeBatchTasks();
     return;
   }
 
-  current_matches_.emplace_back(object_id);
-  int next_index = index + 1;
-  if (max_count != -1 && next_index >= max_count) {
-    DecrementResponseCountAndContinue();
-    return;
-  }
+  acc->emplace_back(object_id);
 
   // Fetch the next element.
-  ResolveMatchArrayRecursive(array_object_id, next_index, max_count);
+  ReportMatchingElementsArrayRecursive(task_id, array_object_id, std::move(acc),
+                                       index + 1);
 }
 
-void ElementFinder::DecrementResponseCountAndContinue() {
-  if (pending_response_count_ > 1) {
-    pending_response_count_--;
-    return;
+void ElementFinder::CssElementFinder::MaybeFinalizeBatchTasks() {
+  // Return early if one of the tasks is still pending.
+  for (const auto& result : tasks_results_) {
+    if (!result) {
+      return;
+    }
   }
 
-  pending_response_count_ = 0;
+  // Add all matching elements to current_matches_.
+  for (const auto& result : tasks_results_) {
+    current_matches_.insert(current_matches_.end(), result->begin(),
+                            result->end());
+  }
+  tasks_results_.clear();
+
   ExecuteNextTask();
-  return;
 }
 
 }  // namespace autofill_assistant

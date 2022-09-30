@@ -1,46 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2012 BogDan Vatra <bogdan@kde.org>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2012 BogDan Vatra <bogdan@kde.org>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
-#include "androidjnimenu.h"
 #include "androidjnimain.h"
-#include "qandroidplatformmenubar.h"
+#include "androidjnimenu.h"
 #include "qandroidplatformmenu.h"
+#include "qandroidplatformmenubar.h"
 #include "qandroidplatformmenuitem.h"
 
 #include <QMutex>
@@ -50,7 +14,7 @@
 #include <QSet>
 #include <QWindow>
 #include <QtCore/private/qjnihelpers_p.h>
-#include <QtCore/private/qjni_p.h>
+#include <QtCore/QJniObject>
 
 QT_BEGIN_NAMESPACE
 
@@ -59,12 +23,12 @@ using namespace QtAndroid;
 namespace QtAndroidMenu
 {
     static QList<QAndroidPlatformMenu *> pendingContextMenus;
-    static QAndroidPlatformMenu *visibleMenu = 0;
+    static QAndroidPlatformMenu *visibleMenu = nullptr;
     static QRecursiveMutex visibleMenuMutex;
 
     static QSet<QAndroidPlatformMenuBar *> menuBars;
-    static QAndroidPlatformMenuBar *visibleMenuBar = 0;
-    static QWindow *activeTopLevelWindow = 0;
+    static QAndroidPlatformMenuBar *visibleMenuBar = nullptr;
+    static QWindow *activeTopLevelWindow = nullptr;
     static QRecursiveMutex menuBarMutex;
 
     static jmethodID openContextMenuMethodID = 0;
@@ -82,12 +46,12 @@ namespace QtAndroidMenu
 
     void resetMenuBar()
     {
-        QJNIObjectPrivate::callStaticMethod<void>(applicationClass(), "resetOptionsMenu");
+        QJniObject::callStaticMethod<void>(applicationClass(), "resetOptionsMenu");
     }
 
     void openOptionsMenu()
     {
-        QJNIObjectPrivate::callStaticMethod<void>(applicationClass(), "openOptionsMenu");
+        QJniObject::callStaticMethod<void>(applicationClass(), "openOptionsMenu");
     }
 
     void showContextMenu(QAndroidPlatformMenu *menu, const QRect &anchorRect, JNIEnv *env)
@@ -104,13 +68,14 @@ namespace QtAndroidMenu
     {
         QMutexLocker lock(&visibleMenuMutex);
         if (visibleMenu == menu) {
-            QJNIObjectPrivate::callStaticMethod<void>(applicationClass(), "closeContextMenu");
+            QJniObject::callStaticMethod<void>(applicationClass(), "closeContextMenu");
             pendingContextMenus.clear();
         } else {
             pendingContextMenus.removeOne(menu);
         }
     }
 
+    // FIXME
     void syncMenu(QAndroidPlatformMenu */*menu*/)
     {
 //        QMutexLocker lock(&visibleMenuMutex);
@@ -180,12 +145,12 @@ namespace QtAndroidMenu
 
     static QString removeAmpersandEscapes(QString s)
     {
-        int i = 0;
+        qsizetype i = 0;
         while (i < s.size()) {
             ++i;
-            if (s.at(i-1) != QLatin1Char('&'))
+            if (s.at(i - 1) != u'&')
                 continue;
-            if (i < s.size() && s.at(i) == QLatin1Char('&'))
+            if (i < s.size() && s.at(i) == u'&')
                 ++i;
             s.remove(i-1,1);
         }

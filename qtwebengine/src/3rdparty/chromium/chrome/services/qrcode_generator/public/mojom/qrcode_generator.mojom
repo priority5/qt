@@ -4,6 +4,7 @@
 
 module qrcode_generator.mojom;
 
+import "sandbox/policy/mojom/sandbox.mojom";
 import "skia/public/mojom/bitmap.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 
@@ -56,7 +57,7 @@ struct GenerateQRCodeResponse {
 
   // Image data for generated QR code. May be null on error, or if rendering
   // was not requested.
-  skia.mojom.Bitmap? bitmap;
+  skia.mojom.BitmapN32? bitmap;
 
   // QR Code data.
   array<uint8> data;
@@ -68,6 +69,7 @@ struct GenerateQRCodeResponse {
 
 // Interface for generating QR codes for a given string of input data.
 // This is usually run outside the browser process if the data is untrusted.
+[ServiceSandbox=sandbox.mojom.Sandbox.kUtility]
 interface QRCodeGeneratorService {
   // Tries to generate a QR code for |data|.
   // Populates |response.error| on error; if kNone then |response.data|

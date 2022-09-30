@@ -15,26 +15,34 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "net/base/auth.h"
+#include "net/base/features.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/isolation_info.h"
+#include "net/base/net_errors.h"
 #include "net/base/proxy_delegate.h"
 #include "net/base/url_util.h"
+#include "net/cert/ct_policy_status.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/http/http_request_headers.h"
+#include "net/http/transport_security_state.h"
 #include "net/log/net_log.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_config.h"
@@ -51,12 +59,14 @@
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_test_util.h"
 #include "net/websockets/websocket_channel.h"
 #include "net/websockets/websocket_event_interface.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+#include "url/url_constants.h"
 
 namespace net {
 
@@ -83,9 +93,17 @@ class ConnectTestingEventInterface : public WebSocketEventInterface {
  public:
   ConnectTestingEventInterface();
 
+  ConnectTestingEventInterface(const ConnectTestingEventInterface&) = delete;
+  ConnectTestingEventInterface& operator=(const ConnectTestingEventInterface&) =
+      delete;
+
   void WaitForResponse();
 
   bool failed() const { return failed_; }
+
+  const std::unique_ptr<WebSocketHandshakeResponseInfo>& response() const {
+    return response_;
+  }
 
   // Only set if the handshake failed, otherwise empty.
   std::string failure_message() const;
@@ -116,7 +134,9 @@ class ConnectTestingEventInterface : public WebSocketEventInterface {
                      uint16_t code,
                      const std::string& reason) override;
 
-  void OnFailChannel(const std::string& message) override;
+  void OnFailChannel(const std::string& message,
+                     int net_error,
+                     absl::optional<int> response_code) override;
 
   void OnStartOpeningHandshake(
       std::unique_ptr<WebSocketHandshakeRequestInfo> request) override;
@@ -132,19 +152,18 @@ class ConnectTestingEventInterface : public WebSocketEventInterface {
                      scoped_refptr<HttpResponseHeaders> response_headers,
                      const IPEndPoint& remote_endpoint,
                      base::OnceCallback<void(const AuthCredentials*)> callback,
-                     base::Optional<AuthCredentials>* credentials) override;
+                     absl::optional<AuthCredentials>* credentials) override;
 
  private:
   void QuitNestedEventLoop();
 
   // failed_ is true if the handshake failed (ie. OnFailChannel was called).
   bool failed_;
+  std::unique_ptr<WebSocketHandshakeResponseInfo> response_;
   std::string selected_subprotocol_;
   std::string extensions_;
   std::string failure_message_;
   base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConnectTestingEventInterface);
 };
 
 ConnectTestingEventInterface::ConnectTestingEventInterface() : failed_(false) {
@@ -170,6 +189,7 @@ void ConnectTestingEventInterface::OnAddChannelResponse(
     std::unique_ptr<WebSocketHandshakeResponseInfo> response,
     const std::string& selected_subprotocol,
     const std::string& extensions) {
+  response_ = std::move(response);
   selected_subprotocol_ = selected_subprotocol;
   extensions_ = extensions;
   QuitNestedEventLoop();
@@ -188,7 +208,10 @@ void ConnectTestingEventInterface::OnDropChannel(bool was_clean,
                                                  uint16_t code,
                                                  const std::string& reason) {}
 
-void ConnectTestingEventInterface::OnFailChannel(const std::string& message) {
+void ConnectTestingEventInterface::OnFailChannel(
+    const std::string& message,
+    int net_error,
+    absl::optional<int> response_code) {
   failed_ = true;
   failure_message_ = message;
   QuitNestedEventLoop();
@@ -214,8 +237,8 @@ int ConnectTestingEventInterface::OnAuthRequired(
     scoped_refptr<HttpResponseHeaders> response_headers,
     const IPEndPoint& remote_endpoint,
     base::OnceCallback<void(const AuthCredentials*)> callback,
-    base::Optional<AuthCredentials>* credentials) {
-  *credentials = base::nullopt;
+    absl::optional<AuthCredentials>* credentials) {
+  *credentials = absl::nullopt;
   return OK;
 }
 
@@ -228,6 +251,11 @@ void ConnectTestingEventInterface::QuitNestedEventLoop() {
 class TestProxyDelegateWithProxyInfo : public ProxyDelegate {
  public:
   TestProxyDelegateWithProxyInfo() = default;
+
+  TestProxyDelegateWithProxyInfo(const TestProxyDelegateWithProxyInfo&) =
+      delete;
+  TestProxyDelegateWithProxyInfo& operator=(
+      const TestProxyDelegateWithProxyInfo&) = delete;
 
   struct ResolvedProxyInfo {
     GURL url;
@@ -260,8 +288,6 @@ class TestProxyDelegateWithProxyInfo : public ProxyDelegate {
 
  private:
   ResolvedProxyInfo resolved_proxy_info_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestProxyDelegateWithProxyInfo);
 };
 
 class WebSocketEndToEndTest : public TestWithTaskEnvironment {
@@ -269,35 +295,33 @@ class WebSocketEndToEndTest : public TestWithTaskEnvironment {
   WebSocketEndToEndTest()
       : event_interface_(),
         proxy_delegate_(std::make_unique<TestProxyDelegateWithProxyInfo>()),
-        context_(true),
-        channel_(),
-        initialised_context_(false) {}
+        context_builder_(CreateTestURLRequestContextBuilder()) {}
 
   // Initialise the URLRequestContext. Normally done automatically by
   // ConnectAndWait(). This method is for the use of tests that need the
   // URLRequestContext initialised before calling ConnectAndWait().
   void InitialiseContext() {
-    context_.Init();
-    context_.proxy_resolution_service()->SetProxyDelegate(
+    DCHECK(!context_);
+    context_ = context_builder_->Build();
+    context_->proxy_resolution_service()->SetProxyDelegate(
         proxy_delegate_.get());
-    initialised_context_ = true;
   }
 
   // Send the connect request to |socket_url| and wait for a response. Returns
   // true if the handshake succeeded.
   bool ConnectAndWait(const GURL& socket_url) {
-    if (!initialised_context_) {
+    if (!context_) {
       InitialiseContext();
     }
     url::Origin origin = url::Origin::Create(GURL("http://localhost"));
     net::SiteForCookies site_for_cookies =
         net::SiteForCookies::FromOrigin(origin);
-    IsolationInfo isolation_info = IsolationInfo::Create(
-        IsolationInfo::RedirectMode::kUpdateNothing, origin, origin,
-        SiteForCookies::FromOrigin(origin));
+    IsolationInfo isolation_info =
+        IsolationInfo::Create(IsolationInfo::RequestType::kOther, origin,
+                              origin, SiteForCookies::FromOrigin(origin));
     event_interface_ = new ConnectTestingEventInterface();
     channel_ = std::make_unique<WebSocketChannel>(
-        base::WrapUnique(event_interface_), &context_);
+        base::WrapUnique(event_interface_.get()), context_.get());
     channel_->SendAddChannelRequest(
         GURL(socket_url), sub_protocols_, origin, site_for_cookies,
         isolation_info, HttpRequestHeaders(), TRAFFIC_ANNOTATION_FOR_TESTS);
@@ -305,12 +329,12 @@ class WebSocketEndToEndTest : public TestWithTaskEnvironment {
     return !event_interface_->failed();
   }
 
-  ConnectTestingEventInterface* event_interface_;  // owned by channel_
+  raw_ptr<ConnectTestingEventInterface> event_interface_;  // owned by channel_
   std::unique_ptr<TestProxyDelegateWithProxyInfo> proxy_delegate_;
-  TestURLRequestContext context_;
+  std::unique_ptr<URLRequestContextBuilder> context_builder_;
+  std::unique_ptr<URLRequestContext> context_;
   std::unique_ptr<WebSocketChannel> channel_;
   std::vector<std::string> sub_protocols_;
-  bool initialised_context_;
 };
 
 // Basic test of connectivity. If this test fails, nothing else can be expected
@@ -340,7 +364,8 @@ TEST_F(WebSocketEndToEndTest, DISABLED_HttpsProxyUnauthedFails) {
       ConfiguredProxyResolutionService::CreateFixed(
           proxy_config, TRAFFIC_ANNOTATION_FOR_TESTS));
   ASSERT_TRUE(proxy_resolution_service);
-  context_.set_proxy_resolution_service(proxy_resolution_service.get());
+  context_builder_->set_proxy_resolution_service(
+      std::move(proxy_resolution_service));
   EXPECT_FALSE(ConnectAndWait(ws_server.GetURL(kEchoServer)));
   EXPECT_EQ("Proxy authentication failed", event_interface_->failure_message());
 }
@@ -348,7 +373,7 @@ TEST_F(WebSocketEndToEndTest, DISABLED_HttpsProxyUnauthedFails) {
 // These test are not compatible with RemoteTestServer because RemoteTestServer
 // doesn't support TYPE_BASIC_AUTH_PROXY.
 // TODO(ricea): Make these tests work. See crbug.com/441711.
-#if defined(OS_ANDROID) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_HttpsWssProxyUnauthedFails DISABLED_HttpsWssProxyUnauthedFails
 #define MAYBE_HttpsProxyUsed DISABLED_HttpsProxyUsed
 #else
@@ -375,7 +400,8 @@ TEST_F(WebSocketEndToEndTest, MAYBE_HttpsWssProxyUnauthedFails) {
       ConfiguredProxyResolutionService::CreateFixed(ProxyConfigWithAnnotation(
           proxy_config, TRAFFIC_ANNOTATION_FOR_TESTS)));
   ASSERT_TRUE(proxy_resolution_service);
-  context_.set_proxy_resolution_service(proxy_resolution_service.get());
+  context_builder_->set_proxy_resolution_service(
+      std::move(proxy_resolution_service));
   EXPECT_FALSE(ConnectAndWait(wss_server.GetURL(kEchoServer)));
   EXPECT_EQ("Proxy authentication failed", event_interface_->failure_message());
 }
@@ -401,7 +427,8 @@ TEST_F(WebSocketEndToEndTest, MAYBE_HttpsProxyUsed) {
   std::unique_ptr<ProxyResolutionService> proxy_resolution_service(
       ConfiguredProxyResolutionService::CreateFixed(ProxyConfigWithAnnotation(
           proxy_config, TRAFFIC_ANNOTATION_FOR_TESTS)));
-  context_.set_proxy_resolution_service(proxy_resolution_service.get());
+  context_builder_->set_proxy_resolution_service(
+      std::move(proxy_resolution_service));
   InitialiseContext();
 
   GURL ws_url = ws_server.GetURL(kEchoServer);
@@ -437,7 +464,7 @@ std::unique_ptr<HttpResponse> ProxyPacHandler(const HttpRequest& request) {
 // TODO(ricea): Remove this test if --winhttp-proxy-resolver flag is removed.
 // See crbug.com/644030.
 
-#if defined(OS_WIN) || defined(OS_APPLE)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE)
 #define MAYBE_ProxyPacUsed ProxyPacUsed
 #else
 #define MAYBE_ProxyPacUsed DISABLED_ProxyPacUsed
@@ -469,7 +496,8 @@ TEST_F(WebSocketEndToEndTest, MAYBE_ProxyPacUsed) {
           std::move(proxy_config_service), NetLog::Get(),
           /*quick_check_enabled=*/true));
   ASSERT_EQ(ws_server.host_port_pair().host(), "127.0.0.1");
-  context_.set_proxy_resolution_service(proxy_resolution_service.get());
+  context_builder_->set_proxy_resolution_service(
+      std::move(proxy_resolution_service));
   InitialiseContext();
 
   // Use a name other than localhost, since localhost implicitly bypasses the
@@ -517,7 +545,7 @@ TEST_F(WebSocketEndToEndTest, HstsHttpsToWebSocket) {
   // Set HSTS via https:
   TestDelegate delegate;
   GURL https_page = https_server.GetURL("/hsts-headers.html");
-  std::unique_ptr<URLRequest> request(context_.CreateRequest(
+  std::unique_ptr<URLRequest> request(context_->CreateRequest(
       https_page, DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
   delegate.RunUntilComplete();
@@ -550,7 +578,7 @@ TEST_F(WebSocketEndToEndTest, HstsWebSocketToHttps) {
   TestDelegate delegate;
   GURL http_page =
       ReplaceUrlScheme(https_server.GetURL("/simple.html"), "http");
-  std::unique_ptr<URLRequest> request(context_.CreateRequest(
+  std::unique_ptr<URLRequest> request(context_->CreateRequest(
       http_page, DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
   delegate.RunUntilComplete();
@@ -602,6 +630,45 @@ TEST_F(WebSocketEndToEndTest, HeaderContinuations) {
   EXPECT_TRUE(ConnectAndWait(ws_url));
   EXPECT_EQ("permessage-deflate; server_max_window_bits=10",
             event_interface_->extensions());
+}
+
+// Test that ws->wss scheme upgrade is supported on receiving a DNS HTTPS
+// record.
+TEST_F(WebSocketEndToEndTest, DnsSchemeUpgradeSupported) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeatureWithParameters(
+      features::kUseDnsHttpsSvcb, {{"UseDnsHttpsSvcbHttpUpgrade", "true"}});
+
+  SpawnedTestServer wss_server(SpawnedTestServer::TYPE_WSS,
+                               SpawnedTestServer::SSLOptions(base::FilePath(
+                                   FILE_PATH_LITERAL("test_names.pem"))),
+                               GetWebSocketTestDataDirectory());
+  ASSERT_TRUE(wss_server.Start());
+
+  GURL wss_url("wss://a.test:" +
+               base::NumberToString(wss_server.host_port_pair().port()) + "/" +
+               kEchoServer);
+  GURL::Replacements replacements;
+  replacements.SetSchemeStr(url::kWsScheme);
+  GURL ws_url = wss_url.ReplaceComponents(replacements);
+
+  // Note that due to socket pool behavior, HostResolver will see the ws/wss
+  // requests as http/https.
+  auto host_resolver = std::make_unique<MockHostResolver>();
+  MockHostResolverBase::RuleResolver::RuleKey unencrypted_resolve_key;
+  unencrypted_resolve_key.scheme = url::kHttpScheme;
+  host_resolver->rules()->AddRule(std::move(unencrypted_resolve_key),
+                                  ERR_DNS_NAME_HTTPS_ONLY);
+  MockHostResolverBase::RuleResolver::RuleKey encrypted_resolve_key;
+  encrypted_resolve_key.scheme = url::kHttpsScheme;
+  host_resolver->rules()->AddRule(std::move(encrypted_resolve_key),
+                                  "127.0.0.1");
+  context_builder_->set_host_resolver(std::move(host_resolver));
+
+  EXPECT_TRUE(ConnectAndWait(ws_url));
+
+  // Expect request to have reached the server using the upgraded URL.
+  EXPECT_EQ(event_interface_->response()->url, wss_url);
 }
 
 }  // namespace

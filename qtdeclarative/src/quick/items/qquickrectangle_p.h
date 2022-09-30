@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QQUICKRECTANGLE_P_H
 #define QQUICKRECTANGLE_P_H
@@ -63,10 +27,11 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPen : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(qreal width READ width WRITE setWidth NOTIFY penChanged)
-    Q_PROPERTY(QColor color READ color WRITE setColor NOTIFY penChanged)
-    Q_PROPERTY(bool pixelAligned READ pixelAligned WRITE setPixelAligned NOTIFY penChanged)
+    Q_PROPERTY(qreal width READ width WRITE setWidth NOTIFY widthChanged)
+    Q_PROPERTY(QColor color READ color WRITE setColor NOTIFY colorChanged)
+    Q_PROPERTY(bool pixelAligned READ pixelAligned WRITE setPixelAligned NOTIFY pixelAlignedChanged)
     QML_ANONYMOUS
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickPen(QObject *parent=nullptr);
 
@@ -82,7 +47,9 @@ public:
     bool isValid() const;
 
 Q_SIGNALS:
-    void penChanged();
+    void widthChanged();
+    void colorChanged();
+    void pixelAlignedChanged();
 
 private:
     qreal m_width;
@@ -98,6 +65,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickGradientStop : public QObject
     Q_PROPERTY(qreal position READ position WRITE setPosition)
     Q_PROPERTY(QColor color READ color WRITE setColor)
     QML_NAMED_ELEMENT(GradientStop)
+    QML_ADDED_IN_VERSION(2, 0)
 
 public:
     QQuickGradientStop(QObject *parent=nullptr);
@@ -121,11 +89,12 @@ class Q_QUICK_PRIVATE_EXPORT QQuickGradient : public QObject
     Q_OBJECT
 
     Q_PROPERTY(QQmlListProperty<QQuickGradientStop> stops READ stops)
-    Q_PROPERTY(Orientation orientation READ orientation WRITE setOrientation NOTIFY orientationChanged REVISION 12)
+    Q_PROPERTY(Orientation orientation READ orientation WRITE setOrientation NOTIFY orientationChanged REVISION(2, 12))
     Q_CLASSINFO("DefaultProperty", "stops")
     QML_NAMED_ELEMENT(Gradient)
+    QML_ADDED_IN_VERSION(2, 0)
+    QML_EXTENDED_NAMESPACE(QGradient)
 
-    Q_ENUMS(QGradient::Preset)
 public:
     QQuickGradient(QObject *parent=nullptr);
     ~QQuickGradient() override;
@@ -165,6 +134,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickRectangle : public QQuickItem
     Q_PROPERTY(QQuickPen * border READ border CONSTANT)
     Q_PROPERTY(qreal radius READ radius WRITE setRadius NOTIFY radiusChanged)
     QML_NAMED_ELEMENT(Rectangle)
+    QML_ADDED_IN_VERSION(2, 0)
 public:
     QQuickRectangle(QQuickItem *parent=nullptr);
 

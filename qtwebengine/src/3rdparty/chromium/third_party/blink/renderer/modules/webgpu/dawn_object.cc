@@ -19,81 +19,66 @@ DawnObjectBase::GetDawnControlClient() const {
   return dawn_control_client_;
 }
 
-bool DawnObjectBase::IsDawnControlClientDestroyed() const {
-  return dawn_control_client_->IsDestroyed();
-}
-
-gpu::webgpu::WebGPUInterface* DawnObjectBase::GetInterface() const {
-  return dawn_control_client_->GetInterface();
-}
-
-const DawnProcTable& DawnObjectBase::GetProcs() const {
-  return dawn_control_client_->GetProcs();
-}
-
-DawnDeviceClientSerializerHolder::DawnDeviceClientSerializerHolder(
-    scoped_refptr<DawnControlClientHolder> dawn_control_client,
-    uint64_t device_client_id)
-    : dawn_control_client_(std::move(dawn_control_client)),
-      device_client_id_(device_client_id) {}
-
-DawnDeviceClientSerializerHolder::~DawnDeviceClientSerializerHolder() {
-  if (dawn_control_client_->IsDestroyed()) {
-    return;
+void DawnObjectBase::setLabel(ScriptState* script_state,
+                              const ScriptValue value,
+                              ExceptionState& exception_state) {
+  v8::Local<v8::Value> v8_value = value.V8Value();
+  if (v8_value->IsString()) {
+    setLabel(ToCoreString(v8::Local<v8::String>::Cast(v8_value)));
+  } else if (v8_value->IsUndefined()) {
+    setLabel(String());
+  } else {
+    exception_state.ThrowTypeError(
+        "'label' is not of type 'string' or undefined");
   }
-  dawn_control_client_->GetInterface()->RemoveDevice(device_client_id_);
 }
 
-const scoped_refptr<DawnControlClientHolder>&
-DeviceTreeObject::GetDawnControlClient() const {
-  return device_client_serializer_holder_->dawn_control_client_;
+void DawnObjectBase::setLabel(const String& value) {
+  // TODO: Relay label changes to Dawn
+  label_ = value;
+  setLabelImpl(value);
 }
 
-bool DeviceTreeObject::IsDawnControlClientDestroyed() const {
-  return GetDawnControlClient()->IsDestroyed();
-}
-gpu::webgpu::WebGPUInterface* DeviceTreeObject::GetInterface() const {
-  return GetDawnControlClient()->GetInterface();
-}
-const DawnProcTable& DeviceTreeObject::GetProcs() const {
-  return GetDawnControlClient()->GetProcs();
-}
-
-uint64_t DeviceTreeObject::GetDeviceClientID() const {
-  return device_client_serializer_holder_->device_client_id_;
-}
-
-void DeviceTreeObject::EnsureFlush() {
+void DawnObjectBase::EnsureFlush() {
   bool needs_flush = false;
-  GetInterface()->EnsureAwaitingFlush(
-      device_client_serializer_holder_->device_client_id_, &needs_flush);
+  auto context_provider = GetContextProviderWeakPtr();
+  if (UNLIKELY(!context_provider))
+    return;
+  context_provider->ContextProvider()->WebGPUInterface()->EnsureAwaitingFlush(
+      &needs_flush);
   if (!needs_flush) {
     // We've already enqueued a task to flush, or the command buffer
     // is empty. Do nothing.
     return;
   }
   Microtask::EnqueueMicrotask(WTF::Bind(
-      [](scoped_refptr<DawnDeviceClientSerializerHolder> holder) {
-        if (holder->dawn_control_client_->IsDestroyed()) {
-          return;
+      [](scoped_refptr<DawnControlClientHolder> dawn_control_client) {
+        if (auto context_provider =
+                dawn_control_client->GetContextProviderWeakPtr()) {
+          context_provider->ContextProvider()
+              ->WebGPUInterface()
+              ->FlushAwaitingCommands();
         }
-        holder->dawn_control_client_->GetInterface()->FlushAwaitingCommands(
-            holder->device_client_id_);
       },
-      device_client_serializer_holder_));
+      dawn_control_client_));
 }
 
 // Flush commands up until now on this object's parent device immediately.
-void DeviceTreeObject::FlushNow() {
-  GetInterface()->FlushCommands(
-      device_client_serializer_holder_->device_client_id_);
+void DawnObjectBase::FlushNow() {
+  auto context_provider = GetContextProviderWeakPtr();
+  if (LIKELY(context_provider)) {
+    context_provider->ContextProvider()->WebGPUInterface()->FlushCommands();
+  }
 }
 
 DawnObjectImpl::DawnObjectImpl(GPUDevice* device)
-    : DeviceTreeObject(device->GetDeviceClientSerializerHolder()),
-      device_(device) {}
+    : DawnObjectBase(device->GetDawnControlClient()), device_(device) {}
 
 DawnObjectImpl::~DawnObjectImpl() = default;
+
+WGPUDevice DawnObjectImpl::GetDeviceHandle() {
+  return device_->GetHandle();
+}
 
 void DawnObjectImpl::Trace(Visitor* visitor) const {
   visitor->Trace(device_);

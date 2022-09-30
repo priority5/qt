@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
    \group all-examples
@@ -81,9 +57,6 @@
 
     Examples marked with an asterisk (*) are fully documented.
 */
-// This example seems to have disappeared:
-//    \li \l{draganddrop/delayedencoding}{Delayed Encoding}\raisedaster
-
 
 /*!
     \page examples-threadandconcurrent.html
@@ -196,11 +169,6 @@
 
     \image xml-examples.png XML
 
-    The XQuery/XPath and XML Schema engines in the \l{Qt XML Patterns} module
-    provide classes for querying XML files and custom data models.
-
-    \annotatedlist xmlpattern_examples
-
     Examples marked with an asterisk (*) are fully documented.
 */
 /*
@@ -229,31 +197,6 @@
 */
 
 /*!
-    \page examples-statemachine.html
-    \ingroup all-examples
-    \title State Machine Examples
-    \brief Using Qt's finite state machine classes.
-
-    Qt provides a powerful hierarchical finite state machine through the Qt State
-    Machine classes.
-
-    These examples demonstrate the fundamental aspects of implementing
-    Statecharts with Qt.
-
-    \list
-    \li \l{statemachine/eventtransitions}{Event Transitions}\raisedaster
-    \li \l{statemachine/factorial}{Factorial States}\raisedaster
-    \li \l{statemachine/pingpong}{Ping Pong States}\raisedaster
-    \li \l{statemachine/rogue}{Rogue}\raisedaster
-    \li \l{statemachine/trafficlight}{Traffic Light}\raisedaster
-    \li \l{statemachine/twowaybutton}{Two-way Button}\raisedaster
-    \endlist
-
-    For more information about using the Qt SCXML module to to create state
-    charts from State Chart XML (SCXML) files, see \l {Qt SCXML Examples}.
-*/
-
-/*!
     \page examples-animation.html
     \ingroup all-examples
     \title Animation Framework Examples
@@ -262,15 +205,8 @@
     \image animation-examples.png Animation
 
     \list
-    \li \l{animation/animatedtiles}{Animated Tiles}
     \li \l{animation/easing}{Easing Curves}
-    \li \l{animation/moveblocks}{Move Blocks}\raisedaster
-    \li \l{animation/states}{States}
-    \li \l{animation/stickman}{Stick man}\raisedaster
-    \li \l{animation/sub-attaq}{Sub-Attaq}
     \endlist
-
-    Examples marked with an asterisk (*) are fully documented.
 */
 
 /*!
@@ -296,7 +232,7 @@
     \endlist
 */
 
-/*!
+/* //! QDoc marker omitted as ActiveQt is not part of 6.0 release.
     \page examples-activeqt.html
     \title ActiveQt Examples
     \brief Using ActiveX from Qt applications.

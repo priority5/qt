@@ -14,9 +14,11 @@
 #include <utility>
 
 #include "core/fxcrt/unowned_ptr.h"
-#include "third_party/base/logging.h"
+#include "third_party/base/check.h"
 
 namespace pdfium {
+
+constexpr size_t dynamic_extent = static_cast<size_t>(-1);
 
 template <typename T>
 class span;
@@ -149,9 +151,6 @@ using EnableIfConstSpanCompatibleContainer =
 // static extent template parameter. Other differences are documented in
 // subsections below.
 //
-// Differences from [views.constants]:
-// - no dynamic_extent constant
-//
 // Differences in constants and types:
 // - no element_type type alias
 // - no index_type type alias
@@ -230,11 +229,11 @@ class span {
     return span(data_.Get() + (size_ - count), count);
   }
 
-  const span subspan(size_t pos, size_t count = -1) const {
-    const auto npos = static_cast<size_t>(-1);
+  const span subspan(size_t pos, size_t count = dynamic_extent) const {
     CHECK(pos <= size_);
-    CHECK(count == npos || count <= size_ - pos);
-    return span(data_.Get() + pos, count == npos ? size_ - pos : count);
+    CHECK(count == dynamic_extent || count <= size_ - pos);
+    return span(data_.Get() + pos,
+                count == dynamic_extent ? size_ - pos : count);
   }
 
   // [span.obs], span observers
@@ -247,6 +246,17 @@ class span {
     CHECK(index < size_);
     return data_.Get()[index];
   }
+
+  constexpr T& front() const noexcept {
+    CHECK(!empty());
+    return *data();
+  }
+
+  constexpr T& back() const noexcept {
+    CHECK(!empty());
+    return *(data() + size() - 1);
+  }
+
   constexpr T* data() const noexcept { return data_.Get(); }
 
   // [span.iter], span iterator support

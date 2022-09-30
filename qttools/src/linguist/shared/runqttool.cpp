@@ -1,30 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt Linguist of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "runqttool.h"
 
@@ -32,7 +7,7 @@
 
 #include <QtCore/qcoreapplication.h>
 #include <QtCore/qdir.h>
-#include <QtCore/qregexp.h>
+#include <QtCore/qregularexpression.h>
 
 #include <cstdlib>
 #include <iostream>
@@ -45,10 +20,9 @@ class FMT {
     Q_DECLARE_TR_FUNCTIONS(Linguist)
 };
 
-static QString qtToolFilePath(const QString &toolName)
+static QString qtToolFilePath(const QString &toolName, QLibraryInfo::LibraryPath location)
 {
-    QString filePath = QCoreApplication::instance()->applicationDirPath()
-            + QLatin1Char('/') + toolName;
+    QString filePath = QLibraryInfo::path(location) + QLatin1Char('/') + toolName;
 #ifdef Q_OS_WIN
     filePath.append(QLatin1String(".exe"));
 #endif
@@ -62,7 +36,7 @@ static void printErr(const QString &out)
 
 static QString shellQuoted(const QString &str)
 {
-    static QRegExp rx(QStringLiteral("\\s"));
+    static QRegularExpression rx(QStringLiteral("\\s"));
     QString result = str;
     if (result.contains(rx)) {
         const QLatin1Char dblqt = QLatin1Char('"');
@@ -89,10 +63,11 @@ static QString commandLineForSystem(const QString &program,
             + shellQuoted(arguments).join(QLatin1Char(' '));
 }
 
-void runQtTool(const QString &toolName, const QStringList &arguments)
+void runQtTool(const QString &toolName, const QStringList &arguments,
+               QLibraryInfo::LibraryPath location)
 {
     int exitCode = 0;
-    const QString commandLine = commandLineForSystem(qtToolFilePath(toolName), arguments);
+    const QString commandLine = commandLineForSystem(qtToolFilePath(toolName, location), arguments);
 #if defined(Q_OS_WIN)
     exitCode = _wsystem(reinterpret_cast<const wchar_t *>(commandLine.utf16()));
 #elif defined(Q_OS_UNIX)
@@ -105,6 +80,11 @@ void runQtTool(const QString &toolName, const QStringList &arguments)
         exit(exitCode);
 }
 
+void runInternalQtTool(const QString &toolName, const QStringList &arguments)
+{
+    runQtTool(toolName, arguments, QLibraryInfo::LibraryExecutablesPath);
+}
+
 std::unique_ptr<QTemporaryFile> createProjectDescription(QStringList args)
 {
     std::unique_ptr<QTemporaryFile> file(new QTemporaryFile(QStringLiteral("XXXXXX.json")));
@@ -114,6 +94,6 @@ std::unique_ptr<QTemporaryFile> createProjectDescription(QStringList args)
     }
     file->close();
     args << QStringLiteral("-out") << file->fileName();
-    runQtTool(QStringLiteral("lprodump"), args);
+    runInternalQtTool(QStringLiteral("lprodump"), args);
     return file;
 }

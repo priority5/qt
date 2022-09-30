@@ -8,26 +8,33 @@
 #include "services/network/public/mojom/cross_origin_opener_policy.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/location_report_body.h"
 
 namespace blink {
 
-class CORE_EXPORT CoopAccessViolationReportBody : public LocationReportBody {
+class CORE_EXPORT CoopAccessViolationReportBody final
+    : public LocationReportBody {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   CoopAccessViolationReportBody(
       std::unique_ptr<SourceLocation> source_location,
       network::mojom::blink::CoopAccessReportType type,
-      const String& property);
+      const String& property,
+      const String& reported_url);
   ~CoopAccessViolationReportBody() final = default;
   String type() const;
+  String openeeURL() const;
+  String openerURL() const;
+  String otherDocumentURL() const;
   const String& property() const { return property_; }
   void BuildJSONValue(V8ObjectBuilder& builder) const final;
 
  private:
   network::mojom::blink::CoopAccessReportType type_;
   const String property_;
+  const String reported_url_;
 };
 
 }  // namespace blink

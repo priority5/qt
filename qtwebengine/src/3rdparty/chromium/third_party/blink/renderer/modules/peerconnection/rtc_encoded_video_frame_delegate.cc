@@ -25,7 +25,7 @@ String RTCEncodedVideoFrameDelegate::Type() const {
   return webrtc_frame_->IsKeyFrame() ? "key" : "delta";
 }
 
-uint64_t RTCEncodedVideoFrameDelegate::Timestamp() const {
+uint32_t RTCEncodedVideoFrameDelegate::Timestamp() const {
   MutexLocker lock(mutex_);
   return webrtc_frame_ ? webrtc_frame_->GetTimestamp() : 0;
 }
@@ -52,7 +52,7 @@ void RTCEncodedVideoFrameDelegate::SetData(const DOMArrayBuffer* data) {
   MutexLocker lock(mutex_);
   if (webrtc_frame_ && data) {
     webrtc_frame_->SetData(rtc::ArrayView<const uint8_t>(
-        static_cast<const uint8_t*>(data->Data()), data->ByteLengthAsSizeT()));
+        static_cast<const uint8_t*>(data->Data()), data->ByteLength()));
   }
 }
 
@@ -75,9 +75,16 @@ DOMArrayBuffer* RTCEncodedVideoFrameDelegate::CreateAdditionalDataBuffer()
   return DOMArrayBuffer::Create(std::move(contents));
 }
 
-uint32_t RTCEncodedVideoFrameDelegate::Ssrc() const {
+absl::optional<uint32_t> RTCEncodedVideoFrameDelegate::Ssrc() const {
   MutexLocker lock(mutex_);
-  return webrtc_frame_ ? webrtc_frame_->GetSsrc() : 0;
+  return webrtc_frame_ ? absl::make_optional(webrtc_frame_->GetSsrc())
+                       : absl::nullopt;
+}
+
+absl::optional<uint8_t> RTCEncodedVideoFrameDelegate::PayloadType() const {
+  MutexLocker lock(mutex_);
+  return webrtc_frame_ ? absl::make_optional(webrtc_frame_->GetPayloadType())
+                       : absl::nullopt;
 }
 
 const webrtc::VideoFrameMetadata* RTCEncodedVideoFrameDelegate::GetMetadata()

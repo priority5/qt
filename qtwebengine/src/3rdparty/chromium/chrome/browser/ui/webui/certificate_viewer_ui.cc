@@ -30,7 +30,6 @@ content::WebUIDataSource* GetWebUIDataSource(const std::string& host) {
       {"details", IDS_CERT_INFO_DETAILS_TAB_LABEL},
       {"close", IDS_CLOSE},
       {"export", IDS_CERT_DETAILS_EXPORT_CERTIFICATE},
-      {"usages", IDS_CERT_INFO_VERIFIED_USAGES_GROUP},
       {"issuedTo", IDS_CERT_INFO_SUBJECT_GROUP},
       {"issuedBy", IDS_CERT_INFO_ISSUER_GROUP},
       {"cn", IDS_CERT_INFO_COMMON_NAME_LABEL},
@@ -46,11 +45,14 @@ content::WebUIDataSource* GetWebUIDataSource(const std::string& host) {
       {"certFields", IDS_CERT_DETAILS_CERTIFICATE_FIELDS_LABEL},
       {"certFieldVal", IDS_CERT_DETAILS_CERTIFICATE_FIELD_VALUE_LABEL},
   };
-  AddLocalizedStringsBulk(html_source, kStrings);
+  html_source->AddLocalizedStrings(kStrings);
 
   html_source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::TrustedTypes,
-      "trusted-types cr-ui-tree-js-static;");
+      "trusted-types static-types certificate-test-script;");
+  html_source->OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::ScriptSrc,
+      "script-src chrome://resources chrome://test 'self';");
 
   html_source->UseStringsJs();
 

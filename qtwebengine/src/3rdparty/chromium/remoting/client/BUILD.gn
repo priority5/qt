@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
+
 static_library("client") {
   sources = [
     "chromoting_client.cc",
@@ -29,8 +31,6 @@ static_library("client") {
     "host_experiment_sender.h",
     "in_memory_log_handler.cc",
     "in_memory_log_handler.h",
-    "queued_task_poster.cc",
-    "queued_task_poster.h",
     "software_video_renderer.cc",
     "software_video_renderer.h",
   ]
@@ -44,7 +44,7 @@ static_library("client") {
   public_deps = [ "//remoting/base" ]
 
   deps = [
-    "//jingle:webrtc_glue",
+    "//components/webrtc:thread_wrapper",
     "//mojo/core/embedder",
     "//remoting/base:authorization",
     "//remoting/client/audio",
@@ -90,7 +90,6 @@ source_set("unit_tests") {
     "client_telemetry_logger_unittest.cc",
     "dual_buffer_frame_consumer_unittest.cc",
     "empty_cursor_filter_unittest.cc",
-    "queued_task_poster_unittest.cc",
     "software_video_renderer_unittest.cc",
   ]
 

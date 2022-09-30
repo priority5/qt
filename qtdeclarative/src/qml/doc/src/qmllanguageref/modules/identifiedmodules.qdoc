@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 /*!
 \page qtqml-modules-identifiedmodules.html
 \title Identified Modules
@@ -35,8 +11,8 @@ specified by the module in its \c qmldir file.  This enables such modules to
 be imported with a unique identifier that remains the same no matter where the
 module is located on the local file system.
 
-When importing an identified module, an unquoted identifier is used, with a
-mandatory version number:
+When importing an identified module, an unquoted identifier is used, with an
+optional version number:
 
 \snippet qml/imports/installed-module.qml imports
 
@@ -175,13 +151,13 @@ An identified module has several restrictions upon it:
 \endlist
 
 For example, if an identified module is installed into
-\c{$QML2_IMPORT_PATH/ExampleModule}, the module identifier directive must be:
+\c{$QML_IMPORT_PATH/ExampleModule}, the module identifier directive must be:
 \code
 module ExampleModule
 \endcode
 
 If the strict module is installed into
-\c{$QML2_IMPORT_PATH/com/example/CustomUi}, the module identifier directive
+\c{$QML_IMPORT_PATH/com/example/CustomUi}, the module identifier directive
 must be:
 \code
 module com.example.CustomUi

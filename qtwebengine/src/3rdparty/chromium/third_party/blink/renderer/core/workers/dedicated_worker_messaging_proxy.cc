@@ -6,10 +6,12 @@
 
 #include <memory>
 #include "base/feature_list.h"
-#include "base/optional.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/v8_cache_options.mojom-blink.h"
+#include "third_party/blink/public/mojom/worker/dedicated_worker_host.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/sanitize_script_errors.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_worker_options.h"
@@ -21,6 +23,7 @@
 #include "third_party/blink/renderer/core/inspector/thread_debugger.h"
 #include "third_party/blink/renderer/core/loader/worker_resource_timing_notifier_impl.h"
 #include "third_party/blink/renderer/core/messaging/blink_transferable_message.h"
+#include "third_party/blink/renderer/core/script_type_names.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_object_proxy.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_thread.h"
@@ -55,7 +58,12 @@ void DedicatedWorkerMessagingProxy::StartWorkerGlobalScope(
     const FetchClientSettingsObjectSnapshot& outside_settings_object,
     const v8_inspector::V8StackTraceId& stack_id,
     const String& source_code,
-    RejectCoepUnsafeNone reject_coep_unsafe_none) {
+    RejectCoepUnsafeNone reject_coep_unsafe_none,
+    const blink::DedicatedWorkerToken& token,
+    mojo::PendingRemote<mojom::blink::DedicatedWorkerHost>
+        dedicated_worker_host,
+    mojo::PendingRemote<mojom::blink::BackForwardCacheControllerHost>
+        back_forward_cache_controller_host) {
   DCHECK(IsParentContextThread());
   if (AskedToTerminate()) {
     // Worker.terminate() could be called from JS before the thread was
@@ -63,13 +71,18 @@ void DedicatedWorkerMessagingProxy::StartWorkerGlobalScope(
     return;
   }
 
+  // These must be stored before InitializeWorkerThread.
+  pending_dedicated_worker_host_ = std::move(dedicated_worker_host);
+  pending_back_forward_cache_controller_host_ =
+      std::move(back_forward_cache_controller_host);
   InitializeWorkerThread(
       std::move(creation_params),
-      CreateBackingThreadStartupData(GetExecutionContext()->GetIsolate()));
+      CreateBackingThreadStartupData(GetExecutionContext()->GetIsolate()),
+      token);
 
   // Step 13: "Obtain script by switching on the value of options's type
   // member:"
-  if (options->type() == "classic") {
+  if (options->type() == script_type_names::kClassic) {
     // "classic: Fetch a classic worker script given url, outside settings,
     // destination, and inside settings."
     UseCounter::Count(GetExecutionContext(),
@@ -87,13 +100,13 @@ void DedicatedWorkerMessagingProxy::StartWorkerGlobalScope(
       GetWorkerThread()->EvaluateClassicScript(
           script_url, source_code, nullptr /* cached_meta_data */, stack_id);
     }
-  } else if (options->type() == "module") {
+  } else if (options->type() == script_type_names::kModule) {
     // "module: Fetch a module worker script graph given url, outside settings,
     // destination, the value of the credentials member of options, and inside
     // settings."
     UseCounter::Count(GetExecutionContext(),
                       WebFeature::kModuleDedicatedWorker);
-    base::Optional<network::mojom::CredentialsMode> credentials_mode =
+    absl::optional<network::mojom::CredentialsMode> credentials_mode =
         Request::ParseCredentialsMode(options->credentials());
     DCHECK(credentials_mode);
 
@@ -122,8 +135,7 @@ void DedicatedWorkerMessagingProxy::PostMessageToWorkerGlobalScope(
       *GetWorkerThread()->GetTaskRunner(TaskType::kPostedMessage), FROM_HERE,
       CrossThreadBindOnce(
           &DedicatedWorkerObjectProxy::ProcessMessageFromWorkerObject,
-          CrossThreadUnretained(&WorkerObjectProxy()),
-          WTF::Passed(std::move(message)),
+          CrossThreadUnretained(&WorkerObjectProxy()), std::move(message),
           CrossThreadUnretained(GetWorkerThread())));
 }
 
@@ -139,12 +151,12 @@ void DedicatedWorkerMessagingProxy::DidFailToFetchScript() {
   worker_object_->DispatchErrorEventForScriptFetchFailure();
 }
 
-void DedicatedWorkerMessagingProxy::Freeze() {
+void DedicatedWorkerMessagingProxy::Freeze(bool is_in_back_forward_cache) {
   DCHECK(IsParentContextThread());
   auto* worker_thread = GetWorkerThread();
   if (AskedToTerminate() || !worker_thread)
     return;
-  worker_thread->Freeze();
+  worker_thread->Freeze(is_in_back_forward_cache);
 }
 
 void DedicatedWorkerMessagingProxy::Resume() {
@@ -176,8 +188,7 @@ void DedicatedWorkerMessagingProxy::DidEvaluateScript(bool success) {
         *GetWorkerThread()->GetTaskRunner(TaskType::kPostedMessage), FROM_HERE,
         CrossThreadBindOnce(
             &DedicatedWorkerObjectProxy::ProcessMessageFromWorkerObject,
-            CrossThreadUnretained(&WorkerObjectProxy()),
-            WTF::Passed(std::move(task)),
+            CrossThreadUnretained(&WorkerObjectProxy()), std::move(task),
             CrossThreadUnretained(GetWorkerThread())));
   }
 }
@@ -246,7 +257,7 @@ void DedicatedWorkerMessagingProxy::Trace(Visitor* visitor) const {
   ThreadedMessagingProxyBase::Trace(visitor);
 }
 
-base::Optional<WorkerBackingThreadStartupData>
+absl::optional<WorkerBackingThreadStartupData>
 DedicatedWorkerMessagingProxy::CreateBackingThreadStartupData(
     v8::Isolate* isolate) {
   using HeapLimitMode = WorkerBackingThreadStartupData::HeapLimitMode;
@@ -260,8 +271,11 @@ DedicatedWorkerMessagingProxy::CreateBackingThreadStartupData(
 
 std::unique_ptr<WorkerThread>
 DedicatedWorkerMessagingProxy::CreateWorkerThread() {
-  return std::make_unique<DedicatedWorkerThread>(GetExecutionContext(),
-                                                 WorkerObjectProxy());
+  DCHECK(pending_dedicated_worker_host_);
+  return std::make_unique<DedicatedWorkerThread>(
+      GetExecutionContext(), WorkerObjectProxy(),
+      std::move(pending_dedicated_worker_host_),
+      std::move(pending_back_forward_cache_controller_host_));
 }
 
 }  // namespace blink

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQml module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 
 #include "qv4stringobject_p.h"
@@ -62,7 +26,7 @@
 #    include "qplatformdefs.h"
 #  endif
 #else
-#  include <windows.h>
+#  include <qt_windows.h>
 #endif
 
 using namespace QV4;
@@ -208,7 +172,6 @@ ReturnedValue StringCtor::method_fromCharCode(const FunctionObject *b, const Val
         *ch = QChar(argv[i].toUInt16());
         ++ch;
     }
-    *ch = 0;
     return Encode(b->engine()->newString(str));
 }
 
@@ -231,11 +194,10 @@ ReturnedValue StringCtor::method_fromCodePoint(const FunctionObject *f, const Va
             ++ch;
             *ch = QChar::lowSurrogate(cp);
         } else {
-            *ch = cp;
+            *ch = QChar(cp);
         }
         ++ch;
     }
-    *ch = 0;
     result.truncate(ch - result.constData());
     return e->newString(result)->asReturnedValue();
 }
@@ -268,14 +230,14 @@ ReturnedValue StringCtor::method_raw(const FunctionObject *f, const Value *, con
     while (1) {
         val = raw->get(nextIndex);
         result += val->toQString();
-        if (scope.engine->hasException)
+        if (scope.hasException())
             return Encode::undefined();
         if (nextIndex + 1 == literalSegments)
             return scope.engine->newString(result)->asReturnedValue();
 
         if (nextIndex < static_cast<uint>(argc))
             result += argv[nextIndex].toQString();
-        if (scope.engine->hasException)
+        if (scope.hasException())
             return Encode::undefined();
         ++nextIndex;
     }
@@ -464,7 +426,7 @@ ReturnedValue StringPrototype::method_endsWith(const FunctionObject *b, const Va
     if (pos == value.length())
         RETURN_RESULT(Encode(value.endsWith(searchString)));
 
-    QStringRef stringToSearch = value.leftRef(pos);
+    QStringView stringToSearch = QStringView{value}.left(pos);
     return Encode(stringToSearch.endsWith(searchString));
 }
 
@@ -514,7 +476,7 @@ ReturnedValue StringPrototype::method_includes(const FunctionObject *b, const Va
     if (pos == 0)
         RETURN_RESULT(Encode(value.contains(searchString)));
 
-    QStringRef stringToSearch = value.midRef(pos);
+    QStringView stringToSearch = QStringView{value}.mid(pos);
     return Encode(stringToSearch.contains(searchString));
 }
 
@@ -655,7 +617,7 @@ ReturnedValue StringPrototype::method_padEnd(const FunctionObject *f, const Valu
         toFill -= copy;
         ch += copy;
     }
-    *ch = 0;
+    *ch = QChar::Null;
 
     return v4->newString(padded)->asReturnedValue();
 }
@@ -697,7 +659,7 @@ ReturnedValue StringPrototype::method_padStart(const FunctionObject *f, const Va
     }
     memcpy(ch, original.constData(), oldLength*sizeof(QChar));
     ch += oldLength;
-    *ch = 0;
+    *ch = QChar::Null;
 
     return v4->newString(padded)->asReturnedValue();
 }
@@ -765,7 +727,7 @@ static void appendReplacementString(QString *result, const QString &input, const
             }
             i += skip;
             if (substStart != JSC::Yarr::offsetNoMatch && substEnd != JSC::Yarr::offsetNoMatch)
-                *result += input.midRef(substStart, substEnd - substStart);
+                *result += QStringView{input}.mid(substStart, substEnd - substStart);
             else if (skip == 0) // invalid capture reference. Taken as literal value
                 *result += replaceValue.at(i);
         } else {
@@ -863,11 +825,11 @@ ReturnedValue StringPrototype::method_replace(const FunctionObject *b, const Val
             Value that = Value::undefinedValue();
             replacement = searchCallback->call(&that, arguments, numCaptures + 2);
             CHECK_EXCEPTION();
-            result += string.midRef(lastEnd, matchStart - lastEnd);
+            result += QStringView{string}.mid(lastEnd, matchStart - lastEnd);
             result += replacement->toQString();
             lastEnd = matchEnd;
         }
-        result += string.midRef(lastEnd);
+        result += QStringView{string}.mid(lastEnd);
     } else {
         QString newString = replaceValue->toQString();
         result.reserve(string.length() + numStringMatches*newString.size());
@@ -880,11 +842,11 @@ ReturnedValue StringPrototype::method_replace(const FunctionObject *b, const Val
             if (matchStart == JSC::Yarr::offsetNoMatch)
                 continue;
 
-            result += string.midRef(lastEnd, matchStart - lastEnd);
+            result += QStringView{string}.mid(lastEnd, matchStart - lastEnd);
             appendReplacementString(&result, string, newString, matchOffsets + baseIndex, numCaptures);
             lastEnd = matchEnd;
         }
-        result += string.midRef(lastEnd);
+        result += QStringView{string}.mid(lastEnd);
     }
 
     if (matchOffsets != _matchOffsets)
@@ -897,13 +859,13 @@ ReturnedValue StringPrototype::method_search(const FunctionObject *b, const Valu
 {
     Scope scope(b);
     QString string = getThisString(scope.engine, thisObject);
-    if (scope.engine->hasException)
+    if (scope.hasException())
         return QV4::Encode::undefined();
 
     Scoped<RegExpObject> regExp(scope, argc ? argv[0] : Value::undefinedValue());
     if (!regExp) {
         regExp = scope.engine->regExpCtor()->callAsConstructor(argv, 1);
-        if (scope.engine->hasException)
+        if (scope.hasException())
             return QV4::Encode::undefined();
 
         Q_ASSERT(regExp);
@@ -1052,7 +1014,7 @@ ReturnedValue StringPrototype::method_startsWith(const FunctionObject *b, const 
     if (pos == 0)
         return Encode(value.startsWith(searchString));
 
-    QStringRef stringToSearch = value.midRef(pos);
+    QStringView stringToSearch = QStringView{value}.mid(pos);
     RETURN_RESULT(Encode(stringToSearch.startsWith(searchString)));
 }
 

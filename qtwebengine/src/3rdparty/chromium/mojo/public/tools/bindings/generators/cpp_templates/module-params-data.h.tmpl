@@ -9,10 +9,8 @@
 #ifndef {{header_guard}}
 #define {{header_guard}}
 
-#include "base/macros.h"
 #include "mojo/public/cpp/bindings/lib/bindings_internal.h"
 #include "mojo/public/cpp/bindings/lib/buffer.h"
-#include "mojo/public/cpp/bindings/lib/validation_context.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -23,6 +21,8 @@
 namespace {{namespace}} {
 {%- endfor %}
 namespace internal {
+
+class ValidationContext;
 
 {#--- Interface parameter definitions #}
 {%- for interface in interfaces %}

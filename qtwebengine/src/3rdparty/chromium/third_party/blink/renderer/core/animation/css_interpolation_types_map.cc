@@ -7,8 +7,9 @@
 #include <memory>
 #include <utility>
 
-#include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/renderer/core/animation/css_angle_interpolation_type.h"
+#include "third_party/blink/renderer/core/animation/css_aspect_ratio_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_basic_shape_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_border_image_length_box_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_clip_interpolation_type.h"
@@ -24,6 +25,7 @@
 #include "third_party/blink/renderer/core/animation/css_image_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_image_list_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_image_slice_interpolation_type.h"
+#include "third_party/blink/renderer/core/animation/css_intrinsic_length_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_length_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_length_list_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_length_pair_interpolation_type.h"
@@ -51,15 +53,16 @@
 #include "third_party/blink/renderer/core/css/css_syntax_definition.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #include "third_party/blink/renderer/core/css/property_registry.h"
-#include "third_party/blink/renderer/core/feature_policy/layout_animations_policy.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/permissions_policy/layout_animations_policy.h"
 
 namespace blink {
 
 CSSInterpolationTypesMap::CSSInterpolationTypesMap(
     const PropertyRegistry* registry,
     const Document& document)
-    : registry_(registry) {
+    : document_(document), registry_(registry) {
   allow_all_animations_ = document.GetExecutionContext()->IsFeatureEnabled(
       blink::mojom::blink::DocumentPolicyFeature::kLayoutAnimations);
 }
@@ -110,11 +113,15 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
   // equivalents when interpolating.
   PropertyHandle used_property =
       property.IsCSSProperty() ? property : PropertyHandle(css_property);
+
+  bool reduce_motion = document_.ShouldForceReduceMotion();
+
   // TODO(crbug.com/838263): Support site-defined list of acceptable properties
-  // through feature policy declarations.
-  bool property_maybe_blocked_by_feature_policy =
+  // through permissions policy declarations.
+  bool property_maybe_blocked_by_permissions_policy =
       LayoutAnimationsPolicy::AffectedCSSProperties().Contains(&css_property);
-  if (allow_all_animations_ || !property_maybe_blocked_by_feature_policy) {
+  if (!reduce_motion && (allow_all_animations_ ||
+                         !property_maybe_blocked_by_permissions_policy)) {
     switch (css_property.PropertyID()) {
       case CSSPropertyID::kBaselineShift:
       case CSSPropertyID::kBorderBottomWidth:
@@ -173,6 +180,16 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
         applicable_types->push_back(
             std::make_unique<CSSLengthInterpolationType>(used_property));
         break;
+      case CSSPropertyID::kAspectRatio:
+        applicable_types->push_back(
+            std::make_unique<CSSAspectRatioInterpolationType>(used_property));
+        break;
+      case CSSPropertyID::kContainIntrinsicWidth:
+      case CSSPropertyID::kContainIntrinsicHeight:
+        applicable_types->push_back(
+            std::make_unique<CSSIntrinsicLengthInterpolationType>(
+                used_property));
+        break;
       case CSSPropertyID::kFlexGrow:
       case CSSPropertyID::kFlexShrink:
       case CSSPropertyID::kFillOpacity:
@@ -199,6 +216,7 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
         applicable_types->push_back(
             std::make_unique<CSSNumberInterpolationType>(used_property));
         break;
+      case CSSPropertyID::kAccentColor:
       case CSSPropertyID::kBackgroundColor:
       case CSSPropertyID::kBorderBottomColor:
       case CSSPropertyID::kBorderLeftColor:
@@ -211,6 +229,7 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
       case CSSPropertyID::kOutlineColor:
       case CSSPropertyID::kStopColor:
       case CSSPropertyID::kTextDecorationColor:
+      case CSSPropertyID::kTextEmphasisColor:
       case CSSPropertyID::kColumnRuleColor:
       case CSSPropertyID::kWebkitTextStrokeColor:
         applicable_types->push_back(
@@ -224,7 +243,7 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
       case CSSPropertyID::kOffsetPath:
         applicable_types->push_back(
             std::make_unique<CSSRayInterpolationType>(used_property));
-        FALLTHROUGH;
+        [[fallthrough]];
       case CSSPropertyID::kD:
         applicable_types->push_back(
             std::make_unique<CSSPathInterpolationType>(used_property));
@@ -293,7 +312,6 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
       case CSSPropertyID::kBorderBottomRightRadius:
       case CSSPropertyID::kBorderTopLeftRadius:
       case CSSPropertyID::kBorderTopRightRadius:
-      case CSSPropertyID::kContainIntrinsicSize:
         applicable_types->push_back(
             std::make_unique<CSSLengthPairInterpolationType>(used_property));
         break;
@@ -337,6 +355,11 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
             std::make_unique<CSSImageSliceInterpolationType>(used_property));
         break;
       case CSSPropertyID::kClipPath:
+        applicable_types->push_back(
+            std::make_unique<CSSBasicShapeInterpolationType>(used_property));
+        applicable_types->push_back(
+            std::make_unique<CSSPathInterpolationType>(used_property));
+        break;
       case CSSPropertyID::kShapeOutside:
         applicable_types->push_back(
             std::make_unique<CSSBasicShapeInterpolationType>(used_property));

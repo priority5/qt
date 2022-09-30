@@ -9,9 +9,12 @@
 
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "components/feed/core/proto/v2/store.pb.h"
+#include "components/feed/core/proto/v2/wire/response.pb.h"
 #include "components/feed/core/v2/enums.h"
 #include "components/feed/core/v2/feed_network.h"
+#include "components/feed/core/v2/scheduling.h"
 #include "components/feed/core/v2/tasks/upload_actions_task.h"
 #include "components/offline_pages/task/task.h"
 #include "components/version_info/channel.h"
@@ -26,12 +29,23 @@ class FeedStream;
 class LoadMoreTask : public offline_pages::Task {
  public:
   struct Result {
+    Result();
+    ~Result();
+    Result(Result&&);
+    Result& operator=(Result&&);
+    Result(const Result&) = delete;
+    Result& operator=(const Result&) = delete;
+
+    StreamType stream_type;
     // Final status of loading the stream.
     LoadStreamStatus final_status = LoadStreamStatus::kNoStatus;
     bool loaded_new_content_from_network = false;
+    absl::optional<RequestSchedule> request_schedule;
+    std::unique_ptr<StreamModelUpdateRequest> model_update_request;
   };
 
-  LoadMoreTask(FeedStream* stream,
+  LoadMoreTask(const StreamType& stream_type,
+               FeedStream* stream,
                base::OnceCallback<void(Result)> done_callback);
   ~LoadMoreTask() override;
   LoadMoreTask(const LoadMoreTask&) = delete;
@@ -44,15 +58,19 @@ class LoadMoreTask : public offline_pages::Task {
   }
 
   void UploadActionsComplete(UploadActionsTask::Result result);
-  void QueryRequestComplete(bool was_signed_in_request,
-                            FeedNetwork::QueryRequestResult result);
+  void QueryApiRequestComplete(
+      FeedNetwork::ApiResult<feedwire::Response> result);
+  void QueryRequestComplete(FeedNetwork::QueryRequestResult result);
+  void ProcessNetworkResponse(std::unique_ptr<feedwire::Response> response_body,
+                              NetworkResponseInfo response_info);
   void Done(LoadStreamStatus status);
 
-  FeedStream* stream_;  // Unowned.
+  StreamType stream_type_;
+  FeedStream& stream_;  // Unowned.
   base::TimeTicks fetch_start_time_;
   std::unique_ptr<UploadActionsTask> upload_actions_task_;
 
-  bool loaded_new_content_from_network_ = false;
+  Result result_;
 
   base::OnceCallback<void(Result)> done_callback_;
   base::WeakPtrFactory<LoadMoreTask> weak_ptr_factory_{this};

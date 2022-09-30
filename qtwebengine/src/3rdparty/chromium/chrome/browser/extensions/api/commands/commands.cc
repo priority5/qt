@@ -17,11 +17,11 @@ std::unique_ptr<base::DictionaryValue> CreateCommandValue(
     const extensions::Command& command,
     bool active) {
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
-  result->SetString("name", command.command_name());
-  result->SetString("description", command.description());
-  result->SetString("shortcut",
-                    active ? command.accelerator().GetShortcutText() :
-                             base::string16());
+  result->SetStringKey("name", command.command_name());
+  result->SetStringKey("description", command.description());
+  result->SetStringKey("shortcut", active
+                                       ? command.accelerator().GetShortcutText()
+                                       : std::u16string());
   return result;
 }
 
@@ -67,5 +67,6 @@ ExtensionFunction::ResponseAction GetAllCommandsFunction::Run() {
     command_list->Append(CreateCommandValue(iter->second, active));
   }
 
-  return RespondNow(OneArgument(std::move(command_list)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(command_list))));
 }

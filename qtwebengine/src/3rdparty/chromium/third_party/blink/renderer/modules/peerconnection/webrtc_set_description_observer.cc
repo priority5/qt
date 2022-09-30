@@ -13,10 +13,7 @@ std::unique_ptr<webrtc::SessionDescriptionInterface> CopySessionDescription(
     const webrtc::SessionDescriptionInterface* description) {
   if (!description)
     return nullptr;
-  std::string sdp;
-  description->ToString(&sdp);
-  return std::unique_ptr<webrtc::SessionDescriptionInterface>(
-      webrtc::CreateSessionDescription(description->type(), sdp, nullptr));
+  return description->Clone();
 }
 
 WebRtcSetDescriptionObserver::States::States()
@@ -83,7 +80,8 @@ void WebRtcSetDescriptionObserverHandlerImpl::OnSetDescriptionComplete(
   if (pc_->signaling_state() != webrtc::PeerConnectionInterface::kClosed) {
     if (surface_receivers_only_) {
       for (const auto& receiver : pc_->GetReceivers()) {
-        transceivers.push_back(new blink::SurfaceReceiverStateOnly(receiver));
+        transceivers.emplace_back(
+            new blink::SurfaceReceiverStateOnly(receiver));
       }
     } else {
       transceivers = pc_->GetTransceivers();

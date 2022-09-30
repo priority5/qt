@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/core/css/property_registry.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder_converter.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -26,11 +25,15 @@ CSSProperty::Flags InheritedFlag(const PropertyRegistration* registration) {
 
 }  // namespace
 
-CustomProperty::CustomProperty(const AtomicString& name,
-                               const Document& document)
+CustomProperty::CustomProperty(AtomicString name, const Document& document)
     : CustomProperty(
-          name,
-          PropertyRegistration::From(document.GetExecutionContext(), name)) {}
+          PropertyRegistration::From(document.GetExecutionContext(), name)) {
+  // Initializing `name_` on the body prevents `name` to be used after the
+  // std::move call.
+  name_ = std::move(name);
+  DCHECK_EQ(IsShorthand(), CSSProperty::IsShorthand(GetCSSPropertyName()));
+  DCHECK_EQ(IsRepeated(), CSSProperty::IsRepeated(GetCSSPropertyName()));
+}
 
 CustomProperty::CustomProperty(const AtomicString& name,
                                const PropertyRegistry* registry)
@@ -38,10 +41,15 @@ CustomProperty::CustomProperty(const AtomicString& name,
 
 CustomProperty::CustomProperty(const AtomicString& name,
                                const PropertyRegistration* registration)
-    : Variable(InheritedFlag(registration) |
-               CSSProperty::kComputedValueComparable),
+    : Variable(InheritedFlag(registration)),
       name_(name),
-      registration_(registration) {}
+      registration_(registration) {
+  DCHECK_EQ(IsShorthand(), CSSProperty::IsShorthand(GetCSSPropertyName()));
+  DCHECK_EQ(IsRepeated(), CSSProperty::IsRepeated(GetCSSPropertyName()));
+}
+
+CustomProperty::CustomProperty(const PropertyRegistration* registration)
+    : Variable(InheritedFlag(registration)), registration_(registration) {}
 
 const AtomicString& CustomProperty::GetPropertyNameAtomicString() const {
   return name_;
@@ -49,6 +57,12 @@ const AtomicString& CustomProperty::GetPropertyNameAtomicString() const {
 
 CSSPropertyName CustomProperty::GetCSSPropertyName() const {
   return CSSPropertyName(name_);
+}
+
+bool CustomProperty::HasEqualCSSPropertyName(const CSSProperty& other) const {
+  if (PropertyID() != other.PropertyID())
+    return false;
+  return name_ == other.GetPropertyNameAtomicString();
 }
 
 void CustomProperty::ApplyInitial(StyleResolverState& state) const {
@@ -82,6 +96,10 @@ void CustomProperty::ApplyInherit(StyleResolverState& state) const {
 void CustomProperty::ApplyValue(StyleResolverState& state,
                                 const CSSValue& value) const {
   if (value.IsInvalidVariableValue()) {
+    if (!SupportsGuaranteedInvalid()) {
+      ApplyUnset(state);
+      return;
+    }
     state.Style()->SetVariableData(name_, nullptr, IsInherited());
     if (registration_)
       state.Style()->SetVariableValue(name_, nullptr, IsInherited());
@@ -156,23 +174,8 @@ const CSSValue* CustomProperty::ParseSingleValue(
   }
 }
 
-bool CustomProperty::ComputedValuesEqual(const ComputedStyle& a,
-                                         const ComputedStyle& b) const {
-  if (registration_) {
-    const CSSValue* a_value = a.GetVariableValue(name_, IsInherited());
-    const CSSValue* b_value = b.GetVariableValue(name_, IsInherited());
-    if (!DataEquivalent(a_value, b_value))
-      return false;
-  }
-
-  CSSVariableData* a_data = a.GetVariableData(name_, IsInherited());
-  CSSVariableData* b_data = b.GetVariableData(name_, IsInherited());
-  return DataEquivalent(a_data, b_data);
-}
-
 const CSSValue* CustomProperty::CSSValueFromComputedStyleInternal(
     const ComputedStyle& style,
-    const SVGComputedStyle&,
     const LayoutObject*,
     bool allow_visited_style) const {
   if (registration_) {
@@ -189,15 +192,16 @@ const CSSValue* CustomProperty::CSSValueFromComputedStyleInternal(
   if (!data)
     return nullptr;
 
-  return MakeGarbageCollected<CSSCustomPropertyDeclaration>(name_, data);
+  return MakeGarbageCollected<CSSCustomPropertyDeclaration>(data);
 }
 
 const CSSValue* CustomProperty::ParseUntyped(
     CSSParserTokenRange range,
     const CSSParserContext& context,
     const CSSParserLocalContext& local_context) const {
+  // TODO(crbug.com/661854): Pass through the original string when we have it.
   return CSSVariableParser::ParseDeclarationValue(
-      name_, range, local_context.IsAnimationTainted(), context);
+      {range, StringView()}, local_context.IsAnimationTainted(), context);
 }
 
 const CSSValue* CustomProperty::ParseTyped(

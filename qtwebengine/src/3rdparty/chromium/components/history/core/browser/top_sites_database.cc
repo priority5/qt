@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <tuple>
 #include <utility>
 
 #include "base/bind.h"
@@ -127,7 +129,7 @@ void FixTopSitesTable(sql::Database* db, int version) {
         "DELETE FROM thumbnails "
         "WHERE (url_rank = -1 AND last_forced = 0) "
         "OR (url_rank <> -1 AND last_forced <> 0)";
-    ignore_result(db->Execute(kFixRankSql));
+    std::ignore = db->Execute(kFixRankSql);
     if (db->GetLastChangeCount() > 0)
       RecordRecoveryEvent(RECOVERY_EVENT_INVARIANT_RANK);
   }
@@ -139,8 +141,8 @@ void FixTopSitesTable(sql::Database* db, int version) {
   static const char kFixRedirectsSql[] =
       "DELETE FROM %s "
       "WHERE url <> substr(redirects, -length(url), length(url))";
-  ignore_result(
-      db->Execute(base::StringPrintf(kFixRedirectsSql, kTableName).c_str()));
+  std::ignore =
+      db->Execute(base::StringPrintf(kFixRedirectsSql, kTableName).c_str());
   if (db->GetLastChangeCount() > 0)
     RecordRecoveryEvent(RECOVERY_EVENT_INVARIANT_REDIRECT);
 
@@ -160,7 +162,7 @@ void FixTopSitesTable(sql::Database* db, int version) {
   sql::Statement update_statement(db->GetUniqueStatement(
       base::StringPrintf(kAdjustRankSql, kTableName).c_str()));
 
-  // Update any rows where |next_rank| doesn't match |url_rank|.
+  // Update any rows where `next_rank` doesn't match `url_rank`.
   int next_rank = 0;
   bool adjusted = false;
   while (select_statement.Step()) {
@@ -246,7 +248,7 @@ void DatabaseErrorCallback(sql::Database* db,
     // Prevent reentrant calls.
     db->reset_error_callback();
 
-    // After this call, the |db| handle is poisoned so that future calls will
+    // After this call, the `db` handle is poisoned so that future calls will
     // return errors until the handle is re-opened.
     RecoverAndFixup(db, db_path);
 
@@ -255,7 +257,7 @@ void DatabaseErrorCallback(sql::Database* db,
     // or hardware issues, not coding errors at the client level, so displaying
     // the error would probably lead to confusion.  The ignored call signals the
     // test-expectation framework that the error was handled.
-    ignore_result(sql::Database::IsExpectedSqliteError(extended_error));
+    std::ignore = sql::Database::IsExpectedSqliteError(extended_error);
     return;
   }
 
@@ -308,7 +310,7 @@ bool TopSitesDatabase::Init(const base::FilePath& db_name) {
 bool TopSitesDatabase::InitImpl(const base::FilePath& db_name) {
   const bool file_existed = base::PathExists(db_name);
 
-  db_.reset(CreateDB(db_name));
+  db_ = CreateDB(db_name);
   if (!db_)
     return false;
 
@@ -322,7 +324,9 @@ bool TopSitesDatabase::InitImpl(const base::FilePath& db_name) {
 
   // Clear databases which are too old to process.
   DCHECK_LT(kDeprecatedVersionNumber, kVersionNumber);
-  sql::MetaTable::RazeIfDeprecated(db_.get(), kDeprecatedVersionNumber);
+  sql::MetaTable::RazeIfIncompatible(
+      db_.get(), /*lowest_supported_version=*/kDeprecatedVersionNumber + 1,
+      kVersionNumber);
 
   // Scope initialization in a transaction so we can't be partially
   // initialized.
@@ -563,18 +567,18 @@ bool TopSitesDatabase::RemoveURLNoTransaction(const MostVisitedURL& url) {
   return delete_statement.Run();
 }
 
-sql::Database* TopSitesDatabase::CreateDB(const base::FilePath& db_name) {
-  std::unique_ptr<sql::Database> db(new sql::Database());
+std::unique_ptr<sql::Database> TopSitesDatabase::CreateDB(
+    const base::FilePath& db_name) {
   // Settings copied from FaviconDatabase.
+  auto db = std::make_unique<sql::Database>(sql::DatabaseOptions(
+      /*.exclusive_locking =*/ true, /*.page_size =*/ 4096, /*.cache_size =*/ 32));
   db->set_histogram_tag("TopSites");
   db->set_error_callback(
       base::BindRepeating(&DatabaseErrorCallback, db.get(), db_name));
-  db->set_page_size(4096);
-  db->set_cache_size(32);
 
   if (!db->Open(db_name))
     return nullptr;
-  return db.release();
+  return db;
 }
 
 }  // namespace history

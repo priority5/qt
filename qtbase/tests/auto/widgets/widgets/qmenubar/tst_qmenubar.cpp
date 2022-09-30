@@ -1,33 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QSignalSpy>
 #include <qapplication.h>
 #include <qmainwindow.h>
 #include <qmenubar.h>
@@ -39,6 +15,7 @@
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QPlainTextEdit>
+#include <QTranslator>
 #include <qscreen.h>
 
 #include <qobject.h>
@@ -143,6 +120,8 @@ private slots:
 #ifdef Q_OS_MACOS
     void taskQTBUG56275_reinsertMenuInParentlessQMenuBar();
     void QTBUG_57404_existingMenuItemException();
+    void defaultEditMenuItems();
+
 #endif
     void QTBUG_25669_menubarActionDoubleTriggered();
     void taskQTBUG55966_subMenuRemoved();
@@ -232,19 +211,25 @@ TestMenu tst_QMenuBar::initSimpleMenuBar(QMenuBar *mb, bool forceNonNative) {
     connect(mb, SIGNAL(triggered(QAction*)), this, SLOT(onSimpleActivated(QAction*)));
     QMenu *menu = mb->addMenu(QStringLiteral("&accel"));
     QAction *action = menu->addAction(QStringLiteral("menu1") );
-    action->setShortcut(QKeySequence(Qt::ALT + Qt::Key_A));
-    action->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_A));
+#if QT_CONFIG(shortcut)
+    action->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
+    action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_A));
+#endif
     connect(menu, SIGNAL(triggered(QAction*)), this, SLOT(onSimpleActivated(QAction*)));
     result.menus << menu;
     result.actions << action;
 
     menu = mb->addMenu(QStringLiteral("accel1"));
     action = menu->addAction(QStringLiteral("&Open...") );
+#if QT_CONFIG(shortcut)
     action->setShortcut(Qt::Key_O);
+#endif
     result.actions << action;
 
     action = menu->addAction(QStringLiteral("action"));
-    action->setShortcut(QKeySequence(Qt::ALT + Qt::Key_Z));
+#if QT_CONFIG(shortcut)
+    action->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Z));
+#endif
     result.actions << action;
 
     result.menus << menu;
@@ -283,7 +268,9 @@ QAction *tst_QMenuBar::createCharacterAction(QMenu *menu, char lowerAscii)
     QAction *action = menu->addAction(text);
     action->setObjectName(text);
     action->setData(QVariant(int(lowerAscii)));
-    action->setShortcut(Qt::CTRL + (lowerAscii - 'a' + Qt::Key_A));
+#if QT_CONFIG(shortcut)
+    action->setShortcut(Qt::CTRL | Qt::Key(lowerAscii - 'a' + int(Qt::Key_A)));
+#endif
     connect(action, SIGNAL(triggered()), this, SLOT(onComplexActionTriggered()));
     return action;
 }
@@ -318,7 +305,9 @@ TestMenu tst_QMenuBar::initComplexMenuBar(QMenuBar *mb)
 
     QAction *action = mb->addAction(QStringLiteral("M&enu 3"));
     action->setData(QVariant(3));
-    action->setShortcut(Qt::ALT + Qt::Key_J);
+#if QT_CONFIG(shortcut)
+    action->setShortcut(Qt::ALT | Qt::Key_J);
+#endif
     connect(action, SIGNAL(triggered()), this, SLOT(onComplexActionTriggered()));
     result.actions << action;
 
@@ -910,7 +899,7 @@ void tst_QMenuBar::check_escKey()
 
     if (!QGuiApplication::platformName().compare(QLatin1String("minimal"), Qt::CaseInsensitive)
         || !QGuiApplication::platformName().compare(QLatin1String("offscreen"), Qt::CaseInsensitive)) {
-        QWARN("Skipping menu button test on minimal/offscreen platforms");
+        qWarning("Skipping menu button test on minimal/offscreen platforms");
         return;
     }
 
@@ -1216,9 +1205,6 @@ void tst_QMenuBar::check_menuPosition()
         mbItemRect.moveTo(w.menuBar()->mapToGlobal(mbItemRect.topLeft()));
         QTest::keyClick(&w, Qt::Key_M, Qt::AltModifier );
         QVERIFY(menu.isActiveWindow());
-#ifdef Q_OS_WINRT
-        QEXPECT_FAIL("", "QTest::keyClick does not work on WinRT.", Abort);
-#endif
         QCOMPARE(menu.pos(), QPoint(mbItemRect.x(), mbItemRect.top() - menu.height()));
         menu.close();
     }
@@ -1348,7 +1334,8 @@ void tst_QMenuBar::menubarSizeHint()
     {
         MyStyle() : QProxyStyle(QStyleFactory::create("windows")) { }
 
-        virtual int pixelMetric(PixelMetric metric, const QStyleOption * option = 0, const QWidget * widget = 0 ) const
+        int pixelMetric(PixelMetric metric, const QStyleOption *option = 0,
+                        const QWidget *widget = 0) const override
         {
             // I chose strange values (prime numbers to be more sure that the size of the menubar is correct)
             switch (metric)
@@ -1406,10 +1393,7 @@ void tst_QMenuBar::menubarSizeHint()
     QSize resSize = QSize(result.x(), result.y()) + result.size()
         + QSize(panelWidth + hmargin, panelWidth + vmargin);
 
-
-    resSize = style.sizeFromContents(QStyle::CT_MenuBar, &opt,
-                                         resSize.expandedTo(QApplication::globalStrut()),
-                                         &mb);
+    resSize = style.sizeFromContents(QStyle::CT_MenuBar, &opt, resSize, &mb);
 
     QCOMPARE(resSize, mb.sizeHint());
 }
@@ -1422,7 +1406,9 @@ void tst_QMenuBar::taskQTBUG4965_escapeEaten()
     menubar.setNativeMenuBar(false);
     QMenu menu("menu1");
     QAction *first = menubar.addMenu(&menu);
-    menu.addAction("quit", &menubar, SLOT(close()), QKeySequence("ESC"));
+#if QT_CONFIG(shortcut)
+    menu.addAction("quit", QKeySequence("ESC"), &menubar, SLOT(close()));
+#endif
     centerOnScreen(&menubar);
     menubar.show();
     QApplication::setActiveWindow(&menubar);
@@ -1556,9 +1542,6 @@ void tst_QMenuBar::cornerWidgets()
     case Qt::TopLeftCorner:
         QVERIFY2(fileMenuGeometry.left() >= cornerWidgetWidth,
                  msgComparison(fileMenuGeometry.left(), ">=", cornerWidgetWidth));
-#ifdef Q_OS_WINRT
-        QEXPECT_FAIL("", "Broken on WinRT - QTBUG-68297", Abort);
-#endif
         QVERIFY2(menuBarWidth - editMenuGeometry.right() < cornerWidgetWidth,
                  msgComparison(menuBarWidth - editMenuGeometry.right(), "<", cornerWidgetWidth));
         break;
@@ -1812,6 +1795,32 @@ void tst_QMenuBar::QTBUG_57404_existingMenuItemException()
     mw1.activateWindow();
     QTest::qWait(100);
     // No crash, all fine. Ideally, there should be only one warning.
+}
+
+void tst_QMenuBar::defaultEditMenuItems()
+{
+    class TestTranslator : public QTranslator
+    {
+    public:
+        QString translate(const char *context, const char *sourceText,
+                          const char *disambiguation = nullptr, int n = -1) const override
+        {
+            if (QByteArrayView(context) == "QCocoaMenu" && QByteArrayView(sourceText) == "Edit")
+                return QString("Editieren");
+            return QTranslator::translate(context, sourceText, disambiguation, n);
+        }
+    } testTranslator;
+    qApp->installTranslator(&testTranslator);
+
+    QMainWindow mw;
+    mw.show();
+    QVERIFY(QTest::qWaitForWindowActive(&mw));
+
+    mw.menuBar()->addMenu("Editieren")->addAction("Undo");
+
+    mw.hide();
+    mw.show();
+    // this should not crash with infinite recursion
 }
 #endif // Q_OS_MACOS
 

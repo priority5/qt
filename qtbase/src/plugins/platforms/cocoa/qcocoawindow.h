@@ -1,48 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the plugins of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #ifndef QCOCOAWINDOW_H
 #define QCOCOAWINDOW_H
 
-#include <AppKit/AppKit.h>
-
 #include <qpa/qplatformwindow.h>
+#include <qpa/qplatformwindow_p.h>
 #include <QRect>
 #include <QPointer>
 
@@ -54,6 +17,17 @@
 
 #if QT_CONFIG(vulkan)
 #include <MoltenVK/mvk_vulkan.h>
+#endif
+
+#include <QHash>
+
+Q_FORWARD_DECLARE_OBJC_CLASS(NSWindow);
+Q_FORWARD_DECLARE_OBJC_CLASS(NSView);
+Q_FORWARD_DECLARE_OBJC_CLASS(NSCursor);
+
+#if !defined(__OBJC__)
+using NSInteger = long;
+using NSUInteger = unsigned long;
 #endif
 
 QT_BEGIN_NAMESPACE
@@ -91,7 +65,8 @@ class QDebug;
 
 class QCocoaMenuBar;
 
-class QCocoaWindow : public QObject, public QPlatformWindow
+class QCocoaWindow : public QObject, public QPlatformWindow,
+    public QNativeInterface::Private::QCocoaWindow
 {
     Q_OBJECT
 public:
@@ -102,6 +77,7 @@ public:
 
     void setGeometry(const QRect &rect) override;
     QRect geometry() const override;
+    QRect normalGeometry() const override;
     void setCocoaGeometry(const QRect &rect);
 
     void setVisible(bool visible) override;
@@ -144,13 +120,11 @@ public:
     Q_NOTIFICATION_HANDLER(NSViewFrameDidChangeNotification) void viewDidChangeFrame();
     Q_NOTIFICATION_HANDLER(NSViewGlobalFrameDidChangeNotification) void viewDidChangeGlobalFrame();
 
-    Q_NOTIFICATION_HANDLER(NSWindowWillMoveNotification) void windowWillMove();
     Q_NOTIFICATION_HANDLER(NSWindowDidMoveNotification) void windowDidMove();
     Q_NOTIFICATION_HANDLER(NSWindowDidResizeNotification) void windowDidResize();
     Q_NOTIFICATION_HANDLER(NSWindowDidEndLiveResizeNotification) void windowDidEndLiveResize();
     Q_NOTIFICATION_HANDLER(NSWindowDidBecomeKeyNotification) void windowDidBecomeKey();
     Q_NOTIFICATION_HANDLER(NSWindowDidResignKeyNotification) void windowDidResignKey();
-    Q_NOTIFICATION_HANDLER(NSWindowWillMiniaturizeNotification) void windowWillMiniaturize();
     Q_NOTIFICATION_HANDLER(NSWindowDidMiniaturizeNotification) void windowDidMiniaturize();
     Q_NOTIFICATION_HANDLER(NSWindowDidDeminiaturizeNotification) void windowDidDeminiaturize();
     Q_NOTIFICATION_HANDLER(NSWindowWillEnterFullScreenNotification) void windowWillEnterFullScreen();
@@ -161,14 +135,16 @@ public:
     Q_NOTIFICATION_HANDLER(NSWindowDidOrderOffScreenNotification) void windowDidOrderOffScreen();
     Q_NOTIFICATION_HANDLER(NSWindowDidChangeOcclusionStateNotification) void windowDidChangeOcclusionState();
     Q_NOTIFICATION_HANDLER(NSWindowDidChangeScreenNotification) void windowDidChangeScreen();
-    Q_NOTIFICATION_HANDLER(NSWindowWillCloseNotification) void windowWillClose();
+
+    void windowWillZoom();
 
     bool windowShouldClose();
     bool windowIsPopupType(Qt::WindowType type = Qt::Widget) const;
 
     NSInteger windowLevel(Qt::WindowFlags flags);
     NSUInteger windowStyleMask(Qt::WindowFlags flags);
-    void setWindowZoomButton(Qt::WindowFlags flags);
+    void updateTitleBarButtons(Qt::WindowFlags flags);
+    bool isFixedSize() const;
 
     bool setWindowModified(bool modified) override;
 
@@ -185,7 +161,7 @@ public:
     void setContentBorderThickness(int topThickness, int bottomThickness);
     void registerContentBorderArea(quintptr identifier, int upper, int lower);
     void setContentBorderAreaEnabled(quintptr identifier, bool enable);
-    void setContentBorderEnabled(bool enable);
+    void setContentBorderEnabled(bool enable) override;
     bool testContentBorderAreaPosition(int position) const;
     void applyContentBorderThickness(NSWindow *window = nullptr);
     void updateNSToolbar();
@@ -194,8 +170,9 @@ public:
     QWindow *childWindowAt(QPoint windowPoint);
     bool shouldRefuseKeyWindowAndFirstResponder();
 
-    static QPoint bottomLeftClippedByNSWindowOffsetStatic(QWindow *window);
-    QPoint bottomLeftClippedByNSWindowOffset() const;
+    QPoint bottomLeftClippedByNSWindowOffset() const override;
+
+    void updateNormalGeometry();
 
     enum RecreationReason {
         RecreationNotNeeded = 0,
@@ -228,7 +205,6 @@ public: // for QNSView
     bool isContentView() const;
 
     bool alwaysShowToolWindow() const;
-    void removeMonitor();
 
     enum HandleFlags {
         NoHandleFlags = 0,
@@ -239,13 +215,17 @@ public: // for QNSView
     void handleWindowStateChanged(HandleFlags flags = NoHandleFlags);
     void handleExposeEvent(const QRegion &region);
 
+    static void closeAllPopups();
+    static void setupPopupMonitor();
+    static void removePopupMonitor();
+
     NSView *m_view;
     QCocoaNSWindow *m_nsWindow;
 
     Qt::WindowStates m_lastReportedWindowState;
     Qt::WindowModality m_windowModality;
-    QPointer<QWindow> m_enterLeaveTargetWindow;
-    bool m_windowUnderMouse;
+
+    static QPointer<QCocoaWindow> s_windowUnderMouse;
 
     bool m_initialized;
     bool m_inSetVisible;
@@ -253,16 +233,14 @@ public: // for QNSView
     bool m_inSetStyleMask;
     QCocoaMenuBar *m_menubar;
 
-    bool m_needsInvalidateShadow;
-
     bool m_frameStrutEventsEnabled;
     QRect m_exposedRect;
+    QRect m_normalGeometry;
     int m_registerTouchCount;
     bool m_resizableTransientParent;
 
     static const int NoAlertRequest;
     NSInteger m_alertRequest;
-    id monitor;
 
     bool m_drawContentBorderGradient;
     int m_topContentBorderThickness;
@@ -277,13 +255,18 @@ public: // for QNSView
               return upper < right.upper;
         }
     };
-    QHash<quintptr, BorderRange> m_contentBorderAreas; // identifer -> uppper/lower
-    QHash<quintptr, bool> m_enabledContentBorderAreas; // identifer -> enabled state (true/false)
+    QHash<quintptr, BorderRange> m_contentBorderAreas; // identifier -> uppper/lower
+    QHash<quintptr, bool> m_enabledContentBorderAreas; // identifier -> enabled state (true/false)
+
+    static inline id s_globalMouseMonitor = 0;
+    static inline id s_applicationActivationObserver = 0;
 
 #if QT_CONFIG(vulkan)
     VkSurfaceKHR m_vulkanSurface = nullptr;
 #endif
 };
+
+extern const NSNotificationName QCocoaWindowWillReleaseQNSViewNotification;
 
 #ifndef QT_NO_DEBUG_STREAM
 QDebug operator<<(QDebug debug, const QCocoaWindow *window);

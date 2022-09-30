@@ -8,15 +8,14 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/debug/stack_trace.h"
-#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
-#include "components/services/storage/indexed_db/scopes/disjoint_range_lock_manager.h"
+#include "components/services/storage/indexed_db/locks/disjoint_range_lock_manager.h"
 #include "content/browser/indexed_db/fake_indexed_db_metadata_coding.h"
 #include "content/browser/indexed_db/indexed_db_class_factory.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
@@ -25,7 +24,6 @@
 #include "content/browser/indexed_db/indexed_db_fake_backing_store.h"
 #include "content/browser/indexed_db/indexed_db_leveldb_coding.h"
 #include "content/browser/indexed_db/indexed_db_metadata_coding.h"
-#include "content/browser/indexed_db/indexed_db_observer.h"
 #include "content/browser/indexed_db/mock_indexed_db_database_callbacks.h"
 #include "content/browser/indexed_db/mock_indexed_db_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -43,33 +41,37 @@ void SetToTrue(bool* value) {
 
 class AbortObserver {
  public:
-  AbortObserver() : abort_task_called_(false) {}
+  AbortObserver() = default;
+
+  AbortObserver(const AbortObserver&) = delete;
+  AbortObserver& operator=(const AbortObserver&) = delete;
 
   void AbortTask() { abort_task_called_ = true; }
 
   bool abort_task_called() const { return abort_task_called_; }
 
  private:
-  bool abort_task_called_;
-  DISALLOW_COPY_AND_ASSIGN(AbortObserver);
+  bool abort_task_called_ = false;
 };
 
 class IndexedDBTransactionTest : public testing::Test {
  public:
   IndexedDBTransactionTest()
       : task_environment_(std::make_unique<base::test::TaskEnvironment>()),
-        backing_store_(new IndexedDBFakeBackingStore()),
-        factory_(new MockIndexedDBFactory()),
+        backing_store_(std::make_unique<IndexedDBFakeBackingStore>()),
+        factory_(std::make_unique<MockIndexedDBFactory>()),
         lock_manager_(kIndexedDBLockLevelCount) {}
+
+  IndexedDBTransactionTest(const IndexedDBTransactionTest&) = delete;
+  IndexedDBTransactionTest& operator=(const IndexedDBTransactionTest&) = delete;
 
   void SetUp() override {
     // DB is created here instead of the constructor to workaround a
     // "peculiarity of C++". More info at
-    // https://github.com/google/googletest/blob/master/googletest/docs/FAQ.md#my-compiler-complains-that-a-constructor-or-destructor-cannot-return-a-value-whats-going-on
+    // https://github.com/google/googletest/blob/main/docs/faq.md#my-compiler-complains-that-a-constructor-or-destructor-cannot-return-a-value-whats-going-on
     leveldb::Status s;
     std::tie(db_, s) = IndexedDBClassFactory::Get()->CreateIndexedDBDatabase(
-        base::ASCIIToUTF16("db"), backing_store_.get(), factory_.get(),
-        CreateRunTasksCallback(),
+        u"db", backing_store_.get(), factory_.get(), CreateRunTasksCallback(),
         std::make_unique<FakeIndexedDBMetadataCoding>(),
         IndexedDBDatabase::Identifier(), &lock_manager_);
     ASSERT_TRUE(s.ok());
@@ -90,9 +92,7 @@ class IndexedDBTransactionTest : public testing::Test {
                          base::Unretained(this), false));
       return;
     }
-    IndexedDBDatabase::RunTasksResult result;
-    leveldb::Status status;
-    std::tie(result, status) = db_->RunTasks();
+    auto [result, status] = db_->RunTasks();
     switch (result) {
       case IndexedDBDatabase::RunTasksResult::kDone:
         return;
@@ -119,11 +119,10 @@ class IndexedDBTransactionTest : public testing::Test {
   }
 
   std::unique_ptr<IndexedDBConnection> CreateConnection() {
-    auto connection = std::unique_ptr<
-        IndexedDBConnection>(std::make_unique<IndexedDBConnection>(
-        IndexedDBOriginStateHandle(), IndexedDBClassFactory::Get(),
+    auto connection = std::make_unique<IndexedDBConnection>(
+        IndexedDBStorageKeyStateHandle(), IndexedDBClassFactory::Get(),
         db_->AsWeakPtr(), base::DoNothing(), base::DoNothing(),
-        new MockIndexedDBDatabaseCallbacks()));
+        base::MakeRefCounted<MockIndexedDBDatabaseCallbacks>());
     db_->AddConnectionForTesting(connection.get());
     return connection;
   }
@@ -140,18 +139,17 @@ class IndexedDBTransactionTest : public testing::Test {
 
  private:
   DisjointRangeLockManager lock_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBTransactionTest);
 };
 
 class IndexedDBTransactionTestMode
     : public IndexedDBTransactionTest,
       public testing::WithParamInterface<blink::mojom::IDBTransactionMode> {
  public:
-  IndexedDBTransactionTestMode() {}
+  IndexedDBTransactionTestMode() = default;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBTransactionTestMode);
+  IndexedDBTransactionTestMode(const IndexedDBTransactionTestMode&) = delete;
+  IndexedDBTransactionTestMode& operator=(const IndexedDBTransactionTestMode&) =
+      delete;
 };
 
 TEST_F(IndexedDBTransactionTest, Timeout) {
@@ -525,50 +523,6 @@ TEST_P(IndexedDBTransactionTestMode, AbortPreemptive) {
             transaction->diagnostics().tasks_scheduled);
 }
 
-TEST_F(IndexedDBTransactionTest, IndexedDBObserver) {
-  const int64_t id = 0;
-  const std::set<int64_t> scope;
-  const leveldb::Status commit_success = leveldb::Status::OK();
-  std::unique_ptr<IndexedDBConnection> connection = CreateConnection();
-  IndexedDBTransaction* transaction = connection->CreateTransaction(
-      id, scope, blink::mojom::IDBTransactionMode::ReadWrite,
-      new IndexedDBFakeBackingStore::FakeTransaction(commit_success));
-  ASSERT_TRUE(transaction);
-  db_->RegisterAndScheduleTransaction(transaction);
-
-  EXPECT_EQ(0UL, transaction->pending_observers_.size());
-  EXPECT_EQ(0UL, connection->active_observers().size());
-
-  // Add observers to pending observer list.
-  const int32_t observer_id1 = 1, observer_id2 = 2;
-  IndexedDBObserver::Options options(false, false, false, 0U);
-  transaction->AddPendingObserver(observer_id1, options);
-  transaction->AddPendingObserver(observer_id2, options);
-  EXPECT_EQ(2UL, transaction->pending_observers_.size());
-  EXPECT_EQ(0UL, connection->active_observers().size());
-
-  // Before commit, observer would be in pending list of transaction.
-  std::vector<int32_t> observer_to_remove1 = {observer_id1};
-  connection->RemoveObservers(observer_to_remove1);
-  EXPECT_EQ(1UL, transaction->pending_observers_.size());
-  EXPECT_EQ(0UL, connection->active_observers().size());
-
-  // After commit, observer moved to connection's active observer.
-  transaction->SetCommitFlag();
-  RunPostedTasks();
-  EXPECT_EQ(0UL, connection->transactions().size());
-  EXPECT_EQ(1UL, connection->active_observers().size());
-
-  // Observer does not exist, so no change to active_observers.
-  connection->RemoveObservers(observer_to_remove1);
-  EXPECT_EQ(1UL, connection->active_observers().size());
-
-  // Observer removed from connection's active observer.
-  std::vector<int32_t> observer_to_remove2 = {observer_id2};
-  connection->RemoveObservers(observer_to_remove2);
-  EXPECT_EQ(0UL, connection->active_observers().size());
-}
-
 static const blink::mojom::IDBTransactionMode kTestModes[] = {
     blink::mojom::IDBTransactionMode::ReadOnly,
     blink::mojom::IDBTransactionMode::ReadWrite,
@@ -589,13 +543,13 @@ TEST_F(IndexedDBTransactionTest, AbortCancelsLockRequest) {
 
   // Acquire a lock to block the transaction's lock acquisition.
   bool locks_recieved = false;
-  std::vector<ScopesLockManager::ScopeLockRequest> lock_requests;
+  std::vector<LeveledLockManager::LeveledLockRequest> lock_requests;
   lock_requests.emplace_back(kDatabaseRangeLockLevel, GetDatabaseLockRange(id),
-                             ScopesLockManager::LockType::kShared);
+                             LeveledLockManager::LockType::kShared);
   lock_requests.emplace_back(kObjectStoreRangeLockLevel,
                              GetObjectStoreLockRange(id, object_store_id),
-                             ScopesLockManager::LockType::kExclusive);
-  ScopesLocksHolder temp_lock_receiver;
+                             LeveledLockManager::LockType::kExclusive);
+  LeveledLockHolder temp_lock_receiver;
   lock_manager()->AcquireLocks(lock_requests,
                                temp_lock_receiver.weak_factory.GetWeakPtr(),
                                base::BindOnce(SetToTrue, &locks_recieved));

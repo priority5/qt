@@ -2,21 +2,24 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 
 mojom("mojom") {
   sources = [
     "data_decoder_service.mojom",
+    "gzipper.mojom",
     "image_decoder.mojom",
     "json_parser.mojom",
     "web_bundler.mojom",
-    "xml_parser.mojom",
   ]
 
   public_deps = [
     ":mojom_resource_snapshot_for_web_bundle",
+    ":mojom_xml_parser",
     "//components/web_package/mojom",
     "//mojo/public/mojom/base",
+    "//sandbox/policy/mojom",
     "//skia/public/mojom",
     "//ui/gfx/geometry/mojom",
     "//url/mojom:url_mojom_gurl",
@@ -26,6 +29,12 @@ mojom("mojom") {
     sources += [ "ble_scan_parser.mojom" ]
     public_deps += [ "//device/bluetooth/public/mojom" ]
   }
+}
+
+mojom("mojom_xml_parser") {
+  sources = [ "xml_parser.mojom" ]
+
+  public_deps = [ "//mojo/public/mojom/base" ]
 }
 
 mojom("mojom_resource_snapshot_for_web_bundle") {

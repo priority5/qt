@@ -12,6 +12,7 @@
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "net/http/http_response_headers.h"
 #include "services/network/public/cpp/net_adapters.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 
 namespace content {
@@ -94,12 +95,17 @@ class ServiceWorkerInstalledScriptReader::MetaDataSender {
 ServiceWorkerInstalledScriptReader::ServiceWorkerInstalledScriptReader(
     mojo::Remote<storage::mojom::ServiceWorkerResourceReader> reader,
     Client* client)
-    : reader_(std::move(reader)), client_(client) {}
+    : reader_(std::move(reader)), client_(client) {
+  DCHECK(reader_.is_connected());
+  reader_.set_disconnect_handler(base::BindOnce(
+      &ServiceWorkerInstalledScriptReader::OnReaderDisconnected, AsWeakPtr()));
+}
 
 ServiceWorkerInstalledScriptReader::~ServiceWorkerInstalledScriptReader() {}
 
 void ServiceWorkerInstalledScriptReader::Start() {
   TRACE_EVENT0("ServiceWorker", "ServiceWorkerInstalledScriptReader::Start");
+  DCHECK(reader_.is_connected());
   reader_->ReadResponseHead(base::BindOnce(
       &ServiceWorkerInstalledScriptReader::OnReadResponseHeadComplete,
       AsWeakPtr()));
@@ -108,20 +114,21 @@ void ServiceWorkerInstalledScriptReader::Start() {
 void ServiceWorkerInstalledScriptReader::OnReadResponseHeadComplete(
     int result,
     network::mojom::URLResponseHeadPtr response_head,
-    base::Optional<mojo_base::BigBuffer> metadata) {
+    absl::optional<mojo_base::BigBuffer> metadata) {
   DCHECK(client_);
   TRACE_EVENT0(
       "ServiceWorker",
-      "ServiceWorkerInstalledScriptReader::OnReadResponseInfoComplete");
+      "ServiceWorkerInstalledScriptReader::OnReadResponseHeadComplete");
   if (!response_head) {
     DCHECK_LT(result, 0);
     ServiceWorkerMetrics::CountReadResponseResult(
         ServiceWorkerMetrics::READ_HEADERS_ERROR);
-    CompleteSendIfNeeded(FinishedReason::kNoHttpInfoError);
+    CompleteSendIfNeeded(FinishedReason::kNoResponseHeadError);
     return;
   }
 
   DCHECK_GE(result, 0);
+  DCHECK(reader_.is_connected());
 
   body_size_ = response_head->content_length;
   int64_t content_length = response_head->content_length;
@@ -134,7 +141,7 @@ void ServiceWorkerInstalledScriptReader::OnReadResponseHeadComplete(
 
 void ServiceWorkerInstalledScriptReader::OnReadDataStarted(
     network::mojom::URLResponseHeadPtr response_head,
-    base::Optional<mojo_base::BigBuffer> metadata,
+    absl::optional<mojo_base::BigBuffer> metadata,
     mojo::ScopedDataPipeConsumerHandle body_consumer_handle) {
   if (!body_consumer_handle) {
     CompleteSendIfNeeded(FinishedReason::kCreateDataPipeError);
@@ -154,8 +161,8 @@ void ServiceWorkerInstalledScriptReader::OnReadDataStarted(
     options.element_num_bytes = 1;
     options.capacity_num_bytes =
         blink::BlobUtils::GetDataPipeCapacity(metadata->size());
-    int rv = mojo::CreateDataPipe(&options, &meta_producer_handle,
-                                  &meta_data_consumer);
+    int rv = mojo::CreateDataPipe(&options, meta_producer_handle,
+                                  meta_data_consumer);
     if (rv != MOJO_RESULT_OK) {
       CompleteSendIfNeeded(FinishedReason::kCreateDataPipeError);
       return;
@@ -174,6 +181,10 @@ void ServiceWorkerInstalledScriptReader::OnReadDataStarted(
   client_->OnStarted(std::move(response_head), std::move(metadata),
                      std::move(body_consumer_handle),
                      std::move(meta_data_consumer));
+}
+
+void ServiceWorkerInstalledScriptReader::OnReaderDisconnected() {
+  CompleteSendIfNeeded(FinishedReason::kConnectionError);
 }
 
 void ServiceWorkerInstalledScriptReader::OnMetaDataSent(bool success) {

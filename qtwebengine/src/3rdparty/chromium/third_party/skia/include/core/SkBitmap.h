@@ -14,8 +14,11 @@
 #include "include/core/SkPixmap.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkRefCnt.h"
+#include "include/core/SkShader.h"
 #include "include/core/SkTileMode.h"
 
+class SkBitmap;
+class SkColorSpace;
 struct SkMask;
 class SkMipmap;
 struct SkIRect;
@@ -156,7 +159,7 @@ public:
 
         @return  SkColorSpace in SkImageInfo, or nullptr
     */
-    SkColorSpace* colorSpace() const { return fPixmap.colorSpace(); }
+    SkColorSpace* colorSpace() const;
 
     /** Returns smart pointer to SkColorSpace, the range of colors, associated with
         SkImageInfo. The smart pointer tracks the number of objects sharing this
@@ -166,7 +169,7 @@ public:
 
         @return  SkColorSpace in SkImageInfo wrapped in a smart pointer
     */
-    sk_sp<SkColorSpace> refColorSpace() const { return fPixmap.info().refColorSpace(); }
+    sk_sp<SkColorSpace> refColorSpace() const;
 
     /** Returns number of bytes per pixel required by SkColorType.
         Returns zero if colorType( is kUnknown_SkColorType.
@@ -1114,11 +1117,29 @@ public:
         example: https://fiddle.skia.org/c/@Bitmap_peekPixels
     */
     bool peekPixels(SkPixmap* pixmap) const;
+    sk_sp<SkShader> makeShader(SkTileMode tmx, SkTileMode tmy, const SkSamplingOptions&,
+                               const SkMatrix* = nullptr) const;
 
-    sk_sp<SkShader> makeShader(SkTileMode tmx, SkTileMode tmy,
-                               const SkMatrix* localMatrix = nullptr) const;
-    // defaults to Clamp in x, and y
-    sk_sp<SkShader> makeShader(const SkMatrix* localMatrix = nullptr) const;
+    sk_sp<SkShader> makeShader(SkTileMode tmx, SkTileMode tmy, const SkSamplingOptions& sampling,
+                               const SkMatrix& localMatrix) const {
+        return this->makeShader(tmx, tmy, sampling, &localMatrix);
+    }
+
+    sk_sp<SkShader> makeShader(const SkSamplingOptions& sampling,
+                               const SkMatrix* localMatrix = nullptr) const {
+        return this->makeShader(SkTileMode::kClamp, SkTileMode::kClamp, sampling, localMatrix);
+    }
+
+    sk_sp<SkShader> makeShader(const SkSamplingOptions& sampling,
+                               const SkMatrix& localMatrix) const {
+        return this->makeShader(sampling, &localMatrix);
+    }
+
+    /**
+     *  Returns a new image from the bitmap. If the bitmap is marked immutable, this will
+     *  share the pixel buffer. If not, it will make a copy of the pixels for the image.
+     */
+    sk_sp<SkImage> asImage() const;
 
     /** Asserts if internal values are illegal or inconsistent. Only available if
         SK_DEBUG is defined at compile time.

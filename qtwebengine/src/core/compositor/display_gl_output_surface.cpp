@@ -1,43 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "display_gl_output_surface.h"
+
+#include "type_conversion.h"
 
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/viz/service/display/display.h"
@@ -51,8 +17,10 @@
 
 namespace QtWebEngineCore {
 
-DisplayGLOutputSurface::DisplayGLOutputSurface(scoped_refptr<viz::VizProcessContextProvider> contextProvider)
+DisplayGLOutputSurface::DisplayGLOutputSurface(
+        scoped_refptr<viz::VizProcessContextProvider> contextProvider)
     : OutputSurface(contextProvider)
+    , Compositor(Compositor::Type::OpenGL)
     , m_commandBuffer(contextProvider->command_buffer())
     , m_gl(contextProvider->ContextGL())
     , m_vizContextProvider(contextProvider)
@@ -65,16 +33,17 @@ DisplayGLOutputSurface::~DisplayGLOutputSurface()
 {
     m_vizContextProvider->SetUpdateVSyncParametersCallback(viz::UpdateVSyncParametersCallback());
     m_gl->DeleteFramebuffers(1, &m_fboId);
-    if (m_sink)
-        m_sink->disconnect(this);
 }
 
 // Called from viz::Display::Initialize.
 void DisplayGLOutputSurface::BindToClient(viz::OutputSurfaceClient *client)
 {
-    m_display = static_cast<viz::Display *>(client);
-    m_sink = DisplayFrameSink::findOrCreate(m_display->frame_sink_id());
-    m_sink->connect(this);
+    m_client = client;
+}
+
+void DisplayGLOutputSurface::SetFrameSinkId(const viz::FrameSinkId &id)
+{
+    bind(id);
 }
 
 // Triggered by ui::Compositor::SetVisible(true).
@@ -213,7 +182,8 @@ void DisplayGLOutputSurface::swapBuffersOnGpuThread(unsigned int id, std::unique
         m_readyToUpdate = true;
     }
 
-    m_sink->scheduleUpdate();
+    if (auto obs = observer())
+        obs->readyToSwap();
 }
 
 void DisplayGLOutputSurface::swapBuffersOnVizThread()
@@ -224,8 +194,8 @@ void DisplayGLOutputSurface::swapBuffersOnVizThread()
     }
 
     const auto now = base::TimeTicks::Now();
-    m_display->DidReceiveSwapBuffersAck(gfx::SwapTimings{now, now});
-    m_display->DidReceivePresentationFeedback(
+    m_client->DidReceiveSwapBuffersAck(gfx::SwapTimings{now, now, {}, {}, {}}, gfx::GpuFenceHandle());
+    m_client->DidReceivePresentationFeedback(
             gfx::PresentationFeedback(now, base::TimeDelta(),
                                       gfx::PresentationFeedback::Flags::kVSync));
 }
@@ -276,16 +246,6 @@ unsigned DisplayGLOutputSurface::UpdateGpuFence()
     return 0;
 }
 
-scoped_refptr<gpu::GpuTaskSchedulerHelper> DisplayGLOutputSurface::GetGpuTaskSchedulerHelper()
-{
-    return m_vizContextProvider->GetGpuTaskSchedulerHelper();
-}
-
-gpu::MemoryTracker *DisplayGLOutputSurface::GetMemoryTracker()
-{
-    return m_vizContextProvider->GetMemoryTracker();
-}
-
 void DisplayGLOutputSurface::SetUpdateVSyncParametersCallback(viz::UpdateVSyncParametersCallback callback)
 {
     m_vizContextProvider->SetUpdateVSyncParametersCallback(std::move(callback));
@@ -298,6 +258,47 @@ void DisplayGLOutputSurface::SetDisplayTransformHint(gfx::OverlayTransform)
 gfx::OverlayTransform DisplayGLOutputSurface::GetDisplayTransform()
 {
     return gfx::OVERLAY_TRANSFORM_NONE;
+}
+
+void DisplayGLOutputSurface::swapFrame()
+{
+    QMutexLocker locker(&m_mutex);
+    if (m_readyToUpdate) {
+        std::swap(m_middleBuffer, m_frontBuffer);
+        m_taskRunner->PostTask(FROM_HERE,
+                               base::BindOnce(&DisplayGLOutputSurface::swapBuffersOnVizThread,
+                                              base::Unretained(this)));
+        m_taskRunner.reset();
+        m_readyToUpdate = false;
+    }
+}
+
+void DisplayGLOutputSurface::waitForTexture()
+{
+    if (m_frontBuffer && m_frontBuffer->fence) {
+        m_frontBuffer->fence->wait();
+        m_frontBuffer->fence.reset();
+    }
+}
+
+int DisplayGLOutputSurface::textureId()
+{
+    return m_frontBuffer ? m_frontBuffer->serviceId : 0;
+}
+
+QSize DisplayGLOutputSurface::size()
+{
+    return m_frontBuffer ? toQt(m_frontBuffer->shape.sizeInPixels) : QSize();
+}
+
+bool DisplayGLOutputSurface::hasAlphaChannel()
+{
+    return m_frontBuffer ? m_frontBuffer->shape.hasAlpha : false;
+}
+
+float DisplayGLOutputSurface::devicePixelRatio()
+{
+    return m_frontBuffer ? m_frontBuffer->shape.devicePixelRatio : 1;
 }
 
 } // namespace QtWebEngineCore

@@ -5,17 +5,16 @@
 #ifndef MOJO_PUBLIC_CPP_PLATFORM_NAMED_PLATFORM_CHANNEL_H_
 #define MOJO_PUBLIC_CPP_PLATFORM_NAMED_PLATFORM_CHANNEL_H_
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/strings/string_piece.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/platform/platform_channel_endpoint.h"
 #include "mojo/public/cpp/platform/platform_channel_server_endpoint.h"
 
-#if defined(OS_WIN)
-#include "base/strings/string16.h"
-#elif defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 #include "base/files/file_path.h"
 #endif
 
@@ -34,8 +33,8 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) NamedPlatformChannel {
  public:
   static const char kNamedHandleSwitch[];
 
-#if defined(OS_WIN)
-  using ServerName = base::string16;
+#if BUILDFLAG(IS_WIN)
+  using ServerName = std::wstring;
 #else
   using ServerName = std::string;
 #endif
@@ -45,18 +44,18 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) NamedPlatformChannel {
     // generated.
     ServerName server_name;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // If non-empty, a security descriptor to use when creating the pipe. If
     // empty, a default security descriptor will be used. See
     // |kDefaultSecurityDescriptor|.
-    base::string16 security_descriptor;
+    std::wstring security_descriptor;
 
     // If |true|, only a server endpoint will be allowed with the given name and
     // only one client will be able to connect. Otherwise many
     // NamedPlatformChannel instances can be created with the same name and
     // a different client can connect to each one.
     bool enforce_uniqueness = true;
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
     // On POSIX, every new unnamed NamedPlatformChannel creates a server socket
     // with a random name. This controls the directory where that happens.
     // Ignored if |server_name| was set explicitly.
@@ -66,6 +65,10 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) NamedPlatformChannel {
 
   NamedPlatformChannel(const Options& options);
   NamedPlatformChannel(NamedPlatformChannel&& other);
+
+  NamedPlatformChannel(const NamedPlatformChannel&) = delete;
+  NamedPlatformChannel& operator=(const NamedPlatformChannel&) = delete;
+
   ~NamedPlatformChannel();
 
   NamedPlatformChannel& operator=(NamedPlatformChannel&& other);
@@ -83,7 +86,7 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) NamedPlatformChannel {
   //
   // Use the handle to send or receive an invitation, with the endpoint type as
   // |MOJO_INVITATION_TRANSPORT_TYPE_CHANNEL_SERVER|.
-  PlatformChannelServerEndpoint TakeServerEndpoint() WARN_UNUSED_RESULT {
+  [[nodiscard]] PlatformChannelServerEndpoint TakeServerEndpoint() {
     return std::move(server_endpoint_);
   }
 
@@ -97,13 +100,13 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) NamedPlatformChannel {
 
   // Recovers a functioning client endpoint handle by creating a new endpoint
   // and connecting it to |server_name| if possible.
-  static PlatformChannelEndpoint ConnectToServer(const ServerName& server_name)
-      WARN_UNUSED_RESULT;
+  [[nodiscard]] static PlatformChannelEndpoint ConnectToServer(
+      const ServerName& server_name);
 
   // Like above, but extracts the server name from |command_line| using the
   // common |kNamedHandleSwitch| flag.
-  static PlatformChannelEndpoint ConnectToServer(
-      const base::CommandLine& command_line) WARN_UNUSED_RESULT;
+  [[nodiscard]] static PlatformChannelEndpoint ConnectToServer(
+      const base::CommandLine& command_line);
 
  private:
   static PlatformChannelServerEndpoint CreateServerEndpoint(
@@ -114,8 +117,6 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) NamedPlatformChannel {
 
   ServerName server_name_;
   PlatformChannelServerEndpoint server_endpoint_;
-
-  DISALLOW_COPY_AND_ASSIGN(NamedPlatformChannel);
 };
 
 }  // namespace mojo

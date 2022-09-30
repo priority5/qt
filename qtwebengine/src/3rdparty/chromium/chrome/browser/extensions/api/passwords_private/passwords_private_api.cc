@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
@@ -16,7 +16,6 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_delegate_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/extensions/api/passwords_private.h"
 #include "components/password_manager/core/browser/manage_passwords_referrer.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
@@ -44,28 +43,17 @@ PasswordsPrivateRecordPasswordsPageAccessInSettingsFunction::Run() {
   UMA_HISTOGRAM_ENUMERATION(
       "PasswordManager.ManagePasswordsReferrer",
       password_manager::ManagePasswordsReferrer::kChromeSettings);
-  if (password_manager_util::IsSyncingWithNormalEncryption(
-          ProfileSyncServiceFactory::GetForProfile(
-              Profile::FromBrowserContext(browser_context())))) {
-    // We record this second histogram to better understand the impact of the
-    // Google Password Manager experiment for signed in and syncing users.
-    UMA_HISTOGRAM_ENUMERATION(
-        "PasswordManager.ManagePasswordsReferrerSignedInAndSyncing",
-        password_manager::ManagePasswordsReferrer::kChromeSettings);
-  }
   return RespondNow(NoArguments());
 }
 
 // PasswordsPrivateChangeSavedPasswordFunction
 ResponseAction PasswordsPrivateChangeSavedPasswordFunction::Run() {
   auto parameters =
-      api::passwords_private::ChangeSavedPassword::Params::Create(*args_);
+      api::passwords_private::ChangeSavedPassword::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
 
   if (!GetDelegate(browser_context())
-           ->ChangeSavedPassword(parameters->ids,
-                                 base::UTF8ToUTF16(parameters->new_username),
-                                 base::UTF8ToUTF16(parameters->new_password))) {
+           ->ChangeSavedPassword(parameters->ids, parameters->params)) {
     return RespondNow(Error(
         "Could not change the password. Either the password is empty, the user "
         "is not authenticated, vector of ids is empty or no matching password "
@@ -78,7 +66,7 @@ ResponseAction PasswordsPrivateChangeSavedPasswordFunction::Run() {
 // PasswordsPrivateRemoveSavedPasswordFunction
 ResponseAction PasswordsPrivateRemoveSavedPasswordFunction::Run() {
   auto parameters =
-      api::passwords_private::RemoveSavedPassword::Params::Create(*args_);
+      api::passwords_private::RemoveSavedPassword::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
   GetDelegate(browser_context())->RemoveSavedPasswords({parameters->id});
   return RespondNow(NoArguments());
@@ -87,7 +75,7 @@ ResponseAction PasswordsPrivateRemoveSavedPasswordFunction::Run() {
 // PasswordsPrivateRemoveSavedPasswordsFunction
 ResponseAction PasswordsPrivateRemoveSavedPasswordsFunction::Run() {
   auto parameters =
-      api::passwords_private::RemoveSavedPasswords::Params::Create(*args_);
+      api::passwords_private::RemoveSavedPasswords::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
   GetDelegate(browser_context())->RemoveSavedPasswords(parameters->ids);
   return RespondNow(NoArguments());
@@ -96,7 +84,7 @@ ResponseAction PasswordsPrivateRemoveSavedPasswordsFunction::Run() {
 // PasswordsPrivateRemovePasswordExceptionFunction
 ResponseAction PasswordsPrivateRemovePasswordExceptionFunction::Run() {
   auto parameters =
-      api::passwords_private::RemovePasswordException::Params::Create(*args_);
+      api::passwords_private::RemovePasswordException::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
   GetDelegate(browser_context())->RemovePasswordExceptions({parameters->id});
   return RespondNow(NoArguments());
@@ -105,7 +93,7 @@ ResponseAction PasswordsPrivateRemovePasswordExceptionFunction::Run() {
 // PasswordsPrivateRemovePasswordExceptionsFunction
 ResponseAction PasswordsPrivateRemovePasswordExceptionsFunction::Run() {
   auto parameters =
-      api::passwords_private::RemovePasswordExceptions::Params::Create(*args_);
+      api::passwords_private::RemovePasswordExceptions::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
   GetDelegate(browser_context())->RemovePasswordExceptions(parameters->ids);
   return RespondNow(NoArguments());
@@ -121,7 +109,7 @@ PasswordsPrivateUndoRemoveSavedPasswordOrExceptionFunction::Run() {
 // PasswordsPrivateRequestPlaintextPasswordFunction
 ResponseAction PasswordsPrivateRequestPlaintextPasswordFunction::Run() {
   auto parameters =
-      api::passwords_private::RequestPlaintextPassword::Params::Create(*args_);
+      api::passwords_private::RequestPlaintextPassword::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
 
   GetDelegate(browser_context())
@@ -137,16 +125,16 @@ ResponseAction PasswordsPrivateRequestPlaintextPasswordFunction::Run() {
 }
 
 void PasswordsPrivateRequestPlaintextPasswordFunction::GotPassword(
-    base::Optional<base::string16> password) {
+    absl::optional<std::u16string> password) {
   if (password) {
-    Respond(OneArgument(std::make_unique<base::Value>(std::move(*password))));
+    Respond(OneArgument(base::Value(std::move(*password))));
     return;
   }
 
   Respond(Error(base::StringPrintf(
       "Could not obtain plaintext password. Either the user is not "
       "authenticated or no password with id = %d could be found.",
-      api::passwords_private::RequestPlaintextPassword::Params::Create(*args_)
+      api::passwords_private::RequestPlaintextPassword::Params::Create(args())
           ->id)));
 }
 
@@ -198,12 +186,12 @@ void PasswordsPrivateGetPasswordExceptionListFunction::GotList(
 }
 
 // PasswordsPrivateMovePasswordToAccountFunction
-ResponseAction PasswordsPrivateMovePasswordToAccountFunction::Run() {
+ResponseAction PasswordsPrivateMovePasswordsToAccountFunction::Run() {
   auto parameters =
-      api::passwords_private::MovePasswordToAccount::Params::Create(*args_);
+      api::passwords_private::MovePasswordsToAccount::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
   GetDelegate(browser_context())
-      ->MovePasswordToAccount(parameters->id, GetSenderWebContents());
+      ->MovePasswordsToAccount(parameters->ids, GetSenderWebContents());
   return RespondNow(NoArguments());
 }
 
@@ -247,14 +235,14 @@ ResponseAction PasswordsPrivateRequestExportProgressStatusFunction::Run() {
 
 // PasswordsPrivateIsOptedInForAccountStorageFunction
 ResponseAction PasswordsPrivateIsOptedInForAccountStorageFunction::Run() {
-  return RespondNow(OneArgument(std::make_unique<base::Value>(
+  return RespondNow(OneArgument(base::Value(
       GetDelegate(browser_context())->IsOptedInForAccountStorage())));
 }
 
 // PasswordsPrivateOptInForAccountStorageFunction
 ResponseAction PasswordsPrivateOptInForAccountStorageFunction::Run() {
   auto parameters =
-      api::passwords_private::OptInForAccountStorage::Params::Create(*args_);
+      api::passwords_private::OptInForAccountStorage::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters.get());
 
   GetDelegate(browser_context())
@@ -289,7 +277,7 @@ PasswordsPrivateGetPlaintextInsecurePasswordFunction::
 ResponseAction PasswordsPrivateGetPlaintextInsecurePasswordFunction::Run() {
   auto parameters =
       api::passwords_private::GetPlaintextInsecurePassword::Params::Create(
-          *args_);
+          args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
 
   GetDelegate(browser_context())
@@ -305,7 +293,7 @@ ResponseAction PasswordsPrivateGetPlaintextInsecurePasswordFunction::Run() {
 }
 
 void PasswordsPrivateGetPlaintextInsecurePasswordFunction::GotCredential(
-    base::Optional<api::passwords_private::InsecureCredential> credential) {
+    absl::optional<api::passwords_private::InsecureCredential> credential) {
   if (!credential) {
     Respond(
         Error("Could not obtain plaintext insecure password. Either the user "
@@ -324,7 +312,7 @@ PasswordsPrivateChangeInsecureCredentialFunction::
 
 ResponseAction PasswordsPrivateChangeInsecureCredentialFunction::Run() {
   auto parameters =
-      api::passwords_private::ChangeInsecureCredential::Params::Create(*args_);
+      api::passwords_private::ChangeInsecureCredential::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
 
   if (parameters->new_password.empty()) {
@@ -350,13 +338,51 @@ PasswordsPrivateRemoveInsecureCredentialFunction::
 
 ResponseAction PasswordsPrivateRemoveInsecureCredentialFunction::Run() {
   auto parameters =
-      api::passwords_private::RemoveInsecureCredential::Params::Create(*args_);
+      api::passwords_private::RemoveInsecureCredential::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(parameters);
 
   if (!GetDelegate(browser_context())
            ->RemoveInsecureCredential(parameters->credential)) {
     return RespondNow(
         Error("Could not remove the insecure credential. Probably no matching "
+              "password could be found."));
+  }
+
+  return RespondNow(NoArguments());
+}
+
+// PasswordsPrivateMuteInsecureCredentialFunction:
+PasswordsPrivateMuteInsecureCredentialFunction::
+    ~PasswordsPrivateMuteInsecureCredentialFunction() = default;
+
+ResponseAction PasswordsPrivateMuteInsecureCredentialFunction::Run() {
+  auto parameters =
+      api::passwords_private::MuteInsecureCredential::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(parameters);
+
+  if (!GetDelegate(browser_context())
+           ->MuteInsecureCredential(parameters->credential)) {
+    return RespondNow(
+        Error("Could not mute the insecure credential. Probably no matching "
+              "password could be found."));
+  }
+
+  return RespondNow(NoArguments());
+}
+
+// PasswordsPrivateUnmuteInsecureCredentialFunction:
+PasswordsPrivateUnmuteInsecureCredentialFunction::
+    ~PasswordsPrivateUnmuteInsecureCredentialFunction() = default;
+
+ResponseAction PasswordsPrivateUnmuteInsecureCredentialFunction::Run() {
+  auto parameters =
+      api::passwords_private::UnmuteInsecureCredential::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(parameters);
+
+  if (!GetDelegate(browser_context())
+           ->UnmuteInsecureCredential(parameters->credential)) {
+    return RespondNow(
+        Error("Could not unmute the insecure credential. Probably no matching "
               "password could be found."));
   }
 
@@ -401,6 +427,51 @@ ResponseAction PasswordsPrivateGetPasswordCheckStatusFunction::Run() {
   return RespondNow(ArgumentList(
       api::passwords_private::GetPasswordCheckStatus::Results::Create(
           GetDelegate(browser_context())->GetPasswordCheckStatus())));
+}
+
+// PasswordsPrivateIsAccountStoreDefaultFunction
+ResponseAction PasswordsPrivateIsAccountStoreDefaultFunction::Run() {
+  return RespondNow(OneArgument(
+      base::Value(GetDelegate(browser_context())
+                      ->IsAccountStoreDefault(GetSenderWebContents()))));
+}
+
+// PasswordsPrivateGetUrlCollectionFunction:
+ResponseAction PasswordsPrivateGetUrlCollectionFunction::Run() {
+  auto parameters =
+      api::passwords_private::GetUrlCollection::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(parameters);
+
+  const absl::optional<api::passwords_private::UrlCollection> url_collection =
+      GetDelegate(browser_context())->GetUrlCollection(parameters->url);
+  if (!url_collection) {
+    return RespondNow(
+        Error("Provided string doesn't meet password URL requirements. Either "
+              "the format is invalid or the scheme is not unsupported."));
+  }
+
+  return RespondNow(
+      ArgumentList(api::passwords_private::GetUrlCollection::Results::Create(
+          url_collection.value())));
+}
+
+// PasswordsPrivateAddPasswordFunction
+ResponseAction PasswordsPrivateAddPasswordFunction::Run() {
+  auto parameters = api::passwords_private::AddPassword::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(parameters);
+
+  if (!GetDelegate(browser_context())
+           ->AddPassword(parameters->options.url,
+                         base::UTF8ToUTF16(parameters->options.username),
+                         base::UTF8ToUTF16(parameters->options.password),
+                         parameters->options.use_account_store,
+                         GetSenderWebContents())) {
+    return RespondNow(Error(
+        "Could not add the password. Either the url is invalid, the password "
+        "is empty or an entry with such origin and username already exists."));
+  }
+
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions

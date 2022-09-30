@@ -10,6 +10,7 @@
 
 #include "cc/layers/layer.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -19,7 +20,6 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
-#include "third_party/blink/renderer/core/paint/ng/ng_paint_fragment.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/testing/layer_tree_host_embedder.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -91,7 +91,7 @@ class RenderingTestChromeClient : public EmptyChromeClient {
   void InjectGestureScrollEvent(LocalFrame& local_frame,
                                 WebGestureDevice device,
                                 const gfx::Vector2dF& delta,
-                                ScrollGranularity granularity,
+                                ui::ScrollGranularity granularity,
                                 CompositorElementId scrollable_area_element_id,
                                 WebInputEvent::Type injected_type) override;
 
@@ -140,15 +140,16 @@ class RenderingTest : public PageTestBase {
     return element ? element->GetLayoutObject() : nullptr;
   }
 
+  LayoutBox* GetLayoutBoxByElementId(const char* id) const {
+    return To<LayoutBox>(GetLayoutObjectByElementId(id));
+  }
+
   PaintLayer* GetPaintLayerByElementId(const char* id) {
-    return ToLayoutBoxModelObject(GetLayoutObjectByElementId(id))->Layer();
+    return To<LayoutBoxModelObject>(GetLayoutObjectByElementId(id))->Layer();
   }
 
   const DisplayItemClient* GetDisplayItemClientFromLayoutObject(
       LayoutObject* obj) const {
-    LayoutNGBlockFlow* block_flow = ToLayoutNGBlockFlowOrNull(obj);
-    if (block_flow && block_flow->PaintFragment())
-      return block_flow->PaintFragment();
     return obj;
   }
 

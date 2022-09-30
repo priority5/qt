@@ -19,12 +19,14 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/simple_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
@@ -34,6 +36,7 @@
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
 #include "cc/metrics/begin_main_frame_metrics.h"
+#include "cc/metrics/web_vital_metrics.h"
 #include "cc/mojo_embedder/async_layer_tree_frame_sink.h"
 #include "cc/resources/ui_resource_manager.h"
 #include "cc/trees/layer_tree_host.h"
@@ -64,6 +67,7 @@
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "gpu/ipc/common/gpu_surface_tracker.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "services/viz/public/cpp/gpu/context_provider_command_buffer.h"
 #include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -215,7 +219,34 @@ class CompositorImpl::AndroidHostDisplayClient : public viz::HostDisplayClient {
   }
 
  private:
-  CompositorImpl* compositor_;
+  raw_ptr<CompositorImpl> compositor_;
+};
+
+class CompositorImpl::HostBeginFrameObserver
+    : public viz::mojom::BeginFrameObserver {
+ public:
+  explicit HostBeginFrameObserver(
+      const base::flat_set<SimpleBeginFrameObserver*>& observers)
+      : simple_begin_frame_observers_(observers) {}
+
+  void OnStandaloneBeginFrame(const viz::BeginFrameArgs& args) override {
+    if (args.type == viz::BeginFrameArgs::MISSED)
+      return;
+
+    for (auto* simple_observer : simple_begin_frame_observers_) {
+      simple_observer->OnBeginFrame(args.frame_time);
+    }
+  }
+
+  mojo::PendingRemote<viz::mojom::BeginFrameObserver> GetBoundRemote() {
+    return receiver_.BindNewPipeAndPassRemote();
+  }
+
+ private:
+  const base::flat_set<SimpleBeginFrameObserver*>&
+      simple_begin_frame_observers_;
+
+  mojo::Receiver<viz::mojom::BeginFrameObserver> receiver_{this};
 };
 
 class CompositorImpl::ScopedCachedBackBuffer {
@@ -290,18 +321,14 @@ CompositorImpl::CompositorImpl(CompositorClient* client,
       client_(client),
       needs_animate_(false),
       pending_frames_(0U),
-      layer_tree_frame_sink_request_pending_(false) {
+      layer_tree_frame_sink_request_pending_(false),
+      lock_manager_(base::ThreadTaskRunnerHandle::Get()) {
   DCHECK(client);
 
   SetRootWindow(root_window);
-
-  // Listen to display density change events and update painted device scale
-  // factor accordingly.
-  display::Screen::GetScreen()->AddObserver(this);
 }
 
 CompositorImpl::~CompositorImpl() {
-  display::Screen::GetScreen()->RemoveObserver(this);
   DetachRootWindow();
   // Clean-up any surface references.
   SetSurface(nullptr, false);
@@ -340,8 +367,6 @@ void CompositorImpl::SetRootWindow(gfx::NativeWindow root_window) {
   }
 
   root_window_ = root_window;
-  if (base::FeatureList::IsEnabled(features::kForce60HzRefreshRate))
-    root_window_->SetForce60HzRefreshRate();
   root_window_->SetLayer(root_layer ? root_layer : cc::Layer::Create());
   root_window_->GetLayer()->SetBounds(size_);
   root_window->AttachCompositor(this);
@@ -365,11 +390,8 @@ void CompositorImpl::SetRootLayer(scoped_refptr<cc::Layer> root_layer) {
   }
 }
 
-void CompositorImpl::SetSurface(jobject surface,
+void CompositorImpl::SetSurface(const base::android::JavaRef<jobject>& surface,
                                 bool can_be_used_with_surface_control) {
-  can_be_used_with_surface_control &=
-      !root_window_->ApplyDisableSurfaceControlWorkaround();
-
   JNIEnv* env = base::android::AttachCurrentThread();
   gpu::GpuSurfaceTracker* tracker = gpu::GpuSurfaceTracker::Get();
 
@@ -388,7 +410,7 @@ void CompositorImpl::SetSurface(jobject surface,
     // ANativeWindow_fromSurface are released immediately. This is needed as a
     // workaround for https://code.google.com/p/android/issues/detail?id=68174
     base::android::ScopedJavaLocalFrame scoped_local_reference_frame(env);
-    window = ANativeWindow_fromSurface(env, surface);
+    window = ANativeWindow_fromSurface(env, surface.obj());
   }
 
   if (window) {
@@ -423,10 +445,6 @@ void CompositorImpl::CreateLayerTreeHost() {
     settings.initial_debug_state.show_debug_borders.set();
   settings.single_thread_proxy_scheduler = true;
   settings.use_painted_device_scale_factor = true;
-  // TODO(crbug.com/933846): LatencyRecovery is causing jank on Android. Disable
-  // for now, with a plan to disable more widely once viz launches.
-  settings.enable_impl_latency_recovery = false;
-  settings.enable_main_latency_recovery = false;
 
   animation_host_ = cc::AnimationHost::CreateMainInstance();
 
@@ -434,7 +452,8 @@ void CompositorImpl::CreateLayerTreeHost() {
   params.client = this;
   params.task_graph_runner =
       CompositorDependenciesAndroid::Get().GetTaskGraphRunner();
-  params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
+  params.main_task_runner =
+      content::GetUIThreadTaskRunner({BrowserTaskType::kUserInput});
   params.settings = &settings;
   params.mutator_host = animation_host_.get();
   host_ = cc::LayerTreeHost::CreateSingleThreaded(this, std::move(params));
@@ -491,8 +510,13 @@ void CompositorImpl::TearDownDisplayAndUnregisterRootFrameSink() {
     // execution of this call.
     display_private_->ForceImmediateDrawAndSwapIfPossible();
   }
-  GetHostFrameSinkManager()->InvalidateFrameSinkId(frame_sink_id_);
+  // Reset |display_private_| first since InvalidateFrameSinkId() will send a
+  // sync IPC. This guards against reentrant code using |display_private_|
+  // before it can be reset.
   display_private_.reset();
+  GetHostFrameSinkManager()->InvalidateFrameSinkId(frame_sink_id_);
+  display_client_.reset();
+  host_begin_frame_observer_.reset();
 }
 
 void CompositorImpl::RegisterRootFrameSink() {
@@ -682,6 +706,14 @@ bool CompositorImpl::SupportsETC1NonPowerOfTwo() const {
   return gpu_capabilities_.texture_format_etc1_npot;
 }
 
+std::unique_ptr<ui::CompositorLock> CompositorImpl::GetCompositorLock(
+    base::TimeDelta timeout) {
+  if (!host_)
+    return nullptr;
+  return lock_manager_.GetCompositorLock(/*client=*/nullptr, timeout,
+                                         host_->DeferMainFrameUpdate());
+}
+
 void CompositorImpl::DidSubmitCompositorFrame() {
   TRACE_EVENT0("compositor", "CompositorImpl::DidSubmitCompositorFrame");
   pending_frames_++;
@@ -700,12 +732,16 @@ void CompositorImpl::DidLoseLayerTreeFrameSink() {
   client_->DidSwapFrame(0);
 }
 
-void CompositorImpl::DidCommit(base::TimeTicks) {
+void CompositorImpl::DidCommit(base::TimeTicks, base::TimeTicks) {
   root_window_->OnCompositingDidCommit();
 }
 
 std::unique_ptr<cc::BeginMainFrameMetrics>
 CompositorImpl::GetBeginMainFrameMetrics() {
+  return nullptr;
+}
+
+std::unique_ptr<cc::WebVitalMetrics> CompositorImpl::GetWebVitalMetrics() {
   return nullptr;
 }
 
@@ -809,7 +845,7 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
   pending_frames_ = 0;
   gpu_capabilities_ = context_provider->ContextCapabilities();
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      base::ThreadTaskRunnerHandle::Get();
+      content::GetUIThreadTaskRunner({BrowserTaskType::kUserInput});
 
   auto root_params = viz::mojom::RootCompositorFrameSinkParams::New();
 
@@ -851,6 +887,16 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
   GetHostFrameSinkManager()->CreateRootCompositorFrameSink(
       std::move(root_params));
 
+  display_private_->SetSwapCompletionCallbackEnabled(
+      enable_swap_completion_callbacks_);
+  display_private_->SetDisplayVisible(true);
+  display_private_->Resize(size_);
+  display_private_->SetDisplayColorSpaces(display_color_spaces_);
+  display_private_->SetVSyncPaused(vsync_paused_);
+  display_private_->SetSupportedRefreshRates(
+      root_window_->GetSupportedRefreshRates());
+  MaybeUpdateObserveBeginFrame();
+
   // Create LayerTreeFrameSink with the browser end of CompositorFrameSink.
   cc::mojo_embedder::AsyncLayerTreeFrameSink::InitParams params;
   params.compositor_task_runner = task_runner;
@@ -863,12 +909,6 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
       std::make_unique<cc::mojo_embedder::AsyncLayerTreeFrameSink>(
           std::move(context_provider), nullptr, &params);
   host_->SetLayerTreeFrameSink(std::move(layer_tree_frame_sink));
-  display_private_->SetDisplayVisible(true);
-  display_private_->Resize(size_);
-  display_private_->SetDisplayColorSpaces(display_color_spaces_);
-  display_private_->SetVSyncPaused(vsync_paused_);
-  display_private_->SetSupportedRefreshRates(
-      root_window_->GetSupportedRefreshRates());
 }
 
 viz::LocalSurfaceId CompositorImpl::GenerateLocalSurfaceId() {
@@ -917,14 +957,64 @@ void CompositorImpl::EvictCachedBackBuffer() {
   cached_back_buffer_.reset();
 }
 
+void CompositorImpl::PreserveChildSurfaceControls() {
+  if (display_private_)
+    display_private_->PreserveChildSurfaceControls();
+}
+
 void CompositorImpl::RequestPresentationTimeForNextFrame(
     PresentationTimeCallback callback) {
   host_->RequestPresentationTimeForNextFrame(std::move(callback));
 }
 
+void CompositorImpl::SetDidSwapBuffersCallbackEnabled(bool enable) {
+  if (enable_swap_completion_callbacks_ == enable)
+    return;
+  enable_swap_completion_callbacks_ = enable;
+  if (display_private_) {
+    display_private_->SetSwapCompletionCallbackEnabled(
+        enable_swap_completion_callbacks_);
+  }
+}
+
 void CompositorImpl::DecrementPendingReadbacks() {
   DCHECK_GT(pending_readbacks_, 0u);
   --pending_readbacks_;
+}
+
+void CompositorImpl::AddSimpleBeginFrameObserver(
+    SimpleBeginFrameObserver* obs) {
+  DCHECK(obs);
+  DCHECK(!base::Contains(simple_begin_frame_observers_, obs));
+  simple_begin_frame_observers_.insert(obs);
+  MaybeUpdateObserveBeginFrame();
+}
+
+void CompositorImpl::RemoveSimpleBeginFrameObserver(
+    SimpleBeginFrameObserver* obs) {
+  DCHECK(obs);
+  DCHECK(base::Contains(simple_begin_frame_observers_, obs));
+
+  simple_begin_frame_observers_.erase(obs);
+  MaybeUpdateObserveBeginFrame();
+}
+
+void CompositorImpl::MaybeUpdateObserveBeginFrame() {
+  if (simple_begin_frame_observers_.empty()) {
+    host_begin_frame_observer_.reset();
+    return;
+  }
+
+  if (host_begin_frame_observer_)
+    return;
+
+  if (!display_private_)
+    return;
+
+  host_begin_frame_observer_ =
+      std::make_unique<HostBeginFrameObserver>(simple_begin_frame_observers_);
+  display_private_->SetStandaloneBeginFrameObserver(
+      host_begin_frame_observer_->GetBoundRemote());
 }
 
 }  // namespace content

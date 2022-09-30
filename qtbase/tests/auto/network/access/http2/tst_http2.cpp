@@ -1,32 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
-#include <QtTest/QtTest>
+#include <QtNetwork/qtnetworkglobal.h>
+
+#include <QTest>
+#include <QTestEventLoop>
+#include <QScopeGuard>
+#include <QRandomGenerator>
+#include <QSignalSpy>
 
 #include "http2srv.h"
 
@@ -36,37 +17,27 @@
 #include <QtNetwork/qnetworkrequest.h>
 #include <QtNetwork/qnetworkreply.h>
 
+#if QT_CONFIG(ssl)
+#include <QtNetwork/qsslsocket.h>
+#endif
+
 #include <QtCore/qglobal.h>
 #include <QtCore/qobject.h>
 #include <QtCore/qthread.h>
 #include <QtCore/qurl.h>
 
-#ifndef QT_NO_SSL
-#ifndef QT_NO_OPENSSL
-#include <QtNetwork/private/qsslsocket_openssl_symbols_p.h>
-#endif // NO_OPENSSL
-#endif // NO_SSL
-
 #include <cstdlib>
 #include <memory>
 #include <string>
 
-#include "emulationdetector.h"
-
-#if (!defined(QT_NO_OPENSSL) && OPENSSL_VERSION_NUMBER >= 0x10002000L && !defined(OPENSSL_NO_TLSEXT)) \
-        || QT_CONFIG(schannel)
-// HTTP/2 over TLS requires ALPN/NPN to negotiate the protocol version.
-const bool clearTextHTTP2 = false;
-#else
-// No ALPN/NPN support to negotiate HTTP/2, we'll use cleartext 'h2c' with
-// a protocol upgrade procedure.
-const bool clearTextHTTP2 = true;
-#endif
+#include <QtTest/private/qemulationdetector_p.h>
 
 Q_DECLARE_METATYPE(H2Type)
 Q_DECLARE_METATYPE(QNetworkRequest::Attribute)
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 QHttp2Configuration qt_defaultH2Configuration()
 {
@@ -98,6 +69,7 @@ public slots:
     void init();
 private slots:
     // Tests:
+    void defaultQnamHttp2Configuration();
     void singleRequest_data();
     void singleRequest();
     void multipleRequests();
@@ -110,9 +82,22 @@ private slots:
     void connectToHost_data();
     void connectToHost();
     void maxFrameSize();
+    void http2DATAFrames();
+
+    void moreActivitySignals_data();
+    void moreActivitySignals();
+
+    void contentEncoding_data();
+    void contentEncoding();
 
     void authenticationRequired_data();
     void authenticationRequired();
+
+    void h2cAllowedAttribute_data();
+    void h2cAllowedAttribute();
+
+    void redirect_data();
+    void redirect();
 
 protected slots:
     // Slots to listen to our in-process server:
@@ -183,6 +168,8 @@ struct ServerDeleter
     }
 };
 
+bool clearTextHTTP2 = false;
+
 using ServerPtr = QScopedPointer<Http2Server, ServerDeleter>;
 
 H2Type defaultConnectionType()
@@ -195,6 +182,12 @@ H2Type defaultConnectionType()
 tst_Http2::tst_Http2()
     : workerThread(new QThread)
 {
+#if QT_CONFIG(ssl)
+    const auto features = QSslSocket::supportedFeatures();
+    clearTextHTTP2 = !features.contains(QSsl::SupportedFeature::ServerSideAlpn);
+#else
+    clearTextHTTP2 = true;
+#endif
     workerThread->start();
 }
 
@@ -214,6 +207,12 @@ tst_Http2::~tst_Http2()
 void tst_Http2::init()
 {
     manager.reset(new QNetworkAccessManager);
+}
+
+void tst_Http2::defaultQnamHttp2Configuration()
+{
+    // The configuration we also implicitly use in QNAM.
+    QCOMPARE(qt_defaultH2Configuration(), QNetworkRequest().http2Configuration());
 }
 
 void tst_Http2::singleRequest_data()
@@ -267,6 +266,7 @@ void tst_Http2::singleRequest()
     url.setPath("/index.html");
 
     QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
     QFETCH(const QNetworkRequest::Attribute, h2Attribute);
     request.setAttribute(h2Attribute, QVariant(true));
 
@@ -385,7 +385,7 @@ void tst_Http2::flowControlServerSide()
     // to let all replies finish without any error.
     using namespace Http2;
 
-    if (EmulationDetector::isRunningArmOnX86())
+    if (QTestPrivate::isRunningArmOnX86())
         QSKIP("Test is too slow to run on emulator");
 
     clearHTTP2State();
@@ -442,6 +442,7 @@ void tst_Http2::pushPromise()
     url.setPath("/index.html");
 
     QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
     request.setAttribute(QNetworkRequest::Http2AllowedAttribute, QVariant(true));
     request.setHttp2Configuration(params);
 
@@ -468,6 +469,7 @@ void tst_Http2::pushPromise()
 
     url.setPath("/script.js");
     QNetworkRequest promisedRequest(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
     promisedRequest.setAttribute(QNetworkRequest::Http2AllowedAttribute, QVariant(true));
     reply = manager->get(promisedRequest);
     connect(reply, &QNetworkReply::finished, this, &tst_Http2::replyFinished);
@@ -522,6 +524,7 @@ void tst_Http2::goaway()
     for (int i = 0; i < nRequests; ++i) {
         url.setPath(QString("/%1").arg(i));
         QNetworkRequest request(url);
+        request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
         request.setAttribute(QNetworkRequest::Http2AllowedAttribute, QVariant(true));
         replies[i] = manager->get(request);
         QCOMPARE(replies[i]->error(), QNetworkReply::NoError);
@@ -663,6 +666,7 @@ void tst_Http2::connectToHost()
         auto copyUrl = url;
         copyUrl.setScheme(QLatin1String("preconnect-https"));
         QNetworkRequest request(copyUrl);
+        request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
         request.setAttribute(requestAttribute, true);
         reply = manager->get(request);
         // Since we're using self-signed certificates, ignore SSL errors:
@@ -675,6 +679,7 @@ void tst_Http2::connectToHost()
         auto copyUrl = url;
         copyUrl.setScheme(QLatin1String("preconnect-http"));
         QNetworkRequest request(copyUrl);
+        request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
         request.setAttribute(requestAttribute, true);
         reply = manager->get(request);
     }
@@ -695,6 +700,7 @@ void tst_Http2::connectToHost()
     QCOMPARE(nRequests, 1);
 
     QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
     request.setAttribute(requestAttribute, QVariant(true));
     reply = manager->get(request);
     connect(reply, &QNetworkReply::finished, this, &tst_Http2::replyFinished);
@@ -760,6 +766,7 @@ void tst_Http2::maxFrameSize()
     url.setPath(QString("/stream1.html"));
 
     QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
     request.setAttribute(attribute, QVariant(true));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("text/plain"));
     request.setHttp2Configuration(h2Config);
@@ -780,6 +787,275 @@ void tst_Http2::maxFrameSize()
     QVERIFY(serverGotSettingsACK);
 }
 
+void tst_Http2::http2DATAFrames()
+{
+    using namespace Http2;
+
+    {
+        // 0. DATA frame with payload, no padding.
+
+        FrameWriter writer(FrameType::DATA, FrameFlag::EMPTY, 1);
+        writer.append('a');
+        writer.append('b');
+        writer.append('c');
+
+        const Frame frame = writer.outboundFrame();
+        const auto &buffer = frame.buffer;
+        // Frame's header is 9 bytes + 3 bytes of payload
+        // (+ 0 bytes of padding and no padding length):
+        QCOMPARE(int(buffer.size()), 12);
+
+        QVERIFY(!frame.padding());
+        QCOMPARE(int(frame.payloadSize()), 3);
+        QCOMPARE(int(frame.dataSize()), 3);
+        QCOMPARE(frame.dataBegin() - buffer.data(), 9);
+        QCOMPARE(char(*frame.dataBegin()), 'a');
+    }
+
+    {
+        // 1. DATA with padding.
+
+        const int padLength = 10;
+        FrameWriter writer(FrameType::DATA, FrameFlag::END_STREAM | FrameFlag::PADDED, 1);
+        writer.append(uchar(padLength)); // The length of padding is 1 byte long.
+        writer.append('a');
+        for (int i = 0; i < padLength; ++i)
+            writer.append('b');
+
+        const Frame frame = writer.outboundFrame();
+        const auto &buffer = frame.buffer;
+        // Frame's header is 9 bytes + 1 byte for padding length
+        // + 1 byte of data + 10 bytes of padding:
+        QCOMPARE(int(buffer.size()), 21);
+
+        QCOMPARE(frame.padding(), padLength);
+        QCOMPARE(int(frame.payloadSize()), 12); // Includes padding, its length + data.
+        QCOMPARE(int(frame.dataSize()), 1);
+
+        // Skipping 9 bytes long header and padding length:
+        QCOMPARE(frame.dataBegin() - buffer.data(), 10);
+
+        QCOMPARE(char(frame.dataBegin()[0]), 'a');
+        QCOMPARE(char(frame.dataBegin()[1]), 'b');
+
+        QVERIFY(frame.flags().testFlag(FrameFlag::END_STREAM));
+        QVERIFY(frame.flags().testFlag(FrameFlag::PADDED));
+    }
+    {
+        // 2. DATA with PADDED flag, but 0 as padding length.
+
+        FrameWriter writer(FrameType::DATA, FrameFlag::END_STREAM | FrameFlag::PADDED, 1);
+
+        writer.append(uchar(0)); // Number of padding bytes is 1 byte long.
+        writer.append('a');
+
+        const Frame frame = writer.outboundFrame();
+        const auto &buffer = frame.buffer;
+
+        // Frame's header is 9 bytes + 1 byte for padding length + 1 byte of data
+        // + 0 bytes of padding:
+        QCOMPARE(int(buffer.size()), 11);
+
+        QCOMPARE(frame.padding(), 0);
+        QCOMPARE(int(frame.payloadSize()), 2); // Includes padding (0 bytes), its length + data.
+        QCOMPARE(int(frame.dataSize()), 1);
+
+        // Skipping 9 bytes long header and padding length:
+        QCOMPARE(frame.dataBegin() - buffer.data(), 10);
+
+        QCOMPARE(char(*frame.dataBegin()), 'a');
+
+        QVERIFY(frame.flags().testFlag(FrameFlag::END_STREAM));
+        QVERIFY(frame.flags().testFlag(FrameFlag::PADDED));
+    }
+}
+
+void tst_Http2::moreActivitySignals_data()
+{
+    QTest::addColumn<QNetworkRequest::Attribute>("h2Attribute");
+    QTest::addColumn<H2Type>("connectionType");
+
+    QTest::addRow("h2c-upgrade")
+            << QNetworkRequest::Http2AllowedAttribute << H2Type::h2c;
+    QTest::addRow("h2c-direct")
+            << QNetworkRequest::Http2DirectAttribute << H2Type::h2cDirect;
+
+    if (!clearTextHTTP2)
+        QTest::addRow("h2-ALPN")
+                << QNetworkRequest::Http2AllowedAttribute << H2Type::h2Alpn;
+
+#if QT_CONFIG(ssl)
+    QTest::addRow("h2-direct")
+            << QNetworkRequest::Http2DirectAttribute << H2Type::h2Direct;
+#endif
+}
+
+void tst_Http2::moreActivitySignals()
+{
+    clearHTTP2State();
+
+#if QT_CONFIG(securetransport)
+    // Normally on macOS we use plain text only for SecureTransport
+    // does not support ALPN on the server side. With 'direct encrytped'
+    // we have to use TLS sockets (== private key) and thus suppress a
+    // keychain UI asking for permission to use a private key.
+    // Our CI has this, but somebody testing locally - will have a problem.
+    qputenv("QT_SSL_USE_TEMPORARY_KEYCHAIN", QByteArray("1"));
+    auto envRollback = qScopeGuard([]() { qunsetenv("QT_SSL_USE_TEMPORARY_KEYCHAIN"); });
+#endif
+
+    serverPort = 0;
+    QFETCH(H2Type, connectionType);
+    ServerPtr srv(newServer(defaultServerSettings, connectionType));
+    QMetaObject::invokeMethod(srv.data(), "startServer", Qt::QueuedConnection);
+    runEventLoop(100);
+    QVERIFY(serverPort != 0);
+    auto url = requestUrl(connectionType);
+    url.setPath(QString("/stream1.html"));
+    QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
+    QFETCH(const QNetworkRequest::Attribute, h2Attribute);
+    request.setAttribute(h2Attribute, QVariant(true));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("text/plain"));
+    QSharedPointer<QNetworkReply> reply(manager->get(request));
+    nRequests = 1;
+    connect(reply.data(), &QNetworkReply::finished, this, &tst_Http2::replyFinished);
+    QSignalSpy spy1(reply.data(), SIGNAL(socketStartedConnecting()));
+    QSignalSpy spy2(reply.data(), SIGNAL(requestSent()));
+    QSignalSpy spy3(reply.data(), SIGNAL(metaDataChanged()));
+    // Since we're using self-signed certificates,
+    // ignore SSL errors:
+    reply->ignoreSslErrors();
+
+    spy1.wait();
+    spy2.wait();
+    spy3.wait();
+
+    runEventLoop();
+    STOP_ON_FAILURE
+
+    QVERIFY(nRequests == 0);
+    QVERIFY(prefaceOK);
+    QVERIFY(serverGotSettingsACK);
+
+    QVERIFY(reply->error() == QNetworkReply::NoError);
+    QVERIFY(reply->isFinished());
+}
+
+void tst_Http2::contentEncoding_data()
+{
+    QTest::addColumn<QByteArray>("encoding");
+    QTest::addColumn<QByteArray>("body");
+    QTest::addColumn<QByteArray>("expected");
+    QTest::addColumn<QNetworkRequest::Attribute>("h2Attribute");
+    QTest::addColumn<H2Type>("connectionType");
+
+    struct ContentEncodingData
+    {
+        ContentEncodingData(QByteArray &&ce, QByteArray &&body, QByteArray &&ex)
+            : contentEncoding(ce), body(body), expected(ex)
+        {
+        }
+        QByteArray contentEncoding;
+        QByteArray body;
+        QByteArray expected;
+    };
+
+    QList<ContentEncodingData> contentEncodingData;
+    contentEncodingData.emplace_back(
+            "gzip", QByteArray::fromBase64("H4sIAAAAAAAAA8tIzcnJVyjPL8pJAQCFEUoNCwAAAA=="),
+            "hello world");
+    contentEncodingData.emplace_back(
+            "deflate", QByteArray::fromBase64("eJzLSM3JyVcozy/KSQEAGgsEXQ=="), "hello world");
+
+#if QT_CONFIG(brotli)
+    contentEncodingData.emplace_back("br", QByteArray::fromBase64("DwWAaGVsbG8gd29ybGQD"),
+                                     "hello world");
+#endif
+
+#if QT_CONFIG(zstd)
+    contentEncodingData.emplace_back(
+            "zstd", QByteArray::fromBase64("KLUv/QRYWQAAaGVsbG8gd29ybGRoaR6y"), "hello world");
+#endif
+
+    // Loop through and add the data...
+    for (const auto &data : contentEncodingData) {
+        const char *name = data.contentEncoding.data();
+        QTest::addRow("%s-h2c-upgrade", name)
+                << data.contentEncoding << data.body << data.expected
+                << QNetworkRequest::Http2AllowedAttribute << H2Type::h2c;
+        QTest::addRow("%s-h2c-direct", name)
+                << data.contentEncoding << data.body << data.expected
+                << QNetworkRequest::Http2DirectAttribute << H2Type::h2cDirect;
+
+        if (!clearTextHTTP2)
+            QTest::addRow("%s-h2-ALPN", name)
+                    << data.contentEncoding << data.body << data.expected
+                    << QNetworkRequest::Http2AllowedAttribute << H2Type::h2Alpn;
+
+#if QT_CONFIG(ssl)
+        QTest::addRow("%s-h2-direct", name)
+                << data.contentEncoding << data.body << data.expected
+                << QNetworkRequest::Http2DirectAttribute << H2Type::h2Direct;
+#endif
+    }
+}
+
+void tst_Http2::contentEncoding()
+{
+    clearHTTP2State();
+
+#if QT_CONFIG(securetransport)
+    // Normally on macOS we use plain text only for SecureTransport
+    // does not support ALPN on the server side. With 'direct encrytped'
+    // we have to use TLS sockets (== private key) and thus suppress a
+    // keychain UI asking for permission to use a private key.
+    // Our CI has this, but somebody testing locally - will have a problem.
+    qputenv("QT_SSL_USE_TEMPORARY_KEYCHAIN", QByteArray("1"));
+    auto envRollback = qScopeGuard([]() { qunsetenv("QT_SSL_USE_TEMPORARY_KEYCHAIN"); });
+#endif
+
+    QFETCH(H2Type, connectionType);
+
+    ServerPtr targetServer(newServer(defaultServerSettings, connectionType));
+    QFETCH(QByteArray, body);
+    targetServer->setResponseBody(body);
+    QFETCH(QByteArray, encoding);
+    targetServer->setContentEncoding(encoding);
+
+    QMetaObject::invokeMethod(targetServer.data(), "startServer", Qt::QueuedConnection);
+    runEventLoop();
+
+    QVERIFY(serverPort != 0);
+
+    nRequests = 1;
+
+    auto url = requestUrl(connectionType);
+    url.setPath("/index.html");
+
+    QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
+    QFETCH(const QNetworkRequest::Attribute, h2Attribute);
+    request.setAttribute(h2Attribute, QVariant(true));
+
+    auto reply = manager->get(request);
+    connect(reply, &QNetworkReply::finished, this, &tst_Http2::replyFinished);
+    // Since we're using self-signed certificates,
+    // ignore SSL errors:
+    reply->ignoreSslErrors();
+
+    runEventLoop();
+    STOP_ON_FAILURE
+
+    QVERIFY(nRequests == 0);
+    QVERIFY(prefaceOK);
+    QVERIFY(serverGotSettingsACK);
+
+    QCOMPARE(reply->error(), QNetworkReply::NoError);
+    QVERIFY(reply->isFinished());
+    QTEST(reply->readAll(), "expected");
+}
+
 void tst_Http2::authenticationRequired_data()
 {
     QTest::addColumn<bool>("success");
@@ -796,6 +1072,7 @@ void tst_Http2::authenticationRequired_data()
 void tst_Http2::authenticationRequired()
 {
     clearHTTP2State();
+    serverPort = 0;
     QFETCH(const bool, responseHEADOnly);
     POSTResponseHEADOnly = responseHEADOnly;
 
@@ -815,10 +1092,10 @@ void tst_Http2::authenticationRequired()
     auto url = requestUrl(defaultConnectionType());
     url.setPath("/index.html");
     QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
 
     QByteArray expectedBody = "Hello, World!";
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
-    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, QVariant(true));
     QScopedPointer<QNetworkReply> reply;
     reply.reset(manager->post(request, expectedBody));
 
@@ -864,6 +1141,143 @@ void tst_Http2::authenticationRequired()
     QCOMPARE(isAuthenticated(reqAuthHeader), success);
     if (success)
         QCOMPARE(receivedBody, expectedBody);
+    // In the `!success` case we need to wait for the server to emit this or it might cause issues
+    // in the next test running after this. In the `success` case we anyway expect it to have been
+    // received.
+    QTRY_VERIFY(serverGotSettingsACK);
+}
+
+void tst_Http2::h2cAllowedAttribute_data()
+{
+    QTest::addColumn<bool>("h2cAllowed");
+    QTest::addColumn<bool>("useAttribute"); // true: use attribute, false: use environment variable
+    QTest::addColumn<bool>("success");
+
+    QTest::addRow("h2c-not-allowed") << false << false << false;
+    // Use the attribute to enable/disable the H2C:
+    QTest::addRow("attribute") << true << true << true;
+    // Use the QT_NETWORK_H2C_ALLOWED environment variable to enable/disable the H2C:
+    QTest::addRow("environment-variable") << true << false << true;
+}
+
+void tst_Http2::h2cAllowedAttribute()
+{
+    QFETCH(const bool, h2cAllowed);
+    QFETCH(const bool, useAttribute);
+    QFETCH(const bool, success);
+
+    clearHTTP2State();
+    serverPort = 0;
+
+    ServerPtr targetServer(newServer(defaultServerSettings, H2Type::h2c));
+    targetServer->setResponseBody("Hello");
+
+    QMetaObject::invokeMethod(targetServer.data(), "startServer", Qt::QueuedConnection);
+    runEventLoop();
+
+    QVERIFY(serverPort != 0);
+
+    nRequests = 1;
+
+    auto url = requestUrl(H2Type::h2c);
+    url.setPath("/index.html");
+    QNetworkRequest request(url);
+    if (h2cAllowed) {
+        if (useAttribute)
+            request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
+        else
+            qputenv("QT_NETWORK_H2C_ALLOWED", "1");
+    }
+    auto envCleanup = qScopeGuard([]() { qunsetenv("QT_NETWORK_H2C_ALLOWED"); });
+
+    QScopedPointer<QNetworkReply> reply;
+    reply.reset(manager->get(request));
+
+    if (success)
+        connect(reply.get(), &QNetworkReply::finished, this, &tst_Http2::replyFinished);
+    else
+        connect(reply.get(), &QNetworkReply::errorOccurred, this, &tst_Http2::replyFinishedWithError);
+
+    // Since we're using self-signed certificates,
+    // ignore SSL errors:
+    reply->ignoreSslErrors();
+
+    runEventLoop();
+    STOP_ON_FAILURE
+
+    if (!success) {
+        QCOMPARE(reply->error(), QNetworkReply::ConnectionRefusedError);
+    } else {
+        QCOMPARE(reply->readAll(), QByteArray("Hello"));
+        QTRY_VERIFY(serverGotSettingsACK);
+    }
+}
+
+void tst_Http2::redirect_data()
+{
+    QTest::addColumn<int>("maxRedirects");
+    QTest::addColumn<int>("redirectCount");
+    QTest::addColumn<bool>("success");
+
+    QTest::addRow("1-redirects-none-allowed-failure") << 0 << 1 << false;
+    QTest::addRow("1-redirects-success") << 1 << 1 << true;
+    QTest::addRow("2-redirects-1-allowed-failure") << 1 << 2 << false;
+}
+
+void tst_Http2::redirect()
+{
+    QFETCH(const int, maxRedirects);
+    QFETCH(const int, redirectCount);
+    QFETCH(const bool, success);
+    const QByteArray redirectUrl = "/b.html"_ba;
+
+    clearHTTP2State();
+    serverPort = 0;
+
+    ServerPtr targetServer(newServer(defaultServerSettings, defaultConnectionType()));
+    targetServer->setRedirect(redirectUrl, redirectCount);
+
+    QMetaObject::invokeMethod(targetServer.data(), "startServer", Qt::QueuedConnection);
+    runEventLoop();
+
+    QVERIFY(serverPort != 0);
+
+    nRequests = 1 + maxRedirects;
+
+    auto originalUrl = requestUrl(defaultConnectionType());
+    auto url = originalUrl;
+    url.setPath("/index.html");
+    QNetworkRequest request(url);
+    request.setMaximumRedirectsAllowed(maxRedirects);
+    // H2C might be used on macOS where SecureTransport doesn't support server-side ALPN
+    qputenv("QT_NETWORK_H2C_ALLOWED", "1");
+    auto envCleanup = qScopeGuard([]() { qunsetenv("QT_NETWORK_H2C_ALLOWED"); });
+
+    QScopedPointer<QNetworkReply> reply;
+    reply.reset(manager->get(request));
+
+    if (success) {
+        connect(reply.get(), &QNetworkReply::finished, this, &tst_Http2::replyFinished);
+    } else {
+        connect(reply.get(), &QNetworkReply::errorOccurred, this,
+                &tst_Http2::replyFinishedWithError);
+    }
+
+    // Since we're using self-signed certificates,
+    // ignore SSL errors:
+    reply->ignoreSslErrors();
+
+    runEventLoop();
+    STOP_ON_FAILURE
+
+    if (success) {
+        QCOMPARE(reply->error(), QNetworkReply::NoError);
+        QCOMPARE(reply->url().toString(),
+                 originalUrl.resolved(QString::fromLatin1(redirectUrl)).toString());
+    } else if (maxRedirects < redirectCount) {
+        QCOMPARE(reply->error(), QNetworkReply::TooManyRedirectsError);
+    }
+    QTRY_VERIFY(serverGotSettingsACK);
 }
 
 void tst_Http2::serverStarted(quint16 port)
@@ -923,8 +1337,9 @@ void tst_Http2::sendRequest(int streamNumber,
     url.setPath(QString("/stream%1.html").arg(streamNumber));
 
     QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::Http2CleartextAllowedAttribute, true);
     request.setAttribute(QNetworkRequest::Http2AllowedAttribute, QVariant(true));
-    request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, QVariant(true));
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("text/plain"));
     request.setPriority(priority);
     request.setHttp2Configuration(h2Config);
@@ -984,12 +1399,12 @@ void tst_Http2::invalidFrame()
 
 void tst_Http2::invalidRequest(quint32 streamID)
 {
-    Q_UNUSED(streamID)
+    Q_UNUSED(streamID);
 }
 
 void tst_Http2::decompressionFailed(quint32 streamID)
 {
-    Q_UNUSED(streamID)
+    Q_UNUSED(streamID);
 }
 
 void tst_Http2::receivedRequest(quint32 streamID)
@@ -1015,7 +1430,7 @@ void tst_Http2::receivedData(quint32 streamID)
 
 void tst_Http2::windowUpdated(quint32 streamID)
 {
-    Q_UNUSED(streamID)
+    Q_UNUSED(streamID);
 
     ++windowUpdates;
 }
@@ -1036,13 +1451,6 @@ void tst_Http2::replyFinished()
 
         QVERIFY(http2Used.isValid());
         QVERIFY(http2Used.toBool());
-
-        const QVariant spdyUsed(reply->attribute(QNetworkRequest::SpdyWasUsedAttribute));
-        if (!spdyUsed.isValid() || spdyUsed.toBool())
-            stopEventLoop();
-
-        QVERIFY(spdyUsed.isValid());
-        QVERIFY(!spdyUsed.toBool());
 
         const QVariant code(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute));
         if (!code.isValid() || !code.canConvert<int>() || code.value<int>() != 200)

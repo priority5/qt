@@ -27,33 +27,11 @@ class DeviceInfoPrefsTest : public testing::Test {
   TestingPrefServiceSimple pref_service_;
 };
 
-TEST_F(DeviceInfoPrefsTest, ShouldMigrateFromObsoletePref) {
-  const char kObsoleteDeviceInfoRecentGUIDs[] = "sync.local_device_guids";
-
-  ListPrefUpdate cache_guids_update(&pref_service_,
-                                    kObsoleteDeviceInfoRecentGUIDs);
-
-  cache_guids_update->Insert(cache_guids_update->GetList().begin(),
-                             base::Value("old_guid1"));
-  cache_guids_update->Insert(cache_guids_update->GetList().begin(),
-                             base::Value("old_guid2"));
-
-  ASSERT_FALSE(device_info_prefs_.IsRecentLocalCacheGuid("old_guid1"));
-  ASSERT_FALSE(device_info_prefs_.IsRecentLocalCacheGuid("old_guid2"));
-
-  DeviceInfoPrefs::MigrateRecentLocalCacheGuidsPref(&pref_service_);
-
-  EXPECT_TRUE(device_info_prefs_.IsRecentLocalCacheGuid("old_guid1"));
-  EXPECT_TRUE(device_info_prefs_.IsRecentLocalCacheGuid("old_guid2"));
-}
-
 TEST_F(DeviceInfoPrefsTest, ShouldGarbageCollectExpiredCacheGuids) {
-  const base::TimeDelta kMaxDaysLocalCacheGuidsStored =
-      base::TimeDelta::FromDays(10);
+  const base::TimeDelta kMaxDaysLocalCacheGuidsStored = base::Days(10);
 
   device_info_prefs_.AddLocalCacheGuid("guid1");
-  clock_.Advance(kMaxDaysLocalCacheGuidsStored -
-                 base::TimeDelta::FromMinutes(1));
+  clock_.Advance(kMaxDaysLocalCacheGuidsStored - base::Minutes(1));
   device_info_prefs_.AddLocalCacheGuid("guid2");
 
   // First garbage collection immediately before taking effect, hence a no-op.
@@ -62,7 +40,7 @@ TEST_F(DeviceInfoPrefsTest, ShouldGarbageCollectExpiredCacheGuids) {
   EXPECT_TRUE(device_info_prefs_.IsRecentLocalCacheGuid("guid2"));
 
   // Advancing one day causes the first GUID to be garbage-collected.
-  clock_.Advance(base::TimeDelta::FromDays(1));
+  clock_.Advance(base::Days(1));
   device_info_prefs_.GarbageCollectExpiredCacheGuids();
   EXPECT_FALSE(device_info_prefs_.IsRecentLocalCacheGuid("guid1"));
   EXPECT_TRUE(device_info_prefs_.IsRecentLocalCacheGuid("guid2"));
@@ -80,17 +58,17 @@ TEST_F(DeviceInfoPrefsTest, ShouldCleanUpCorruptEntriesUponGarbageCollection) {
   // which is a string instead of a dictionary.
   ListPrefUpdate cache_guids_update(&pref_service_,
                                     kDeviceInfoRecentGUIDsWithTimestamps);
-  cache_guids_update->Insert(cache_guids_update->GetList().begin(),
+  cache_guids_update->Insert(cache_guids_update->GetListDeprecated().begin(),
                              base::Value("corrupt_string_entry"));
 
   // Add another corrupt entry: in this case the entry is a dictionary, but it
   // contains no timestamp.
-  cache_guids_update->Insert(cache_guids_update->GetList().begin(),
+  cache_guids_update->Insert(cache_guids_update->GetListDeprecated().begin(),
                              base::Value(base::Value::Type::DICTIONARY));
 
   // The end result is the list contains three entries among which one is valid.
   ASSERT_EQ(3u, pref_service_.GetList(kDeviceInfoRecentGUIDsWithTimestamps)
-                    ->GetList()
+                    ->GetListDeprecated()
                     .size());
   ASSERT_TRUE(device_info_prefs_.IsRecentLocalCacheGuid("guid1"));
 
@@ -100,7 +78,7 @@ TEST_F(DeviceInfoPrefsTest, ShouldCleanUpCorruptEntriesUponGarbageCollection) {
 
   // |guid1| should be the only entry in the list.
   EXPECT_EQ(1u, pref_service_.GetList(kDeviceInfoRecentGUIDsWithTimestamps)
-                    ->GetList()
+                    ->GetListDeprecated()
                     .size());
 }
 

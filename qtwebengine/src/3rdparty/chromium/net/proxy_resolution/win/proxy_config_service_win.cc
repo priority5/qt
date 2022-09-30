@@ -8,7 +8,8 @@
 #include <winhttp.h>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
@@ -37,7 +38,7 @@ void FreeIEConfig(WINHTTP_CURRENT_USER_IE_PROXY_CONFIG* ie_config) {
 
 ProxyConfigServiceWin::ProxyConfigServiceWin(
     const NetworkTrafficAnnotationTag& traffic_annotation)
-    : PollingProxyConfigService(base::TimeDelta::FromSeconds(kPollIntervalSec),
+    : PollingProxyConfigService(base::Seconds(kPollIntervalSec),
                                 &ProxyConfigServiceWin::GetCurrentProxyConfig,
                                 traffic_annotation) {
   NetworkChangeNotifier::AddNetworkChangeObserver(this);
@@ -156,6 +157,7 @@ void ProxyConfigServiceWin::GetCurrentProxyConfig(
   ProxyConfig proxy_config;
   SetFromIEConfig(&proxy_config, ie_config);
   FreeIEConfig(&ie_config);
+  proxy_config.set_from_system(true);
   *config = ProxyConfigWithAnnotation(proxy_config, traffic_annotation);
 }
 

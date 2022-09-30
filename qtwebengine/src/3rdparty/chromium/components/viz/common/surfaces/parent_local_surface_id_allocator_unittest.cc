@@ -4,6 +4,8 @@
 
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 
+#include <memory>
+
 #include "testing/gtest/include/gtest/gtest.h"
 
 // ParentLocalSurfaceIdAllocator has 2 accessors which do not alter state:
@@ -21,7 +23,12 @@ class ParentLocalSurfaceIdAllocatorTest : public testing::Test {
  public:
   ParentLocalSurfaceIdAllocatorTest() = default;
 
-  ~ParentLocalSurfaceIdAllocatorTest() override {}
+  ParentLocalSurfaceIdAllocatorTest(const ParentLocalSurfaceIdAllocatorTest&) =
+      delete;
+  ParentLocalSurfaceIdAllocatorTest& operator=(
+      const ParentLocalSurfaceIdAllocatorTest&) = delete;
+
+  ~ParentLocalSurfaceIdAllocatorTest() override = default;
 
   ParentLocalSurfaceIdAllocator& allocator() { return *allocator_.get(); }
 
@@ -46,8 +53,6 @@ class ParentLocalSurfaceIdAllocatorTest : public testing::Test {
 
  private:
   std::unique_ptr<ParentLocalSurfaceIdAllocator> allocator_;
-
-  DISALLOW_COPY_AND_ASSIGN(ParentLocalSurfaceIdAllocatorTest);
 };
 
 // UpdateFromChild() on a parent allocator should accept the child's sequence

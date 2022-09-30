@@ -8,13 +8,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <utility>
+
 #include "base/base_export.h"
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
+#if BUILDFLAG(IS_WIN)
+#include "base/win/scoped_handle.h"
 #endif
 
 namespace base {
@@ -45,7 +46,7 @@ class BASE_EXPORT MemoryMappedFile {
     // in the process address space.
     READ_WRITE_EXTEND,
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // This provides read access, but as executable code used for prefetching
     // DLLs into RAM to avoid inefficient hard fault patterns such as during
     // process startup. The accessing thread could be paused while data from
@@ -56,6 +57,8 @@ class BASE_EXPORT MemoryMappedFile {
 
   // The default constructor sets all members to invalid/null values.
   MemoryMappedFile();
+  MemoryMappedFile(const MemoryMappedFile&) = delete;
+  MemoryMappedFile& operator=(const MemoryMappedFile&) = delete;
   ~MemoryMappedFile();
 
   // Used to hold information about a region [offset + size] of a file.
@@ -77,8 +80,8 @@ class BASE_EXPORT MemoryMappedFile {
   // to a valid memory mapped file then this method will fail and return
   // false. If it cannot open the file, the file does not exist, or the
   // memory mapping fails, it will return false.
-  WARN_UNUSED_RESULT bool Initialize(const FilePath& file_name, Access access);
-  WARN_UNUSED_RESULT bool Initialize(const FilePath& file_name) {
+  [[nodiscard]] bool Initialize(const FilePath& file_name, Access access);
+  [[nodiscard]] bool Initialize(const FilePath& file_name) {
     return Initialize(file_name, READ_ONLY);
   }
 
@@ -87,8 +90,8 @@ class BASE_EXPORT MemoryMappedFile {
   // of |file| and closes it when done. |file| must have been opened with
   // permissions suitable for |access|. If the memory mapping fails, it will
   // return false.
-  WARN_UNUSED_RESULT bool Initialize(File file, Access access);
-  WARN_UNUSED_RESULT bool Initialize(File file) {
+  [[nodiscard]] bool Initialize(File file, Access access);
+  [[nodiscard]] bool Initialize(File file) {
     return Initialize(std::move(file), READ_ONLY);
   }
 
@@ -96,10 +99,8 @@ class BASE_EXPORT MemoryMappedFile {
   // must not be READ_CODE_IMAGE. If READ_WRITE_EXTEND is specified then
   // |region| provides the maximum size of the file. If the memory mapping
   // fails, it return false.
-  WARN_UNUSED_RESULT bool Initialize(File file,
-                                     const Region& region,
-                                     Access access);
-  WARN_UNUSED_RESULT bool Initialize(File file, const Region& region) {
+  [[nodiscard]] bool Initialize(File file, const Region& region, Access access);
+  [[nodiscard]] bool Initialize(File file, const Region& region) {
     return Initialize(std::move(file), region, READ_ONLY);
   }
 
@@ -123,7 +124,7 @@ class BASE_EXPORT MemoryMappedFile {
                                            size_t* aligned_size,
                                            int32_t* offset);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Maps the executable file to memory, set |data_| to that memory address.
   // Return true on success.
   bool MapImageToMemory(Access access);
@@ -140,11 +141,9 @@ class BASE_EXPORT MemoryMappedFile {
   uint8_t* data_;
   size_t length_;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   win::ScopedHandle file_mapping_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(MemoryMappedFile);
 };
 
 }  // namespace base

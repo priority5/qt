@@ -15,8 +15,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/render_messages.h"
-#include "chrome/renderer/searchbox/search_bouncer.h"
 #include "chrome/renderer/searchbox/searchbox.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -57,18 +55,16 @@ TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
   ChromeContentRendererClient* client =
       static_cast<ChromeContentRendererClient*>(content_renderer_client_.get());
 
-  // Create a thumbnail URL containing the correct render view ID and an
+  // Create a thumbnail URL containing the correct render frame ID and an
   // arbitrary instant restricted ID.
-  GURL thumbnail_url(base::StringPrintf(
-      "chrome-search:/thumb/%i/1",
-      render_frame->GetRenderView()->GetRoutingID()));
+  GURL thumbnail_url(base::StringPrintf("chrome-search:/thumb/%i/1",
+                                        render_frame->GetRoutingID()));
 
   GURL result;
-  bool force_ignore_site_for_cookies;
   // Make sure the SearchBox rewrites a thumbnail request from the main frame.
   client->WillSendRequest(GetMainFrame(), ui::PAGE_TRANSITION_LINK,
                           blink::WebURL(thumbnail_url), net::SiteForCookies(),
-                          nullptr, &result, &force_ignore_site_for_cookies);
+                          nullptr, &result);
   EXPECT_NE(result, thumbnail_url);
 
   // Make sure the SearchBox rewrites a thumbnail request from the iframe.
@@ -79,7 +75,7 @@ TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
       static_cast<blink::WebLocalFrame*>(child_frame);
   client->WillSendRequest(local_child, ui::PAGE_TRANSITION_LINK,
                           blink::WebURL(thumbnail_url), net::SiteForCookies(),
-                          nullptr, &result, &force_ignore_site_for_cookies);
+                          nullptr, &result);
   EXPECT_NE(result, thumbnail_url);
 }
 
@@ -171,7 +167,7 @@ class ChromeContentRendererClientBrowserTest :
 IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
                        RewriteYouTubeFlashEmbed) {
   GURL url(https_server()->GetURL("/flash_embeds.html"));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
@@ -185,7 +181,7 @@ IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
 IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
                        RewriteYouTubeFlashEmbedObject) {
   GURL url(https_server()->GetURL("/flash_embeds.html"));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* web_contents =
      browser()->tab_strip_model()->GetActiveWebContents();
 

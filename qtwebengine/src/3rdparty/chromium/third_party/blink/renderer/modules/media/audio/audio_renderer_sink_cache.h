@@ -11,8 +11,8 @@
 
 #include "base/callback.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/sequenced_task_runner.h"
 #include "base/synchronization/lock.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "media/audio/audio_sink_parameters.h"
@@ -26,7 +26,7 @@ class AudioRendererSink;
 
 namespace blink {
 
-class LocalFrame;
+class LocalDOMWindow;
 
 // Caches AudioRendererSink instances, provides them to the clients for usage,
 // tracks their used/unused state, reuses them to obtain output device
@@ -34,7 +34,7 @@ class LocalFrame;
 // Must live on the main render thread. Thread safe.
 class MODULES_EXPORT AudioRendererSinkCache {
  public:
-  class FrameObserver;
+  class WindowObserver;
 
   // Callback to be used for AudioRendererSink creation
   using CreateSinkCallback =
@@ -42,9 +42,9 @@ class MODULES_EXPORT AudioRendererSinkCache {
           const LocalFrameToken& frame_token,
           const media::AudioSinkParameters& params)>;
 
-  // If called, the cache will drop sinks belonging to the specified frame on
+  // If called, the cache will drop sinks belonging to the specified window on
   // navigation.
-  static void InstallFrameObserver(LocalFrame& frame);
+  static void InstallWindowObserver(LocalDOMWindow&);
 
   // |cleanup_task_runner| will be used to delete sinks when they are unused,
   // AudioRendererSinkCache must outlive any tasks posted to it. Since
@@ -53,6 +53,10 @@ class MODULES_EXPORT AudioRendererSinkCache {
       scoped_refptr<base::SequencedTaskRunner> cleanup_task_runner,
       CreateSinkCallback create_sink_callback,
       base::TimeDelta delete_timeout);
+
+  AudioRendererSinkCache(const AudioRendererSinkCache&) = delete;
+  AudioRendererSinkCache& operator=(const AudioRendererSinkCache&) = delete;
+
   ~AudioRendererSinkCache();
 
   // AudioRendererSinkCache implementation:
@@ -67,14 +71,14 @@ class MODULES_EXPORT AudioRendererSinkCache {
  private:
   friend class AudioRendererSinkCacheTest;
   friend class CacheEntryFinder;
-  friend class AudioRendererSinkCache::FrameObserver;
+  friend class AudioRendererSinkCache::WindowObserver;
 
   struct CacheEntry;
   using CacheContainer = std::vector<CacheEntry>;
 
   // Schedules a sink for deletion. Deletion will be performed on the same
   // thread the cache is created on.
-  void DeleteLaterIfUnused(const media::AudioRendererSink* sink_ptr);
+  void DeleteLaterIfUnused(scoped_refptr<media::AudioRendererSink> sink);
 
   // Deletes a sink from the cache. If |force_delete_used| is set, a sink being
   // deleted can (and should) be in use at the moment of deletion; otherwise the
@@ -116,8 +120,6 @@ class MODULES_EXPORT AudioRendererSinkCache {
   // Cached sinks, protected by lock.
   base::Lock cache_lock_;
   CacheContainer cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioRendererSinkCache);
 };
 
 }  // namespace blink

@@ -151,12 +151,10 @@ void SetWebEventLocationFromEventInView(blink::WebMouseEvent* result,
       NOTREACHED();
     }
 #endif
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 101500
     result->movement_x = CGEventGetIntegerValueField(
         cgEvent, kCGEventUnacceleratedPointerMovementX);
     result->movement_y = CGEventGetIntegerValueField(
         cgEvent, kCGEventUnacceleratedPointerMovementY);
-#endif
     result->is_raw_movement_event = true;
   } else {
     result->movement_x = [event deltaX];
@@ -256,21 +254,8 @@ blink::WebMouseEvent::Button ButtonFromButtonNumber(NSEvent* event) {
 
 }  // namespace
 
-blink::WebKeyboardEvent WebKeyboardEventBuilder::Build(NSEvent* event,
-                                                       bool record_debug_uma) {
+blink::WebKeyboardEvent WebKeyboardEventBuilder::Build(NSEvent* event) {
   ui::ComputeEventLatencyOS(event);
-  base::TimeTicks now = ui::EventTimeForNow();
-  base::TimeTicks hardware_timestamp =
-      ui::EventTimeStampFromSeconds([event timestamp]);
-  if (record_debug_uma) {
-    if (ui::EventTypeFromNative(event) == ui::ET_KEY_PRESSED) {
-      base::TimeDelta diff = (now - hardware_timestamp).magnitude();
-      UMA_HISTOGRAM_CUSTOM_TIMES(
-          "Event.Latency.OS_NO_VALIDATION.POSITIVE.KEY_PRESSED", diff,
-          base::TimeDelta::FromMilliseconds(1),
-          base::TimeDelta::FromSeconds(60), 50);
-    }
-  }
 
   ui::DomCode dom_code = ui::DomCodeFromNSEvent(event);
   int modifiers =
@@ -311,8 +296,9 @@ blink::WebKeyboardEvent WebKeyboardEventBuilder::Build(NSEvent* event,
 
   if ([text_str length] < blink::WebKeyboardEvent::kTextLengthCap &&
       [unmodified_str length] < blink::WebKeyboardEvent::kTextLengthCap) {
-    [text_str getCharacters:&result.text[0]];
-    [unmodified_str getCharacters:&result.unmodified_text[0]];
+    [text_str getCharacters:reinterpret_cast<UniChar*>(&result.text[0])];
+    [unmodified_str
+        getCharacters:reinterpret_cast<UniChar*>(&result.unmodified_text[0])];
   } else
     NOTIMPLEMENTED();
 
@@ -329,16 +315,6 @@ blink::WebMouseEvent WebMouseEventBuilder::Build(
     blink::WebPointerProperties::PointerType pointerType,
     bool unacceleratedMovement) {
   ui::ComputeEventLatencyOS(event);
-  base::TimeTicks now = ui::EventTimeForNow();
-  base::TimeTicks hardware_timestamp =
-      ui::EventTimeStampFromSeconds([event timestamp]);
-  if (ui::EventTypeFromNative(event) == ui::ET_MOUSE_PRESSED) {
-    base::TimeDelta diff = (now - hardware_timestamp).magnitude();
-    UMA_HISTOGRAM_CUSTOM_TIMES(
-        "Event.Latency.OS_NO_VALIDATION.POSITIVE.MOUSE_PRESSED", diff,
-        base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromSeconds(60),
-        50);
-  }
   blink::WebInputEvent::Type event_type =
       blink::WebInputEvent::Type::kUndefined;
   int click_count = 0;
@@ -457,14 +433,6 @@ blink::WebMouseWheelEvent WebMouseWheelEventBuilder::Build(
     NSEvent* event,
     NSView* view) {
   ui::ComputeEventLatencyOS(event);
-  base::TimeTicks now = ui::EventTimeForNow();
-  base::TimeTicks hardware_timestamp =
-      ui::EventTimeStampFromSeconds([event timestamp]);
-  base::TimeDelta diff = (now - hardware_timestamp).magnitude();
-  UMA_HISTOGRAM_CUSTOM_TIMES(
-      "Event.Latency.OS_NO_VALIDATION.POSITIVE.MOUSE_WHEEL", diff,
-      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromSeconds(60),
-      50);
   blink::WebMouseWheelEvent result(
       blink::WebInputEvent::Type::kMouseWheel, ModifiersFromEvent(event),
       ui::EventTimeStampFromSeconds([event timestamp]));
@@ -696,16 +664,6 @@ blink::WebTouchEvent WebTouchEventBuilder::Build(NSEvent* event, NSView* view) {
 
   blink::WebTouchEvent result(event_type, ModifiersFromEvent(event),
                               ui::EventTimeStampFromSeconds([event timestamp]));
-  if (ui::EventTypeFromNative(event) == ui::ET_TOUCH_PRESSED) {
-    base::TimeTicks now = ui::EventTimeForNow();
-    base::TimeTicks hardware_timestamp =
-        ui::EventTimeStampFromSeconds([event timestamp]);
-    UMA_HISTOGRAM_CUSTOM_TIMES(
-        "Event.Latency.OS.NO_VALIDATION.POSITIVE.TOUCH_PRESSED",
-        (now - hardware_timestamp).magnitude(),
-        base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromSeconds(60),
-        50);
-  }
   ui::ComputeEventLatencyOS(event);
   result.hovering = event_type == blink::WebInputEvent::Type::kTouchEnd;
   result.unique_touch_event_id = ui::GetNextTouchEventId();

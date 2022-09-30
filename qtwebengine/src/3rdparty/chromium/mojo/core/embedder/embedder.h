@@ -7,12 +7,10 @@
 
 #include <stddef.h>
 
-#include <string>
-
 #include "base/component_export.h"
 #include "base/memory/ref_counted.h"
 #include "base/process/process_handle.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "mojo/core/embedder/configuration.h"
 
@@ -37,6 +35,14 @@ COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void Init();
 // ScopedIPCSupport.
 COMPONENT_EXPORT(MOJO_CORE_EMBEDDER)
 scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner();
+
+// InitFeatures will be called as soon as the base::FeatureList is initialized.
+// NOTE: This is temporarily necessary because of how Mojo is started with
+// respect to base::FeatureList.
+//
+// TODO(rockot): Remove once a long term solution is in place for using
+// base::Features inside of Mojo.
+COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void InitFeatures();
 
 }  // namespace core
 }  // namespace mojo

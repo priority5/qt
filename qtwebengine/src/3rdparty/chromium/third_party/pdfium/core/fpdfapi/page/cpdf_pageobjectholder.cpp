@@ -16,7 +16,9 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fxcrt/fx_extension.h"
-#include "third_party/base/stl_util.h"
+#include "core/fxcrt/stl_util.h"
+#include "third_party/base/check.h"
+#include "third_party/base/check_op.h"
 
 bool GraphicsData::operator<(const GraphicsData& other) const {
   if (!FXSYS_SafeEQ(fillAlpha, other.fillAlpha))
@@ -40,7 +42,7 @@ CPDF_PageObjectHolder::CPDF_PageObjectHolder(CPDF_Document* pDoc,
       m_pResources(pResources),
       m_pDict(pDict),
       m_pDocument(pDoc) {
-  ASSERT(m_pDict);
+  DCHECK(m_pDict);
 }
 
 CPDF_PageObjectHolder::~CPDF_PageObjectHolder() = default;
@@ -51,7 +53,7 @@ bool CPDF_PageObjectHolder::IsPage() const {
 
 void CPDF_PageObjectHolder::StartParse(
     std::unique_ptr<CPDF_ContentParser> pParser) {
-  ASSERT(m_ParseState == ParseState::kNotParsed);
+  DCHECK_EQ(m_ParseState, ParseState::kNotParsed);
   m_pParser = std::move(pParser);
   m_ParseState = ParseState::kParsing;
 }
@@ -60,7 +62,7 @@ void CPDF_PageObjectHolder::ContinueParse(PauseIndicatorIface* pPause) {
   if (m_ParseState == ParseState::kParsed)
     return;
 
-  ASSERT(m_ParseState == ParseState::kParsing);
+  DCHECK_EQ(m_ParseState, ParseState::kParsing);
   if (m_pParser->Continue(pPause))
     return;
 
@@ -82,6 +84,34 @@ std::set<int32_t> CPDF_PageObjectHolder::TakeDirtyStreams() {
   return dirty_streams;
 }
 
+absl::optional<ByteString> CPDF_PageObjectHolder::GraphicsMapSearch(
+    const GraphicsData& gd) {
+  auto it = m_GraphicsMap.find(gd);
+  if (it == m_GraphicsMap.end())
+    return absl::nullopt;
+
+  return it->second;
+}
+
+void CPDF_PageObjectHolder::GraphicsMapInsert(const GraphicsData& gd,
+                                              const ByteString& str) {
+  m_GraphicsMap[gd] = str;
+}
+
+absl::optional<ByteString> CPDF_PageObjectHolder::FontsMapSearch(
+    const FontData& fd) {
+  auto it = m_FontsMap.find(fd);
+  if (it == m_FontsMap.end())
+    return absl::nullopt;
+
+  return it->second;
+}
+
+void CPDF_PageObjectHolder::FontsMapInsert(const FontData& fd,
+                                           const ByteString& str) {
+  m_FontsMap[fd] = str;
+}
+
 void CPDF_PageObjectHolder::LoadTransparencyInfo() {
   CPDF_Dictionary* pGroup = m_pDict->GetDictFor("Group");
   if (!pGroup)
@@ -98,7 +128,7 @@ void CPDF_PageObjectHolder::LoadTransparencyInfo() {
 
 CPDF_PageObject* CPDF_PageObjectHolder::GetPageObjectByIndex(
     size_t index) const {
-  return pdfium::IndexInBounds(m_PageObjectList, index)
+  return fxcrt::IndexInBounds(m_PageObjectList, index)
              ? m_PageObjectList[index].get()
              : nullptr;
 }
@@ -109,7 +139,7 @@ void CPDF_PageObjectHolder::AppendPageObject(
 }
 
 bool CPDF_PageObjectHolder::RemovePageObject(CPDF_PageObject* pPageObj) {
-  pdfium::FakeUniquePtr<CPDF_PageObject> p(pPageObj);
+  fxcrt::FakeUniquePtr<CPDF_PageObject> p(pPageObj);
 
   auto it =
       std::find(std::begin(m_PageObjectList), std::end(m_PageObjectList), p);

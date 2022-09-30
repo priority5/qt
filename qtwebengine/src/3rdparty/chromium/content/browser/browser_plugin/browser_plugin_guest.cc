@@ -22,9 +22,10 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom.h"
 
-#if defined(OS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
+#if BUILDFLAG(IS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
 #include "content/browser/browser_plugin/browser_plugin_popup_menu_helper_mac.h"
 #endif
 
@@ -35,9 +36,6 @@ BrowserPluginGuest::BrowserPluginGuest(WebContentsImpl* web_contents,
     : WebContentsObserver(web_contents),
       owner_web_contents_(nullptr),
       initialized_(false),
-      last_drag_status_(blink::kWebDragStatusUnknown),
-      seen_embedder_system_drag_ended_(false),
-      seen_embedder_drag_source_ended_at_(false),
       delegate_(delegate) {
   DCHECK(web_contents);
   DCHECK(delegate);
@@ -62,29 +60,6 @@ void BrowserPluginGuest::Init() {
   InitInternal(owner_web_contents);
 }
 
-base::WeakPtr<BrowserPluginGuest> BrowserPluginGuest::AsWeakPtr() {
-  return weak_ptr_factory_.GetWeakPtr();
-}
-
-void BrowserPluginGuest::SetFocus(bool focused,
-                                  blink::mojom::FocusType focus_type) {
-  RenderWidgetHostView* rwhv = web_contents()->GetRenderWidgetHostView();
-  RenderWidgetHost* rwh = rwhv ? rwhv->GetRenderWidgetHost() : nullptr;
-
-  if (!rwh)
-    return;
-
-  if ((focus_type == blink::mojom::FocusType::kForward) ||
-      (focus_type == blink::mojom::FocusType::kBackward)) {
-    static_cast<RenderViewHostImpl*>(RenderViewHost::From(rwh))
-        ->SetInitialFocus(focus_type == blink::mojom::FocusType::kBackward);
-  }
-  RenderWidgetHostImpl::From(rwh)->GetWidgetInputHandler()->SetFocus(focused);
-
-  // Restore the last seen state of text input to the view.
-  SendTextInputTypeChangedToView(static_cast<RenderWidgetHostViewBase*>(rwhv));
-}
-
 WebContentsImpl* BrowserPluginGuest::CreateNewGuestWindow(
     const WebContents::CreateParams& params) {
   WebContentsImpl* new_contents =
@@ -94,7 +69,17 @@ WebContentsImpl* BrowserPluginGuest::CreateNewGuestWindow(
 }
 
 void BrowserPluginGuest::InitInternal(WebContentsImpl* owner_web_contents) {
-  SetFocus(false, blink::mojom::FocusType::kNone);
+  RenderWidgetHostImpl* rwhi =
+      GetWebContents()->GetMainFrame()->GetRenderWidgetHost();
+  DCHECK(rwhi);
+  // The initial state will not be focused but the plugin may be active so
+  // set that appropriately.
+  rwhi->GetWidgetInputHandler()->SetFocus(
+      rwhi->is_active() ? blink::mojom::FocusState::kNotFocusedAndActive
+                        : blink::mojom::FocusState::kNotFocusedAndNotActive);
+
+  // Restore the last seen state of text input to the view.
+  SendTextInputTypeChangedToView(rwhi->GetView());
 
   if (owner_web_contents_ != owner_web_contents) {
     // Once a BrowserPluginGuest has an embedder WebContents, it's considered to
@@ -102,7 +87,7 @@ void BrowserPluginGuest::InitInternal(WebContentsImpl* owner_web_contents) {
     owner_web_contents_ = owner_web_contents;
   }
 
-  blink::mojom::RendererPreferences* renderer_prefs =
+  blink::RendererPreferences* renderer_prefs =
       GetWebContents()->GetMutableRendererPrefs();
   blink::UserAgentOverride guest_user_agent_override =
       renderer_prefs->user_agent_override;
@@ -118,8 +103,6 @@ void BrowserPluginGuest::InitInternal(WebContentsImpl* owner_web_contents) {
   // Navigation is disabled in Chrome Apps. We want to make sure guest-initiated
   // navigations still continue to function inside the app.
   renderer_prefs->browser_handles_all_top_level_requests = false;
-
-  DCHECK(GetWebContents()->GetRenderViewHost());
 
   // TODO(chrishtr): this code is wrong. The navigate_on_drag_drop field will
   // be reset again the next time preferences are updated.
@@ -140,66 +123,8 @@ void BrowserPluginGuest::CreateInWebContents(
   web_contents->SetBrowserPluginGuest(std::move(guest));
 }
 
-// static
-bool BrowserPluginGuest::IsGuest(WebContentsImpl* web_contents) {
-  return web_contents && web_contents->GetBrowserPluginGuest();
-}
-
 WebContentsImpl* BrowserPluginGuest::GetWebContents() const {
   return static_cast<WebContentsImpl*>(web_contents());
-}
-
-gfx::Point BrowserPluginGuest::GetScreenCoordinates(
-    const gfx::Point& relative_position) const {
-  return relative_position;
-}
-
-void BrowserPluginGuest::DragSourceEndedAt(float client_x,
-                                           float client_y,
-                                           float screen_x,
-                                           float screen_y,
-                                           blink::DragOperation operation) {
-  web_contents()->GetRenderViewHost()->GetWidget()->DragSourceEndedAt(
-      gfx::PointF(client_x, client_y), gfx::PointF(screen_x, screen_y),
-      operation);
-  seen_embedder_drag_source_ended_at_ = true;
-  EndSystemDragIfApplicable();
-}
-
-void BrowserPluginGuest::EndSystemDragIfApplicable() {
-  // Ideally we'd want either WebDragStatusDrop or WebDragStatusLeave...
-  // Call guest RVH->DragSourceSystemDragEnded() correctly on the guest where
-  // the drag was initiated. Calling DragSourceSystemDragEnded() correctly
-  // means we call it in all cases and also make sure we only call it once.
-  // This ensures that the input state of the guest stays correct, otherwise
-  // it will go stale and won't accept any further input events.
-  //
-  // The strategy used here to call DragSourceSystemDragEnded() on the RVH
-  // is when the following conditions are met:
-  //   a. Embedder has seen SystemDragEnded()
-  //   b. Embedder has seen DragSourceEndedAt()
-  //   c. The guest has seen some drag status update other than
-  //      WebDragStatusUnknown. Note that this step should ideally be done
-  //      differently: The guest has seen at least one of
-  //      {WebDragStatusOver, WebDragStatusDrop}. However, if a user drags
-  //      a source quickly outside of <webview> bounds, then the
-  //      BrowserPluginGuest never sees any of these drag status updates,
-  //      there we just check whether we've seen any drag status update or
-  //      not.
-  if (last_drag_status_ != blink::kWebDragStatusOver &&
-      seen_embedder_drag_source_ended_at_ && seen_embedder_system_drag_ended_) {
-    RenderViewHostImpl* guest_rvh = static_cast<RenderViewHostImpl*>(
-        GetWebContents()->GetRenderViewHost());
-    guest_rvh->GetWidget()->DragSourceSystemDragEnded();
-    last_drag_status_ = blink::kWebDragStatusUnknown;
-    seen_embedder_system_drag_ended_ = false;
-    seen_embedder_drag_source_ended_at_ = false;
-  }
-}
-
-void BrowserPluginGuest::EmbedderSystemDragEnded() {
-  seen_embedder_system_drag_ended_ = true;
-  EndSystemDragIfApplicable();
 }
 
 void BrowserPluginGuest::SendTextInputTypeChangedToView(
@@ -216,6 +141,8 @@ void BrowserPluginGuest::SendTextInputTypeChangedToView(
     // content::InterstitialPageImpl::DontProceed().
     //
     // TODO(lazyboy): Write a WebUI test once http://crbug.com/463674 is fixed.
+    // TODO(falken): Check whether this code is dead, since InterstitialPageImpl
+    // does not exist.
     return;
   }
 
@@ -254,9 +181,10 @@ void BrowserPluginGuest::DidFinishNavigation(
     RecordAction(base::UserMetricsAction("BrowserPlugin.Guest.DidNavigate"));
 }
 
-void BrowserPluginGuest::RenderProcessGone(base::TerminationStatus status) {
+void BrowserPluginGuest::PrimaryMainFrameRenderProcessGone(
+    base::TerminationStatus status) {
   switch (status) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
     case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
 #endif
     case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
@@ -277,8 +205,8 @@ void BrowserPluginGuest::RenderProcessGone(base::TerminationStatus status) {
   }
 }
 
-#if defined(OS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
-bool BrowserPluginGuest::ShowPopupMenu(
+#if BUILDFLAG(IS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
+void BrowserPluginGuest::ShowPopupMenu(
     RenderFrameHost* render_frame_host,
     mojo::PendingRemote<blink::mojom::PopupMenuClient>* popup_client,
     const gfx::Rect& bounds,
@@ -299,7 +227,6 @@ bool BrowserPluginGuest::ShowPopupMenu(
   popup_menu_helper.ShowPopupMenu(translated_bounds, item_height, font_size,
                                   selected_item, std::move(*menu_items),
                                   right_aligned, allow_multiple_selection);
-  return true;
 }
 #endif
 

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickstategroup_p.h"
 
@@ -53,7 +17,9 @@
 
 QT_BEGIN_NAMESPACE
 
-DEFINE_BOOL_CONFIG_OPTION(stateChangeDebug, STATECHANGE_DEBUG);
+using namespace Qt::StringLiterals;
+
+Q_DECLARE_LOGGING_CATEGORY(lcStates)
 
 class QQuickStateGroupPrivate : public QObjectPrivate
 {
@@ -67,15 +33,15 @@ public:
     QQuickState *nullState;
 
     static void append_state(QQmlListProperty<QQuickState> *list, QQuickState *state);
-    static int count_state(QQmlListProperty<QQuickState> *list);
-    static QQuickState *at_state(QQmlListProperty<QQuickState> *list, int index);
+    static qsizetype count_state(QQmlListProperty<QQuickState> *list);
+    static QQuickState *at_state(QQmlListProperty<QQuickState> *list, qsizetype index);
     static void clear_states(QQmlListProperty<QQuickState> *list);
-    static void replace_states(QQmlListProperty<QQuickState> *list, int index, QQuickState *state);
+    static void replace_states(QQmlListProperty<QQuickState> *list, qsizetype index, QQuickState *state);
     static void removeLast_states(QQmlListProperty<QQuickState> *list);
 
     static void append_transition(QQmlListProperty<QQuickTransition> *list, QQuickTransition *state);
-    static int count_transitions(QQmlListProperty<QQuickTransition> *list);
-    static QQuickTransition *at_transition(QQmlListProperty<QQuickTransition> *list, int index);
+    static qsizetype count_transitions(QQmlListProperty<QQuickTransition> *list);
+    static QQuickTransition *at_transition(QQmlListProperty<QQuickTransition> *list, qsizetype index);
     static void clear_transitions(QQmlListProperty<QQuickTransition> *list);
 
     QList<QQuickState *> states;
@@ -184,13 +150,13 @@ void QQuickStateGroupPrivate::append_state(QQmlListProperty<QQuickState> *list, 
 
 }
 
-int QQuickStateGroupPrivate::count_state(QQmlListProperty<QQuickState> *list)
+qsizetype QQuickStateGroupPrivate::count_state(QQmlListProperty<QQuickState> *list)
 {
     QQuickStateGroup *_this = static_cast<QQuickStateGroup *>(list->object);
     return _this->d_func()->states.count();
 }
 
-QQuickState *QQuickStateGroupPrivate::at_state(QQmlListProperty<QQuickState> *list, int index)
+QQuickState *QQuickStateGroupPrivate::at_state(QQmlListProperty<QQuickState> *list, qsizetype index)
 {
     QQuickStateGroup *_this = static_cast<QQuickStateGroup *>(list->object);
     return _this->d_func()->states.at(index);
@@ -200,13 +166,13 @@ void QQuickStateGroupPrivate::clear_states(QQmlListProperty<QQuickState> *list)
 {
     QQuickStateGroup *_this = static_cast<QQuickStateGroup *>(list->object);
     _this->d_func()->setCurrentStateInternal(QString(), true);
-    for (int i = 0; i < _this->d_func()->states.count(); ++i) {
+    for (qsizetype i = 0; i < _this->d_func()->states.count(); ++i) {
         _this->d_func()->states.at(i)->setStateGroup(nullptr);
     }
     _this->d_func()->states.clear();
 }
 
-void QQuickStateGroupPrivate::replace_states(QQmlListProperty<QQuickState> *list, int index, QQuickState *state)
+void QQuickStateGroupPrivate::replace_states(QQmlListProperty<QQuickState> *list, qsizetype index, QQuickState *state)
 {
     auto *self = qobject_cast<QQuickStateGroup *>(list->object);
     auto *d = self->d_func();
@@ -265,13 +231,13 @@ void QQuickStateGroupPrivate::append_transition(QQmlListProperty<QQuickTransitio
         _this->d_func()->transitions.append(trans);
 }
 
-int QQuickStateGroupPrivate::count_transitions(QQmlListProperty<QQuickTransition> *list)
+qsizetype QQuickStateGroupPrivate::count_transitions(QQmlListProperty<QQuickTransition> *list)
 {
     QQuickStateGroup *_this = static_cast<QQuickStateGroup *>(list->object);
     return _this->d_func()->transitions.count();
 }
 
-QQuickTransition *QQuickStateGroupPrivate::at_transition(QQmlListProperty<QQuickTransition> *list, int index)
+QQuickTransition *QQuickStateGroupPrivate::at_transition(QQmlListProperty<QQuickTransition> *list, qsizetype index)
 {
     QQuickStateGroup *_this = static_cast<QQuickStateGroup *>(list->object);
     return _this->d_func()->transitions.at(index);
@@ -376,9 +342,27 @@ bool QQuickStateGroupPrivate::updateAutoState()
         QQuickState *state = states.at(ii);
         if (state->isWhenKnown()) {
             if (state->isNamed()) {
-                if (state->when()) {
-                    if (stateChangeDebug())
-                        qWarning() << "Setting auto state due to expression";
+                bool whenValue = state->when();
+                const QQmlProperty whenProp(state, u"when"_s);
+                const auto potentialWhenBinding = QQmlAnyBinding::ofProperty(whenProp);
+                Q_ASSERT(!potentialWhenBinding.isUntypedPropertyBinding());
+
+                // if there is a binding, the value in when might not be up-to-date at this point
+                // so we manually re-evaluate the binding
+                QQmlAbstractBinding *abstractBinding = potentialWhenBinding.asAbstractBinding();
+                if (abstractBinding && abstractBinding->kind() == QQmlAbstractBinding::QmlBinding) {
+                    QQmlBinding *binding = static_cast<QQmlBinding *>(abstractBinding);
+                    if (binding->hasValidContext()) {
+                        QVariant evalResult = binding->evaluate();
+                        if (evalResult.metaType() == QMetaType::fromType<QJSValue>())
+                            whenValue = evalResult.value<QJSValue>().toBool();
+                        else
+                            whenValue = evalResult.toBool();
+                    }
+                }
+
+                if (whenValue) {
+                    qCDebug(lcStates) << "Setting auto state due to expression";
                     if (currentState != state->name()) {
                         q->setState(state->name());
                         return true;
@@ -420,26 +404,26 @@ QQuickTransition *QQuickStateGroupPrivate::findTransition(const QString &from, c
             const QString fromStateStr = t->fromState();
             const QString toStateStr = t->toState();
 
-            QVector<QStringRef> fromState = fromStateStr.splitRef(QLatin1Char(','));
+            auto fromState = QStringView{fromStateStr}.split(QLatin1Char(','));
             for (int jj = 0; jj < fromState.count(); ++jj)
                 fromState[jj] = fromState.at(jj).trimmed();
-            QVector<QStringRef> toState = toStateStr.splitRef(QLatin1Char(','));
+            auto toState = QStringView{toStateStr}.split(QLatin1Char(','));
             for (int jj = 0; jj < toState.count(); ++jj)
                 toState[jj] = toState.at(jj).trimmed();
             if (ii == 1)
                 qSwap(fromState, toState);
             int tScore = 0;
             const QString asterisk = QStringLiteral("*");
-            if (fromState.contains(QStringRef(&from)))
+            if (fromState.contains(QStringView(from)))
                 tScore += 2;
-            else if (fromState.contains(QStringRef(&asterisk)))
+            else if (fromState.contains(QStringView(asterisk)))
                 tScore += 1;
             else
                 continue;
 
-            if (toState.contains(QStringRef(&to)))
+            if (toState.contains(QStringView(to)))
                 tScore += 2;
-            else if (toState.contains(QStringRef(&asterisk)))
+            else if (toState.contains(QStringView(asterisk)))
                 tScore += 1;
             else
                 continue;
@@ -483,11 +467,11 @@ void QQuickStateGroupPrivate::setCurrentStateInternal(const QString &state,
     applyingState = true;
 
     QQuickTransition *transition = ignoreTrans ? nullptr : findTransition(currentState, state);
-    if (stateChangeDebug()) {
-        qWarning() << this << "Changing state.  From" << currentState << ". To" << state;
+    if (lcStates().isDebugEnabled()) {
+        qCDebug(lcStates) << this << "changing state from:" << currentState << "to:" << state;
         if (transition)
-            qWarning() << "   using transition" << transition->fromState()
-                       << transition->toState();
+            qCDebug(lcStates) << "   using transition" << transition->fromState()
+                              << transition->toState();
     }
 
     QQuickState *oldState = nullptr;

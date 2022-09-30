@@ -7,18 +7,17 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
-#include "base/test/bind_test_util.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/test/bind.h"
 #include "base/threading/sequence_bound.h"
 #include "components/performance_manager/performance_manager_impl.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace performance_manager {
 
@@ -29,14 +28,13 @@ TEST(SiteDataCacheFactoryTest, EndToEnd) {
       PerformanceManager::GetTaskRunner());
 
   content::TestBrowserContext browser_context;
-  cache_factory.Post(FROM_HERE, &SiteDataCacheFactory::OnBrowserContextCreated,
-                     browser_context.UniqueId(), browser_context.GetPath(),
-                     base::nullopt);
+  cache_factory.AsyncCall(&SiteDataCacheFactory::OnBrowserContextCreated)
+      .WithArgs(browser_context.UniqueId(), browser_context.GetPath(),
+                absl::nullopt);
 
   {
     base::RunLoop run_loop;
     cache_factory.PostTaskWithThisObject(
-        FROM_HERE,
         base::BindOnce(
             [](const std::string& browser_context_id,
                base::OnceClosure quit_closure, SiteDataCacheFactory* factory) {
@@ -51,13 +49,11 @@ TEST(SiteDataCacheFactoryTest, EndToEnd) {
     run_loop.Run();
   }
 
-  cache_factory.Post(FROM_HERE,
-                     &SiteDataCacheFactory::OnBrowserContextDestroyed,
-                     browser_context.UniqueId());
+  cache_factory.AsyncCall(&SiteDataCacheFactory::OnBrowserContextDestroyed)
+      .WithArgs(browser_context.UniqueId());
   {
     base::RunLoop run_loop;
     cache_factory.PostTaskWithThisObject(
-        FROM_HERE,
         base::BindOnce(
             [](const std::string& browser_context_id,
                base::OnceClosure quit_closure, SiteDataCacheFactory* factory) {

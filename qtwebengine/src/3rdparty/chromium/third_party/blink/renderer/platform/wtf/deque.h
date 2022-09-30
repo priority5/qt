@@ -35,7 +35,6 @@
 
 #include <iterator>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/construct_traits.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -182,10 +181,10 @@ class Deque
    public:
     BackingBuffer() : Base() {}
     explicit BackingBuffer(wtf_size_t capacity) : Base(capacity) {}
+    BackingBuffer(const BackingBuffer&) = delete;
+    BackingBuffer& operator=(const BackingBuffer&) = delete;
 
     void SetSize(wtf_size_t size) { size_ = size; }
-
-    DISALLOW_COPY_AND_ASSIGN(BackingBuffer);
   };
 
   typedef VectorTypeOperations<T, Allocator> TypeOperations;
@@ -264,12 +263,23 @@ class DequeIterator : public DequeIteratorBase<T, inlineCapacity, Allocator> {
     Base::Increment();
     return *this;
   }
-  // postfix ++ intentionally omitted
+
+  Iterator operator++(int) {
+    Iterator tmp = *this;
+    ++*this;
+    return tmp;
+  }
+
   Iterator& operator--() {
     Base::Decrement();
     return *this;
   }
-  // postfix -- intentionally omitted
+
+  Iterator operator--(int) {
+    Iterator tmp = *this;
+    --*this;
+    return tmp;
+  }
 };
 
 template <typename T,
@@ -314,12 +324,23 @@ class DequeConstIterator
     Base::Increment();
     return *this;
   }
-  // postfix ++ intentionally omitted
+
+  Iterator operator++(int) {
+    Iterator tmp = *this;
+    ++*this;
+    return tmp;
+  }
+
   Iterator& operator--() {
     Base::Decrement();
     return *this;
   }
-  // postfix -- intentionally omitted
+
+  Iterator operator--(int) {
+    Iterator tmp = *this;
+    --*this;
+    return tmp;
+  }
 };
 
 template <typename T, wtf_size_t inlineCapacity, typename Allocator>

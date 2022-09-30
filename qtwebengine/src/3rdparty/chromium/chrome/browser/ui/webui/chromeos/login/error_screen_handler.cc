@@ -5,21 +5,20 @@
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 
 #include "base/time/time.h"
-#include "chrome/browser/chromeos/login/screens/error_screen.h"
-#include "chrome/browser/ui/webui/chromeos/network_element_localized_strings_provider.h"
+#include "chrome/browser/ash/login/screens/error_screen.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/login/localized_values_builder.h"
 #include "ui/chromeos/devicetype_utils.h"
+#include "ui/chromeos/strings/network_element_localized_strings_provider.h"
 #include "ui/strings/grit/ui_strings.h"
 
 namespace chromeos {
 
 constexpr StaticOobeScreenId ErrorScreenView::kScreenId;
 
-ErrorScreenHandler::ErrorScreenHandler(JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(kScreenId, js_calls_container) {
-  set_user_acted_method_path("login.ErrorMessageScreen.userActed");
+ErrorScreenHandler::ErrorScreenHandler() : BaseScreenHandler(kScreenId) {
+  set_user_acted_method_path_deprecated("login.ErrorMessageScreen.userActed");
 }
 
 ErrorScreenHandler::~ErrorScreenHandler() {
@@ -28,11 +27,11 @@ ErrorScreenHandler::~ErrorScreenHandler() {
 }
 
 void ErrorScreenHandler::Show() {
-  if (!page_is_ready()) {
+  if (!IsJavascriptAllowed()) {
     show_on_init_ = true;
     return;
   }
-  BaseScreenHandler::ShowScreen(kScreenId);
+  ShowInWebUI();
   if (screen_)
     screen_->DoShow();
   showing_ = true;
@@ -40,22 +39,24 @@ void ErrorScreenHandler::Show() {
 
 void ErrorScreenHandler::Hide() {
   showing_ = false;
+  show_on_init_ = false;
   if (screen_)
     screen_->DoHide();
 }
 
 void ErrorScreenHandler::Bind(ErrorScreen* screen) {
   screen_ = screen;
-  BaseScreenHandler::SetBaseScreen(screen_);
+  BaseScreenHandler::SetBaseScreenDeprecated(screen_);
 }
 
 void ErrorScreenHandler::Unbind() {
   screen_ = nullptr;
-  BaseScreenHandler::SetBaseScreen(nullptr);
+  BaseScreenHandler::SetBaseScreenDeprecated(nullptr);
 }
 
 void ErrorScreenHandler::ShowOobeScreen(OobeScreenId screen) {
-  ShowScreen(screen);
+  // TODO(https://crbug.com/1310191): Migrate off ShowScreenDeprecated.
+  ShowScreenDeprecated(screen);
 }
 
 void ErrorScreenHandler::SetErrorStateCode(
@@ -88,10 +89,8 @@ void ErrorScreenHandler::SetUIState(NetworkError::UIState ui_state) {
   CallJS("login.ErrorMessageScreen.setUIState", static_cast<int>(ui_state));
 }
 
-void ErrorScreenHandler::RegisterMessages() {
-  AddCallback("hideCaptivePortal",
-              &ErrorScreenHandler::HandleHideCaptivePortal);
-  BaseScreenHandler::RegisterMessages();
+void ErrorScreenHandler::OnReloadGaiaClicked() {
+  CallJS("login.GaiaSigninScreen.doReload");
 }
 
 void ErrorScreenHandler::DeclareLocalizedValues(
@@ -134,11 +133,13 @@ void ErrorScreenHandler::DeclareLocalizedValues(
   builder->Add("proxySettingsMenuName",
                IDS_NETWORK_PROXY_SETTINGS_LIST_ITEM_NAME);
   builder->Add("addWiFiNetworkMenuName", IDS_NETWORK_ADD_WI_FI_LIST_ITEM_NAME);
-  network_element::AddLocalizedValuesToBuilder(builder);
+  ui::network_element::AddLocalizedValuesToBuilder(builder);
+
+  builder->Add("offlineLogin", IDS_OFFLINE_LOGIN_HTML);
 }
 
-void ErrorScreenHandler::Initialize() {
-  if (!page_is_ready())
+void ErrorScreenHandler::InitializeDeprecated() {
+  if (!IsJavascriptAllowed())
     return;
 
   if (show_on_init_) {
@@ -146,11 +147,6 @@ void ErrorScreenHandler::Initialize() {
     Show();
     show_on_init_ = false;
   }
-}
-
-void ErrorScreenHandler::HandleHideCaptivePortal() {
-  if (screen_)
-    screen_->HideCaptivePortal();
 }
 
 }  // namespace chromeos

@@ -23,19 +23,6 @@
 
 namespace blocked_content {
 
-// static
-void PopupOpenerTabHelper::CreateForWebContents(
-    content::WebContents* contents,
-    const base::TickClock* tick_clock,
-    HostContentSettingsMap* settings_map) {
-  DCHECK(contents);
-  if (!FromWebContents(contents)) {
-    contents->SetUserData(UserDataKey(),
-                          base::WrapUnique(new PopupOpenerTabHelper(
-                              contents, tick_clock, settings_map)));
-  }
-}
-
 PopupOpenerTabHelper::~PopupOpenerTabHelper() {
   DCHECK(visibility_tracker_);
   base::TimeDelta total_visible_time =
@@ -74,6 +61,7 @@ PopupOpenerTabHelper::PopupOpenerTabHelper(content::WebContents* web_contents,
                                            const base::TickClock* tick_clock,
                                            HostContentSettingsMap* settings_map)
     : content::WebContentsObserver(web_contents),
+      content::WebContentsUserData<PopupOpenerTabHelper>(*web_contents),
       tick_clock_(tick_clock),
       settings_map_(settings_map) {
   visibility_tracker_ = std::make_unique<ui::ScopedVisibilityTracker>(
@@ -98,8 +86,14 @@ void PopupOpenerTabHelper::DidGetUserInteraction(
 void PopupOpenerTabHelper::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   // Treat browser-initiated navigations as user interactions.
-  if (!navigation_handle->IsRendererInitiated())
+  // Note that |HasUserGesture| does not capture browser-initiated navigations.
+  // The negation of |IsRendererInitiated| tells us whether the navigation is
+  // browser-generated.
+  if (navigation_handle->IsInPrimaryMainFrame() &&
+      (navigation_handle->HasUserGesture() ||
+       !navigation_handle->IsRendererInitiated())) {
     has_opened_popup_since_last_user_gesture_ = false;
+  }
 }
 
 void PopupOpenerTabHelper::MaybeLogPagePopupContentSettings() {
@@ -114,9 +108,9 @@ void PopupOpenerTabHelper::MaybeLogPagePopupContentSettings() {
   // Do not record duplicate Popup.Page events for popups opened in succession
   // from the same opener.
   if (source_id != last_opener_source_id_) {
-    bool user_allows_popups = settings_map_->GetContentSetting(
-                                  url, url, ContentSettingsType::POPUPS,
-                                  std::string()) == CONTENT_SETTING_ALLOW;
+    bool user_allows_popups =
+        settings_map_->GetContentSetting(
+            url, url, ContentSettingsType::POPUPS) == CONTENT_SETTING_ALLOW;
     ukm::builders::Popup_Page(source_id)
         .SetAllowed(user_allows_popups)
         .Record(ukm::UkmRecorder::Get());
@@ -124,6 +118,6 @@ void PopupOpenerTabHelper::MaybeLogPagePopupContentSettings() {
   }
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(PopupOpenerTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(PopupOpenerTabHelper);
 
 }  // namespace blocked_content

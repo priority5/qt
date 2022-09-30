@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickpointhandler_p.h"
 #include <private/qquickwindow_p.h>
@@ -120,11 +84,11 @@ QQuickPointHandler::QQuickPointHandler(QQuickItem *parent)
     setIgnoreAdditionalPoints();
 }
 
-bool QQuickPointHandler::wantsEventPoint(QQuickEventPoint *pt)
+bool QQuickPointHandler::wantsEventPoint(const QPointerEvent *event, const QEventPoint &point)
 {
     // On press, we want it unless a sibling of the same type also does.
-    if (pt->state() == QQuickEventPoint::Pressed && QQuickSinglePointHandler::wantsEventPoint(pt)) {
-        for (const QQuickPointerHandler *grabber : pt->passiveGrabbers()) {
+    if (point.state() == QEventPoint::Pressed && QQuickSinglePointHandler::wantsEventPoint(event, point)) {
+        for (const QObject *grabber : event->passiveGrabbers(point)) {
             if (grabber && grabber->parent() == parent() &&
                     grabber->metaObject()->className() == metaObject()->className())
                 return false;
@@ -132,29 +96,31 @@ bool QQuickPointHandler::wantsEventPoint(QQuickEventPoint *pt)
         return true;
     }
     // If we've already been interested in a point, stay interested, even if it has strayed outside bounds.
-    return (pt->state() != QQuickEventPoint::Pressed && point().id() == pt->pointId());
+    return (point.state() != QEventPoint::Pressed &&
+            QQuickSinglePointHandler::point().id() == point.id());
 }
 
-void QQuickPointHandler::handleEventPoint(QQuickEventPoint *point)
+void QQuickPointHandler::handleEventPoint(QPointerEvent *event, QEventPoint &point)
 {
-    switch (point->state()) {
-    case QQuickEventPoint::Pressed:
-        if (point->pointerEvent()->asPointerTouchEvent() ||
-                (point->pointerEvent()->buttons() & acceptedButtons()) != Qt::NoButton) {
-            setPassiveGrab(point);
+    switch (point.state()) {
+    case QEventPoint::Pressed:
+        if (QQuickDeliveryAgentPrivate::isTouchEvent(event) ||
+                (static_cast<const QSinglePointEvent *>(event)->buttons() & acceptedButtons()) != Qt::NoButton) {
+            setPassiveGrab(event, point);
             setActive(true);
         }
         break;
-    case QQuickEventPoint::Released:
-        if (point->pointerEvent()->asPointerTouchEvent() ||
-                (point->pointerEvent()->buttons() & acceptedButtons()) == Qt::NoButton)
+    case QEventPoint::Released:
+        if (QQuickDeliveryAgentPrivate::isTouchEvent(event) ||
+                (static_cast<const QSinglePointEvent *>(event)->buttons() & acceptedButtons()) == Qt::NoButton)
             setActive(false);
         break;
     default:
         break;
     }
-    point->setAccepted(false); // Just lurking... don't interfere with propagation
+    point.setAccepted(false); // Just lurking... don't interfere with propagation
     emit translationChanged();
+    QQuickSinglePointHandler::handleEventPoint(event, point);
 }
 
 QVector2D QQuickPointHandler::translation() const
@@ -163,3 +129,5 @@ QVector2D QQuickPointHandler::translation() const
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qquickpointhandler_p.cpp"

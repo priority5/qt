@@ -19,6 +19,7 @@ class DiskDataMetadata {
   DiskDataMetadata(int64_t start_offset, size_t size)
       : start_offset_(start_offset), size_(size) {}
   DiskDataMetadata(const DiskDataMetadata& other) = default;
+  DiskDataMetadata(DiskDataMetadata&& other) = default;
   DiskDataMetadata& operator=(const DiskDataMetadata& other) = default;
 
   int64_t start_offset_;

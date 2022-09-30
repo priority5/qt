@@ -31,13 +31,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_CHARACTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_CHARACTER_H_
 
+#include <unicode/uchar.h>
+
 #include "base/containers/span.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/text/character_property.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/text_run.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -113,6 +114,9 @@ class PLATFORM_EXPORT Character {
   static bool IsCollapsibleSpace(UChar c) {
     return c == kSpaceCharacter || c == kNewlineCharacter ||
            c == kTabulationCharacter || c == kCarriageReturnCharacter;
+  }
+  static bool IsOtherSpaceSeparator(UChar c) {
+    return c == kIdeographicSpaceCharacter;
   }
   static bool TreatAsSpace(UChar32 c) {
     return c == kSpaceCharacter || c == kTabulationCharacter ||
@@ -219,4 +223,4 @@ class PLATFORM_EXPORT Character {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_CHARACTER_H_

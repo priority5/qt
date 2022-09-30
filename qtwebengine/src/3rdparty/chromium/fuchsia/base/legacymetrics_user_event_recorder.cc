@@ -8,8 +8,11 @@
 
 #include "base/callback.h"
 #include "base/metrics/user_metrics.h"
+#include "base/time/time.h"
 
 namespace cr_fuchsia {
+
+constexpr size_t LegacyMetricsUserActionRecorder::kMaxEventCount;
 
 LegacyMetricsUserActionRecorder::LegacyMetricsUserActionRecorder()
     : on_event_callback_(
@@ -33,6 +36,9 @@ LegacyMetricsUserActionRecorder::TakeEvents() {
 
 void LegacyMetricsUserActionRecorder::OnUserAction(const std::string& action,
                                                    base::TimeTicks time) {
+  if (events_.size() >= kMaxEventCount)
+    return;
+
   fuchsia::legacymetrics::UserActionEvent fidl_event;
   fidl_event.set_name(action);
   fidl_event.set_time(time.ToZxTime());

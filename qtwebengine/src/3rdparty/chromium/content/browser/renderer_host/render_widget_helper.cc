@@ -5,14 +5,11 @@
 #include "content/browser/renderer_host/render_widget_helper.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/lazy_instance.h"
-#include "base/posix/eintr_wrapper.h"
-#include "base/threading/thread.h"
-#include "base/threading/thread_restrictions.h"
-#include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace content {
 namespace {
@@ -30,6 +27,19 @@ void AddWidgetHelper(int render_process_id,
 }
 
 }  // namespace
+
+RenderWidgetHelper::FrameTokens::FrameTokens(
+    const blink::LocalFrameToken& frame_token,
+    const base::UnguessableToken& devtools_frame_token)
+    : frame_token(frame_token), devtools_frame_token(devtools_frame_token) {}
+
+RenderWidgetHelper::FrameTokens::FrameTokens(const FrameTokens& other) =
+    default;
+
+RenderWidgetHelper::FrameTokens& RenderWidgetHelper::FrameTokens::operator=(
+    const FrameTokens& other) = default;
+
+RenderWidgetHelper::FrameTokens::~FrameTokens() = default;
 
 RenderWidgetHelper::RenderWidgetHelper() : render_process_id_(-1) {}
 
@@ -52,7 +62,35 @@ void RenderWidgetHelper::Init(int render_process_id) {
 }
 
 int RenderWidgetHelper::GetNextRoutingID() {
-  return next_routing_id_.GetNext() + 1;
+  int next_routing_id = next_routing_id_.GetNext();
+  CHECK_LT(next_routing_id, std::numeric_limits<int>::max());
+  return next_routing_id + 1;
+}
+
+bool RenderWidgetHelper::TakeFrameTokensForFrameRoutingID(
+    int32_t routing_id,
+    blink::LocalFrameToken& frame_token,
+    base::UnguessableToken& devtools_frame_token) {
+  base::AutoLock lock(frame_token_map_lock_);
+  auto iter = frame_token_routing_id_map_.find(routing_id);
+  if (iter == frame_token_routing_id_map_.end())
+    return false;
+  frame_token = iter->second.frame_token;
+  devtools_frame_token = iter->second.devtools_frame_token;
+  frame_token_routing_id_map_.erase(iter);
+  return true;
+}
+
+void RenderWidgetHelper::StoreNextFrameRoutingID(
+    int32_t routing_id,
+    const blink::LocalFrameToken& frame_token,
+    const base::UnguessableToken& devtools_frame_token) {
+  base::AutoLock lock(frame_token_map_lock_);
+  bool result =
+      frame_token_routing_id_map_
+          .emplace(routing_id, FrameTokens(frame_token, devtools_frame_token))
+          .second;
+  DCHECK(result);
 }
 
 // static

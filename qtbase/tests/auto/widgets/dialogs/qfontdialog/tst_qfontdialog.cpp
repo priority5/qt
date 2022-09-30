@@ -1,33 +1,8 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
 
 
 #include <qapplication.h>
@@ -182,7 +157,6 @@ void tst_QFontDialog::task256466_wrongStyle()
     if (QGuiApplication::platformName().startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
         QSKIP("Wayland: This freezes. Figure out why.");
 
-    QFontDatabase fdb;
     FriendlyFontDialog dialog;
     dialog.setOption(QFontDialog::DontUseNativeDialog);
     QListView *familyList = reinterpret_cast<QListView*>(dialog.d_func()->familyList);
@@ -193,11 +167,11 @@ void tst_QFontDialog::task256466_wrongStyle()
         familyList->setCurrentIndex(currentFamily);
         int expectedSize = sizeList->currentIndex().data().toInt();
         const QFont current = dialog.currentFont(),
-                    expected = fdb.font(currentFamily.data().toString(),
+                    expected = QFontDatabase::font(currentFamily.data().toString(),
             styleList->currentIndex().data().toString(), expectedSize);
         QCOMPARE(current.family(), expected.family());
         QCOMPARE(current.style(), expected.style());
-        if (expectedSize == 0 && !QFontDatabase().isScalable(current.family(), current.styleName()))
+        if (expectedSize == 0 && !QFontDatabase::isScalable(current.family(), current.styleName()))
             QEXPECT_FAIL("", "QTBUG-53299: Smooth sizes for unscalable font contains unsupported size", Continue);
         QCOMPARE(current.pointSizeF(), expected.pointSizeF());
     }
@@ -261,7 +235,7 @@ void tst_QFontDialog::testNonStandardFontSize()
     if (accepted)
         QCOMPARE(testFont.pointSize(), resultFont.pointSize());
     else
-        QWARN("Fail using a non-standard font size.");
+        qWarning("Fail using a non-standard font size.");
 }
 
 QTEST_MAIN(tst_QFontDialog)

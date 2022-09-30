@@ -1,33 +1,11 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QStandardPaths>
+#include <QSignalSpy>
+#include <QTemporaryFile>
 
 #include <qcoreapplication.h>
 #include <qfile.h>
@@ -35,7 +13,6 @@
 #include <qsharedpointer.h>
 #include <qfiledialog.h>
 #include <qabstractitemdelegate.h>
-#include <qdirmodel.h>
 #include <qitemdelegate.h>
 #include <qlistview.h>
 #include <qcombobox.h>
@@ -72,7 +49,7 @@ QT_END_NAMESPACE
 
 static inline bool isCaseSensitiveFileSystem(const QString &path)
 {
-    Q_UNUSED(path)
+    Q_UNUSED(path);
 #if defined(Q_OS_MAC)
     return pathconf(QFile::encodeName(path).constData(), _PC_CASE_SENSITIVE);
 #elif defined(Q_OS_WIN)
@@ -137,6 +114,7 @@ private slots:
     void clearLineEdit();
     void enableChooseButton();
     void selectedFilesWithoutWidgets();
+    void selectedFileWithDefaultSuffix();
     void trailingDotsAndSpaces();
 #ifdef Q_OS_UNIX
 #ifdef QT_BUILD_INTERNAL
@@ -202,8 +180,8 @@ class MyAbstractItemDelegate : public QAbstractItemDelegate
 {
 public:
     MyAbstractItemDelegate() : QAbstractItemDelegate() {};
-    void paint(QPainter *, const QStyleOptionViewItem &, const QModelIndex &) const {}
-    QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &) const { return QSize(); }
+    void paint(QPainter *, const QStyleOptionViewItem &, const QModelIndex &) const override {}
+    QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &) const override { return QSize(); }
 };
 
 // emitted any time the selection model emits current changed
@@ -293,7 +271,6 @@ void tst_QFiledialog::filesSelectedSignal_data()
     QTest::newRow("any") << QFileDialog::AnyFile;
     QTest::newRow("existing") << QFileDialog::ExistingFile;
     QTest::newRow("directory") << QFileDialog::Directory;
-    QTest::newRow("directoryOnly") << QFileDialog::DirectoryOnly;
     QTest::newRow("existingFiles") << QFileDialog::ExistingFiles;
 }
 
@@ -302,7 +279,7 @@ void tst_QFiledialog::filesSelectedSignal()
 {
     QFileDialog fd;
     fd.setViewMode(QFileDialog::List);
-    QDir testDir(SRCDIR);
+    QDir testDir(QT_TESTCASE_SOURCEDIR);
     fd.setDirectory(testDir);
     QFETCH(QFileDialog::FileMode, fileMode);
     fd.setFileMode(fileMode);
@@ -318,7 +295,7 @@ void tst_QFiledialog::filesSelectedSignal()
     QModelIndex file;
     for (int i = 0; i < listView->model()->rowCount(root); ++i) {
         file = listView->model()->index(i, 0, root);
-        if (fileMode == QFileDialog::Directory || fileMode == QFileDialog::DirectoryOnly) {
+        if (fileMode == QFileDialog::Directory) {
             if (listView->model()->hasChildren(file))
                 break;
         } else {
@@ -367,7 +344,7 @@ void tst_QFiledialog::filterSelectedSignal()
 
 void tst_QFiledialog::args()
 {
-    QWidget *parent = 0;
+    QWidget *parent = nullptr;
     QString caption = "caption";
     QString directory = QDir::tempPath();
     QString filter = "*.mp3";
@@ -441,7 +418,18 @@ void tst_QFiledialog::completer_data()
     QTest::newRow("goto root")     << QString()        << rootPath << -1;
     QTest::newRow("start at root") << rootPath << QString()        << -1;
 
-    QFileInfoList list = QDir::root().entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    QDir dir = QDir::root();
+#ifdef Q_OS_ANDROID
+    // Android 11 and above doesn't allow accessing root filesystem as before,
+    // so let's opt int for the app's home.
+    if (QNativeInterface::QAndroidApplication::sdkVersion() >= 30) {
+        const auto homePaths = QStandardPaths::standardLocations(QStandardPaths::HomeLocation);
+        QVERIFY(!homePaths.isEmpty());
+        dir = QDir(homePaths.first());
+    }
+#endif
+
+    QFileInfoList list = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
     QVERIFY(!list.isEmpty());
     const QString folder = list.first().absoluteFilePath();
     QTest::newRow("start at one below root r") << folder << "r" << -1;
@@ -528,7 +516,7 @@ void tst_QFiledialog::completer()
     }
 
     // press 'keys' for the input
-    for (int i = 0; i < input.count(); ++i)
+    for (int i = 0; i < input.size(); ++i)
         QTest::keyPress(lineEdit, input[i].toLatin1());
 
     QStringList expectedFiles;
@@ -650,8 +638,6 @@ void tst_QFiledialog::fileMode()
     QCOMPARE(fd.fileMode(), QFileDialog::ExistingFile);
     fd.setFileMode(QFileDialog::Directory);
     QCOMPARE(fd.fileMode(), QFileDialog::Directory);
-    fd.setFileMode(QFileDialog::DirectoryOnly);
-    QCOMPARE(fd.fileMode(), QFileDialog::DirectoryOnly);
     fd.setFileMode(QFileDialog::ExistingFiles);
     QCOMPARE(fd.fileMode(), QFileDialog::ExistingFiles);
 }
@@ -801,9 +787,6 @@ void tst_QFiledialog::isReadOnly()
     QAction* renameAction = fd.findChild<QAction*>("qt_rename_action");
     QAction* deleteAction = fd.findChild<QAction*>("qt_delete_action");
 
-#if QT_DEPRECATED_SINCE(5, 13)
-    QCOMPARE(fd.isReadOnly(), false);
-#endif
     QCOMPARE(fd.testOption(QFileDialog::ReadOnly), false);
 
     // This is dependent upon the file/dir, find cross platform way to test
@@ -1455,6 +1438,10 @@ void tst_QFiledialog::widgetlessNativeDialog()
 {
     if (!QGuiApplicationPrivate::platformTheme()->usePlatformNativeDialog(QPlatformTheme::FileDialog))
         QSKIP("This platform always uses widgets to realize its QFileDialog, instead of the native file dialog.");
+#ifdef Q_OS_ANDROID
+    // QTBUG-101194
+    QSKIP("Android: This keeeps the window open. Figure out why.");
+#endif
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, false);
     QFileDialog fd;
     fd.setWindowModality(Qt::ApplicationModal);
@@ -1473,6 +1460,21 @@ void tst_QFiledialog::selectedFilesWithoutWidgets()
     QFileDialog fd;
     fd.setAcceptMode(QFileDialog::AcceptOpen);
     QVERIFY(fd.selectedFiles().size() >= 0);
+}
+
+void tst_QFiledialog::selectedFileWithDefaultSuffix()
+{
+    // QTBUG-59401: dot in file path should not prevent default suffix from being added
+    QTemporaryDir tempDir(QDir::tempPath() + "/abcXXXXXX.def");
+    QVERIFY2(tempDir.isValid(), qPrintable(tempDir.errorString()));
+
+    QFileDialog fd;
+    fd.setDirectory(tempDir.path());
+    fd.setDefaultSuffix(".txt");
+    fd.selectFile("xxx");
+    const auto selectedFiles = fd.selectedFiles();
+    QCOMPARE(selectedFiles.size(), 1);
+    QVERIFY(selectedFiles.first().endsWith(".txt"));
 }
 
 void tst_QFiledialog::trailingDotsAndSpaces()
@@ -1556,6 +1558,10 @@ void tst_QFiledialog::rejectModalDialogs()
 {
     if (QGuiApplication::platformName().startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
         QSKIP("Wayland: This freezes. Figure out why.");
+#ifdef Q_OS_ANDROID
+    // QTBUG-101194
+    QSKIP("Android: This freezes. Figure out why.");
+#endif
 
     // QTBUG-38672 , static functions should return empty Urls
     DialogRejecter dr;
@@ -1587,6 +1593,12 @@ void tst_QFiledialog::QTBUG49600_nativeIconProviderCrash()
 {
     if (!QGuiApplicationPrivate::platformTheme()->usePlatformNativeDialog(QPlatformTheme::FileDialog))
         QSKIP("This platform always uses widgets to realize its QFileDialog, instead of the native file dialog.");
+
+#ifdef Q_OS_ANDROID
+    // QTBUG-101194
+    QSKIP("Android: This hangs. Figure out why.");
+#endif
+
     QFileDialog fd;
     fd.iconProvider();
 }
@@ -1618,6 +1630,10 @@ void tst_QFiledialog::focusObjectDuringDestruction()
 {
     if (QGuiApplication::platformName().startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
         QSKIP("Wayland: This freezes. Figure out why.");
+#ifdef Q_OS_ANDROID
+    // QTBUG-101194
+    QSKIP("Android: This freezes. Figure out why.");
+#endif
 
     QTRY_VERIFY(QGuiApplication::topLevelWindows().isEmpty());
 

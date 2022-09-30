@@ -1,41 +1,17 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Copyright (C) 2013 Olivier Goffart <ogoffart@woboq.com>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// Copyright (C) 2013 Olivier Goffart <ogoffart@woboq.com>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #ifndef SYMBOLS_H
 #define SYMBOLS_H
 
 #include "token.h"
-#include <qstring.h>
-#include <qhash.h>
-#include <qvector.h>
-#include <qstack.h>
 #include <qdebug.h>
+#include <qhash.h>
+#include <qlist.h>
+#include <qstack.h>
+#include <qstring.h>
+#include <qset.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -59,9 +35,9 @@ struct SubArray
     }
 };
 
-inline uint qHash(const SubArray &key)
+inline size_t qHash(const SubArray &key)
 {
-    return qHash(QLatin1String(key.array.constData() + key.from, key.len));
+    return qHash(QLatin1StringView(key.array.constData() + key.from, key.len));
 }
 
 
@@ -118,9 +94,9 @@ struct Symbol
 
 #endif
 };
-Q_DECLARE_TYPEINFO(Symbol, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(Symbol, Q_RELOCATABLE_TYPE);
 
-typedef QVector<Symbol> Symbols;
+typedef QList<Symbol> Symbols;
 
 struct SafeSymbols {
     Symbols symbols;
@@ -128,7 +104,7 @@ struct SafeSymbols {
     QSet<QByteArray> excludedSymbols;
     int index;
 };
-Q_DECLARE_TYPEINFO(SafeSymbols, Q_MOVABLE_TYPE);
+Q_DECLARE_TYPEINFO(SafeSymbols, Q_RELOCATABLE_TYPE);
 
 class SymbolStack : public QStack<SafeSymbols>
 {

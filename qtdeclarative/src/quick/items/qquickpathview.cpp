@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtQuick module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qquickpathview_p.h"
 #include "qquickpathview_p_p.h"
@@ -49,7 +13,8 @@
 #include <private/qqmlchangeset_p.h>
 
 #include <QtQml/qqmlinfo.h>
-#include <QtGui/qevent.h>
+
+#include <QtGui/private/qeventpoint_p.h>
 #include <QtGui/qevent.h>
 #include <QtGui/qguiapplication.h>
 #include <QtGui/qstylehints.h>
@@ -145,7 +110,8 @@ QQuickItem *QQuickPathViewPrivate::getItem(int modelIndex, qreal z, bool async)
         item->setParentItem(q);
         requestedIndex = -1;
         QQuickItemPrivate *itemPrivate = QQuickItemPrivate::get(item);
-        itemPrivate->addItemChangeListener(this, QQuickItemPrivate::Geometry);
+        itemPrivate->addItemChangeListener(
+                    this, QQuickItemPrivate::Geometry | QQuickItemPrivate::Destroyed);
     }
     inRequest = false;
     return item;
@@ -198,11 +164,14 @@ void QQuickPathView::initItem(int index, QObject *object)
 
 void QQuickPathViewPrivate::releaseItem(QQuickItem *item)
 {
-    if (!item || !model)
+    if (!item)
         return;
     qCDebug(lcItemViewDelegateLifecycle) << "release" << item;
     QQuickItemPrivate *itemPrivate = QQuickItemPrivate::get(item);
-    itemPrivate->removeItemChangeListener(this, QQuickItemPrivate::Geometry);
+    itemPrivate->removeItemChangeListener(
+                this, QQuickItemPrivate::Geometry | QQuickItemPrivate::Destroyed);
+    if (!model)
+        return;
     QQmlInstanceModel::ReleaseFlags flags = model->release(item);
     if (!flags) {
         // item was not destroyed, and we no longer reference it.
@@ -221,10 +190,9 @@ QQuickPathViewAttached *QQuickPathViewPrivate::attached(QQuickItem *item)
 
 QQmlOpenMetaObjectType *QQuickPathViewPrivate::attachedType()
 {
-    Q_Q(QQuickPathView);
     if (!attType) {
         // pre-create one metatype to share with all attached objects
-        attType = new QQmlOpenMetaObjectType(&QQuickPathViewAttached::staticMetaObject, qmlEngine(q));
+        attType = new QQmlOpenMetaObjectType(&QQuickPathViewAttached::staticMetaObject);
         if (path) {
             const auto attributes = path->attributes();
             for (const QString &attr : attributes)
@@ -440,7 +408,8 @@ void QQuickPathViewPrivate::updateItem(QQuickItem *item, qreal percent)
     }
     QQuickItemPrivate::get(item)->setCulled(percent >= 1);
     QPointF pf = path->pointAtPercent(qMin(percent, qreal(1)));
-    item->setPosition(pf - QPointF(item->width()/2, item->height()/2));
+    item->setX(pf.x() - item->width()/2);
+    item->setY(pf.y() - item->height()/2);
 }
 
 void QQuickPathViewPrivate::regenerate()
@@ -1656,16 +1625,16 @@ void QQuickPathViewPrivate::handleMousePressEvent(QMouseEvent *event)
     int idx = 0;
     for (; idx < items.count(); ++idx) {
         QQuickItem *item = items.at(idx);
-        if (item->contains(item->mapFromScene(event->windowPos())))
+        if (item->contains(item->mapFromScene(event->scenePosition())))
             break;
     }
     if (idx == items.count() && qFuzzyIsNull(dragMargin))  // didn't click on an item
         return;
 
-    startPoint = pointNear(event->localPos(), &startPc);
-    startPos = event->localPos();
+    startPoint = pointNear(event->position(), &startPc);
+    startPos = event->position();
     if (idx == items.count()) {
-        qreal distance = qAbs(event->localPos().x() - startPoint.x()) + qAbs(event->localPos().y() - startPoint.y());
+        qreal distance = qAbs(event->position().x() - startPoint.x()) + qAbs(event->position().y() - startPoint.y());
         if (distance > dragMargin)
             return;
     }
@@ -1702,10 +1671,11 @@ void QQuickPathViewPrivate::handleMouseMoveEvent(QMouseEvent *event)
 
     qint64 currentTimestamp = computeCurrentTime(event);
     qreal newPc;
-    QPointF pathPoint = pointNear(event->localPos(), &newPc);
+    QPointF pathPoint = pointNear(event->position(), &newPc);
     if (!stealMouse) {
-        QPointF posDelta = event->localPos() - startPos;
-        if (QQuickWindowPrivate::dragOverThreshold(posDelta.y(), Qt::YAxis, event) || QQuickWindowPrivate::dragOverThreshold(posDelta.x(), Qt::XAxis, event)) {
+        QPointF posDelta = event->position() - startPos;
+        if (QQuickDeliveryAgentPrivate::dragOverThreshold(posDelta.y(), Qt::YAxis, event) ||
+                QQuickDeliveryAgentPrivate::dragOverThreshold(posDelta.x(), Qt::XAxis, event)) {
             // The touch has exceeded the threshold. If the movement along the path is close to the drag threshold
             // then we'll assume that this gesture targets the PathView. This ensures PathView gesture grabbing
             // is in sync with other items.
@@ -1836,71 +1806,62 @@ void QQuickPathViewPrivate::handleMouseReleaseEvent(QMouseEvent *event)
         q->movementEnding();
 }
 
-bool QQuickPathView::sendMouseEvent(QMouseEvent *event)
-{
-    Q_D(QQuickPathView);
-    QPointF localPos = mapFromScene(event->windowPos());
-
-    QQuickWindow *c = window();
-    QQuickItem *grabber = c ? c->mouseGrabberItem() : nullptr;
-    if (grabber == this && d->stealMouse) {
-        // we are already the grabber and we do want the mouse event to ourselves.
-        return true;
-    }
-
-    bool grabberDisabled = grabber && !grabber->isEnabled();
-    bool stealThisEvent = d->stealMouse;
-    if ((stealThisEvent || contains(localPos)) && (!grabber || !grabber->keepMouseGrab() || grabberDisabled)) {
-        QScopedPointer<QMouseEvent> mouseEvent(QQuickWindowPrivate::cloneMouseEvent(event, &localPos));
-        mouseEvent->setAccepted(false);
-
-        switch (mouseEvent->type()) {
-        case QEvent::MouseMove:
-            d->handleMouseMoveEvent(mouseEvent.data());
-            break;
-        case QEvent::MouseButtonPress:
-            d->handleMousePressEvent(mouseEvent.data());
-            stealThisEvent = d->stealMouse;   // Update stealThisEvent in case changed by function call above
-            break;
-        case QEvent::MouseButtonRelease:
-            d->handleMouseReleaseEvent(mouseEvent.data());
-            break;
-        default:
-            break;
-        }
-        grabber = c ? c->mouseGrabberItem() : nullptr;
-        if ((grabber && stealThisEvent && !grabber->keepMouseGrab() && grabber != this) || grabberDisabled) {
-            grabMouse();
-        }
-
-        const bool filtered = stealThisEvent || grabberDisabled;
-        if (filtered) {
-            event->setAccepted(false);
-        }
-        return filtered;
-    } else if (d->timer.isValid()) {
-        d->timer.invalidate();
-        d->fixOffset();
-    }
-    if (event->type() == QEvent::MouseButtonRelease || (grabber && grabber->keepMouseGrab() && !grabberDisabled)) {
-        d->stealMouse = false;
-    }
-    return false;
-}
-
 bool QQuickPathView::childMouseEventFilter(QQuickItem *i, QEvent *e)
 {
     Q_D(QQuickPathView);
-    if (!isVisible() || !d->interactive)
+    if (!isVisible() || !d->interactive || !e->isPointerEvent())
         return QQuickItem::childMouseEventFilter(i, e);
 
-    switch (e->type()) {
-    case QEvent::MouseButtonPress:
-    case QEvent::MouseMove:
-    case QEvent::MouseButtonRelease:
-        return sendMouseEvent(static_cast<QMouseEvent *>(e));
-    default:
-        break;
+    QPointerEvent *pe = static_cast<QPointerEvent *>(e);
+    if (QQuickDeliveryAgentPrivate::isMouseEvent(pe)) {
+        // The event is localized for the intended receiver (in the delegate, probably),
+        // but we need to look at position relative to the PathView itself.
+        const auto &point = pe->points().first();
+        QPointF localPos = mapFromScene(point.scenePosition());
+        QQuickItem *grabber = qmlobject_cast<QQuickItem *>(pe->exclusiveGrabber(point));
+        if (grabber == this && d->stealMouse) {
+            // we are already the grabber and we do want the mouse event to ourselves.
+            return true;
+        }
+
+        bool grabberDisabled = grabber && !grabber->isEnabled();
+        bool stealThisEvent = d->stealMouse;
+        if ((stealThisEvent || contains(localPos)) && (!grabber || !grabber->keepMouseGrab() || grabberDisabled)) {
+            // Make a localized copy of the QMouseEvent.
+            QMutableSinglePointEvent localizedEvent(*static_cast<QMouseEvent *>(pe));
+            QMutableEventPoint::setPosition(localizedEvent.point(0), localPos);
+            localizedEvent.setAccepted(false);
+
+            switch (localizedEvent.type()) {
+            case QEvent::MouseMove:
+                d->handleMouseMoveEvent(static_cast<QMouseEvent *>(static_cast<QSinglePointEvent *>(&localizedEvent)));
+                break;
+            case QEvent::MouseButtonPress:
+                d->handleMousePressEvent(static_cast<QMouseEvent *>(static_cast<QSinglePointEvent *>(&localizedEvent)));
+                stealThisEvent = d->stealMouse;   // Update stealThisEvent in case changed by function call above
+                break;
+            case QEvent::MouseButtonRelease:
+                d->handleMouseReleaseEvent(static_cast<QMouseEvent *>(static_cast<QSinglePointEvent *>(&localizedEvent)));
+                break;
+            default:
+                break;
+            }
+
+            grabber = qmlobject_cast<QQuickItem *>(localizedEvent.exclusiveGrabber(localizedEvent.points().first()));
+            if ((grabber && stealThisEvent && !grabber->keepMouseGrab() && grabber != this) || grabberDisabled)
+                pe->setExclusiveGrabber(point, this);
+
+            const bool filtered = stealThisEvent || grabberDisabled;
+            if (filtered)
+                pe->setAccepted(false);
+            return filtered;
+        } else if (d->timer.isValid()) {
+            d->timer.invalidate();
+            d->fixOffset();
+        }
+        if (pe->type() == QEvent::MouseButtonRelease || (grabber && grabber->keepMouseGrab() && !grabberDisabled))
+            d->stealMouse = false;
+        return false;
     }
 
     return QQuickItem::childMouseEventFilter(i, e);
@@ -1929,7 +1890,7 @@ void QQuickPathView::updatePolish()
     refill();
 }
 
-static inline int currentIndexRemainder(int currentIndex, int modelCount) Q_DECL_NOTHROW
+static inline int currentIndexRemainder(int currentIndex, int modelCount) noexcept
 {
     if (currentIndex < 0)
         return modelCount + currentIndex % modelCount;
@@ -1989,7 +1950,7 @@ void QQuickPathView::refill()
         if (lcItemViewDelegateLifecycle().isDebugEnabled()) {
             QQuickText *text = qmlobject_cast<QQuickText*>(item);
             if (text)
-                qCDebug(lcItemViewDelegateLifecycle) << "idx" << idx << "@" << pos << ": QQuickText" << text->objectName() << text->text().leftRef(40);
+                qCDebug(lcItemViewDelegateLifecycle) << "idx" << idx << "@" << pos << ": QQuickText" << text->objectName() << QStringView{text->text()}.left(40);
             else
                 qCDebug(lcItemViewDelegateLifecycle) << "idx" << idx << "@" << pos << ":" << item;
         }

@@ -5,11 +5,13 @@
 #include "components/update_client/component.h"
 
 #include <algorithm>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -17,7 +19,6 @@
 #include "base/logging.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
@@ -111,7 +112,7 @@ void InstallOnBlockingTaskRunner(
 
   // Acquire the ownership of the |unpack_path|.
   base::ScopedTempDir unpack_path_owner;
-  ignore_result(unpack_path_owner.Set(unpack_path));
+  std::ignore = unpack_path_owner.Set(unpack_path);
 
   if (static_cast<int>(fingerprint.size()) !=
       base::WriteFile(
@@ -341,41 +342,48 @@ void Component::SetParseResult(const ProtocolParser::Result& result) {
   hashdiff_sha256_ = package.hashdiff_sha256;
 
   if (!result.manifest.run.empty()) {
-    install_params_ = base::make_optional(CrxInstaller::InstallParams(
-        result.manifest.run, result.manifest.arguments));
+    install_params_ = absl::make_optional(CrxInstaller::InstallParams(
+        result.manifest.run, result.manifest.arguments,
+        [&result](const std::string& expected) -> std::string {
+          if (expected.empty() || result.data.empty()) {
+            return "";
+          }
+
+          auto it =
+              std::find_if(std::begin(result.data), std::end(result.data),
+                           [&expected](const ProtocolParser::Result::Data& d) {
+                             return d.install_data_index == expected;
+                           });
+
+          const bool matched = it != std::end(result.data);
+          DVLOG(2) << "Expected install_data_index: " << expected
+                   << ", matched: " << matched;
+
+          return matched ? it->text : "";
+        }(crx_component_ ? crx_component_->install_data_index : "")));
   }
 }
 
-void Component::Uninstall(const base::Version& version, int reason) {
+void Component::Uninstall(const CrxComponent& crx_component, int reason) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
   DCHECK_EQ(ComponentState::kNew, state());
-
-  crx_component_ = CrxComponent();
-  crx_component_->version = version;
-
-  previous_version_ = version;
+  crx_component_ = crx_component;
+  previous_version_ = crx_component_->version;
   next_version_ = base::Version("0");
   extra_code1_ = reason;
-
   state_ = std::make_unique<StateUninstalled>(this);
 }
 
-void Component::Registration(const base::Version& version) {
+void Component::Registration(const CrxComponent& crx_component) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
   DCHECK_EQ(ComponentState::kNew, state());
-
-  crx_component_ = CrxComponent();
-  crx_component_->version = version;
-
-  next_version_ = version;
-
+  crx_component_ = crx_component;
+  next_version_ = crx_component_->version;
   state_ = std::make_unique<StateRegistration>(this);
 }
 
 void Component::SetUpdateCheckResult(
-    const base::Optional<ProtocolParser::Result>& result,
+    const absl::optional<ProtocolParser::Result>& result,
     ErrorCategory error_category,
     int error) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -386,9 +394,6 @@ void Component::SetUpdateCheckResult(
 
   if (result)
     SetParseResult(result.value());
-
-  base::SequencedTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, std::move(update_check_complete_));
 }
 
 void Component::NotifyWait() {
@@ -430,13 +435,13 @@ base::TimeDelta Component::GetUpdateDuration() const {
   const base::TimeDelta update_cost(base::TimeTicks::Now() - update_begin_);
   DCHECK_GE(update_cost, base::TimeDelta());
   const base::TimeDelta max_update_delay =
-      base::TimeDelta::FromSeconds(update_context_.config->UpdateDelay());
+      base::Seconds(update_context_.config->UpdateDelay());
   return std::min(update_cost, max_update_delay);
 }
 
 base::Value Component::MakeEventUpdateComplete() const {
   base::Value event(base::Value::Type::DICTIONARY);
-  event.SetKey("eventtype", base::Value(3));
+  event.SetKey("eventtype", base::Value(update_context_.is_install ? 2 : 3));
   event.SetKey(
       "eventresult",
       base::Value(static_cast<int>(state() == ComponentState::kUpdated)));
@@ -593,6 +598,23 @@ void Component::StateNew::DoHandle() {
   auto& component = State::component();
   if (component.crx_component()) {
     TransitionState(std::make_unique<StateChecking>(&component));
+
+    // Notify that the component is being checked for updates after the
+    // transition to `StateChecking` occurs. This event indicates the start
+    // of the update check. The component receives the update check results when
+    // the update checks completes, and after that, `UpdateEngine` invokes the
+    // function `StateChecking::DoHandle` to transition the component out of
+    // the `StateChecking`. The current design allows for notifying observers
+    // on state transitions but it does not allow such notifications when a
+    // new state is entered. Hence, posting the task below is a workaround for
+    // this design oversight.
+    base::SequencedTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](Component& component) {
+              component.NotifyObservers(Events::COMPONENT_CHECKING_FOR_UPDATES);
+            },
+            std::ref(component)));
   } else {
     component.error_code_ = static_cast<int>(Error::CRX_NOT_FOUND);
     component.error_category_ = ErrorCategory::kService;
@@ -601,47 +623,37 @@ void Component::StateNew::DoHandle() {
 }
 
 Component::StateChecking::StateChecking(Component* component)
-    : State(component, ComponentState::kChecking) {}
+    : State(component, ComponentState::kChecking) {
+  component->last_check_ = base::TimeTicks::Now();
+}
 
 Component::StateChecking::~StateChecking() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
-// Unlike how other states are handled, this function does not change the
-// state right away. The state transition happens when the UpdateChecker
-// calls Component::UpdateCheckComplete and |update_check_complete_| is invoked.
-// This is an artifact of how multiple components must be checked for updates
-// together but the state machine defines the transitions for one component
-// at a time.
 void Component::StateChecking::DoHandle() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   auto& component = State::component();
   DCHECK(component.crx_component());
 
-  component.last_check_ = base::TimeTicks::Now();
-  component.update_check_complete_ = base::BindOnce(
-      &Component::StateChecking::UpdateCheckComplete, base::Unretained(this));
+  if (component.error_code_) {
+    TransitionState(std::make_unique<StateUpdateError>(&component));
+    return;
+  }
 
-  component.NotifyObservers(Events::COMPONENT_CHECKING_FOR_UPDATES);
-}
+  if (component.status_ == "ok") {
+    TransitionState(std::make_unique<StateCanUpdate>(&component));
+    return;
+  }
 
-void Component::StateChecking::UpdateCheckComplete() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  auto& component = State::component();
-  if (!component.error_code_) {
-    if (component.status_ == "ok") {
-      TransitionState(std::make_unique<StateCanUpdate>(&component));
-      return;
+  if (component.status_ == "noupdate") {
+    if (component.action_run_.empty()) {
+      TransitionState(std::make_unique<StateUpToDate>(&component));
+    } else {
+      TransitionState(std::make_unique<StateRun>(&component));
     }
-
-    if (component.status_ == "noupdate") {
-      if (component.action_run_.empty())
-        TransitionState(std::make_unique<StateUpToDate>(&component));
-      else
-        TransitionState(std::make_unique<StateRun>(&component));
-      return;
-    }
+    return;
   }
 
   TransitionState(std::make_unique<StateUpdateError>(&component));
@@ -686,9 +698,7 @@ void Component::StateCanUpdate::DoHandle() {
   component.is_update_available_ = true;
   component.NotifyObservers(Events::COMPONENT_UPDATE_FOUND);
 
-  if (component.crx_component()
-          ->supports_group_policy_enable_component_updates &&
-      !component.update_context_.enabled_component_updates) {
+  if (!component.crx_component()->updates_enabled) {
     component.error_category_ = ErrorCategory::kService;
     component.error_code_ = static_cast<int>(ServiceError::UPDATE_DISABLED);
     component.extra_code1_ = 0;

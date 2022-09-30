@@ -8,12 +8,10 @@
 #include "base/memory/scoped_refptr.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/media_gpu_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/buffer_types.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/linux/native_pixmap_dmabuf.h"
-
-namespace gfx {
-struct GpuMemoryBufferHandle;
-}  // namespace gfx
 
 namespace gpu {
 class GpuMemoryBufferFactory;
@@ -21,13 +19,17 @@ class GpuMemoryBufferFactory;
 
 namespace media {
 
+// Returns a GpuMemoryBufferId that's guaranteed to be different from those
+// returned by previous calls. This function is thread safe.
+MEDIA_GPU_EXPORT gfx::GpuMemoryBufferId GetNextGpuMemoryBufferId();
+
 // Create GpuMemoryBuffer-based media::VideoFrame with |buffer_usage|.
 // See //media/base/video_frame.h for other parameters.
 // If |gpu_memory_buffer_factory| is not null, it's used to allocate the
 // GpuMemoryBuffer and it must outlive the returned VideoFrame. If it's null,
 // the buffer is allocated using the render node (this is intended to be used
 // only for the internals of video encoding when the usage is
-// SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE). It's safe to call this function
+// VEA_READ_CAMERA_AND_CPU_READ_WRITE). It's safe to call this function
 // concurrently from multiple threads (as long as either
 // |gpu_memory_buffer_factory| is thread-safe or nullptr).
 MEDIA_GPU_EXPORT scoped_refptr<VideoFrame> CreateGpuMemoryBufferVideoFrame(
@@ -45,7 +47,7 @@ MEDIA_GPU_EXPORT scoped_refptr<VideoFrame> CreateGpuMemoryBufferVideoFrame(
 // video frame's storage and it must outlive the returned VideoFrame. If it's
 // null, the buffer is allocated using the render node (this is intended to be
 // used only for the internals of video encoding when the usage is
-// SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE). It's safe to call this function
+// VEA_READ_CAMERA_AND_CPU_READ_WRITE). It's safe to call this function
 // concurrently from multiple threads (as long as either
 // |gpu_memory_buffer_factory| is thread-safe or nullptr).
 MEDIA_GPU_EXPORT scoped_refptr<VideoFrame> CreatePlatformVideoFrame(
@@ -63,10 +65,10 @@ MEDIA_GPU_EXPORT scoped_refptr<VideoFrame> CreatePlatformVideoFrame(
 // If |gpu_memory_buffer_factory| is not null, it's used to allocate the
 // video frame's storage. If it's null, the storage is allocated using the
 // render node (this is intended to be used only for the internals of video
-// encoding when the usage is SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE). It's
+// encoding when the usage is VEA_READ_CAMERA_AND_CPU_READ_WRITE). It's
 // safe to call this function concurrently from multiple threads (as long as
 // either |gpu_memory_buffer_factory| is thread-safe or nullptr).
-MEDIA_GPU_EXPORT base::Optional<VideoFrameLayout> GetPlatformVideoFrameLayout(
+MEDIA_GPU_EXPORT absl::optional<VideoFrameLayout> GetPlatformVideoFrameLayout(
     gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory,
     VideoPixelFormat pixel_format,
     const gfx::Size& coded_size,
@@ -81,6 +83,13 @@ MEDIA_GPU_EXPORT gfx::GpuMemoryBufferHandle CreateGpuMemoryBufferHandle(
 // compositing/scanout.
 MEDIA_GPU_EXPORT scoped_refptr<gfx::NativePixmapDmaBuf>
 CreateNativePixmapDmaBuf(const VideoFrame* video_frame);
+
+// Returns true if |gmb_handle| can be imported into minigbm and false
+// otherwise.
+bool CanImportGpuMemoryBufferHandle(
+    const gfx::Size& size,
+    gfx::BufferFormat format,
+    const gfx::GpuMemoryBufferHandle& gmb_handle);
 
 }  // namespace media
 

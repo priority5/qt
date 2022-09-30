@@ -7,8 +7,12 @@
 
 #include <memory>
 
-#include "base/util/type_safety/pass_key.h"
+#include "base/types/pass_key.h"
 #include "third_party/blink/public/platform/web_time_range.h"
+#include "third_party/blink/renderer/core/html/track/audio_track.h"
+#include "third_party/blink/renderer/core/html/track/audio_track_list.h"
+#include "third_party/blink/renderer/core/html/track/video_track.h"
+#include "third_party/blink/renderer/core/html/track/video_track_list.h"
 #include "third_party/blink/renderer/modules/mediasource/media_source.h"
 #include "third_party/blink/renderer/modules/mediasource/media_source_attachment_supplement.h"
 #include "third_party/blink/renderer/modules/mediasource/url_media_source.h"
@@ -25,12 +29,29 @@ class SameThreadMediaSourceAttachment final
   // raw pointer is then adopted into a scoped_refptr in
   // MediaSourceRegistryImpl::RegisterURL.
   SameThreadMediaSourceAttachment(MediaSource* media_source,
-                                  util::PassKey<URLMediaSource>);
+                                  base::PassKey<URLMediaSource>);
+
+  SameThreadMediaSourceAttachment(const SameThreadMediaSourceAttachment&) =
+      delete;
+  SameThreadMediaSourceAttachment& operator=(
+      const SameThreadMediaSourceAttachment&) = delete;
 
   // MediaSourceAttachmentSupplement
   void NotifyDurationChanged(MediaSourceTracer* tracer, double duration) final;
-  double GetRecentMediaTime(MediaSourceTracer* tracer) final;
+  base::TimeDelta GetRecentMediaTime(MediaSourceTracer* tracer) final;
   bool GetElementError(MediaSourceTracer* tracer) final;
+  AudioTrackList* CreateAudioTrackList(MediaSourceTracer* tracer) final;
+  VideoTrackList* CreateVideoTrackList(MediaSourceTracer* tracer) final;
+  void AddAudioTrackToMediaElement(MediaSourceTracer* tracer,
+                                   AudioTrack* track) final;
+  void AddVideoTrackToMediaElement(MediaSourceTracer* tracer,
+                                   VideoTrack* track) final;
+  void RemoveAudioTracksFromMediaElement(MediaSourceTracer* tracer,
+                                         Vector<String> audio_ids,
+                                         bool enqueue_change_event) final;
+  void RemoveVideoTracksFromMediaElement(MediaSourceTracer* tracer,
+                                         Vector<String> video_ids,
+                                         bool enqueue_change_event) final;
   void OnMediaSourceContextDestroyed() final;
 
   // MediaSourceAttachment
@@ -69,8 +90,6 @@ class SameThreadMediaSourceAttachment final
   bool element_has_error_;               // See OnElementError().
   bool element_context_destroyed_;       // See OnElementContextDestroyed().
   bool media_source_context_destroyed_;  // See OnMediaSourceContextDestroyed().
-
-  DISALLOW_COPY_AND_ASSIGN(SameThreadMediaSourceAttachment);
 };
 
 }  // namespace blink

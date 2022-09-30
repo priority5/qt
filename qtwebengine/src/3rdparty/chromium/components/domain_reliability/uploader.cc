@@ -9,9 +9,11 @@
 #include "base/callback.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/supports_user_data.h"
 #include "components/domain_reliability/util.h"
 #include "net/base/elements_upload_data_stream.h"
+#include "net/base/isolation_info.h"
 #include "net/base/net_errors.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/http/http_response_headers.h"
@@ -70,6 +72,7 @@ class DomainReliabilityUploaderImpl : public DomainReliabilityUploader,
       const std::string& report_json,
       int max_upload_depth,
       const GURL& upload_url,
+      const net::NetworkIsolationKey& network_isolation_key,
       DomainReliabilityUploader::UploadCallback callback) override {
     DVLOG(1) << "Uploading report to " << upload_url;
     DVLOG(2) << "Report JSON: " << report_json;
@@ -119,6 +122,8 @@ class DomainReliabilityUploaderImpl : public DomainReliabilityUploader,
     request->set_allow_credentials(false);
     request->SetExtraRequestHeaderByName(net::HttpRequestHeaders::kContentType,
                                          kJsonMimeType, true /* overwrite */);
+    request->set_isolation_info(net::IsolationInfo::CreatePartial(
+        net::IsolationInfo::RequestType::kOther, network_isolation_key));
     std::vector<char> report_data(report_json.begin(), report_json.end());
     auto upload_reader =
         std::make_unique<net::UploadOwnedBytesElementReader>(&report_data);
@@ -128,9 +133,7 @@ class DomainReliabilityUploaderImpl : public DomainReliabilityUploader,
         UploadDepthData::kUserDataKey,
         std::make_unique<UploadDepthData>(max_upload_depth + 1));
 
-    UploadMap::iterator it;
-    bool inserted;
-    std::tie(it, inserted) = uploads_.insert(
+    auto [it, inserted] = uploads_.insert(
         std::make_pair(std::move(request), std::move(callback)));
     DCHECK(inserted);
     it->first->Start();
@@ -188,8 +191,8 @@ class DomainReliabilityUploaderImpl : public DomainReliabilityUploader,
   }
 
  private:
-  MockableTime* time_;
-  net::URLRequestContext* url_request_context_;
+  raw_ptr<MockableTime> time_;
+  raw_ptr<net::URLRequestContext> url_request_context_;
   // Stores each in-flight upload request with the callback to notify its
   // initiating DRContext of its completion.
   using UploadMap = std::map<std::unique_ptr<net::URLRequest>,

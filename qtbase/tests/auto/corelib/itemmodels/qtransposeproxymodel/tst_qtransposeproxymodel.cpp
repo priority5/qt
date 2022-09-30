@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 Luca Beldi <v.ronin@yahoo.it>
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtCore module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 Luca Beldi <v.ronin@yahoo.it>
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include <QTest>
 #include <QSignalSpy>
@@ -84,6 +48,8 @@ private Q_SLOTS:
     void setItemData();
     void moveRowsBase();
     void moveColumnsProxy();
+    void sortPersistentIndex();
+    void createPersistentOnLayoutAboutToBeChanged();
 private:
     void testTransposed(
         const QAbstractItemModel *const baseModel,
@@ -343,6 +309,84 @@ void tst_QTransposeProxyModel::removeColumnBase()
     delete model;
 }
 
+void tst_QTransposeProxyModel::sortPersistentIndex()
+{
+    QStringListModel model(QStringList{QStringLiteral("Alice"), QStringLiteral("Charlie"), QStringLiteral("Bob")});
+    QTransposeProxyModel proxy;
+    new QAbstractItemModelTester(&proxy, &proxy);
+    proxy.setSourceModel(&model);
+    QPersistentModelIndex aliceIdx = proxy.index(0, 0);
+    QPersistentModelIndex bobIdx = proxy.index(0, 2);
+    QPersistentModelIndex charlieIdx = proxy.index(0, 1);
+    connect(&proxy, &QAbstractItemModel::layoutAboutToBeChanged, this, [&aliceIdx, &bobIdx, &charlieIdx](){
+        QCOMPARE(aliceIdx.row(), 0);
+        QCOMPARE(aliceIdx.column(), 0);
+        QCOMPARE(aliceIdx.data().toString(), QStringLiteral("Alice"));
+        QCOMPARE(bobIdx.row(), 0);
+        QCOMPARE(bobIdx.column(), 2);
+        QCOMPARE(bobIdx.data().toString(), QStringLiteral("Bob"));
+        QCOMPARE(charlieIdx.row(), 0);
+        QCOMPARE(charlieIdx.column(), 1);
+        QCOMPARE(charlieIdx.data().toString(), QStringLiteral("Charlie"));
+    });
+    connect(&proxy, &QAbstractItemModel::layoutChanged, this, [&aliceIdx, &bobIdx, &charlieIdx](){
+        QCOMPARE(aliceIdx.row(), 0);
+        QCOMPARE(aliceIdx.column(), 0);
+        QCOMPARE(aliceIdx.data().toString(), QStringLiteral("Alice"));
+        QCOMPARE(bobIdx.row(), 0);
+        QCOMPARE(bobIdx.column(), 1);
+        QCOMPARE(bobIdx.data().toString(), QStringLiteral("Bob"));
+        QCOMPARE(charlieIdx.row(), 0);
+        QCOMPARE(charlieIdx.column(), 2);
+        QCOMPARE(charlieIdx.data().toString(), QStringLiteral("Charlie"));
+    });
+    model.sort(0);
+    QCOMPARE(aliceIdx.row(), 0);
+    QCOMPARE(aliceIdx.column(), 0);
+    QCOMPARE(aliceIdx.data().toString(), QStringLiteral("Alice"));
+    QCOMPARE(bobIdx.row(), 0);
+    QCOMPARE(bobIdx.column(), 1);
+    QCOMPARE(bobIdx.data().toString(), QStringLiteral("Bob"));
+    QCOMPARE(charlieIdx.row(), 0);
+    QCOMPARE(charlieIdx.column(), 2);
+    QCOMPARE(charlieIdx.data().toString(), QStringLiteral("Charlie"));
+}
+
+void tst_QTransposeProxyModel::createPersistentOnLayoutAboutToBeChanged() // QTBUG-93466
+{
+    QStandardItemModel model(3, 1);
+    for (int row = 0; row < 3; ++row)
+        model.setData(model.index(row, 0), row, Qt::UserRole);
+    model.setSortRole(Qt::UserRole);
+    QTransposeProxyModel proxy;
+    new QAbstractItemModelTester(&proxy, &proxy);
+    proxy.setSourceModel(&model);
+    QList<QPersistentModelIndex> idxList;
+    QSignalSpy layoutAboutToBeChangedSpy(&proxy, &QAbstractItemModel::layoutAboutToBeChanged);
+    QSignalSpy layoutChangedSpy(&proxy, &QAbstractItemModel::layoutChanged);
+    connect(&proxy, &QAbstractItemModel::layoutAboutToBeChanged, this, [&idxList, &proxy](){
+        idxList.clear();
+        for (int row = 0; row < 3; ++row)
+            idxList << QPersistentModelIndex(proxy.index(0, row));
+    });
+    connect(&proxy, &QAbstractItemModel::layoutChanged, this, [&idxList](){
+        QCOMPARE(idxList.size(), 3);
+        QCOMPARE(idxList.at(0).row(), 0);
+        QCOMPARE(idxList.at(0).column(), 1);
+        QCOMPARE(idxList.at(0).data(Qt::UserRole).toInt(), 0);
+        QCOMPARE(idxList.at(1).row(), 0);
+        QCOMPARE(idxList.at(1).column(), 0);
+        QCOMPARE(idxList.at(1).data(Qt::UserRole).toInt(), -1);
+        QCOMPARE(idxList.at(2).row(), 0);
+        QCOMPARE(idxList.at(2).column(), 2);
+        QCOMPARE(idxList.at(2).data(Qt::UserRole).toInt(), 2);
+    });
+    model.setData(model.index(1, 0), -1, Qt::UserRole);
+    model.sort(0);
+    QCOMPARE(layoutAboutToBeChangedSpy.size(), 1);
+    QCOMPARE(layoutChangedSpy.size(), 1);
+}
+
 void tst_QTransposeProxyModel::insertColumnBase_data()
 {
     QTest::addColumn<QAbstractItemModel *>("model");
@@ -442,7 +486,8 @@ void tst_QTransposeProxyModel::insertRowBase()
     const int oldColCount = proxy.columnCount(proxy.mapFromSource(parent));
     QVERIFY(model->insertRow(1, parent));
     QCOMPARE(proxy.columnCount(proxy.mapFromSource(parent)), oldColCount + 1);
-    QVERIFY(proxy.index(0, 1, proxy.mapFromSource(parent)).data().isNull());
+    QVariant result = proxy.index(0, 1, proxy.mapFromSource(parent)).data();
+    QVERIFY(result.isNull() || (result.metaType().id() == QMetaType::QString && result.toString().isNull()));
     QCOMPARE(columnsInsertSpy.count(), 1);
     QCOMPARE(columnsAboutToBeInsertSpy.count(), 1);
     for (const auto &spyArgs : {columnsInsertSpy.takeFirst(),
@@ -540,8 +585,10 @@ void tst_QTransposeProxyModel::insertColumnProxy()
     QVERIFY(proxy.insertColumn(1, proxyParent));
     QCOMPARE(proxy.columnCount(proxyParent), oldColCount + 1);
     QCOMPARE(model->rowCount(sourceParent), oldRowCount + 1);
-    QVERIFY(proxy.index(0, 1, proxyParent).data().isNull());
-    QVERIFY(model->index(1, 0, sourceParent).data().isNull());
+    QVariant result = proxy.index(0, 1, proxyParent).data();
+    QVERIFY(result.isNull() || (result.metaType().id() == QMetaType::QString && result.toString().isNull()));
+    result = model->index(1, 0, sourceParent).data();
+    QVERIFY(result.isNull() || (result.metaType().id() == QMetaType::QString && result.toString().isNull()));
     QCOMPARE(columnsInsertSpy.count(), 1);
     QCOMPARE(columnsAboutToBeInsertSpy.count(), 1);
     QCOMPARE(rowsInsertSpy.count(), 1);
@@ -713,7 +760,7 @@ void tst_QTransposeProxyModel::span()
         {}
         QSize span(const QModelIndex &index) const override
         {
-            Q_UNUSED(index)
+            Q_UNUSED(index);
             return QSize(2, 1);
         }
     };
@@ -769,15 +816,15 @@ void tst_QTransposeProxyModel::setItemData()
     auto signalData = proxyDataChangeSpy.takeFirst();
     QCOMPARE(signalData.at(0).value<QModelIndex>(), idx);
     QCOMPARE(signalData.at(1).value<QModelIndex>(), idx);
-    const QVector<int> expectedRoles{Qt::DisplayRole, Qt::UserRole, Qt::EditRole, Qt::UserRole + 1};
-    QVector<int> receivedRoles = signalData.at(2).value<QVector<int> >();
+    const QList<int> expectedRoles{Qt::DisplayRole, Qt::UserRole, Qt::EditRole, Qt::UserRole + 1};
+    QList<int> receivedRoles = signalData.at(2).value<QList<int> >();
     QCOMPARE(receivedRoles.size(), expectedRoles.size());
     for (int role : expectedRoles)
         QVERIFY(receivedRoles.contains(role));
     signalData = sourceDataChangeSpy.takeFirst();
     QCOMPARE(signalData.at(0).value<QModelIndex>(), proxy.mapToSource(idx));
     QCOMPARE(signalData.at(1).value<QModelIndex>(), proxy.mapToSource(idx));
-    receivedRoles = signalData.at(2).value<QVector<int> >();
+    receivedRoles = signalData.at(2).value<QList<int> >();
     QCOMPARE(receivedRoles.size(), expectedRoles.size());
     for (int role : expectedRoles)
         QVERIFY(receivedRoles.contains(role));
@@ -793,14 +840,14 @@ void tst_QTransposeProxyModel::setItemData()
     signalData = proxyDataChangeSpy.takeFirst();
     QCOMPARE(signalData.at(0).value<QModelIndex>(), idx);
     QCOMPARE(signalData.at(1).value<QModelIndex>(), idx);
-    receivedRoles = signalData.at(2).value<QVector<int> >();
+    receivedRoles = signalData.at(2).value<QList<int> >();
     QCOMPARE(receivedRoles.size(), expectedRoles.size());
     for (int role : expectedRoles)
         QVERIFY(receivedRoles.contains(role));
     signalData = sourceDataChangeSpy.takeFirst();
     QCOMPARE(signalData.at(0).value<QModelIndex>(), proxy.mapToSource(idx));
     QCOMPARE(signalData.at(1).value<QModelIndex>(), proxy.mapToSource(idx));
-    receivedRoles = signalData.at(2).value<QVector<int> >();
+    receivedRoles = signalData.at(2).value<QList<int> >();
     QCOMPARE(receivedRoles.size(), expectedRoles.size());
     for (int role : expectedRoles)
         QVERIFY(receivedRoles.contains(role));

@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the tools applications of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "fontpanel.h"
 
@@ -64,11 +28,11 @@ FontPanel::FontPanel(QWidget *parentWidget) :
     // writing systems
     m_writingSystemComboBox->setEditable(false);
 
-    auto writingSystems = m_fontDatabase.writingSystems();
+    auto writingSystems = QFontDatabase::writingSystems();
     writingSystems.push_front(QFontDatabase::Any);
     for (QFontDatabase::WritingSystem ws : qAsConst(writingSystems))
         m_writingSystemComboBox->addItem(QFontDatabase::writingSystemName(ws), QVariant(ws));
-    connect(m_writingSystemComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+    connect(m_writingSystemComboBox, &QComboBox::currentIndexChanged,
             this, &FontPanel::slotWritingSystemChanged);
     formLayout->addRow(tr("&Writing system"), m_writingSystemComboBox);
 
@@ -77,12 +41,12 @@ FontPanel::FontPanel(QWidget *parentWidget) :
     formLayout->addRow(tr("&Family"), m_familyComboBox);
 
     m_styleComboBox->setEditable(false);
-    connect(m_styleComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+    connect(m_styleComboBox, &QComboBox::currentIndexChanged,
             this, &FontPanel::slotStyleChanged);
     formLayout->addRow(tr("&Style"), m_styleComboBox);
 
     m_pointSizeComboBox->setEditable(false);
-    connect(m_pointSizeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+    connect(m_pointSizeComboBox, &QComboBox::currentIndexChanged,
             this, &FontPanel::slotPointSizeChanged);
     formLayout->addRow(tr("&Point size"), m_pointSizeComboBox);
 
@@ -104,12 +68,8 @@ QFont FontPanel::selectedFont() const
         rc.setStyle(QFont::StyleOblique);
     else
         rc.setStyle(QFont::StyleNormal);
-    rc.setBold(m_fontDatabase.bold(family, styleDescription));
-
-    // Weight < 0 asserts...
-    const int weight = m_fontDatabase.weight(family, styleDescription);
-    if (weight >= 0)
-        rc.setWeight(weight);
+    rc.setBold(QFontDatabase::bold(family, styleDescription));
+    rc.setWeight(QFont::Weight(QFontDatabase::weight(family, styleDescription)));
     return rc;
 }
 
@@ -118,7 +78,7 @@ void FontPanel::setSelectedFont(const QFont &f)
     m_familyComboBox->setCurrentFont(f);
     if (m_familyComboBox->currentIndex() < 0) {
         // family not in writing system - find the corresponding one?
-        QList<QFontDatabase::WritingSystem> familyWritingSystems = m_fontDatabase.writingSystems(f.family());
+        QList<QFontDatabase::WritingSystem> familyWritingSystems = QFontDatabase::writingSystems(f.family());
         if (familyWritingSystems.isEmpty())
             return;
 
@@ -131,7 +91,7 @@ void FontPanel::setSelectedFont(const QFont &f)
     const int pointSizeIndex = closestPointSizeIndex(f.pointSize());
     m_pointSizeComboBox->setCurrentIndex( pointSizeIndex);
 
-    const QString styleString = m_fontDatabase.styleString(f);
+    const QString styleString = QFontDatabase::styleString(f);
     const int styleIndex = m_styleComboBox->findText(styleString);
     m_styleComboBox->setCurrentIndex(styleIndex);
     slotUpdatePreviewFont();
@@ -212,7 +172,7 @@ void FontPanel::updateFamily(const QString &family)
     // Try to maintain selection or select normal
     const QString &oldStyleString = styleString();
 
-    const QStringList &styles = m_fontDatabase.styles(family);
+    const QStringList &styles = QFontDatabase::styles(family);
     const bool hasStyles = !styles.isEmpty();
 
     m_styleComboBox->setCurrentIndex(-1);
@@ -269,7 +229,7 @@ void FontPanel::updatePointSizes(const QString &family, const QString &styleStri
 {
     const int oldPointSize = pointSize();
 
-    auto pointSizes =  m_fontDatabase.pointSizes(family, styleString);
+    auto pointSizes =  QFontDatabase::pointSizes(family, styleString);
     if (pointSizes.isEmpty())
         pointSizes = QFontDatabase::standardSizes();
 

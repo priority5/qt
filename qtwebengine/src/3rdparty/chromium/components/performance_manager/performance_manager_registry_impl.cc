@@ -7,7 +7,7 @@
 #include <iterator>
 #include <utility>
 
-#include "base/stl_util.h"
+#include "base/observer_list.h"
 #include "components/performance_manager/embedder/binders.h"
 #include "components/performance_manager/performance_manager_tab_helper.h"
 #include "components/performance_manager/public/mojom/coordination_unit.mojom.h"
@@ -24,15 +24,15 @@
 
 namespace performance_manager {
 
-namespace {
+namespace performance_manager_registry_impl {
 
 PerformanceManagerRegistryImpl* g_instance = nullptr;
 
 }  // namespace
 
 PerformanceManagerRegistryImpl::PerformanceManagerRegistryImpl() {
-  DCHECK(!g_instance);
-  g_instance = this;
+  DCHECK(!performance_manager_registry_impl::g_instance);
+  performance_manager_registry_impl::g_instance = this;
 
   // The registry should be created after the PerformanceManager.
   DCHECK(PerformanceManager::IsAvailable());
@@ -43,7 +43,7 @@ PerformanceManagerRegistryImpl::~PerformanceManagerRegistryImpl() {
   // TearDown() should have been invoked to reset |g_instance| and clear
   // |web_contents_| and |render_process_user_data_| prior to destroying the
   // registry.
-  DCHECK(!g_instance);
+  DCHECK(!performance_manager_registry_impl::g_instance);
   DCHECK(web_contents_.empty());
   DCHECK(render_process_hosts_.empty());
   DCHECK(pm_owned_.empty());
@@ -54,7 +54,7 @@ PerformanceManagerRegistryImpl::~PerformanceManagerRegistryImpl() {
 
 // static
 PerformanceManagerRegistryImpl* PerformanceManagerRegistryImpl::GetInstance() {
-  return g_instance;
+  return performance_manager_registry_impl::g_instance;
 }
 
 void PerformanceManagerRegistryImpl::AddObserver(
@@ -137,6 +137,8 @@ void PerformanceManagerRegistryImpl::CreatePageNodeForWebContents(
 PerformanceManagerRegistryImpl::Throttles
 PerformanceManagerRegistryImpl::CreateThrottlesForNavigation(
     content::NavigationHandle* handle) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   Throttles combined_throttles;
   for (auto& mechanism : mechanisms_) {
     Throttles throttles = mechanism.CreateThrottlesForNavigation(handle);
@@ -149,8 +151,10 @@ PerformanceManagerRegistryImpl::CreateThrottlesForNavigation(
 
 void PerformanceManagerRegistryImpl::NotifyBrowserContextAdded(
     content::BrowserContext* browser_context) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   content::StoragePartition* storage_partition =
-      content::BrowserContext::GetDefaultStoragePartition(browser_context);
+      browser_context->GetDefaultStoragePartition();
 
   // Create an adapter for the service worker context.
   auto insertion_result = service_worker_context_adapters_.emplace(
@@ -195,6 +199,8 @@ void PerformanceManagerRegistryImpl::ExposeInterfacesToRenderFrame(
 
 void PerformanceManagerRegistryImpl::NotifyBrowserContextRemoved(
     content::BrowserContext* browser_context) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   auto it = worker_watchers_.find(browser_context);
   DCHECK(it != worker_watchers_.end());
   it->second->TearDown();
@@ -216,8 +222,8 @@ void PerformanceManagerRegistryImpl::TearDown() {
   for (auto& observer : observers_)
     observer.OnBeforePerformanceManagerDestroyed();
 
-  DCHECK_EQ(g_instance, this);
-  g_instance = nullptr;
+  DCHECK_EQ(performance_manager_registry_impl::g_instance, this);
+  performance_manager_registry_impl::g_instance = nullptr;
 
   // Destroy WorkerNodes before ProcessNodes, because ProcessNode checks that it
   // has no associated WorkerNode when torn down.

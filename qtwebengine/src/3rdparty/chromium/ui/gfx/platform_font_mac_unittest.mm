@@ -8,9 +8,7 @@
 #include <stddef.h>
 
 #import "base/mac/foundation_util.h"
-#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/font.h"
 
@@ -174,16 +172,8 @@ TEST(PlatformFontMacTest, DerivedFineGrainedFonts) {
   EXPECT_EQ(static_cast<int>(Weight::LIGHT), DerivedIntWeight(Weight::LIGHT));
   EXPECT_EQ(static_cast<int>(Weight::NORMAL), DerivedIntWeight(Weight::NORMAL));
   EXPECT_EQ(static_cast<int>(Weight::MEDIUM), DerivedIntWeight(Weight::MEDIUM));
-  if (base::mac::IsAtMostOS10_10()) {
-    // If a SEMIBOLD system font is requested, 10.10 will return the bold system
-    // font, but somehow bearing a weight number of 0.24, which is really a
-    // medium weight (0.23).
-    EXPECT_EQ(static_cast<int>(Weight::MEDIUM),
-              DerivedIntWeight(Weight::SEMIBOLD));
-  } else {
-    EXPECT_EQ(static_cast<int>(Weight::SEMIBOLD),
-              DerivedIntWeight(Weight::SEMIBOLD));
-  }
+  EXPECT_EQ(static_cast<int>(Weight::SEMIBOLD),
+            DerivedIntWeight(Weight::SEMIBOLD));
   EXPECT_EQ(static_cast<int>(Weight::BOLD), DerivedIntWeight(Weight::BOLD));
   EXPECT_EQ(static_cast<int>(Weight::EXTRA_BOLD),
             DerivedIntWeight(Weight::EXTRA_BOLD));
@@ -198,7 +188,7 @@ TEST(PlatformFontMacTest, ValidateFontHeight) {
   Font default_font;
   Font::FontStyle styles[] = {Font::NORMAL, Font::ITALIC, Font::UNDERLINE};
 
-  for (size_t i = 0; i < base::size(styles); ++i) {
+  for (size_t i = 0; i < std::size(styles); ++i) {
     SCOPED_TRACE(testing::Message() << "Font::FontStyle: " << styles[i]);
     // Include the range of sizes used by ResourceBundle::FontStyle (-1 to +8).
     for (int delta = -1; delta <= 8; ++delta) {

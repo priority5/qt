@@ -21,6 +21,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/prefs/profile_pref_store_manager.h"
@@ -41,11 +42,11 @@
 #include "extensions/common/extension.h"
 #include "services/preferences/public/cpp/tracked/tracked_preference_histogram_names.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/constants/chromeos_switches.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_switches.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/registry.h"
 #include "chrome/install_static/install_util.h"
 #endif
@@ -68,8 +69,8 @@ enum AllowedBuckets {
   ALLOW_ANY
 };
 
-#if defined(OS_WIN)
-base::string16 GetRegistryPathForTestProfile() {
+#if BUILDFLAG(IS_WIN)
+std::wstring GetRegistryPathForTestProfile() {
   // Cleanup follow-up to http://crbug.com/721245 for the previous location of
   // this test key which had similar problems (to a lesser extent). It's
   // redundant but harmless to have multiple callers hit this on the same
@@ -144,7 +145,7 @@ int GetTrackedPrefHistogramCount(const char* histogram_name,
   return GetTrackedPrefHistogramCount(histogram_name, "", allowed_buckets);
 }
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 std::unique_ptr<base::DictionaryValue> ReadPrefsDictionary(
     const base::FilePath& pref_file) {
   JSONFileValueDeserializer deserializer(pref_file);
@@ -154,11 +155,11 @@ std::unique_ptr<base::DictionaryValue> ReadPrefsDictionary(
       deserializer.Deserialize(&error_code, &error_str);
   if (!prefs || error_code != JSONFileValueDeserializer::JSON_NO_ERROR) {
     ADD_FAILURE() << "Error #" << error_code << ": " << error_str;
-    return std::unique_ptr<base::DictionaryValue>();
+    return nullptr;
   }
   if (!prefs->is_dict()) {
     ADD_FAILURE();
-    return std::unique_ptr<base::DictionaryValue>();
+    return nullptr;
   }
   return std::unique_ptr<base::DictionaryValue>(
       static_cast<base::DictionaryValue*>(prefs.release()));
@@ -168,7 +169,7 @@ std::unique_ptr<base::DictionaryValue> ReadPrefsDictionary(
 // Returns whether external validation is supported on the platform through
 // storing MACs in the registry.
 bool SupportsRegistryValidation() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return true;
 #else
   return false;
@@ -205,9 +206,9 @@ class PrefHashBrowserTestBase : public extensions::ExtensionBrowserTest {
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     extensions::ExtensionBrowserTest::SetUpCommandLine(command_line);
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     command_line->AppendSwitch(
-        chromeos::switches::kIgnoreUserProfileMappingForTests);
+        ash::switches::kIgnoreUserProfileMappingForTests);
 #endif
   }
 
@@ -217,7 +218,7 @@ class PrefHashBrowserTestBase : public extensions::ExtensionBrowserTest {
     if (content::IsPreTest())
       return extensions::ExtensionBrowserTest::SetUpUserDataDirectory();
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     // For some reason, the Preferences file does not exist in the location
     // below on Chrome OS. Since protection is disabled on Chrome OS, it's okay
     // to simply not attack preferences at all (and still assert that no
@@ -286,7 +287,7 @@ class PrefHashBrowserTestBase : public extensions::ExtensionBrowserTest {
     // order to be able to test all SettingsEnforcement groups.
     chrome_prefs::DisableDomainCheckForTesting();
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // Avoid polluting prefs for the user and the bots by writing to a specific
     // testing registry path.
     registry_key_for_external_validation_ = GetRegistryPathForTestProfile();
@@ -308,10 +309,10 @@ class PrefHashBrowserTestBase : public extensions::ExtensionBrowserTest {
   }
 
   void TearDown() override {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // When done, delete the Registry key to avoid polluting the registry.
     if (!content::IsPreTest()) {
-      base::string16 registry_key = GetRegistryPathForTestProfile();
+      std::wstring registry_key = GetRegistryPathForTestProfile();
       base::win::RegKey key;
       if (key.Open(HKEY_CURRENT_USER, registry_key.c_str(),
                    KEY_SET_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS) {
@@ -363,12 +364,12 @@ class PrefHashBrowserTestBase : public extensions::ExtensionBrowserTest {
         EXPECT_EQ(protection_level_ > PROTECTION_DISABLED_ON_PLATFORM,
                   num_tracked_prefs_ > 0);
 
-        int num_split_tracked_prefs = GetTrackedPrefHistogramCount(
+        int split_tracked_prefs = GetTrackedPrefHistogramCount(
             user_prefs::tracked::kTrackedPrefHistogramUnchanged,
             user_prefs::tracked::kTrackedPrefRegistryValidationSuffix,
             BEGIN_ALLOW_SINGLE_BUCKET + 5);
         EXPECT_EQ(protection_level_ > PROTECTION_DISABLED_ON_PLATFORM ? 1 : 0,
-                  num_split_tracked_prefs);
+                  split_tracked_prefs);
       }
 
       num_tracked_prefs_ += num_split_tracked_prefs;
@@ -415,19 +416,19 @@ class PrefHashBrowserTestBase : public extensions::ExtensionBrowserTest {
     if (!ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking)
       return PROTECTION_DISABLED_ON_PLATFORM;
 
-#if defined(OS_WIN) || defined(OS_MAC)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
     // The strongest mode is enforced on Windows and MacOS in the absence of a
     // field trial.
     return PROTECTION_ENABLED_ALL;
 #else
     return PROTECTION_DISABLED_FOR_GROUP;
-#endif  // defined(OS_WIN) || defined(OS_MAC)
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   }
 
   int num_tracked_prefs_;
 
-#if defined(OS_WIN)
-  base::string16 registry_key_for_external_validation_;
+#if BUILDFLAG(IS_WIN)
+  std::wstring registry_key_for_external_validation_;
 #endif
 };
 
@@ -542,7 +543,7 @@ class PrefHashBrowserTestClearedAtomic : public PrefHashBrowserTestBase {
     // |selected_prefs| should never be NULL under the protection level picking
     // it.
     EXPECT_TRUE(selected_prefs);
-    EXPECT_TRUE(selected_prefs->Remove(prefs::kHomePage, NULL));
+    EXPECT_TRUE(selected_prefs->RemoveKey(prefs::kHomePage));
   }
 
   void VerifyReactionToPrefAttack() override {
@@ -629,9 +630,9 @@ class PrefHashBrowserTestUntrustedInitialized : public PrefHashBrowserTestBase {
   void AttackPreferencesOnDisk(
       base::DictionaryValue* unprotected_preferences,
       base::DictionaryValue* protected_preferences) override {
-    unprotected_preferences->Remove("protection.macs", NULL);
+    unprotected_preferences->RemovePath("protection.macs");
     if (protected_preferences)
-      protected_preferences->Remove("protection.macs", NULL);
+      protected_preferences->RemovePath("protection.macs");
   }
 
   void VerifyReactionToPrefAttack() override {
@@ -662,13 +663,13 @@ class PrefHashBrowserTestUntrustedInitialized : public PrefHashBrowserTestBase {
       case PROTECTION_ENABLED_ALL:
       case PROTECTION_ENABLED_EXTENSIONS:
         ++num_protected_prefs;
-        FALLTHROUGH;
+        [[fallthrough]];
       case PROTECTION_ENABLED_DSE:
         ++num_protected_prefs;
-        FALLTHROUGH;
+        [[fallthrough]];
       case PROTECTION_ENABLED_BASIC:
         num_protected_prefs += num_tracked_prefs() - num_null_values - 2;
-        FALLTHROUGH;
+        [[fallthrough]];
       case PROTECTION_DISABLED_FOR_GROUP:
       case PROTECTION_DISABLED_ON_PLATFORM:
         // No protection.
@@ -741,7 +742,7 @@ class PrefHashBrowserTestChangedAtomic : public PrefHashBrowserTestBase {
 
     ListPrefUpdate update(profile()->GetPrefs(),
                           prefs::kURLsToRestoreOnStartup);
-    update->AppendString("http://example.com");
+    update->Append("http://example.com");
   }
 
   void AttackPreferencesOnDisk(
@@ -757,8 +758,8 @@ class PrefHashBrowserTestChangedAtomic : public PrefHashBrowserTestBase {
     EXPECT_TRUE(
         selected_prefs->GetList(prefs::kURLsToRestoreOnStartup, &startup_urls));
     EXPECT_TRUE(startup_urls);
-    EXPECT_EQ(1U, startup_urls->GetSize());
-    startup_urls->AppendString("http://example.org");
+    EXPECT_EQ(1U, startup_urls->GetListDeprecated().size());
+    startup_urls->Append("http://example.org");
   }
 
   void VerifyReactionToPrefAttack() override {
@@ -788,13 +789,14 @@ class PrefHashBrowserTestChangedAtomic : public PrefHashBrowserTestBase {
 
 // TODO(gab): This doesn't work on OS_CHROMEOS because we fail to attack
 // Preferences.
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
     // Explicitly verify the result of reported resets.
     EXPECT_EQ(protection_level_ >= PROTECTION_ENABLED_BASIC ? 0U : 2U,
               profile()
                   ->GetPrefs()
                   ->GetList(prefs::kURLsToRestoreOnStartup)
-                  ->GetSize());
+                  ->GetListDeprecated()
+                  .size());
 #endif
 
     // Nothing else should have triggered.
@@ -856,16 +858,16 @@ class PrefHashBrowserTestChangedSplitPref : public PrefHashBrowserTestBase {
     // Tamper with any installed setting for good.crx
     base::DictionaryValue* good_crx_dict;
     EXPECT_TRUE(extensions_dict->GetDictionary(kGoodCrxId, &good_crx_dict));
-    int good_crx_state;
-    EXPECT_TRUE(good_crx_dict->GetInteger("state", &good_crx_state));
-    EXPECT_EQ(extensions::Extension::ENABLED, good_crx_state);
+    absl::optional<int> good_crx_state = good_crx_dict->FindIntKey("state");
+    ASSERT_TRUE(good_crx_state);
+    EXPECT_EQ(extensions::Extension::ENABLED, *good_crx_state);
     good_crx_dict->SetInteger("state", extensions::Extension::DISABLED);
 
     // Drop a fake extension (for the purpose of this test, dropped settings
     // don't need to be valid extension settings).
-    auto fake_extension = std::make_unique<base::DictionaryValue>();
-    fake_extension->SetString("name", "foo");
-    extensions_dict->Set(std::string(32, 'a'), std::move(fake_extension));
+    base::DictionaryValue fake_extension;
+    fake_extension.SetString("name", "foo");
+    extensions_dict->SetKey(std::string(32, 'a'), std::move(fake_extension));
   }
 
   void VerifyReactionToPrefAttack() override {
@@ -1034,7 +1036,7 @@ class PrefHashBrowserTestUntrustedAdditionToPrefsAfterWipe
     unprotected_preferences->SetString(prefs::kHomePage, "http://example.net");
     // Clear the value in Secure Preferences, if any.
     if (protected_preferences)
-      protected_preferences->Remove(prefs::kHomePage, NULL);
+      protected_preferences->RemoveKey(prefs::kHomePage);
   }
 
   void VerifyReactionToPrefAttack() override {
@@ -1104,7 +1106,7 @@ class PrefHashBrowserTestUntrustedAdditionToPrefsAfterWipe
 PREF_HASH_BROWSER_TEST(PrefHashBrowserTestUntrustedAdditionToPrefsAfterWipe,
                        UntrustedAdditionToPrefsAfterWipe);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 class PrefHashBrowserTestRegistryValidationFailure
     : public PrefHashBrowserTestBase {
  public:
@@ -1115,14 +1117,14 @@ class PrefHashBrowserTestRegistryValidationFailure
   void AttackPreferencesOnDisk(
       base::DictionaryValue* unprotected_preferences,
       base::DictionaryValue* protected_preferences) override {
-    base::string16 registry_key =
+    std::wstring registry_key =
         GetRegistryPathForTestProfile() + L"\\PreferenceMACs\\Default";
     base::win::RegKey key;
     ASSERT_EQ(ERROR_SUCCESS, key.Open(HKEY_CURRENT_USER, registry_key.c_str(),
                                       KEY_SET_VALUE | KEY_WOW64_32KEY));
     // An incorrect hash should still have the correct size.
     ASSERT_EQ(ERROR_SUCCESS,
-              key.WriteValue(L"homepage", base::string16(64, 'A').c_str()));
+              key.WriteValue(L"homepage", std::wstring(64, 'A').c_str()));
   }
 
   void VerifyReactionToPrefAttack() override {
@@ -1161,16 +1163,16 @@ class PrefHashBrowserTestDefaultSearch : public PrefHashBrowserTestBase {
         static_cast<DefaultSearchManager::Source>(-1);
 
     TemplateURLData user_dse;
-    user_dse.SetKeyword(base::UTF8ToUTF16("userkeyword"));
-    user_dse.SetShortName(base::UTF8ToUTF16("username"));
+    user_dse.SetKeyword(u"userkeyword");
+    user_dse.SetShortName(u"username");
     user_dse.SetURL("http://user_default_engine/search?q=good_user_query");
     default_search_manager.SetUserSelectedDefaultSearchEngine(user_dse);
 
     const TemplateURLData* current_dse =
         default_search_manager.GetDefaultSearchEngine(&dse_source);
     EXPECT_EQ(DefaultSearchManager::FROM_USER, dse_source);
-    EXPECT_EQ(current_dse->keyword(), base::UTF8ToUTF16("userkeyword"));
-    EXPECT_EQ(current_dse->short_name(), base::UTF8ToUTF16("username"));
+    EXPECT_EQ(current_dse->keyword(), u"userkeyword");
+    EXPECT_EQ(current_dse->short_name(), u"username");
     EXPECT_EQ(current_dse->url(),
               "http://user_default_engine/search?q=good_user_query");
   }
@@ -1232,19 +1234,19 @@ class PrefHashBrowserTestDefaultSearch : public PrefHashBrowserTestBase {
 
     if (protection_level_ < PROTECTION_ENABLED_DSE) {
 // This doesn't work on OS_CHROMEOS because we fail to attack Preferences.
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
       // Attack is successful.
       EXPECT_EQ(DefaultSearchManager::FROM_USER, dse_source);
-      EXPECT_EQ(current_dse->keyword(), base::UTF8ToUTF16("badkeyword"));
-      EXPECT_EQ(current_dse->short_name(), base::UTF8ToUTF16("badname"));
+      EXPECT_EQ(current_dse->keyword(), u"badkeyword");
+      EXPECT_EQ(current_dse->short_name(), u"badname");
       EXPECT_EQ(current_dse->url(),
                 "http://bad_default_engine/search?q=dirty_user_query");
 #endif
     } else {
       // Attack fails.
       EXPECT_EQ(DefaultSearchManager::FROM_FALLBACK, dse_source);
-      EXPECT_NE(current_dse->keyword(), base::UTF8ToUTF16("badkeyword"));
-      EXPECT_NE(current_dse->short_name(), base::UTF8ToUTF16("badname"));
+      EXPECT_NE(current_dse->keyword(), u"badkeyword");
+      EXPECT_NE(current_dse->short_name(), u"badname");
       EXPECT_NE(current_dse->url(),
                 "http://bad_default_engine/search?q=dirty_user_query");
     }

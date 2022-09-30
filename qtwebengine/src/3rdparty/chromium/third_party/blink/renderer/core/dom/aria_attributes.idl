@@ -21,6 +21,7 @@
     [CEReactions, Reflect=aria_expanded] attribute DOMString? ariaExpanded;
     [CEReactions, Reflect=aria_haspopup] attribute DOMString? ariaHasPopup;
     [CEReactions, Reflect=aria_hidden] attribute DOMString? ariaHidden;
+    [CEReactions, Reflect=aria_invalid] attribute DOMString? ariaInvalid;
     [CEReactions, Reflect=aria_keyshortcuts] attribute DOMString? ariaKeyShortcuts;
     [CEReactions, Reflect=aria_label] attribute DOMString? ariaLabel;
     [CEReactions, Reflect=aria_level] attribute DOMString? ariaLevel;
@@ -46,6 +47,7 @@
     [CEReactions, Reflect=aria_valuemin] attribute DOMString? ariaValueMin;
     [CEReactions, Reflect=aria_valuenow] attribute DOMString? ariaValueNow;
     [CEReactions, Reflect=aria_valuetext] attribute DOMString? ariaValueText;
+    [RuntimeEnabled=AccessibilityAriaVirtualContent, CEReactions, Reflect=aria_virtualcontent] attribute DOMString? ariaVirtualContent;
 };
 
 Element includes AriaAttributes;

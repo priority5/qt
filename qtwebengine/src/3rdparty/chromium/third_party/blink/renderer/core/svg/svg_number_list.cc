@@ -21,7 +21,7 @@
 #include "third_party/blink/renderer/core/svg/svg_number_list.h"
 
 #include "third_party/blink/renderer/core/svg/svg_parser_utilities.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -54,7 +54,7 @@ SVGParsingError SVGNumberList::SetValueAsString(const String& value) {
   // valid items before error.
   // Spec: http://www.w3.org/TR/SVG/single-page.html#implnote-ErrorProcessing
   return WTF::VisitCharacters(value, [&](const auto* chars, unsigned length) {
-    return this->Parse(chars, chars + length);
+    return Parse(chars, chars + length);
   });
 }
 

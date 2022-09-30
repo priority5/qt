@@ -8,6 +8,7 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
+#include <mach/thread_switch.h>
 #include <stddef.h>
 #include <sys/resource.h>
 
@@ -18,6 +19,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/mach_logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/threading/thread_id_name_manager.h"
@@ -53,6 +55,17 @@ void InitThreading() {
 }
 
 // static
+void PlatformThread::YieldCurrentThread() {
+  // Don't use sched_yield(), as it can lead to 10ms delays.
+  //
+  // This only depresses the thread priority for 1ms, which is more in line
+  // with what calling code likely wants. See this bug in webkit for context:
+  // https://bugs.webkit.org/show_bug.cgi?id=204871
+  mach_msg_timeout_t timeout_ms = 1;
+  thread_switch(MACH_PORT_NULL, SWITCH_OPTION_DEPRESS, timeout_ms);
+}
+
+// static
 void PlatformThread::SetName(const std::string& name) {
   ThreadIdNameManager::GetInstance()->SetName(name);
 
@@ -66,16 +79,63 @@ void PlatformThread::SetName(const std::string& name) {
 }
 
 // Whether optimized realt-time thread config should be used for audio.
-const Feature kOptimizedRealtimeThreadingMac{"OptimizedRealtimeThreadingMac",
-                                             FEATURE_DISABLED_BY_DEFAULT};
+const Feature kOptimizedRealtimeThreadingMac {
+  "OptimizedRealtimeThreadingMac",
+#if BUILDFLAG(IS_MAC)
+      FEATURE_ENABLED_BY_DEFAULT
+#else
+      FEATURE_DISABLED_BY_DEFAULT
+#endif
+};
 
 namespace {
-// PlatformThread::SetCurrentThreadRealtimePeriodValue() doesn't query the state
-// of kOptimizedRealtimeThreadingMac feature directly because FeatureList
-// initialization is not always synchronized with
-// PlatformThread::SetCurrentThreadRealtimePeriodValue(). The initial value
-// should match the default state of kOptimizedRealtimeThreadingMac.
-std::atomic<bool> g_use_optimized_realtime_threading(false);
+
+bool IsOptimizedRealtimeThreadingMacEnabled() {
+#if BUILDFLAG(IS_MAC)
+  // There is some platform bug on 10.14.
+  if (mac::IsOS10_14())
+    return false;
+#endif
+
+  return FeatureList::IsEnabled(kOptimizedRealtimeThreadingMac);
+}
+
+}  // namespace
+
+// Fine-tuning optimized realt-time thread config:
+// Whether or not the thread should be preeptible.
+const FeatureParam<bool> kOptimizedRealtimeThreadingMacPreemptible{
+    &kOptimizedRealtimeThreadingMac, "preemptible", true};
+// Portion of the time quantum the thread is expected to be busy, (0, 1].
+const FeatureParam<double> kOptimizedRealtimeThreadingMacBusy{
+    &kOptimizedRealtimeThreadingMac, "busy", 0.5};
+// Maximum portion of the time quantum the thread is expected to be busy,
+// (kOptimizedRealtimeThreadingMacBusy, 1].
+const FeatureParam<double> kOptimizedRealtimeThreadingMacBusyLimit{
+    &kOptimizedRealtimeThreadingMac, "busy_limit", 1.0};
+
+namespace {
+
+struct TimeConstraints {
+  bool preemptible{kOptimizedRealtimeThreadingMacPreemptible.default_value};
+  double busy{kOptimizedRealtimeThreadingMacBusy.default_value};
+  double busy_limit{kOptimizedRealtimeThreadingMacBusyLimit.default_value};
+
+  static TimeConstraints ReadFromFeatureParams() {
+    double busy_limit = kOptimizedRealtimeThreadingMacBusyLimit.Get();
+    return TimeConstraints{
+        kOptimizedRealtimeThreadingMacPreemptible.Get(),
+        std::min(busy_limit, kOptimizedRealtimeThreadingMacBusy.Get()),
+        busy_limit};
+  }
+};
+
+// Use atomics to access FeatureList values when setting up a thread, since
+// there are cases when FeatureList initialization is not synchronized with
+// PlatformThread creation.
+std::atomic<bool> g_use_optimized_realtime_threading(
+    kOptimizedRealtimeThreadingMac.default_state == FEATURE_ENABLED_BY_DEFAULT);
+std::atomic<TimeConstraints> g_time_constraints;
 
 }  // namespace
 
@@ -86,8 +146,9 @@ void PlatformThread::InitializeOptimizedRealtimeThreadingFeature() {
   // tests that call this before initializing the FeatureList, only check the
   // state of the feature if the FeatureList is initialized.
   if (FeatureList::GetInstance()) {
+    g_time_constraints.store(TimeConstraints::ReadFromFeatureParams());
     g_use_optimized_realtime_threading.store(
-        FeatureList::IsEnabled(kOptimizedRealtimeThreadingMac));
+        IsOptimizedRealtimeThreadingMacEnabled());
   }
 }
 
@@ -106,8 +167,7 @@ TimeDelta GetCurrentThreadRealtimePeriod() {
   NSNumber* period = mac::ObjCCast<NSNumber>(
       [[NSThread currentThread] threadDictionary][kRealtimePeriodNsKey]);
 
-  return period ? TimeDelta::FromNanoseconds(period.longLongValue)
-                : TimeDelta();
+  return period ? Nanoseconds(period.longLongValue) : TimeDelta();
 }
 
 // Calculates time constrints for THREAD_TIME_CONSTRAINT_POLICY.
@@ -120,14 +180,20 @@ thread_time_constraint_policy_data_t GetTimeConstraints(
   mach_timebase_info(&tb_info);
 
   if (!realtime_period.is_zero()) {
-    uint32_t abs_realtime_period =
-        saturated_cast<uint32_t>(realtime_period.InNanoseconds() *
-                                 (double(tb_info.denom) / tb_info.numer));
-
+    // Limit the lowest value to 2.9 ms we used to have historically. The lower
+    // the period, the more CPU frequency may go up, and we don't want to risk
+    // worsening the thermal situation.
+    uint32_t abs_realtime_period = saturated_cast<uint32_t>(
+        std::max(realtime_period.InNanoseconds(), 2900000LL) *
+        (double(tb_info.denom) / tb_info.numer));
+    TimeConstraints config = g_time_constraints.load();
     time_constraints.period = abs_realtime_period;
-    time_constraints.computation = abs_realtime_period / 2;
-    time_constraints.constraint = abs_realtime_period;
-    time_constraints.preemptible = YES;
+    time_constraints.constraint = std::min(
+        abs_realtime_period, uint32_t(abs_realtime_period * config.busy_limit));
+    time_constraints.computation =
+        std::min(time_constraints.constraint,
+                 uint32_t(abs_realtime_period * config.busy));
+    time_constraints.preemptible = config.preemptible ? YES : NO;
     return time_constraints;
   }
 
@@ -212,12 +278,12 @@ void SetPriorityRealtimeAudio(TimeDelta realtime_period) {
 
   UmaHistogramCustomMicrosecondsTimes(
       "PlatformThread.Mac.AttemptedRealtimePeriod", realtime_period,
-      base::TimeDelta(), base::TimeDelta::FromMilliseconds(100), 100);
+      base::TimeDelta(), base::Milliseconds(100), 100);
 
   if (result == KERN_SUCCESS) {
     UmaHistogramCustomMicrosecondsTimes(
         "PlatformThread.Mac.SucceededRealtimePeriod", realtime_period,
-        base::TimeDelta(), base::TimeDelta::FromMilliseconds(100), 100);
+        base::TimeDelta(), base::Milliseconds(100), 100);
   }
   return;
 }
@@ -225,7 +291,8 @@ void SetPriorityRealtimeAudio(TimeDelta realtime_period) {
 }  // anonymous namespace
 
 // static
-bool PlatformThread::CanIncreaseThreadPriority(ThreadPriority priority) {
+bool PlatformThread::CanChangeThreadPriority(ThreadPriority from,
+                                             ThreadPriority to) {
   return true;
 }
 
@@ -290,7 +357,7 @@ ThreadPriority PlatformThread::GetCurrentThreadPriority() {
 }
 
 size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   return 0;
 #else
   // The Mac OS X default for a pthread stack size is 512kB.

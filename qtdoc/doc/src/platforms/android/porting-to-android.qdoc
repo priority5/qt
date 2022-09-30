@@ -1,34 +1,13 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
 \page porting-to-android.html
 \title Porting to Android
 \brief Provides instructions to port your existing Qt application to Android.
+\ingroup androidplatform
+\previouspage android-building.html
+\nextpage examples-android.html
 
 Most Qt applications should be portable to Android with ease, unless they
 depend on a specific hardware or software feature not supported by Android.
@@ -41,7 +20,7 @@ The other approach is to deploy the resources into the package's \c{assets}
 directory. It is the best option if you want to achieve better
 interoperability with the Android APIs. You can access all resources in the
 directory using the "assets:" prefix. Unlike qrc, this approach is Android
-sepcific, not a cross-platform solution.
+specific, not a cross-platform solution.
 
 To use the "assets:" approach, for example, add the following lines into the
 \c {.pro} file:

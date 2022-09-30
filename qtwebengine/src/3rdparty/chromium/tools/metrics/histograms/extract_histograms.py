@@ -21,7 +21,6 @@ XML below will generate the following five histograms:
   <owner>person@chromium.org</owner>
   <owner>some-team@chromium.org</owner>
   <summary>A brief description.</summary>
-  <details>This is a more thorough description of this histogram.</details>
 </histogram>
 
 <histogram name="HistogramEnum" enum="MyEnumType">
@@ -299,6 +298,12 @@ def ExtractEnumsFromXmlTree(tree):
 
     nodes = list(IterElementsWithTag(enum, 'int'))
 
+    obsolete_nodes = list(IterElementsWithTag(enum, 'obsolete', 1))
+    if not nodes and not obsolete_nodes:
+      logging.error('Non-obsolete enum %s should have at least one <int>', name)
+      have_errors = True
+      continue
+
     for int_tag in nodes:
       value_dict = {}
       int_value = int(int_tag.getAttribute('value'))
@@ -368,6 +373,30 @@ def _ExtractOwners(node):
         owners.append(owner_text)
 
   return owners, has_owner
+
+
+def _ExtractComponents(histogram):
+  """Extracts component information from the given histogram element.
+
+  Components are present when a histogram has a component tag, e.g.
+  <component>UI&gt;Browser</component>. Components may also be present when an
+  OWNERS file is given as a histogram owner, e.g. <owner>src/dir/OWNERS</owner>;
+  in this case the component is extracted from adjacent DIR_METADATA files.
+  See _ExtractComponentViaDirmd() in the following file for details:
+  chromium/src/tools/metrics/histograms/expand_owners.py.
+
+  Args:
+    histogram: A DOM Element corresponding to a histogram.
+
+  Returns:
+    A list of the components associated with the histogram, e.g.
+    ['UI>Browser>Spellcheck'].
+  """
+  component_nodes = histogram.getElementsByTagName('component')
+  return [
+      _GetTextFromChildNodes(component_node)
+      for component_node in component_nodes
+  ]
 
 
 def _ValidateDateString(date_str):
@@ -453,6 +482,7 @@ def _ExtractTokens(histogram, variants_dict):
       continue
 
     token = dict(key=token_key)
+    token['variants'] = []
 
     # If 'variants' attribute is set for the <token>, get the list of Variant
     # objects from from the |variants_dict|. Else, extract the <variant>
@@ -461,7 +491,7 @@ def _ExtractTokens(histogram, variants_dict):
       variants_name = token_node.getAttribute('variants')
       variant_list = variants_dict.get(variants_name)
       if variant_list:
-        token['variants'] = variant_list
+        token['variants'] = variant_list[:]
       else:
         logging.error(
             "The variants attribute %s of token key %s of histogram %s does "
@@ -469,8 +499,8 @@ def _ExtractTokens(histogram, variants_dict):
             (variants_name, token_key, histogram_name))
         token['variants'] = []
         have_error = True
-    else:
-      token['variants'] = _ExtractVariantNodes(token_node)
+    # Inline and out-of-line variants can be combined.
+    token['variants'].extend(_ExtractVariantNodes(token_node))
 
     tokens.append(token)
 
@@ -553,6 +583,11 @@ def _ExtractHistogramsFromXmlTree(tree, enums):
     if owners:
       histogram_entry['owners'] = owners
 
+    # Find <component> tag.
+    components = _ExtractComponents(histogram)
+    if components:
+      histogram_entry['components'] = components
+
     # Find <summary> tag.
     summary_nodes = list(IterElementsWithTag(histogram, 'summary'))
 
@@ -593,11 +628,6 @@ def _ExtractHistogramsFromXmlTree(tree, enums):
     # Handle units.
     if histogram.hasAttribute('units'):
       histogram_entry['units'] = histogram.getAttribute('units')
-
-    # Find <details> tag.
-    for node in IterElementsWithTag(histogram, 'details'):
-      histogram_entry['details'] = _GetTextFromChildNodes(node)
-      break
 
     # Handle enum types.
     if histogram.hasAttribute('enum'):
@@ -791,6 +821,8 @@ def _UpdateHistogramsWithSuffixes(tree, histograms):
           # group itself was obsolete as well.
           obsolete_reason = _GetObsoleteReason(suffix)
           if not obsolete_reason:
+            obsolete_reason = _GetObsoleteReason(affected_histogram)
+          if not obsolete_reason:
             obsolete_reason = group_obsolete_reason
 
           # If the suffix has an obsolete tag, all histograms it generates
@@ -976,9 +1008,9 @@ def ExtractHistogramsFromDom(tree):
   enums, enum_errors = ExtractEnumsFromXmlTree(enums_tree)
   histograms, histogram_errors = _ExtractHistogramsFromXmlTree(
       histograms_tree, enums)
+  histograms, update_token_errors = _UpdateHistogramsWithTokens(histograms)
   update_suffix_errors = _UpdateHistogramsWithSuffixes(histogram_suffixes_tree,
                                                        histograms)
-  histograms, update_token_errors = _UpdateHistogramsWithTokens(histograms)
 
   return histograms, (enum_errors or histogram_errors or update_suffix_errors
                       or update_token_errors)
@@ -1007,3 +1039,8 @@ def ExtractHistograms(filename):
 
 def ExtractNames(histograms):
   return sorted(histograms.keys())
+
+
+def ExtractObsoleteNames(histograms):
+  return sorted(
+      filter(lambda name: histograms[name].get("obsolete"), histograms.keys()))

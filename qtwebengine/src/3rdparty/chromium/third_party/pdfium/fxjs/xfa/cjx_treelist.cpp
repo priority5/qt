@@ -11,6 +11,7 @@
 #include "fxjs/js_resources.h"
 #include "fxjs/xfa/cfxjse_engine.h"
 #include "fxjs/xfa/cfxjse_value.h"
+#include "v8/include/v8-object.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
 #include "xfa/fxfa/parser/cxfa_node.h"
 #include "xfa/fxfa/parser/cxfa_treelist.h"
@@ -43,9 +44,6 @@ CJS_Result CJX_TreeList::namedItem(
   if (!pNode)
     return CJS_Result::Success();
 
-  CFXJSE_Value* value =
-      GetDocument()->GetScriptContext()->GetOrCreateJSBindingFromMap(pNode);
-
   return CJS_Result::Success(
-      value->DirectGetValue().Get(runtime->GetIsolate()));
+      GetDocument()->GetScriptContext()->GetOrCreateJSBindingFromMap(pNode));
 }

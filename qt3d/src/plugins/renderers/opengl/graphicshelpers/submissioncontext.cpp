@@ -1,44 +1,9 @@
-/****************************************************************************
-**
-** Copyright (C) 2017 Klaralvdalens Datakonsult AB (KDAB).
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the Qt3D module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2017 Klaralvdalens Datakonsult AB (KDAB).
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "submissioncontext_p.h"
 
+#include <Qt3DCore/private/qbuffer_p.h>
 #include <Qt3DRender/qgraphicsapifilter.h>
 #include <Qt3DRender/qparameter.h>
 #include <Qt3DRender/qcullface.h>
@@ -54,7 +19,6 @@
 #include <Qt3DRender/private/buffermanager_p.h>
 #include <Qt3DRender/private/managers_p.h>
 #include <Qt3DRender/private/attachmentpack_p.h>
-#include <Qt3DRender/private/qbuffer_p.h>
 #include <Qt3DRender/private/stringtoint_p.h>
 #include <gltexture_p.h>
 #include <rendercommand_p.h>
@@ -66,7 +30,7 @@
 #include <openglvertexarrayobject_p.h>
 #include <QOpenGLShaderProgram>
 
-#if !defined(QT_OPENGL_ES_2)
+#if !QT_CONFIG(opengles2)
 #include <QOpenGLFunctions_2_0>
 #include <QOpenGLFunctions_3_2_Core>
 #include <QOpenGLFunctions_3_3_Core>
@@ -83,7 +47,13 @@
 #include <QSurface>
 #include <QWindow>
 #include <QOpenGLTexture>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#ifdef QT_OPENGL_LIB
+#include <QtOpenGL/QOpenGLDebugLogger>
+#endif
+#else
 #include <QOpenGLDebugLogger>
+#endif
 
 QT_BEGIN_NAMESPACE
 
@@ -94,6 +64,8 @@ QT_BEGIN_NAMESPACE
 #ifndef GL_DRAW_FRAMEBUFFER
 #define GL_DRAW_FRAMEBUFFER 0x8CA9
 #endif
+
+using namespace Qt3DCore;
 
 namespace Qt3DRender {
 namespace Render {
@@ -472,9 +444,7 @@ bool SubmissionContext::beginDrawing(QSurface *surface)
     initializeHelpers(m_surface);
 
     // need to reset these values every frame, may get overwritten elsewhere
-    m_gl->functions()->glClearColor(m_currClearColorValue.redF(), m_currClearColorValue.greenF(), m_currClearColorValue.blueF(), m_currClearColorValue.alphaF());
-    m_gl->functions()->glClearDepthf(m_currClearDepthValue);
-    m_gl->functions()->glClearStencil(m_currClearStencilValue);
+    resetState();
 
     if (m_activeShader) {
         m_activeShader = nullptr;
@@ -648,7 +618,7 @@ QImage SubmissionContext::readFramebuffer(const QRect &rect)
     case QAbstractTexture::RGBA8_UNorm:
     case QAbstractTexture::RGBA8U:
     case QAbstractTexture::SRGB8_Alpha8:
-#ifdef QT_OPENGL_ES_2
+#if QT_CONFIG(opengles2)
         format = GL_RGBA;
         imageFormat = QImage::Format_RGBA8888_Premultiplied;
 #else
@@ -664,7 +634,7 @@ QImage SubmissionContext::readFramebuffer(const QRect &rect)
     case QAbstractTexture::RGBFormat:
     case QAbstractTexture::RGB8U:
     case QAbstractTexture::RGB8_UNorm:
-#ifdef QT_OPENGL_ES_2
+#if QT_CONFIG(opengles2)
         format = GL_RGBA;
         imageFormat = QImage::Format_RGBX8888;
 #else
@@ -676,7 +646,7 @@ QImage SubmissionContext::readFramebuffer(const QRect &rect)
         bytes = area * 4;
         stride = rect.width() * 4;
         break;
-#ifndef QT_OPENGL_ES_2
+#if !QT_CONFIG(opengles2)
     case QAbstractTexture::RG11B10F:
         bytes = area * 4;
         format = GL_RGB;
@@ -802,10 +772,12 @@ void SubmissionContext::releaseOpenGL()
     m_renderBufferHash.clear();
 
     // Stop and destroy the OpenGL logger
+#ifdef QT_OPENGL_LIB
     if (m_debugLogger) {
         m_debugLogger->stopLogging();
         m_debugLogger.reset(nullptr);
     }
+#endif
 }
 
 // The OpenGLContext is not current on any surface at this point
@@ -876,13 +848,13 @@ SubmissionContext::RenderTargetInfo SubmissionContext::bindFrameBufferAttachment
 
 void SubmissionContext::activateDrawBuffers(const AttachmentPack &attachments)
 {
-    const QVector<int> activeDrawBuffers = attachments.getGlDrawBuffers();
+    const std::vector<int> &activeDrawBuffers = attachments.getGlDrawBuffers();
 
     if (m_glHelper->checkFrameBufferComplete()) {
         if (activeDrawBuffers.size() > 1) {// We need MRT
             if (m_glHelper->supportsFeature(GraphicsHelperInterface::MRT)) {
                 // Set up MRT, glDrawBuffers...
-                m_glHelper->drawBuffers(activeDrawBuffers.size(), activeDrawBuffers.data());
+                m_glHelper->drawBuffers(GLsizei(activeDrawBuffers.size()), activeDrawBuffers.data());
             }
         }
     } else {
@@ -1029,6 +1001,34 @@ void SubmissionContext::applyState(const StateVariant &stateVariant)
     }
 }
 
+void SubmissionContext::resetState()
+{
+    QOpenGLFunctions *f = m_gl->functions();
+    f->glActiveTexture(GL_TEXTURE0);
+    f->glBindTexture(GL_TEXTURE_2D, 0);
+
+    f->glDisable(GL_SCISSOR_TEST);
+
+    f->glColorMask(true, true, true, true);
+    f->glClearColor(m_currClearColorValue.redF(), m_currClearColorValue.greenF(), m_currClearColorValue.blueF(), m_currClearColorValue.alphaF());
+
+    f->glEnable(GL_DEPTH_TEST);
+    f->glDepthMask(true);
+    f->glDepthFunc(GL_LESS);
+    f->glClearDepthf(m_currClearDepthValue);
+
+    f->glDisable(GL_STENCIL_TEST);
+    f->glStencilMask(0xff);
+    f->glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    f->glStencilFunc(GL_ALWAYS, 0, 0xff);
+    f->glClearStencil(m_currClearStencilValue);
+
+    f->glDisable(GL_BLEND);
+    f->glBlendFunc(GL_ONE, GL_ZERO);
+
+    f->glUseProgram(0);
+}
+
 void SubmissionContext::resetMasked(qint64 maskOfStatesToReset)
 {
     // TO DO -> Call gcHelper methods instead of raw GL
@@ -1092,7 +1092,7 @@ void SubmissionContext::resetMasked(qint64 maskOfStatesToReset)
     if (maskOfStatesToReset & LineWidthMask)
         funcs->glLineWidth(1.0f);
 
-#ifndef QT_OPENGL_ES_2
+#if !QT_CONFIG(opengles2)
     if (maskOfStatesToReset & RasterModeMask)
         m_glHelper->rasterMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
@@ -1118,7 +1118,7 @@ void SubmissionContext::applyStateSet(RenderStateSet *ss)
 
     // Apply states that weren't in the previous state or that have
     // different values
-    const QVector<StateVariant> statesToSet = ss->states();
+    const std::vector<StateVariant> statesToSet = ss->states();
     for (const StateVariant &ds : statesToSet) {
         if (previousStates && previousStates->contains(ds))
             continue;
@@ -1201,7 +1201,7 @@ bool SubmissionContext::setParameters(ShaderParameterPack &parameterPack, GLShad
 
     // Fill Texture Uniform Value with proper texture units
     // so that they can be applied as regular uniforms in a second step
-    for (int i = 0; i < parameterPack.textures().size(); ++i) {
+    for (size_t i = 0; i < parameterPack.textures().size(); ++i) {
         const ShaderParameterPack::NamedResource &namedTex = parameterPack.textures().at(i);
         // Given a Texture QNodeId, we retrieve the associated shared GLTexture
         if (uniformValues.contains(namedTex.glslNameId)) {
@@ -1228,7 +1228,7 @@ bool SubmissionContext::setParameters(ShaderParameterPack &parameterPack, GLShad
 
     // Fill Image Uniform Value with proper image units
     // so that they can be applied as regular uniforms in a second step
-    for (int i = 0; i < parameterPack.images().size(); ++i) {
+    for (size_t i = 0; i < parameterPack.images().size(); ++i) {
         const ShaderParameterPack::NamedResource &namedTex = parameterPack.images().at(i);
         // Given a Texture QNodeId, we retrieve the associated shared GLTexture
         if (uniformValues.contains(namedTex.glslNameId)) {
@@ -1260,7 +1260,7 @@ bool SubmissionContext::setParameters(ShaderParameterPack &parameterPack, GLShad
 
     // Bind Shader Storage block to SSBO and update SSBO
     const std::vector<BlockToSSBO> &blockToSSBOs = parameterPack.shaderStorageBuffers();
-    for (const BlockToSSBO b : blockToSSBOs) {
+    for (const BlockToSSBO &b : blockToSSBOs) {
         Buffer *cpuBuffer = m_renderer->nodeManagers()->bufferManager()->lookupResource(b.m_bufferID);
         GLBuffer *ssbo = glBufferForRenderBuffer(cpuBuffer);
         // bindShaderStorageBlock
@@ -1293,7 +1293,7 @@ bool SubmissionContext::setParameters(ShaderParameterPack &parameterPack, GLShad
     // Update uniforms in the Default Uniform Block
     const PackUniformHash& values = parameterPack.uniforms();
     const auto &activeUniformsIndices = parameterPack.submissionUniformIndices();
-    const QVector<ShaderUniform> &shaderUniforms = shader->uniforms();
+    const std::vector<ShaderUniform> &shaderUniforms = shader->uniforms();
 
     for (const int shaderUniformIndex : activeUniformsIndices) {
         const ShaderUniform &uniform = shaderUniforms[shaderUniformIndex];
@@ -1484,7 +1484,7 @@ void SubmissionContext::uploadDataToGLBuffer(Buffer *buffer, GLBuffer *b, bool r
     // * partial buffer updates where received
 
     // TO DO: Handle usage pattern
-    QVector<Qt3DRender::QBufferUpdate> updates = std::move(buffer->pendingBufferUpdates());
+    std::vector<Qt3DCore::QBufferUpdate> updates = Qt3DCore::moveAndClear(buffer->pendingBufferUpdates());
     for (auto it = updates.begin(); it != updates.end(); ++it) {
         auto update = it;
         // We have a partial update

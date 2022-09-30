@@ -28,8 +28,9 @@ FetchParameters ScriptFetchOptions::CreateFetchParameters(
   resource_loader_options.initiator_info.name = "script";
   resource_loader_options.reject_coep_unsafe_none = reject_coep_unsafe_none_;
   FetchParameters params(std::move(resource_request), resource_loader_options);
-  params.SetRequestContext(mojom::RequestContextType::SCRIPT);
+  params.SetRequestContext(mojom::blink::RequestContextType::SCRIPT);
   params.SetRequestDestination(network::mojom::RequestDestination::kScript);
+  params.SetRenderBlockingBehavior(render_blocking_behavior_);
 
   // Step 1. ... and CORS setting. [spec text]
   if (cross_origin != kCrossOriginAttributeNotSet)
@@ -54,10 +55,9 @@ FetchParameters ScriptFetchOptions::CreateFetchParameters(
   // its parser metadata to options's parser metadata, [spec text]
   params.SetParserDisposition(ParserState());
 
-  // Priority Hints is currently non-standard, but we can assume the following
-  // (see https://crbug.com/821464):
-  // its importance to options's importance, [spec text]
-  params.MutableResourceRequest().SetFetchImportanceMode(importance_);
+  // https://wicg.github.io/priority-hints/#script
+  // set request’s priority to option’s fetchpriority
+  params.MutableResourceRequest().SetFetchPriorityHint(fetch_priority_hint_);
 
   // its referrer policy to options's referrer policy. [spec text]
   params.MutableResourceRequest().SetReferrerPolicy(referrer_policy_);

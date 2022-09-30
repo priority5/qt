@@ -1,37 +1,12 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "mockcompositor.h"
 
 #include <qwayland-server-wp-primary-selection-unstable-v1.h>
 
+#include <QtOpenGL/QOpenGLWindow>
 #include <QtGui/QRasterWindow>
-#include <QtGui/QOpenGLWindow>
 #include <QtGui/QClipboard>
 #include <QtCore/private/qcore_unix_p.h>
 
@@ -140,7 +115,7 @@ public:
 
     PrimarySelectionDeviceManagerV1 *m_manager = nullptr;
     Seat *m_seat = nullptr;
-    QVector<PrimarySelectionOfferV1 *> m_sentSelectionOffers;
+    QList<PrimarySelectionOfferV1 *> m_sentSelectionOffers;
     PrimarySelectionSourceV1 *m_selectionSource = nullptr;
     uint m_serial = 0;
 
@@ -194,7 +169,7 @@ public:
 
     int m_version = 1; // TODO: Remove on libwayland upgrade
     QMap<Seat *, PrimarySelectionDeviceV1 *> m_devices;
-    QVector<PrimarySelectionSourceV1 *> m_sources;
+    QList<PrimarySelectionSourceV1 *> m_sources;
 protected:
     void zwp_primary_selection_device_manager_v1_destroy(Resource *resource) override
     {
@@ -268,9 +243,6 @@ private slots:
 void tst_primaryselectionv1::initTestCase()
 {
     QCOMPOSITOR_TRY_VERIFY(pointer());
-    QCOMPOSITOR_TRY_VERIFY(!pointer()->resourceMap().empty());
-    QCOMPOSITOR_TRY_COMPARE(pointer()->resourceMap().first()->version(), 5);
-
     QCOMPOSITOR_TRY_VERIFY(keyboard());
 }
 
@@ -459,7 +431,7 @@ void tst_primaryselectionv1::copy()
     window.show();
 
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
-    QVector<uint> mouseSerials;
+    QList<uint> mouseSerials;
     exec([&] {
         auto *surface = xdgSurface()->m_surface;
         keyboard()->sendEnter(surface); // Need to set keyboard focus according to protocol

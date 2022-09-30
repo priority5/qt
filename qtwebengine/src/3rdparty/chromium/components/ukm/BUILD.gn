@@ -20,6 +20,8 @@ component("ukm_recorder") {
     "ukm_entry_filter.h",
     "ukm_recorder_impl.cc",
     "ukm_recorder_impl.h",
+    "ukm_recorder_observer.cc",
+    "ukm_recorder_observer.h",
   ]
 
   deps = [
@@ -70,6 +72,9 @@ static_library("ukm") {
     "//components/variations",
     "//url",
   ]
+  if (is_ios) {
+    deps += [ "//components/ukm/ios:ukm_reporting_ios_util" ]
+  }
 }
 
 # Helper library for observing signals that we need to clear any local data.
@@ -84,7 +89,8 @@ static_library("observers") {
   deps = [
     "//base",
     "//components/history/core/browser",
-    "//components/sync",
+    "//components/sync/base",
+    "//components/sync/driver",
     "//google_apis",
   ]
 

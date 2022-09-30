@@ -8,22 +8,19 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/threading/thread_checker.h"
-#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
 #include "cc/paint/paint_image.h"
-#include "components/viz/common/gpu/raster_context_provider.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "media/base/media_export.h"
 #include "media/base/timestamp_constants.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_transformation.h"
 #include "media/renderers/video_frame_yuv_converter.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace gfx {
 class RectF;
@@ -42,11 +39,25 @@ class RasterContextProvider;
 }
 
 namespace media {
+class VideoTextureBacking;
 
 // Handles rendering of VideoFrames to PaintCanvases.
 class MEDIA_EXPORT PaintCanvasVideoRenderer {
  public:
+  // Specifies the chroma upsampling filter used for pixel formats with chroma
+  // subsampling (YUV 4:2:0 and YUV 4:2:2).
+  //
+  // NOTE: Keep the numeric values in sync with libyuv::FilterMode.
+  enum FilterMode {
+    kFilterNone = 0,      // Nearest neighbor.
+    kFilterBilinear = 2,  // Bilinear interpolation.
+  };
+
   PaintCanvasVideoRenderer();
+
+  PaintCanvasVideoRenderer(const PaintCanvasVideoRenderer&) = delete;
+  PaintCanvasVideoRenderer& operator=(const PaintCanvasVideoRenderer&) = delete;
+
   ~PaintCanvasVideoRenderer();
 
   // Paints |video_frame| translated and scaled to |dest_rect| on |canvas|.
@@ -77,7 +88,9 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
   // should point into a buffer large enough to hold as many 32 bit RGBA pixels
   // as are in the visible_rect() area of the frame. |premultiply_alpha|
   // indicates whether the R, G, B samples in |rgb_pixels| should be multiplied
-  // by alpha.
+  // by alpha. |filter| specifies the chroma upsampling filter used for pixel
+  // formats with chroma subsampling. If chroma planes in the pixel format are
+  // not subsampled, |filter| is ignored.
   //
   // NOTE: If |video_frame| doesn't have an alpha plane, all the A samples in
   // |rgb_pixels| will be 255 (equivalent to an alpha of 1.0) and therefore the
@@ -86,23 +99,8 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
   static void ConvertVideoFrameToRGBPixels(const media::VideoFrame* video_frame,
                                            void* rgb_pixels,
                                            size_t row_bytes,
-                                           bool premultiply_alpha = true);
-
-  // Copy the visible rect size contents of texture of |video_frame| to
-  // texture |texture|. |level|, |internal_format|, |type| specify target
-  // texture |texture|. The format of |video_frame| must be
-  // VideoFrame::NATIVE_TEXTURE.
-  static void CopyVideoFrameSingleTextureToGLTexture(
-      gpu::gles2::GLES2Interface* gl,
-      VideoFrame* video_frame,
-      unsigned int target,
-      unsigned int texture,
-      unsigned int internal_format,
-      unsigned int format,
-      unsigned int type,
-      int level,
-      bool premultiply_alpha,
-      bool flip_y);
+                                           bool premultiply_alpha = true,
+                                           FilterMode filter = kFilterNone);
 
   // Copy the contents of |video_frame| to |texture| of |destination_gl|.
   //
@@ -120,7 +118,8 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
       bool premultiply_alpha,
       bool flip_y);
 
-  bool PrepareVideoFrameForWebGL(
+  // TODO(776222): Remove this function from PaintCanvasVideoRenderer.
+  static bool PrepareVideoFrameForWebGL(
       viz::RasterContextProvider* raster_context_provider,
       gpu::gles2::GLES2Interface* gl,
       scoped_refptr<VideoFrame> video_frame,
@@ -137,7 +136,7 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
   bool CopyVideoFrameYUVDataToGLTexture(
       viz::RasterContextProvider* raster_context_provider,
       gpu::gles2::GLES2Interface* destination_gl,
-      const VideoFrame& video_frame,
+      scoped_refptr<VideoFrame> video_frame,
       unsigned int target,
       unsigned int texture,
       unsigned int internal_format,
@@ -212,22 +211,15 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
     // to the visible size of the VideoFrame. Its contents are generated lazily.
     cc::PaintImage paint_image;
 
-    // The context provider used to generate |source_mailbox| and
-    // |source_texture|. This is only set if the VideoFrame was texture-backed.
-    scoped_refptr<viz::RasterContextProvider> raster_context_provider;
+    // The backing for the source texture. This is also responsible for managing
+    // the lifetime of the texture.
+    sk_sp<VideoTextureBacking> texture_backing;
 
-    // The mailbox for the source texture. This can be either the source
-    // VideoFrame's texture (if |wraps_video_frame_texture| is true) or a newly
-    // allocated shared image (if |wraps_video_frame_texture| is false) if a
-    // copy or conversion was necessary.
-    // This is only set if the VideoFrame was texture-backed.
-    gpu::Mailbox source_mailbox;
-
-    // The texture ID created when importing |source_mailbox|.
+    // The GL texture ID used in non-OOP code path.
     // This is only set if the VideoFrame was texture-backed.
     uint32_t source_texture = 0;
 
-    // The allocated size of |source_mailbox|.
+    // The allocated size of VideoFrame texture.
     // This is only set if the VideoFrame was texture-backed.
     gfx::Size coded_size;
 
@@ -236,12 +228,8 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
     // This is only set if the VideoFrame was texture-backed.
     gfx::Rect visible_rect;
 
-    // Whether |source_mailbox| directly points to a texture of the VideoFrame
-    // (if true), or to an allocated shared image (if false).
-    bool wraps_video_frame_texture = false;
-
-    // Whether the texture pointed by |paint_image| is owned by skia or not.
-    bool texture_ownership_in_skia = false;
+    // True if the underlying resource was created with a top left origin.
+    bool texture_origin_is_top_left = true;
 
     // Used to allow recycling of the previous shared image. This requires that
     // no external users have access to this resource via SkImage. Returns true
@@ -270,7 +258,9 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
       unsigned int type,
       bool flip_y);
 
-  base::Optional<Cache> cache_;
+  bool CacheBackingWrapsTexture() const;
+
+  absl::optional<Cache> cache_;
 
   // If |cache_| is not used for a while, it's deleted to save memory.
   base::DelayTimer cache_deleting_timer_;
@@ -303,8 +293,6 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
     gpu::SyncToken sync_token;
   };
   YUVTextureCache yuv_cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(PaintCanvasVideoRenderer);
 };
 
 }  // namespace media

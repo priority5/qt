@@ -1,31 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2018 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWaylandCompositor module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2018 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #include "qwaylandxdgshell.h"
 #include "qwaylandxdgshell_p.h"
@@ -134,8 +108,8 @@ void QWaylandXdgShellPrivate::xdg_wm_base_pong(Resource *resource, uint32_t seri
 
 /*!
  * \qmltype XdgShell
- * \inqmlmodule QtWayland.Compositor
  * \instantiates QWaylandXdgShell
+ * \inqmlmodule QtWayland.Compositor.XdgShell
  * \since 5.12
  * \brief Provides an extension for desktop-style user interfaces.
  *
@@ -149,8 +123,8 @@ void QWaylandXdgShellPrivate::xdg_wm_base_pong(Resource *resource, uint32_t seri
  * an instance of the XdgShell component and add it to the list of extensions
  * supported by the compositor:
  *
- * \qml \QtMinorVersion
- * import QtWayland.Compositor 1.\1
+ * \qml
+ * import QtWayland.Compositor.XdgShell
  *
  * WaylandCompositor {
  *     XdgShell {
@@ -455,8 +429,8 @@ void QWaylandXdgSurfacePrivate::xdg_surface_set_window_geometry(QtWaylandServer:
 
 /*!
  * \qmltype XdgSurface
- * \inqmlmodule QtWayland.Compositor
  * \instantiates QWaylandXdgSurface
+ * \inqmlmodule QtWayland.Compositor.XdgShell
  * \since 5.12
  * \brief XdgSurface provides desktop-style compositor-specific features to an xdg surface.
  *
@@ -705,8 +679,8 @@ QWaylandQuickShellIntegration *QWaylandXdgSurface::createIntegration(QWaylandQui
 
 /*!
  * \qmltype XdgToplevel
- * \inqmlmodule QtWayland.Compositor
  * \instantiates QWaylandXdgToplevel
+ * \inqmlmodule QtWayland.Compositor.XdgShell
  * \since 5.12
  * \brief XdgToplevel represents the toplevel window specific parts of an xdg surface.
  *
@@ -736,7 +710,7 @@ QWaylandQuickShellIntegration *QWaylandXdgSurface::createIntegration(QWaylandQui
 QWaylandXdgToplevel::QWaylandXdgToplevel(QWaylandXdgSurface *xdgSurface, QWaylandResource &resource)
     : QObject(*new QWaylandXdgToplevelPrivate(xdgSurface, resource))
 {
-    QVector<QWaylandXdgToplevel::State> states;
+    QList<QWaylandXdgToplevel::State> states;
     sendConfigure({0, 0}, states);
 }
 
@@ -866,7 +840,7 @@ QSize QWaylandXdgToplevel::minSize() const
  *
  * This property holds the last states the client acknowledged for this QWaylandToplevel.
  */
-QVector<QWaylandXdgToplevel::State> QWaylandXdgToplevel::states() const
+QList<QWaylandXdgToplevel::State> QWaylandXdgToplevel::states() const
 {
     Q_D(const QWaylandXdgToplevel);
     return d->m_lastAckedConfigure.states;
@@ -1014,7 +988,7 @@ QSize QWaylandXdgToplevel::sizeForResize(const QSizeF &size, const QPointF &delt
  * of the surface. A size of zero means the client is free to decide the size.
  * Known \a states are enumerated in QWaylandXdgToplevel::State.
  */
-uint QWaylandXdgToplevel::sendConfigure(const QSize &size, const QVector<QWaylandXdgToplevel::State> &states)
+uint QWaylandXdgToplevel::sendConfigure(const QSize &size, const QList<QWaylandXdgToplevel::State> &states)
 {
     if (!size.isValid()) {
         qWarning() << "Can't configure xdg_toplevel with an invalid size" << size;
@@ -1037,9 +1011,9 @@ uint QWaylandXdgToplevel::sendConfigure(const QSize &size, const QVector<QWaylan
  * A size of zero means the client is free to decide the size.
  * Known \a states are enumerated in XdgToplevel::State.
  */
-uint QWaylandXdgToplevel::sendConfigure(const QSize &size, const QVector<int> &states)
+uint QWaylandXdgToplevel::sendConfigure(const QSize &size, const QList<int> &states)
 {
-    QVector<State> s;
+    QList<State> s;
     for (auto state : states)
         s << State(state);
     return sendConfigure(size, s);
@@ -1308,7 +1282,7 @@ void QWaylandXdgToplevelPrivate::handleAckConfigure(uint serial)
             break;
     }
 
-    QVector<uint> changedStates;
+    QList<uint> changedStates;
     std::set_symmetric_difference(
                 m_lastAckedConfigure.states.begin(), m_lastAckedConfigure.states.end(),
                 config.states.begin(), config.states.end(),
@@ -1543,8 +1517,8 @@ void QWaylandXdgToplevelPrivate::xdg_toplevel_set_minimized(QtWaylandServer::xdg
 
 /*!
  * \qmltype XdgPopup
- * \inqmlmodule QtWayland.Compositor
  * \instantiates QWaylandXdgPopup
+ * \inqmlmodule QtWayland.Compositor.XdgShell
  * \since 5.12
  * \brief XdgPopup represents the popup specific parts of and xdg surface.
  *
@@ -2130,3 +2104,5 @@ Qt::Edges QWaylandXdgPositioner::convertToEdges(QWaylandXdgPositioner::gravity g
 
 
 QT_END_NAMESPACE
+
+#include "moc_qwaylandxdgshell.cpp"

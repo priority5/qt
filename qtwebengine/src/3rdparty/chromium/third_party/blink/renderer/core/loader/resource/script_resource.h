@@ -26,8 +26,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_RESOURCE_SCRIPT_RESOURCE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_RESOURCE_SCRIPT_RESOURCE_H_
 
-#include <memory>
-
+#include "third_party/blink/public/mojom/script/script_type.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/script/script_type.mojom-shared.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_cache_consumer.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_streamer.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/loader/resource/text_resource.h"
@@ -42,10 +43,12 @@ namespace blink {
 class FetchParameters;
 class KURL;
 class ResourceFetcher;
+class ScriptCachedMetadataHandler;
 class SingleCachedMetadataHandler;
 
 // ScriptResource is a resource representing a JavaScript, either a classic or
-// module script.
+// module script. Based on discussions (crbug.com/1178198) ScriptResources are
+// shared between classic and module scripts.
 //
 // In addition to loading the script, a ScriptResource can optionally stream the
 // script to the JavaScript parser/compiler, using a ScriptStreamer. In this
@@ -67,15 +70,20 @@ class CORE_EXPORT ScriptResource final : public TextResource {
                                StreamingAllowed);
 
   // Public for testing
-  static ScriptResource* CreateForTest(const KURL& url,
-                                       const WTF::TextEncoding& encoding);
+  static ScriptResource* CreateForTest(
+      const KURL& url,
+      const WTF::TextEncoding& encoding,
+      mojom::blink::ScriptType = mojom::blink::ScriptType::kClassic);
 
   ScriptResource(const ResourceRequest&,
                  const ResourceLoaderOptions&,
                  const TextResourceDecoderOptions&,
-                 StreamingAllowed);
+                 StreamingAllowed,
+                 mojom::blink::ScriptType);
   ~ScriptResource() override;
 
+  size_t CodeCacheSize() const override;
+  void ResponseReceived(const ResourceResponse&) override;
   void ResponseBodyReceived(
       ResponseBodyLoaderDrainableInterface& body_loader,
       scoped_refptr<base::SingleThreadTaskRunner> loader_task_runner) override;
@@ -87,13 +95,23 @@ class CORE_EXPORT ScriptResource final : public TextResource {
 
   void SetSerializedCachedMetadata(mojo_base::BigBuffer data) override;
 
+  bool CodeCacheHashRequired() const override;
+
   const ParkableString& SourceText();
+
+  const ParkableString& RawSourceText();
+
+  bool DataHasPrefix(const base::span<const char>& prefix) const;
 
   // Get the resource's current text. This can return partial data, so should
   // not be used outside of the inspector.
   String TextForInspector() const;
 
   SingleCachedMetadataHandler* CacheHandler();
+
+  mojom::blink::ScriptType GetInitialRequestScriptType() const {
+    return initial_request_script_type_;
+  }
 
   // Gets the script streamer from the ScriptResource, clearing the resource's
   // streamer so that it cannot be used twice.
@@ -105,16 +123,26 @@ class CORE_EXPORT ScriptResource final : public TextResource {
 
   // Used in DCHECKs
   bool HasStreamer() { return !!streamer_; }
-  bool HasRunningStreamer() { return streamer_ && !streamer_->IsFinished(); }
+  bool HasRunningStreamer() {
+    return streamer_ && streamer_->IsStreamingStarted() &&
+           !streamer_->IsFinished();
+  }
   bool HasFinishedStreamer() { return streamer_ && streamer_->IsFinished(); }
+
+  // Gets the cache consumer from the ScriptResource, clearing it from the
+  // resource so that it cannot be used twice.
+  //
+  // It's fine to return a non-null ScriptCacheConsumer for one user of
+  // ScriptResource while returning null for others, as the ScriptCacheConsumer
+  // is associated with individual ScriptResource users and not with the
+  // ScriptResource itself.
+  ScriptCacheConsumer* TakeCacheConsumer();
 
   // Visible for tests.
   void SetRevalidatingRequest(const ResourceRequestHead&) override;
 
  protected:
-  CachedMetadataHandler* CreateCachedMetadataHandler(
-      std::unique_ptr<CachedMetadataSender> send_callback) override;
-
+  void DestroyDecodedDataIfPossible() override;
   void DestroyDecodedDataForFailedRevalidation() override;
 
   // ScriptResources are considered finished when either:
@@ -143,23 +171,46 @@ class CORE_EXPORT ScriptResource final : public TextResource {
     kStreamingDisabled,
   };
 
+  // Valid state transitions:
+  //
+  //            kWaitingForCache              DisableOffThreadConsumeCache()
+  //                    |---------------------------.
+  //                    |                           |
+  //                    v                           v
+  //            kRunningOffThread ----------> kOffThreadConsumeCacheDisabled
+  //
+  enum class ConsumeCacheState {
+    // No cached data has been received.
+    kWaitingForCache,
+    // Cache is being consumed off-thread.
+    kRunningOffThread,
+    // Off-thread consume was disabled, either because it wasn't possible,
+    // wasn't allowed, or had completed and the consumer has already been taken.
+    kOffThreadConsumeCacheDisabled,
+  };
+
   class ScriptResourceFactory : public ResourceFactory {
    public:
-    explicit ScriptResourceFactory(StreamingAllowed streaming_allowed)
+    explicit ScriptResourceFactory(
+        StreamingAllowed streaming_allowed,
+        mojom::blink::ScriptType initial_request_script_type)
         : ResourceFactory(ResourceType::kScript,
                           TextResourceDecoderOptions::kPlainTextContent),
-          streaming_allowed_(streaming_allowed) {}
+          streaming_allowed_(streaming_allowed),
+          initial_request_script_type_(initial_request_script_type) {}
 
     Resource* Create(
         const ResourceRequest& request,
         const ResourceLoaderOptions& options,
         const TextResourceDecoderOptions& decoder_options) const override {
       return MakeGarbageCollected<ScriptResource>(
-          request, options, decoder_options, streaming_allowed_);
+          request, options, decoder_options, streaming_allowed_,
+          initial_request_script_type_);
     }
 
    private:
     StreamingAllowed streaming_allowed_;
+    mojom::blink::ScriptType initial_request_script_type_;
   };
 
   bool CanUseCacheValidator() const override;
@@ -171,6 +222,13 @@ class CORE_EXPORT ScriptResource final : public TextResource {
   // Check that invariants for the state hold.
   void CheckStreamingState() const;
 
+  void DisableOffThreadConsumeCache();
+
+  void AdvanceConsumeCacheState(ConsumeCacheState new_state);
+
+  // Check that invariants for the state hold.
+  void CheckConsumeCacheState() const;
+
   void OnDataPipeReadable(MojoResult result,
                           const mojo::HandleSignalsState& state);
 
@@ -180,9 +238,18 @@ class CORE_EXPORT ScriptResource final : public TextResource {
   ScriptStreamer::NotStreamingReason no_streamer_reason_ =
       ScriptStreamer::NotStreamingReason::kInvalid;
   StreamingState streaming_state_ = StreamingState::kWaitingForDataPipe;
+  Member<ScriptCachedMetadataHandler> cached_metadata_handler_;
+  Member<ScriptCacheConsumer> cache_consumer_;
+  ConsumeCacheState consume_cache_state_;
+  const mojom::blink::ScriptType initial_request_script_type_;
 };
 
-DEFINE_RESOURCE_TYPE_CASTS(Script);
+template <>
+struct DowncastTraits<ScriptResource> {
+  static bool AllowFrom(const Resource& resource) {
+    return resource.GetType() == ResourceType::kScript;
+  }
+};
 
 }  // namespace blink
 

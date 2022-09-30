@@ -1,29 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2016 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the documentation of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:FDL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Free Documentation License Usage
-** Alternatively, this file may be used under the terms of the GNU Free
-** Documentation License version 1.3 as published by the Free Software
-** Foundation and appearing in the file included in the packaging of
-** this file. Please review the following information to ensure
-** the GNU Free Documentation License version 1.3 requirements
-** will be met: https://www.gnu.org/licenses/fdl-1.3.html.
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2016 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
     \page moc.html
@@ -149,8 +125,12 @@
     \header \li Option \li Description
 
     \row
-    \li \c{-o<file>}
-    \li Write output to \c <file> rather than to standard output.
+    \li \c {-D<macro>[=<def>]}
+    \li Define macro, with optional definition.
+
+    \row
+    \li \c{-E}
+    \li Preprocess only; do not generate meta-object code.
 
     \row
     \li \c{-f[<file>]}
@@ -161,6 +141,19 @@
     The \c <file> part is optional.
 
     \row
+    \li \c{-Fdir}
+
+    \li \macos. Add the framework directory \c{dir} to the head of
+       the list of directories to be searched for header files. These
+       directories are interleaved with those specified by -I options
+       and are scanned in a left-to-right order (see the manpage for
+       gcc). Normally, use -F /Library/Frameworks/
+
+    \row
+    \li \c{-h}
+    \li Display the usage and the list of options.
+
+    \row
     \li \c -i
     \li Do not generate an \c #include statement in the output.
     This may be used to run the moc on on a C++ file containing one or
@@ -168,29 +161,8 @@
     code in the \c .cpp file.
 
     \row
-    \li \c -nw
-    \li Do not generate any warnings. (Not recommended.)
-
-    \row
-    \li \c {-p<path>}
-    \li Makes the moc prepend \c {<path>/} to the file name in the
-    generated \c #include statement.
-
-    \row
     \li \c {-I<dir>}
     \li Add dir to the include path for header files.
-
-    \row
-    \li \c{-E}
-    \li Preprocess only; do not generate meta-object code.
-
-    \row
-    \li \c {-D<macro>[=<def>]}
-    \li Define macro, with optional definition.
-
-    \row
-    \li \c{-U<macro>}
-    \li Undefine macro.
 
     \row
     \li \c{-M<key=value>}
@@ -202,6 +174,23 @@
         information resolved by the build system.
 
     \row
+    \li \c -nw
+    \li Do not generate any warnings. (Not recommended.)
+
+    \row
+    \li \c{-o<file>}
+    \li Write output to \c <file> rather than to standard output.
+
+    \row
+    \li \c {-p<path>}
+    \li Makes the moc prepend \c {<path>/} to the file name in the
+    generated \c #include statement.
+
+    \row
+    \li \c{-U<macro>}
+    \li Undefine macro.
+
+    \row
     \li \c{@<file>}
     \li Read additional command-line options from \c{<file>}.
     Each line of the file is treated as a single option. Empty lines
@@ -210,21 +199,8 @@
     file).
 
     \row
-    \li \c{-h}
-    \li Display the usage and the list of options.
-
-    \row
     \li \c {-v}
     \li Display \c{moc}'s version number.
-
-    \row
-    \li \c{-Fdir}
-
-    \li \macos. Add the framework directory \c{dir} to the head of
-       the list of directories to be searched for header files. These
-       directories are interleaved with those specified by -I options
-       and are scanned in a left-to-right order (see the manpage for
-       gcc). Normally, use -F /Library/Frameworks/
 
     \endtable
 
@@ -248,6 +224,72 @@
     moc-generated C++ code, or (in the former case) include that
     object file in the link command. If you use \c qmake, try
     rerunning it to update your makefile. This should do the trick.
+
+    \section1 Build Systems
+
+    \section2 Including header moc files
+
+    qmake and CMake behave differently with regards to including header moc
+    files.
+
+    To illustrate this with an example, suppose that you have two headers with
+    corresponding source files: \c a.h, \c a.cpp, \c b.h, and \c b.cpp. Each
+    header has a Q_OBJECT macro:
+
+    \code
+    // a.h
+    class A : public QObject
+    {
+        Q_OBJECT
+
+        public:
+            // ...
+    };
+    \endcode
+
+    \code
+    // a.cpp
+    #include "a.h"
+
+    // ...
+
+    #include "moc_a.cpp"
+    \endcode
+
+    \code
+    // b.h
+    class B : public QObject
+    {
+        Q_OBJECT
+
+        public:
+            // ...
+    };
+    \endcode
+
+    \code
+    // b.cpp
+    #include "b.h"
+
+    // ...
+
+    #include "moc_b.cpp"
+    \endcode
+
+    With qmake, if you don't include the moc-generated file
+    (\c{moc_a.cpp}/\c{moc_b.cpp}), \c a.cpp, \c b.cpp, \c moc_a.cpp, and \c moc_b.cpp
+    will be compiled separately. This can result in slower builds.
+    If you include the moc generated files, only a.cpp and b.cpp will need to
+    be compiled, as the moc generated code is included in those files.
+
+    With CMake, if you don't include the files, an single additional
+    file is generated by moc (let's call it \c cmake.cpp for the sake of the
+    example). \c cmake.cpp would include both \c moc_a.cpp and \c moc_b.cpp.
+    Including the moc-generated file is still allowed with CMake, but it's
+    not necessary.
+
+    For more information on CMake's moc support regarding this topic, see
+    \l {Including header moc files in sources}.
 
     \section1 Limitations
 

@@ -4,11 +4,13 @@
 
 #include "components/js_injection/browser/js_to_browser_messaging.h"
 
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "components/js_injection/browser/web_message.h"
 #include "components/js_injection/browser/web_message_host.h"
 #include "components/js_injection/browser/web_message_host_factory.h"
 #include "components/js_injection/browser/web_message_reply_proxy.h"
+#include "content/public/browser/disallow_activation_reason.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
@@ -37,10 +39,11 @@ std::string GetOriginString(const url::Origin& source_origin) {
 
 class JsToBrowserMessaging::ReplyProxyImpl : public WebMessageReplyProxy {
  public:
-  explicit ReplyProxyImpl(
-      mojo::PendingAssociatedRemote<mojom::BrowserToJsMessaging>
-          java_to_js_messaging)
-      : java_to_js_messaging_(std::move(java_to_js_messaging)) {}
+  ReplyProxyImpl(content::RenderFrameHost* render_frame_host,
+                 mojo::PendingAssociatedRemote<mojom::BrowserToJsMessaging>
+                     java_to_js_messaging)
+      : render_frame_host_(render_frame_host),
+        java_to_js_messaging_(std::move(java_to_js_messaging)) {}
   ReplyProxyImpl(const ReplyProxyImpl&) = delete;
   ReplyProxyImpl& operator=(const ReplyProxyImpl&) = delete;
   ~ReplyProxyImpl() override = default;
@@ -49,8 +52,14 @@ class JsToBrowserMessaging::ReplyProxyImpl : public WebMessageReplyProxy {
   void PostMessage(std::unique_ptr<WebMessage> message) override {
     java_to_js_messaging_->OnPostMessage(message->message);
   }
+  bool IsInBackForwardCache() override {
+    return render_frame_host_->GetLifecycleState() ==
+           content::RenderFrameHost::LifecycleState::kInBackForwardCache;
+  }
+  content::Page& GetPage() override { return render_frame_host_->GetPage(); }
 
  private:
+  raw_ptr<content::RenderFrameHost> render_frame_host_;
   mojo::AssociatedRemote<mojom::BrowserToJsMessaging> java_to_js_messaging_;
 };
 
@@ -67,10 +76,20 @@ JsToBrowserMessaging::JsToBrowserMessaging(
 
 JsToBrowserMessaging::~JsToBrowserMessaging() = default;
 
+void JsToBrowserMessaging::OnBackForwardCacheStateChanged() {
+  if (host_)
+    host_->OnBackForwardCacheStateChanged();
+}
+
 void JsToBrowserMessaging::PostMessage(
-    const base::string16& message,
+    const std::u16string& message,
     std::vector<blink::MessagePortDescriptor> ports) {
   DCHECK(render_frame_host_);
+
+  if (render_frame_host_->IsInactiveAndDisallowActivation(
+          content::DisallowActivationReasonId::kJsInjectionPostMessage)) {
+    return;
+  }
 
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host_);
@@ -119,11 +138,14 @@ void JsToBrowserMessaging::PostMessage(
 void JsToBrowserMessaging::SetBrowserToJsMessaging(
     mojo::PendingAssociatedRemote<mojom::BrowserToJsMessaging>
         java_to_js_messaging) {
+  // TODO(https://crbug.com/1183557): this should really call
+  // IsInactiveAndDisallowReactivation().
+
   // A RenderFrame may inject JsToBrowserMessaging in the JavaScript context
   // more than once because of reusing of RenderFrame.
   host_.reset();
-  reply_proxy_ =
-      std::make_unique<ReplyProxyImpl>(std::move(java_to_js_messaging));
+  reply_proxy_ = std::make_unique<ReplyProxyImpl>(
+      render_frame_host_, std::move(java_to_js_messaging));
 }
 
 }  // namespace js_injection

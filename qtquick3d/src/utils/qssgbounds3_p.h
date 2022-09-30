@@ -1,32 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2008-2012 NVIDIA Corporation.
-** Copyright (C) 2019 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of Qt Quick 3D.
-**
-** $QT_BEGIN_LICENSE:GPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 or (at your option) any later version
-** approved by the KDE Free Qt Foundation. The licenses are as published by
-** the Free Software Foundation and appearing in the file LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2008-2012 NVIDIA Corporation.
+// Copyright (C) 2019 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
 #ifndef QSSGBOUNDS3_H
 #define QSSGBOUNDS3_H
@@ -66,20 +40,19 @@ class Q_QUICK3DUTILS_EXPORT QSSGBounds3
 {
 public:
     /**
-    \brief Default constructor, not performing any initialization for performance reason.
-    \remark Use empty() function below to construct empty bounds.
+    \brief Default constructor, using empty bounds.
     */
-    QSSGBounds3() = default;
+    Q_DECL_CONSTEXPR Q_ALWAYS_INLINE QSSGBounds3();
+
+    /**
+    \brief Construct uninitialized.
+    */
+    Q_ALWAYS_INLINE QSSGBounds3(Qt::Initialization);
 
     /**
     \brief Construct from two bounding points
     */
     Q_DECL_CONSTEXPR Q_ALWAYS_INLINE QSSGBounds3(const QVector3D &minimum, const QVector3D &maximum);
-
-    /**
-    \brief Return empty bounds.
-    */
-    static Q_DECL_CONSTEXPR Q_ALWAYS_INLINE QSSGBounds3 empty();
 
     /**
     \brief returns the AABB containing v0 and v1.
@@ -206,17 +179,18 @@ public:
     QVector3D maximum;
 };
 
-Q_DECL_CONSTEXPR Q_ALWAYS_INLINE QSSGBounds3::QSSGBounds3(const QVector3D &_minimum, const QVector3D &_maximum)
-    : minimum(_minimum), maximum(_maximum)
+Q_DECL_CONSTEXPR Q_ALWAYS_INLINE QSSGBounds3::QSSGBounds3()
+    : minimum(QVector3D(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()))
+    , maximum(-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max())
 {
 }
 
-Q_DECL_CONSTEXPR Q_ALWAYS_INLINE QSSGBounds3 QSSGBounds3::empty()
+Q_ALWAYS_INLINE QSSGBounds3::QSSGBounds3(Qt::Initialization)
+    : minimum(Qt::Uninitialized), maximum(Qt::Uninitialized) { }
+
+Q_DECL_CONSTEXPR Q_ALWAYS_INLINE QSSGBounds3::QSSGBounds3(const QVector3D &_minimum, const QVector3D &_maximum)
+    : minimum(_minimum), maximum(_maximum)
 {
-    return QSSGBounds3(QVector3D(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()),
-                         QVector3D(-std::numeric_limits<float>::max(),
-                                   -std::numeric_limits<float>::max(),
-                                   -std::numeric_limits<float>::max()));
 }
 
 Q_ALWAYS_INLINE QSSGBounds3 QSSGBounds3::centerExtents(const QVector3D &center, const QVector3D &extent)
@@ -226,14 +200,14 @@ Q_ALWAYS_INLINE QSSGBounds3 QSSGBounds3::centerExtents(const QVector3D &center, 
 
 Q_ALWAYS_INLINE void QSSGBounds3::setEmpty()
 {
-    const float maxFloat = std::numeric_limits<float>::max();
+    constexpr float maxFloat = std::numeric_limits<float>::max();
     minimum = QVector3D(maxFloat, maxFloat, maxFloat);
     maximum = QVector3D(-maxFloat, -maxFloat, -maxFloat);
 }
 
 Q_ALWAYS_INLINE void QSSGBounds3::setInfinite()
 {
-    const float maxFloat = std::numeric_limits<float>::max();
+    constexpr float maxFloat = std::numeric_limits<float>::max();
     minimum = QVector3D(-maxFloat, -maxFloat, -maxFloat);
     maximum = QVector3D(maxFloat, maxFloat, maxFloat);
 }

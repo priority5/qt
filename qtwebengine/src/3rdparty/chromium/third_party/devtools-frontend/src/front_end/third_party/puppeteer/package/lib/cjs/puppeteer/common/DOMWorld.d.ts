@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 /// <reference types="node" />
-import { EvaluateFn, EvaluateFnReturnType, EvaluateHandleFn, SerializableOrJSHandle, UnwrapPromiseLike , WrapElementHandle} from './EvalTypes.js';
-import { ExecutionContext } from './ExecutionContext.js';
-import { Frame , FrameManager} from './FrameManager.js';
-import { MouseButton } from './Input.js';
-import { ElementHandle , JSHandle} from './JSHandle.js';
 import { PuppeteerLifeCycleEvent } from './LifecycleWatcher.js';
+import { JSHandle, ElementHandle } from './JSHandle.js';
+import { ExecutionContext } from './ExecutionContext.js';
 import { TimeoutSettings } from './TimeoutSettings.js';
-
+import { MouseButton } from './Input.js';
+import { FrameManager, Frame } from './FrameManager.js';
+import { SerializableOrJSHandle, EvaluateHandleFn, WrapElementHandle, EvaluateFn, EvaluateFnReturnType, UnwrapPromiseLike } from './EvalTypes.js';
+import { CDPSession } from './Connection.js';
 /**
  * @public
  */
@@ -29,12 +29,21 @@ export interface WaitForSelectorOptions {
     visible?: boolean;
     hidden?: boolean;
     timeout?: number;
+    root?: ElementHandle;
+}
+/**
+ * @internal
+ */
+export interface PageBinding {
+    name: string;
+    pptrFunction: Function;
 }
 /**
  * @internal
  */
 export declare class DOMWorld {
     private _frameManager;
+    private _client;
     private _frame;
     private _timeoutSettings;
     private _documentPromise?;
@@ -42,23 +51,30 @@ export declare class DOMWorld {
     private _contextResolveCallback?;
     private _detached;
     /**
-     * internal
+     * @internal
      */
     _waitTasks: Set<WaitTask>;
-    constructor(frameManager: FrameManager, frame: Frame, timeoutSettings: TimeoutSettings);
+    /**
+     * @internal
+     * Contains mapping from functions that should be bound to Puppeteer functions.
+     */
+    _boundFunctions: Map<string, Function>;
+    private _ctxBindings;
+    private static bindingIdentifier;
+    constructor(client: CDPSession, frameManager: FrameManager, frame: Frame, timeoutSettings: TimeoutSettings);
     frame(): Frame;
-    _setContext(context?: ExecutionContext): void;
+    _setContext(context?: ExecutionContext): Promise<void>;
     _hasContext(): boolean;
     _detach(): void;
     executionContext(): Promise<ExecutionContext>;
     evaluateHandle<HandlerType extends JSHandle = JSHandle>(pageFunction: EvaluateHandleFn, ...args: SerializableOrJSHandle[]): Promise<HandlerType>;
     evaluate<T extends EvaluateFn>(pageFunction: T, ...args: SerializableOrJSHandle[]): Promise<UnwrapPromiseLike<EvaluateFnReturnType<T>>>;
-    $(selector: string): Promise<ElementHandle | null>;
+    $<T extends Element = Element>(selector: string): Promise<ElementHandle<T> | null>;
     _document(): Promise<ElementHandle>;
     $x(expression: string): Promise<ElementHandle[]>;
     $eval<ReturnType>(selector: string, pageFunction: (element: Element, ...args: unknown[]) => ReturnType | Promise<ReturnType>, ...args: SerializableOrJSHandle[]): Promise<WrapElementHandle<ReturnType>>;
     $$eval<ReturnType>(selector: string, pageFunction: (elements: Element[], ...args: unknown[]) => ReturnType | Promise<ReturnType>, ...args: SerializableOrJSHandle[]): Promise<WrapElementHandle<ReturnType>>;
-    $$(selector: string): Promise<ElementHandle[]>;
+    $$<T extends Element = Element>(selector: string): Promise<Array<ElementHandle<T>>>;
     content(): Promise<string>;
     setContent(html: string, options?: {
         timeout?: number;
@@ -77,6 +93,7 @@ export declare class DOMWorld {
         url?: string;
         path?: string;
         content?: string;
+        id?: string;
         type?: string;
     }): Promise<ElementHandle>;
     /**
@@ -107,30 +124,58 @@ export declare class DOMWorld {
         delay: number;
     }): Promise<void>;
     waitForSelector(selector: string, options: WaitForSelectorOptions): Promise<ElementHandle | null>;
+    private _settingUpBinding;
+    /**
+     * @internal
+     */
+    addBindingToContext(context: ExecutionContext, name: string): Promise<void>;
+    private _onBindingCalled;
+    /**
+     * @internal
+     */
+    waitForSelectorInPage(queryOne: Function, selector: string, options: WaitForSelectorOptions, binding?: PageBinding): Promise<ElementHandle | null>;
     waitForXPath(xpath: string, options: WaitForSelectorOptions): Promise<ElementHandle | null>;
     waitForFunction(pageFunction: Function | string, options?: {
         polling?: string | number;
         timeout?: number;
     }, ...args: SerializableOrJSHandle[]): Promise<JSHandle>;
     title(): Promise<string>;
-    private _waitForSelectorOrXPath;
 }
-declare class WaitTask {
+/**
+ * @internal
+ */
+export interface WaitTaskOptions {
+    domWorld: DOMWorld;
+    predicateBody: Function | string;
+    predicateAcceptsContextElement: boolean;
+    title: string;
+    polling: string | number;
+    timeout: number;
+    binding?: PageBinding;
+    args: SerializableOrJSHandle[];
+    root?: ElementHandle;
+}
+/**
+ * @internal
+ */
+export declare class WaitTask {
     _domWorld: DOMWorld;
     _polling: string | number;
     _timeout: number;
     _predicateBody: string;
+    _predicateAcceptsContextElement: boolean;
     _args: SerializableOrJSHandle[];
+    _binding: PageBinding;
     _runCount: number;
     promise: Promise<JSHandle>;
     _resolve: (x: JSHandle) => void;
     _reject: (x: Error) => void;
     _timeoutTimer?: NodeJS.Timeout;
     _terminated: boolean;
-    constructor(domWorld: DOMWorld, predicateBody: Function | string, predicateQueryHandlerBody: Function | string | undefined, title: string, polling: string | number, timeout: number, ...args: SerializableOrJSHandle[]);
+    _root: ElementHandle;
+    constructor(options: WaitTaskOptions);
     terminate(error: Error): void;
     rerun(): Promise<void>;
     _cleanup(): void;
 }
-export {};
 //# sourceMappingURL=DOMWorld.d.ts.map

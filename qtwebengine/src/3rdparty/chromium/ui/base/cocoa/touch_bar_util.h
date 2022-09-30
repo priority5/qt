@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_BASE_COCOA_TOUCH_BAR_UTIL_H
-#define UI_BASE_COCOA_TOUCH_BAR_UTIL_H
+#ifndef UI_BASE_COCOA_TOUCH_BAR_UTIL_H_
+#define UI_BASE_COCOA_TOUCH_BAR_UTIL_H_
 
 #import <Cocoa/Cocoa.h>
 #include <os/availability.h>
@@ -31,21 +31,6 @@ enum TouchBarAction {
 // Logs the sample's UMA metrics into the DefaultTouchBar.Metrics histogram.
 COMPONENT_EXPORT(UI_BASE) void LogTouchBarUMA(TouchBarAction command);
 
-// Returns the NSTouchBar Class.
-COMPONENT_EXPORT(UI_BASE) Class NSTouchBar();
-
-// Returns the NSCustomTouchBarItem Class.
-COMPONENT_EXPORT(UI_BASE) Class NSCustomTouchBarItem();
-
-// Returns the NSGroupTouchBarItem Class.
-COMPONENT_EXPORT(UI_BASE) Class NSGroupTouchBarItem();
-
-// Returns a stylized blue button for the touch bar. The button performs
-// |action| from the |target|.
-API_AVAILABLE(macosx(10.12.2))
-COMPONENT_EXPORT(UI_BASE)
-NSButton* GetBlueTouchBarButton(NSString* title, id target, SEL action);
-
 // Creates a touch bar identifier with the given |id|.
 COMPONENT_EXPORT(UI_BASE) NSString* GetTouchBarId(NSString* touch_bar_id);
 
@@ -55,4 +40,4 @@ NSString* GetTouchBarItemId(NSString* touch_bar_id, NSString* item_id);
 
 }  // namespace ui
 
-#endif  // UI_BASE_COCOA_TOUCH_BAR_UTIL_H
+#endif  // UI_BASE_COCOA_TOUCH_BAR_UTIL_H_

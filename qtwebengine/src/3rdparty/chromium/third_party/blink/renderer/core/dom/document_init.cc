@@ -38,12 +38,10 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/html/custom/v0_custom_element_registration_context.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html/html_view_source_document.h"
 #include "third_party/blink/renderer/core/html/image_document.h"
-#include "third_party/blink/renderer/core/html/imports/html_imports_controller.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/media_document.h"
 #include "third_party/blink/renderer/core/html/plugin_document.h"
@@ -77,12 +75,6 @@ DocumentInit& DocumentInit::ForTest() {
   return *this;
 }
 
-DocumentInit& DocumentInit::WithImportsController(
-    HTMLImportsController* controller) {
-  imports_controller_ = controller;
-  return *this;
-}
-
 bool DocumentInit::ShouldSetURL() const {
   return (window_ && !window_->GetFrame()->IsMainFrame()) || !url_.IsEmpty();
 }
@@ -95,7 +87,6 @@ DocumentInit& DocumentInit::WithWindow(LocalDOMWindow* window,
                                        Document* owner_document) {
   DCHECK(!window_);
   DCHECK(!execution_context_);
-  DCHECK(!imports_controller_);
 #if DCHECK_IS_ON()
   DCHECK(!for_test_);
 #endif
@@ -111,10 +102,14 @@ DocumentInit& DocumentInit::ForInitialEmptyDocument(bool empty) {
   return *this;
 }
 
+DocumentInit& DocumentInit::ForPrerendering(bool is_prerendering) {
+  is_prerendering_ = is_prerendering;
+  return *this;
+}
+
 // static
 DocumentInit::Type DocumentInit::ComputeDocumentType(
     LocalFrame* frame,
-    const KURL& url,
     const String& mime_type,
     bool* is_for_external_handler) {
   if (frame && frame->InViewSourceMode())
@@ -137,9 +132,8 @@ DocumentInit::Type DocumentInit::ComputeDocumentType(
   if (HTMLMediaElement::GetSupportsType(ContentType(mime_type)))
     return Type::kMedia;
 
-  if (frame && frame->GetPage() &&
-      frame->Loader().AllowPlugins(kNotAboutToInstantiatePlugin)) {
-    PluginData* plugin_data = GetPluginData(frame, url);
+  if (frame && frame->GetPage() && frame->Loader().AllowPlugins()) {
+    PluginData* plugin_data = GetPluginData(frame);
 
     // Everything else except text/plain can be overridden by plugins.
     // Disallowing plugins to use text/plain prevents plugins from hijacking a
@@ -177,21 +171,13 @@ DocumentInit::Type DocumentInit::ComputeDocumentType(
 }
 
 // static
-PluginData* DocumentInit::GetPluginData(LocalFrame* frame, const KURL& url) {
-  // If the document is being created for the main frame,
-  // frame()->tree().top()->securityContext() returns nullptr.
-  // For that reason, the origin must be retrieved directly from |url|.
-  if (frame->IsMainFrame())
-    return frame->GetPage()->GetPluginData(SecurityOrigin::Create(url).get());
-
-  const SecurityOrigin* main_frame_origin =
-      frame->Tree().Top().GetSecurityContext()->GetSecurityOrigin();
-  return frame->GetPage()->GetPluginData(main_frame_origin);
+PluginData* DocumentInit::GetPluginData(LocalFrame* frame) {
+  return frame->GetPage()->GetPluginData();
 }
 
 DocumentInit& DocumentInit::WithTypeFrom(const String& mime_type) {
   mime_type_ = mime_type;
-  type_ = ComputeDocumentType(window_ ? window_->GetFrame() : nullptr, Url(),
+  type_ = ComputeDocumentType(window_ ? window_->GetFrame() : nullptr,
                               mime_type_, &is_for_external_handler_);
   return *this;
 }
@@ -214,7 +200,30 @@ DocumentInit& DocumentInit::WithURL(const KURL& url) {
 }
 
 const KURL& DocumentInit::GetCookieUrl() const {
-  return owner_document_ ? owner_document_->CookieURL() : url_;
+  const KURL& cookie_url =
+      owner_document_ ? owner_document_->CookieURL() : url_;
+
+  // An "about:blank" should inherit the `cookie_url` from the initiator of the
+  // navigation, but sometimes "about:blank" may commit without an
+  // `owner_document` (e.g. if the original initiator has been navigated away).
+  // In such scenario, it is important to use a safe `cookie_url` (e.g.
+  // kCookieAverseUrl) to avoid triggering mojo::ReportBadMessage and renderer
+  // kills via RestrictedCookieManager::ValidateAccessToCookiesAt.
+  //
+  // TODO(https://crbug.com/1176291): Correctly inherit the `cookie_url` from
+  // the initiator.
+  if (cookie_url.IsAboutBlankURL()) {
+    // Signify a cookie-averse document [1] with an null URL.  See how
+    // CookiesJar::GetCookies and other methods check `cookie_url` against
+    // KURL::IsEmpty.
+    //
+    // [1] https://html.spec.whatwg.org/#cookie-averse-document-object
+    const KURL& kCookieAverseUrl = NullURL();
+
+    return kCookieAverseUrl;
+  }
+
+  return cookie_url;
 }
 
 DocumentInit& DocumentInit::WithSrcdocDocument(bool is_srcdoc_document) {
@@ -222,32 +231,6 @@ DocumentInit& DocumentInit::WithSrcdocDocument(bool is_srcdoc_document) {
   return *this;
 }
 
-
-DocumentInit& DocumentInit::WithRegistrationContext(
-    V0CustomElementRegistrationContext* registration_context) {
-  DCHECK(!create_new_registration_context_);
-  DCHECK(!registration_context_);
-  registration_context_ = registration_context;
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithNewRegistrationContext() {
-  DCHECK(!create_new_registration_context_);
-  DCHECK(!registration_context_);
-  create_new_registration_context_ = true;
-  return *this;
-}
-
-V0CustomElementRegistrationContext* DocumentInit::RegistrationContext(
-    Document* document) const {
-  if (!IsA<HTMLDocument>(document) && !document->IsXHTMLDocument())
-    return nullptr;
-
-  if (create_new_registration_context_)
-    return MakeGarbageCollected<V0CustomElementRegistrationContext>();
-
-  return registration_context_;
-}
 
 DocumentInit& DocumentInit::WithWebBundleClaimedUrl(
     const KURL& web_bundle_claimed_url) {
@@ -290,7 +273,7 @@ Document* DocumentInit::CreateDocument() const {
     case Type::kText:
       return MakeGarbageCollected<TextDocument>(*this);
     case Type::kUnspecified:
-      FALLTHROUGH;
+      [[fallthrough]];
     default:
       break;
   }

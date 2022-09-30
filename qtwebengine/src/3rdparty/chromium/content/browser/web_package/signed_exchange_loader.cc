@@ -10,7 +10,7 @@
 #include "base/callback.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/strings/stringprintf.h"
+#include "components/web_package/web_bundle_utils.h"
 #include "content/browser/web_package/prefetched_signed_exchange_cache_entry.h"
 #include "content/browser/web_package/signed_exchange_cert_fetcher_factory.h"
 #include "content/browser/web_package/signed_exchange_devtools_proxy.h"
@@ -28,11 +28,13 @@
 #include "services/network/public/cpp/constants.h"
 #include "services/network/public/cpp/data_pipe_to_source_stream.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/source_stream_to_data_pipe.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
-#include "third_party/blink/public/common/loader/network_utils.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
 #include "third_party/blink/public/common/web_package/web_package_request_matcher.h"
 
@@ -40,7 +42,6 @@ namespace content {
 
 namespace {
 
-constexpr char kLoadResultHistogram[] = "SignedExchange.LoadResult2";
 constexpr char kPrefetchLoadResultHistogram[] =
     "SignedExchange.Prefetch.LoadResult2";
 
@@ -60,6 +61,7 @@ SignedExchangeLoader::SignedExchangeLoader(
     std::unique_ptr<SignedExchangeReporter> reporter,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     URLLoaderThrottlesGetter url_loader_throttles_getter,
+    const net::NetworkIsolationKey& network_isolation_key,
     int frame_tree_node_id,
     scoped_refptr<SignedExchangePrefetchMetricRecorder> metric_recorder,
     const std::string& accept_langs,
@@ -73,6 +75,7 @@ SignedExchangeLoader::SignedExchangeLoader(
       reporter_(std::move(reporter)),
       url_loader_factory_(std::move(url_loader_factory)),
       url_loader_throttles_getter_(std::move(url_loader_throttles_getter)),
+      network_isolation_key_(network_isolation_key),
       frame_tree_node_id_(frame_tree_node_id),
       metric_recorder_(std::move(metric_recorder)),
       accept_langs_(accept_langs) {
@@ -109,8 +112,14 @@ SignedExchangeLoader::SignedExchangeLoader(
 
 SignedExchangeLoader::~SignedExchangeLoader() = default;
 
+void SignedExchangeLoader::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {
+  NOTREACHED();
+}
+
 void SignedExchangeLoader::OnReceiveResponse(
-    network::mojom::URLResponseHeadPtr response_head) {
+    network::mojom::URLResponseHeadPtr response_head,
+    mojo::ScopedDataPipeConsumerHandle body) {
   // Must not be called because this SignedExchangeLoader and the client
   // endpoints were bound after OnReceiveResponse() is called.
   NOTREACHED();
@@ -151,7 +160,7 @@ void SignedExchangeLoader::OnStartLoadingResponseBody(
       (outer_request_.trusted_params &&
        !outer_request_.trusted_params->isolation_info.IsEmpty())
           ? net::IsolationInfo::Create(
-                net::IsolationInfo::RedirectMode::kUpdateNothing,
+                net::IsolationInfo::RequestType::kOther,
                 *outer_request_.trusted_params->isolation_info
                      .top_frame_origin(),
                 *outer_request_.trusted_params->isolation_info.frame_origin(),
@@ -170,14 +179,17 @@ void SignedExchangeLoader::OnStartLoadingResponseBody(
   }
 
   signed_exchange_handler_ = std::make_unique<SignedExchangeHandler>(
-      blink::network_utils::IsOriginSecure(outer_request_.url),
-      signed_exchange_utils::HasNoSniffHeader(*outer_response_head_),
-      content_type_,
+      network::IsUrlPotentiallyTrustworthy(outer_request_.url),
+      web_package::HasNoSniffHeader(*outer_response_head_), content_type_,
       std::make_unique<network::DataPipeToSourceStream>(
           std::move(response_body)),
       base::BindOnce(&SignedExchangeLoader::OnHTTPExchangeFound,
                      weak_factory_.GetWeakPtr()),
-      std::move(cert_fetcher_factory), outer_request_.load_flags,
+      std::move(cert_fetcher_factory), network_isolation_key_,
+      outer_request_.trusted_params
+          ? absl::make_optional(outer_request_.trusted_params->isolation_info)
+          : absl::nullopt,
+      outer_request_.load_flags, outer_response_head_->remote_endpoint,
       std::make_unique<blink::WebPackageRequestMatcher>(outer_request_.headers,
                                                         accept_langs_),
       std::move(devtools_proxy_), reporter_.get(), frame_tree_node_id_);
@@ -196,7 +208,7 @@ void SignedExchangeLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
     const net::HttpRequestHeaders& modified_cors_exempt_headers,
-    const base::Optional<GURL>& new_url) {
+    const absl::optional<GURL>& new_url) {
   NOTREACHED();
 }
 
@@ -278,7 +290,7 @@ void SignedExchangeLoader::OnHTTPExchangeFound(
           *outer_response_head_, false /* is_fallback_redirect */));
   forwarding_client_.reset();
 
-  const base::Optional<net::SSLInfo>& ssl_info = resource_response->ssl_info;
+  const absl::optional<net::SSLInfo>& ssl_info = resource_response->ssl_info;
   if (ssl_info.has_value() &&
       (url_loader_options_ &
        network::mojom::kURLLoadOptionSendSSLInfoForCertificateError) &&
@@ -291,11 +303,12 @@ void SignedExchangeLoader::OnHTTPExchangeFound(
   if (ssl_info.has_value() &&
       !(url_loader_options_ &
         network::mojom::kURLLoadOptionSendSSLInfoWithResponse)) {
-    inner_response_head_shown_to_client->ssl_info = base::nullopt;
+    inner_response_head_shown_to_client->ssl_info = absl::nullopt;
   }
   inner_response_head_shown_to_client->was_fetched_via_cache =
       outer_response_head_->was_fetched_via_cache;
-  client_->OnReceiveResponse(std::move(inner_response_head_shown_to_client));
+  client_->OnReceiveResponse(std::move(inner_response_head_shown_to_client),
+                             mojo::ScopedDataPipeConsumerHandle());
 
   // Currently we always assume that we have body.
   // TODO(https://crbug.com/80374): Add error handling and bail out
@@ -306,8 +319,9 @@ void SignedExchangeLoader::OnHTTPExchangeFound(
   options.struct_size = sizeof(MojoCreateDataPipeOptions);
   options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
   options.element_num_bytes = 1;
-  options.capacity_num_bytes = network::kDataPipeDefaultAllocationSize;
-  if (mojo::CreateDataPipe(&options, &producer_handle, &consumer_handle) !=
+  options.capacity_num_bytes =
+      network::features::GetDataPipeDefaultAllocationSize();
+  if (mojo::CreateDataPipe(&options, producer_handle, consumer_handle) !=
       MOJO_RESULT_OK) {
     forwarding_client_->OnComplete(
         network::URLLoaderCompletionStatus(net::ERR_INSUFFICIENT_RESOURCES));
@@ -391,7 +405,7 @@ void SignedExchangeLoader::NotifyClientOnCompleteIfReady() {
 }
 
 void SignedExchangeLoader::ReportLoadResult(SignedExchangeLoadResult result) {
-  UMA_HISTOGRAM_ENUMERATION(kLoadResultHistogram, result);
+  signed_exchange_utils::RecordLoadResultHistogram(result);
   // |metric_recorder_| could be null in some tests.
   if ((outer_request_.load_flags & net::LOAD_PREFETCH) && metric_recorder_) {
     UMA_HISTOGRAM_ENUMERATION(kPrefetchLoadResultHistogram, result);

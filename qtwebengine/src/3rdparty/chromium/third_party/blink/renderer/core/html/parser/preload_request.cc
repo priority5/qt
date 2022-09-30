@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/html/parser/preload_request.h"
 
+#include "base/memory/ptr_util.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -23,6 +24,30 @@
 
 namespace blink {
 
+PreloadRequest::ExclusionInfo::ExclusionInfo(const KURL& document_url,
+                                             HashSet<KURL> scopes,
+                                             HashSet<KURL> resources)
+    : document_url_(document_url),
+      scopes_(std::move(scopes)),
+      resources_(std::move(resources)) {}
+
+PreloadRequest::ExclusionInfo::~ExclusionInfo() = default;
+
+bool PreloadRequest::ExclusionInfo::ShouldExclude(
+    const KURL& base_url,
+    const String& resource_url) const {
+  if (resources_.IsEmpty() && scopes_.IsEmpty())
+    return false;
+  KURL url = KURL(base_url.IsEmpty() ? document_url_ : base_url, resource_url);
+  if (resources_.Contains(url))
+    return true;
+  for (const auto& scope : scopes_) {
+    if (url.GetString().StartsWith(scope.GetString()))
+      return true;
+  }
+  return false;
+}
+
 KURL PreloadRequest::CompleteURL(Document* document) {
   if (!base_url_.IsEmpty())
     return document->CompleteURLWithOverride(resource_url_, base_url_);
@@ -37,8 +62,8 @@ std::unique_ptr<PreloadRequest> PreloadRequest::CreateIfNeeded(
     const KURL& base_url,
     ResourceType resource_type,
     const network::mojom::ReferrerPolicy referrer_policy,
-    ReferrerSource referrer_source,
     ResourceFetcher::IsImageSet is_image_set,
+    const ExclusionInfo* exclusion_info,
     const FetchParameters::ResourceWidth& resource_width,
     const ClientHintsPreferences& client_hints_preferences,
     RequestType request_type) {
@@ -50,10 +75,14 @@ std::unique_ptr<PreloadRequest> PreloadRequest::CreateIfNeeded(
       ProtocolIs(resource_url, "data")) {
     return nullptr;
   }
+
+  if (exclusion_info && exclusion_info->ShouldExclude(base_url, resource_url))
+    return nullptr;
+
   return base::WrapUnique(new PreloadRequest(
       initiator_name, initiator_position, resource_url, base_url, resource_type,
       resource_width, client_hints_preferences, request_type, referrer_policy,
-      referrer_source, is_image_set));
+      is_image_set));
 }
 
 Resource* PreloadRequest::Start(Document* document) {
@@ -69,37 +98,24 @@ Resource* PreloadRequest::Start(Document* document) {
 
   ResourceRequest resource_request(url);
   resource_request.SetReferrerPolicy(referrer_policy_);
-  if (referrer_source_ == kBaseUrlIsReferrer) {
-    resource_request.SetReferrerString(base_url_.StrippedForUseAsReferrer());
-  }
 
   resource_request.SetRequestContext(
       ResourceFetcher::DetermineRequestContext(resource_type_, is_image_set_));
   resource_request.SetRequestDestination(
       ResourceFetcher::DetermineRequestDestination(resource_type_));
 
-  resource_request.SetFetchImportanceMode(importance_);
-
-  if (resource_type_ == ResourceType::kImage && url.ProtocolIsInHTTPFamily() &&
-      base::FeatureList::IsEnabled(blink::features::kSubresourceRedirect) &&
-      blink::GetNetworkStateNotifier().SaveDataEnabled()) {
-    resource_request.SetPreviewsState(resource_request.GetPreviewsState() |
-                                      PreviewsTypes::kSubresourceRedirectOn);
-  }
+  resource_request.SetFetchPriorityHint(fetch_priority_hint_);
 
   ResourceLoaderOptions options(document->domWindow()->GetCurrentWorld());
   options.initiator_info = initiator_info;
   FetchParameters params(std::move(resource_request), options);
 
   auto* origin = document->domWindow()->GetSecurityOrigin();
-  if (resource_type_ == ResourceType::kImportResource) {
-    params.SetCrossOriginAccessControl(origin, kCrossOriginAttributeAnonymous);
-  }
-
   if (script_type_ == mojom::blink::ScriptType::kModule) {
     DCHECK_EQ(resource_type_, ResourceType::kScript);
     params.SetCrossOriginAccessControl(
         origin, ScriptLoader::ModuleScriptCredentialsMode(cross_origin_));
+    params.SetModuleScript();
   } else if (cross_origin_ != kCrossOriginAttributeNotSet) {
     params.SetCrossOriginAccessControl(origin, cross_origin_);
   }
@@ -118,8 +134,7 @@ Resource* PreloadRequest::Start(Document* document) {
     DCHECK_EQ(resource_type_, ResourceType::kScript);
     params.SetDecoderOptions(TextResourceDecoderOptions::CreateUTF8Decode());
   } else if (resource_type_ == ResourceType::kScript ||
-             resource_type_ == ResourceType::kCSSStyleSheet ||
-             resource_type_ == ResourceType::kImportResource) {
+             resource_type_ == ResourceType::kCSSStyleSheet) {
     params.SetCharset(charset_.IsEmpty() ? document->Encoding()
                                          : WTF::TextEncoding(charset_));
   }
@@ -132,10 +147,11 @@ Resource* PreloadRequest::Start(Document* document) {
   params.SetSpeculativePreloadType(speculative_preload_type);
 
   if (resource_type_ == ResourceType::kScript) {
-    MaybeDisallowFetchForDocWrittenScript(params, *document);
     // We intentionally ignore the returned value, because we don't resend
     // the async request to the blocked script here.
+    MaybeDisallowFetchForDocWrittenScript(params, *document);
   }
+  params.SetRenderBlockingBehavior(render_blocking_behavior_);
 
   return PreloadHelper::StartPreload(resource_type_, params, *document);
 }

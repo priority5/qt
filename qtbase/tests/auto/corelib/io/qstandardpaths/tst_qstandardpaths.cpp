@@ -1,39 +1,16 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 The Qt Company Ltd.
-** Copyright (C) 2020 Intel Corporation.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the test suite of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:GPL-EXCEPT$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 3 as published by the Free Software
-** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2020 The Qt Company Ltd.
+// Copyright (C) 2020 Intel Corporation.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include <qstandardpaths.h>
-#include <QtTest/QtTest>
+#include <QTest>
+#include <QOperatingSystemVersion>
 #include <qdebug.h>
 #include <qfileinfo.h>
 #include <qplatformdefs.h>
 #include <qregularexpression.h>
-#if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
+#include <qsysinfo.h>
+#if defined(Q_OS_WIN)
 #  include <qt_windows.h>
 #endif
 
@@ -43,7 +20,7 @@
 #include <pwd.h>
 #endif
 
-#if defined(Q_OS_UNIX) && !defined(Q_OS_MAC) && !defined(Q_OS_ANDROID)
+#if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS) && !defined(Q_OS_ANDROID)
 #define Q_XDG_PLATFORM
 #endif
 
@@ -117,7 +94,7 @@ static const char * const enumNames[MaxStandardLocation + 1 - int(QStandardPaths
     "PicturesLocation",
     "TempLocation",
     "HomeLocation",
-    "DataLocation",
+    "AppLocalDataLocation",
     "CacheLocation",
     "GenericDataLocation",
     "RuntimeLocation",
@@ -131,7 +108,7 @@ static const char * const enumNames[MaxStandardLocation + 1 - int(QStandardPaths
 
 void tst_qstandardpaths::initTestCase()
 {
-#if defined(Q_OS_WIN) && !defined(Q_OS_WINRT)
+#if defined(Q_OS_WIN)
     // Disable WOW64 redirection, see testFindExecutable()
     if (QSysInfo::buildCpuArchitecture() != QSysInfo::currentCpuArchitecture()) {
         void *oldMode;
@@ -140,7 +117,7 @@ void tst_qstandardpaths::initTestCase()
             qErrnoWarning("Wow64DisableWow64FsRedirection() failed");
         QVERIFY(disabledDisableWow64FsRedirection);
     }
-#endif // Q_OS_WIN && !Q_OS_WINRT
+#endif // Q_OS_WIN
     QVERIFY2(m_localConfigTempDir.isValid(), qPrintable(m_localConfigTempDir.errorString()));
     QVERIFY2(m_globalConfigTempDir.isValid(), qPrintable(m_globalConfigTempDir.errorString()));
     QVERIFY2(m_localAppTempDir.isValid(), qPrintable(m_localAppTempDir.errorString()));
@@ -306,11 +283,11 @@ void tst_qstandardpaths::testLocateAll()
 
 void tst_qstandardpaths::testDataLocation()
 {
-    // On all platforms, DataLocation should be GenericDataLocation / organization name / app name
+    // On all platforms, AppLocalDataLocation should be GenericDataLocation / organization name / app name
     // This allows one app to access the data of another app.
-    // Android and WinRT are an exception to this case, owing to the fact that
+    // Android is an exception to this case, owing to the fact that
     // applications are sandboxed.
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_WINRT)
+#if !defined(Q_OS_ANDROID)
     const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
     QCOMPARE(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation), base + "/tst_qstandardpaths");
     QCoreApplication::instance()->setOrganizationName("Qt");
@@ -339,7 +316,7 @@ void tst_qstandardpaths::testAppConfigLocation()
 {
     // On all platforms where applications are not sandboxed,
     // AppConfigLocation should be GenericConfigLocation / organization name / app name
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_WINRT)
+#if !defined(Q_OS_ANDROID)
     const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
     QCOMPARE(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation), base + "/tst_qstandardpaths");
     QCoreApplication::setOrganizationName("Qt");
@@ -363,7 +340,7 @@ static inline QFileInfo findSh()
     const QStringList rawPaths = QString::fromLocal8Bit(pEnv.constData()).split(pathSep, Qt::SkipEmptyParts);
     foreach (const QString &path, rawPaths) {
         if (QFile::exists(path + sh))
-            return path + sh;
+            return QFileInfo(path + sh);
     }
     return QFileInfo();
 }
@@ -381,7 +358,6 @@ void tst_qstandardpaths::testFindExecutable_data()
     QTest::addColumn<QString>("needle");
     QTest::addColumn<QString>("expected");
 #ifdef Q_OS_WIN
-# ifndef Q_OS_WINRT
     const QFileInfo cmdFi = QFileInfo(QDir::cleanPath(QString::fromLocal8Bit(qgetenv("COMSPEC"))));
     const QString cmdPath = cmdFi.absoluteFilePath();
 
@@ -406,7 +382,6 @@ void tst_qstandardpaths::testFindExecutable_data()
         QTest::newRow("win8-logo-nosuffix")
             << QString() << logo << logoPath;
     }
-# endif // Q_OS_WINRT
 #else
     const QFileInfo shFi = findSh();
     Q_ASSERT(shFi.exists());
@@ -448,8 +423,6 @@ void tst_qstandardpaths::testFindExecutable()
 
 void tst_qstandardpaths::testFindExecutableLinkToDirectory()
 {
-    // WinRT has no link support
-#ifndef Q_OS_WINRT
     // link to directory
     const QString target = QDir::tempPath() + QDir::separator() + QLatin1String("link.lnk");
     QFile::remove(target);
@@ -457,7 +430,6 @@ void tst_qstandardpaths::testFindExecutableLinkToDirectory()
     QVERIFY(appFile.link(target));
     QVERIFY(QStandardPaths::findExecutable(target).isEmpty());
     QFile::remove(target);
-#endif
 }
 
 using RuntimeDirSetup = QString (*)(QDir &);
@@ -471,7 +443,9 @@ void tst_qstandardpaths::testRuntimeDirectory()
 #endif
 }
 
-#ifdef Q_XDG_PLATFORM
+// INTEGRITY PJF System doesn't support user ID related APIs. getpwuid is not defined.
+// testCustomRuntimeDirectory_data test will always FAIL for INTEGRITY.
+#if defined(Q_XDG_PLATFORM) && !defined(Q_OS_INTEGRITY)
 static QString fallbackXdgRuntimeDir()
 {
     static QString username = [] {
@@ -484,17 +458,17 @@ static QString fallbackXdgRuntimeDir()
 }
 #endif
 
-static QString updateRuntimeDir(const QString &path)
+[[maybe_unused]] static QString updateRuntimeDir(const QString &path)
 {
     qputenv("XDG_RUNTIME_DIR", QFile::encodeName(path));
     return path;
 }
 
-static void clearRuntimeDir()
+[[maybe_unused]] static void clearRuntimeDir()
 {
     qunsetenv("XDG_RUNTIME_DIR");
 #ifdef Q_XDG_PLATFORM
-#ifndef Q_OS_WASM
+#if !defined(Q_OS_WASM) && !defined(Q_OS_INTEGRITY)
     QTest::ignoreMessage(QtWarningMsg,
                          qPrintable("QStandardPaths: XDG_RUNTIME_DIR not set, defaulting to '"
                                     + fallbackXdgRuntimeDir() + '\''));
@@ -504,7 +478,9 @@ static void clearRuntimeDir()
 
 void tst_qstandardpaths::testCustomRuntimeDirectory_data()
 {
-#if defined(Q_XDG_PLATFORM)
+#ifdef Q_OS_INTEGRITY
+    QSKIP("Test requires getgid/getpwuid API that are not available on INTEGRITY");
+#elif defined(Q_XDG_PLATFORM)
     QTest::addColumn<RuntimeDirSetup>("setup");
     auto addRow = [](const char *name, RuntimeDirSetup f) {
         QTest::newRow(name) << f;

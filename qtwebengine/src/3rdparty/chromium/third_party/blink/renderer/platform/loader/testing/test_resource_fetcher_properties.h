@@ -6,7 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_TESTING_TEST_RESOURCE_FETCHER_PROPERTIES_H_
 
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/forward.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/loader/fetch/loader_freeze_mode.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
 
 namespace blink {
@@ -44,6 +46,7 @@ class TestResourceFetcherProperties final : public ResourceFetcherProperties {
     return service_worker_id_;
   }
   bool IsPaused() const override { return paused_; }
+  LoaderFreezeMode FreezeMode() const override { return freeze_mode_; }
   bool IsDetached() const override { return false; }
   bool IsLoadComplete() const override { return load_complete_; }
   bool ShouldBlockLoadingSubResource() const override {
@@ -82,6 +85,7 @@ class TestResourceFetcherProperties final : public ResourceFetcherProperties {
       ControllerServiceWorkerMode::kNoController;
   int64_t service_worker_id_ = 0;
   bool paused_ = false;
+  LoaderFreezeMode freeze_mode_ = LoaderFreezeMode::kNone;
   bool load_complete_ = false;
   bool should_block_loading_sub_resource_ = false;
   bool is_subframe_deprioritization_enabled_ = false;

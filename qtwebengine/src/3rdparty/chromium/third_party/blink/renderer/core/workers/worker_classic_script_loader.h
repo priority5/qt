@@ -71,7 +71,7 @@ class CORE_EXPORT WorkerClassicScriptLoader final
   void LoadSynchronously(ExecutionContext&,
                          ResourceFetcher* fetch_client_settings_object_fetcher,
                          const KURL&,
-                         mojom::RequestContextType,
+                         mojom::blink::RequestContextType,
                          network::mojom::RequestDestination);
 
   // Note that callbacks could be invoked before
@@ -84,19 +84,13 @@ class CORE_EXPORT WorkerClassicScriptLoader final
   //
   // |worker_main_script_load_params| is valid for dedicated workers (when
   // PlzDedicatedWorker is enabled) and shared workers.
-  //
-  // |resource_load_info_notifier| is valid and used to notify of the loading
-  // status of the top-level script for DedicatedWorker only when
-  // PlzDedicatedWorker is enabled
   void LoadTopLevelScriptAsynchronously(
       ExecutionContext&,
       ResourceFetcher* fetch_client_settings_object_fetcher,
       const KURL&,
       std::unique_ptr<WorkerMainScriptLoadParameters>
           worker_main_script_load_params,
-      CrossVariantMojoRemote<mojom::ResourceLoadInfoNotifierInterfaceBase>
-          resource_load_info_notifier,
-      mojom::RequestContextType,
+      mojom::blink::RequestContextType,
       network::mojom::RequestDestination,
       network::mojom::RequestMode,
       network::mojom::CredentialsMode,
@@ -117,7 +111,6 @@ class CORE_EXPORT WorkerClassicScriptLoader final
   bool Failed() const { return failed_; }
   bool Canceled() const { return canceled_; }
   uint64_t Identifier() const { return identifier_; }
-  int64_t AppCacheID() const { return app_cache_id_; }
 
   std::unique_ptr<Vector<uint8_t>> ReleaseCachedMetadata() {
     return std::move(cached_metadata_);
@@ -141,10 +134,10 @@ class CORE_EXPORT WorkerClassicScriptLoader final
   void DidReceiveResponse(uint64_t /*identifier*/,
                           const ResourceResponse&) override;
   void DidReceiveData(const char* data, unsigned data_length) override;
-  void DidReceiveCachedMetadata(const char*, int /*dataLength*/) override;
+  void DidReceiveCachedMetadata(mojo_base::BigBuffer) override;
   void DidFinishLoading(uint64_t identifier) override;
-  void DidFail(const ResourceError&) override;
-  void DidFailRedirectCheck() override;
+  void DidFail(uint64_t, const ResourceError&) override;
+  void DidFailRedirectCheck(uint64_t) override;
 
   // WorkerMainScriptLoaderClient
   // These will be called for dedicated workers (when PlzDedicatedWorker is
@@ -186,7 +179,6 @@ class CORE_EXPORT WorkerClassicScriptLoader final
   bool is_top_level_script_ = false;
 
   uint64_t identifier_ = 0;
-  int64_t app_cache_id_ = 0;
   std::unique_ptr<Vector<uint8_t>> cached_metadata_;
   Member<ContentSecurityPolicy> content_security_policy_;
   network::mojom::IPAddressSpace response_address_space_;

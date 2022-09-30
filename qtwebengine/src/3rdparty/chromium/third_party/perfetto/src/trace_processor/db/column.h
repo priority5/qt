@@ -38,6 +38,7 @@ struct BaseId {
   explicit constexpr BaseId(uint32_t v) : value(v) {}
 
   bool operator==(const BaseId& o) const { return o.value == value; }
+  bool operator!=(const BaseId& o) const { return !(*this == o); }
   bool operator<(const BaseId& o) const { return value < o.value; }
 
   uint32_t value;
@@ -66,11 +67,6 @@ struct Constraint {
 struct Order {
   uint32_t col_idx;
   bool desc;
-};
-
-// Represents a column which is to be joined on.
-struct JoinKey {
-  uint32_t col_idx;
 };
 
 class Table;
@@ -109,6 +105,53 @@ class Column {
     // This flag is only meaningful for nullable columns has no effect for
     // non-null columns.
     kDense = 1 << 3,
+  };
+
+  // Iterator over a column which conforms to std iterator interface
+  // to allow using std algorithms (e.g. upper_bound, lower_bound etc.).
+  class Iterator {
+   public:
+    using iterator_category = std::random_access_iterator_tag;
+    using value_type = SqlValue;
+    using difference_type = uint32_t;
+    using pointer = uint32_t*;
+    using reference = uint32_t&;
+
+    Iterator(const Column* col, uint32_t row) : col_(col), row_(row) {}
+
+    Iterator(const Iterator&) = default;
+    Iterator& operator=(const Iterator&) = default;
+
+    bool operator==(const Iterator& other) const { return other.row_ == row_; }
+    bool operator!=(const Iterator& other) const { return !(*this == other); }
+    bool operator<(const Iterator& other) const { return row_ < other.row_; }
+    bool operator>(const Iterator& other) const { return other < *this; }
+    bool operator<=(const Iterator& other) const { return !(other < *this); }
+    bool operator>=(const Iterator& other) const { return !(*this < other); }
+
+    SqlValue operator*() const { return col_->Get(row_); }
+    Iterator& operator++() {
+      row_++;
+      return *this;
+    }
+    Iterator& operator--() {
+      row_--;
+      return *this;
+    }
+
+    Iterator& operator+=(uint32_t diff) {
+      row_ += diff;
+      return *this;
+    }
+    uint32_t operator-(const Iterator& other) const {
+      return row_ - other.row_;
+    }
+
+    uint32_t row() const { return row_; }
+
+   private:
+    const Column* col_ = nullptr;
+    uint32_t row_ = 0;
   };
 
   // Flags specified for an id column.
@@ -153,6 +196,11 @@ class Column {
                   row_map_idx, ptr, std::move(storage));
   }
 
+  // Creates a Column which does not have any data backing it.
+  static Column DummyColumn(const char* name,
+                            Table* table,
+                            uint32_t col_idx_in_table);
+
   // Creates a Column which returns the index as the value of the row.
   static Column IdColumn(Table* table,
                          uint32_t col_idx_in_table,
@@ -181,8 +229,10 @@ class Column {
       case ColumnType::kId: {
         if (value.type != SqlValue::Type::kLong)
           return base::nullopt;
-        return row_map().IndexOf(static_cast<uint32_t>(value.long_value));
+        return row_map().RowOf(static_cast<uint32_t>(value.long_value));
       }
+      case ColumnType::kDummy:
+        PERFETTO_FATAL("IndexOf not allowed on dummy column");
     }
     PERFETTO_FATAL("For GCC");
   }
@@ -217,6 +267,8 @@ class Column {
       case ColumnType::kId: {
         PERFETTO_FATAL("Cannot set value on a id column");
       }
+      case ColumnType::kDummy:
+        PERFETTO_FATAL("Set not allowed on dummy column");
     }
   }
 
@@ -282,6 +334,9 @@ class Column {
   // Returns true if this column is considered an id column.
   bool IsId() const { return type_ == ColumnType::kId; }
 
+  // Returns true if this column is a dummy column.
+  bool IsDummy() const { return type_ == ColumnType::kDummy; }
+
   // Returns true if this column is a nullable column.
   bool IsNullable() const { return (flags_ & Flag::kNonNull) == 0; }
 
@@ -341,8 +396,11 @@ class Column {
   Order ascending() const { return Order{col_idx_in_table_, false}; }
   Order descending() const { return Order{col_idx_in_table_, true}; }
 
-  // Returns the JoinKey for this Column.
-  JoinKey join_key() const { return JoinKey{col_idx_in_table_}; }
+  // Returns an iterator to the first entry in this column.
+  Iterator begin() const { return Iterator(this, 0); }
+
+  // Returns an iterator pointing beyond the last entry in this column.
+  Iterator end() const { return Iterator(this, row_map().size()); }
 
  protected:
   // Returns the backing sparse vector cast to contain data of type T.
@@ -380,51 +438,9 @@ class Column {
 
     // Types generated on the fly.
     kId,
-  };
 
-  // Iterator over a column which conforms to std iterator interface
-  // to allow using std algorithms (e.g. upper_bound, lower_bound etc.).
-  class Iterator {
-   public:
-    using iterator_category = std::random_access_iterator_tag;
-    using value_type = SqlValue;
-    using difference_type = uint32_t;
-    using pointer = uint32_t*;
-    using reference = uint32_t&;
-
-    Iterator(const Column* col, uint32_t row) : col_(col), row_(row) {}
-
-    Iterator(const Iterator&) = default;
-    Iterator& operator=(const Iterator&) = default;
-
-    bool operator==(const Iterator& other) const { return other.row_ == row_; }
-    bool operator!=(const Iterator& other) const { return !(*this == other); }
-    bool operator<(const Iterator& other) const { return other.row_ < row_; }
-    bool operator>(const Iterator& other) const { return other < *this; }
-    bool operator<=(const Iterator& other) const { return !(other < *this); }
-    bool operator>=(const Iterator& other) const { return !(*this < other); }
-
-    SqlValue operator*() const { return col_->Get(row_); }
-    Iterator& operator++() {
-      row_++;
-      return *this;
-    }
-    Iterator& operator--() {
-      row_--;
-      return *this;
-    }
-
-    Iterator& operator+=(uint32_t diff) {
-      row_ += diff;
-      return *this;
-    }
-    uint32_t operator-(const Iterator& other) const {
-      return row_ - other.row_;
-    }
-
-   private:
-    const Column* col_ = nullptr;
-    uint32_t row_ = 0;
+    // Types which don't have any data backing them.
+    kDummy,
   };
 
   friend class Table;
@@ -467,6 +483,8 @@ class Column {
       }
       case ColumnType::kId:
         return SqlValue::Long(idx);
+      case ColumnType::kDummy:
+        PERFETTO_FATAL("GetAtIdx not allowed on dummy column");
     }
     PERFETTO_FATAL("For GCC");
   }
@@ -577,6 +595,8 @@ class Column {
         return SqlValue::Type::kDouble;
       case ColumnType::kString:
         return SqlValue::Type::kString;
+      case ColumnType::kDummy:
+        PERFETTO_FATAL("ToSqlValueType not allowed on dummy column");
     }
     PERFETTO_FATAL("For GCC");
   }

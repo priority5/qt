@@ -5,7 +5,7 @@
 #include "media/capture/video/linux/video_capture_device_factory_linux.h"
 
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "media/capture/video/linux/fake_device_provider.h"
 #include "media/capture/video/linux/fake_v4l2_impl.h"
@@ -100,7 +100,7 @@ TEST_F(VideoCaptureDeviceFactoryLinuxTest,
   fake_v4l2_->AddDevice(stub_device_id, FakeV4L2DeviceConfig(descriptor));
 
   // Exercise
-  auto device = factory_->CreateDevice(descriptor);
+  auto device = factory_->CreateDevice(descriptor).ReleaseDevice();
   VideoCaptureParams arbitrary_params;
   arbitrary_params.requested_format.frame_size = gfx::Size(1280, 720);
   arbitrary_params.requested_format.frame_rate = 30.0f;

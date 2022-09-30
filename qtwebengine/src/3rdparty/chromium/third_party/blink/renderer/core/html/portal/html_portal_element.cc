@@ -7,7 +7,7 @@
 #include <utility>
 #include "third_party/blink/public/mojom/loader/referrer.mojom-blink.h"
 #include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
+#include "third_party/blink/renderer/bindings/core/v8/js_event_handler_for_content_attribute.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/post_message_helper.h"
@@ -40,8 +40,7 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
@@ -61,9 +60,11 @@ HTMLPortalElement::HTMLPortalElement(
         portal_client_receiver)
     : HTMLFrameOwnerElement(html_names::kPortalTag, document),
       feature_handle_for_scheduler_(
-          document.GetExecutionContext()->GetScheduler()->RegisterFeature(
-              SchedulingPolicy::Feature::kPortal,
-              {SchedulingPolicy::RecordMetricsForBackForwardCache()})) {
+          document.GetExecutionContext()
+              ? document.GetExecutionContext()->GetScheduler()->RegisterFeature(
+                    SchedulingPolicy::Feature::kPortal,
+                    {SchedulingPolicy::DisableBackForwardCache()})
+              : FrameOrWorkerScheduler::SchedulingAffectingFeatureHandle()) {
   if (remote_portal) {
     DCHECK(portal_token);
     was_just_adopted_ = true;
@@ -104,16 +105,6 @@ void HTMLPortalElement::ExpireAdoptionLifetime() {
 void HTMLPortalElement::PortalContentsWillBeDestroyed(PortalContents* portal) {
   DCHECK_EQ(portal_, portal);
   portal_ = nullptr;
-}
-
-bool HTMLPortalElement::IsCurrentlyWithinFrameLimit() const {
-  auto* frame = GetDocument().GetFrame();
-  if (!frame)
-    return false;
-  auto* page = frame->GetPage();
-  if (!page)
-    return false;
-  return page->SubframeCount() < Page::MaxNumberOfFrames();
 }
 
 String HTMLPortalElement::PreActivateChecksCommon() {
@@ -328,26 +319,15 @@ ScriptPromise HTMLPortalElement::activate(ScriptState* script_state,
   ScriptPromiseResolver* resolver =
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
-  portal->Activate(std::move(data), PortalActivationDelegate::ForPromise(
-                                        resolver, exception_state));
+  portal->Activate(std::move(data),
+                   PortalActivationDelegate::ForPromise(
+                       resolver, exception_state.GetContext()));
   return promise;
 }
 
 void HTMLPortalElement::postMessage(ScriptState* script_state,
                                     const ScriptValue& message,
-                                    const String& target_origin,
-                                    const HeapVector<ScriptValue>& transfer,
-                                    ExceptionState& exception_state) {
-  WindowPostMessageOptions* options = WindowPostMessageOptions::Create();
-  options->setTargetOrigin(target_origin);
-  if (!transfer.IsEmpty())
-    options->setTransfer(transfer);
-  postMessage(script_state, message, options, exception_state);
-}
-
-void HTMLPortalElement::postMessage(ScriptState* script_state,
-                                    const ScriptValue& message,
-                                    const WindowPostMessageOptions* options,
+                                    const PostMessageOptions* options,
                                     ExceptionState& exception_state) {
   if (!CheckPortalsEnabledOrThrow(exception_state) || !GetExecutionContext())
     return;
@@ -474,11 +454,9 @@ void HTMLPortalElement::RemovedFrom(ContainerNode& node) {
 }
 
 void HTMLPortalElement::DefaultEventHandler(Event& event) {
-  // Support the new behavior whereby clicking (or equivalent operations via
-  // keyboard and other input modalities) a portal element causes it to activate
-  // unless prevented.
-  if (RuntimeEnabledFeatures::PortalsDefaultActivationEnabled() &&
-      event.type() == event_type_names::kDOMActivate) {
+  // Clicking (or equivalent operations via keyboard and other input modalities)
+  // a portal element causes it to activate unless prevented.
+  if (event.type() == event_type_names::kDOMActivate) {
     ActivateDefault();
     event.SetDefaultHandled();
   }
@@ -523,7 +501,8 @@ void HTMLPortalElement::ParseAttribute(
     if (params.name == attribute.name) {
       SetAttributeEventListener(
           attribute.event_name,
-          CreateAttributeEventListener(this, attribute.name, params.new_value));
+          JSEventHandlerForContentAttribute::Create(
+              GetExecutionContext(), attribute.name, params.new_value));
       return;
     }
   }
@@ -531,7 +510,7 @@ void HTMLPortalElement::ParseAttribute(
 
 LayoutObject* HTMLPortalElement::CreateLayoutObject(const ComputedStyle& style,
                                                     LegacyLayout) {
-  return new LayoutIFrame(this);
+  return MakeGarbageCollected<LayoutIFrame>(this);
 }
 
 bool HTMLPortalElement::SupportsFocus() const {

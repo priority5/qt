@@ -9,11 +9,12 @@
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
+#include "ui/accessibility/ax_mode.h"
 
 namespace blink {
 
-WebAXContext::WebAXContext(WebDocument root_document)
-    : private_(new AXContext(*root_document.Unwrap<Document>())) {}
+WebAXContext::WebAXContext(WebDocument root_document, const ui::AXMode& mode)
+    : private_(new AXContext(*root_document.Unwrap<Document>(), mode)) {}
 
 WebAXContext::~WebAXContext() {}
 
@@ -24,8 +25,15 @@ WebAXObject WebAXContext::Root() const {
   if (!private_->HasActiveDocument())
     return WebAXObject();
 
+  // Make sure that layout is updated before a root ax object is created.
+  WebAXObject::UpdateLayout(WebDocument(private_->GetDocument()));
+
   return WebAXObject(
       static_cast<AXObjectCacheImpl*>(&private_->GetAXObjectCache())->Root());
+}
+
+const ui::AXMode& WebAXContext::GetAXMode() const {
+  return private_->GetAXMode();
 }
 
 }  // namespace blink

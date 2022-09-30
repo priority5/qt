@@ -12,13 +12,12 @@ namespace content {
 
 AboutURLLoaderFactory::AboutURLLoaderFactory(
     mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver)
-    : NonNetworkURLLoaderFactoryBase(std::move(factory_receiver)) {}
+    : network::SelfDeletingURLLoaderFactory(std::move(factory_receiver)) {}
 
 AboutURLLoaderFactory::~AboutURLLoaderFactory() = default;
 
 void AboutURLLoaderFactory::CreateLoaderAndStart(
     mojo::PendingReceiver<network::mojom::URLLoader> loader,
-    int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& request,
@@ -28,13 +27,14 @@ void AboutURLLoaderFactory::CreateLoaderAndStart(
   response_head->mime_type = "text/html";
   mojo::Remote<network::mojom::URLLoaderClient> client_remote(
       std::move(client));
-  client_remote->OnReceiveResponse(std::move(response_head));
+  client_remote->OnReceiveResponse(std::move(response_head),
+                                   mojo::ScopedDataPipeConsumerHandle());
 
   // Create a data pipe for transmitting the empty response. The |producer|
   // doesn't add any data.
   mojo::ScopedDataPipeProducerHandle producer;
   mojo::ScopedDataPipeConsumerHandle consumer;
-  if (CreateDataPipe(nullptr, &producer, &consumer) != MOJO_RESULT_OK) {
+  if (CreateDataPipe(nullptr, producer, consumer) != MOJO_RESULT_OK) {
     client_remote->OnComplete(
         network::URLLoaderCompletionStatus(net::ERR_INSUFFICIENT_RESOURCES));
     return;
@@ -50,7 +50,8 @@ AboutURLLoaderFactory::Create() {
   mojo::PendingRemote<network::mojom::URLLoaderFactory> pending_remote;
 
   // The AboutURLLoaderFactory will delete itself when there are no more
-  // receivers - see the NonNetworkURLLoaderFactoryBase::OnDisconnect method.
+  // receivers - see the network::SelfDeletingURLLoaderFactory::OnDisconnect
+  // method.
   new AboutURLLoaderFactory(pending_remote.InitWithNewPipeAndPassReceiver());
 
   return pending_remote;
