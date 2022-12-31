@@ -22,6 +22,7 @@
 #include "qaudiobuffer.h"
 #include "qffmpegresampler_p.h"
 
+#include <private/qmultimediautils_p.h>
 #include <qshareddata.h>
 #include <qtimer.h>
 #include <qqueue.h>
@@ -67,28 +68,28 @@ private:
 
 struct Codec
 {
+    struct AVCodecFreeContext { void operator()(AVCodecContext *ctx) { avcodec_free_context(&ctx); } };
+    using UniqueAVCodecContext = std::unique_ptr<AVCodecContext, AVCodecFreeContext>;
     struct Data {
-        Data(AVCodecContext *context, AVStream *stream, const QFFmpeg::HWAccel &hwAccel);
+        Data(UniqueAVCodecContext &&context, AVStream *stream, std::unique_ptr<QFFmpeg::HWAccel> &&hwAccel);
         ~Data();
         QAtomicInt ref;
-        AVCodecContext *context = nullptr;
+        UniqueAVCodecContext context;
         AVStream *stream = nullptr;
-        QFFmpeg::HWAccel hwAccel;
-        int streamIndex = -1;
+        std::unique_ptr<QFFmpeg::HWAccel> hwAccel;
     };
 
-    Codec() = default;
-    Codec(AVFormatContext *format, int streamIndex);
-    bool isValid() const { return !!d; }
+    static QMaybe<Codec> create(AVStream *);
 
-    AVCodecContext *context() const { return d->context; }
+    AVCodecContext *context() const { return d->context.get(); }
     AVStream *stream() const { return d->stream; }
     uint streamIndex() const { return d->stream->index; }
-    HWAccel hwAccel() const { return d->hwAccel; }
-    qint64 toMs(qint64 ts) const { return timeStamp(ts, d->stream->time_base); }
-    qint64 toUs(qint64 ts) const { return timeStampUs(ts, d->stream->time_base); }
+    HWAccel *hwAccel() const { return d->hwAccel.get(); }
+    qint64 toMs(qint64 ts) const { return timeStampMs(ts, d->stream->time_base).value_or(0); }
+    qint64 toUs(qint64 ts) const { return timeStampUs(ts, d->stream->time_base).value_or(0); }
 
 private:
+    Codec(Data *data) : d(data) {}
     QExplicitlySharedDataPointer<Data> d;
 };
 
@@ -109,7 +110,7 @@ struct Frame
                 av_frame_free(&frame);
         }
         QAtomicInt ref;
-        Codec codec;
+        std::optional<Codec> codec;
         AVFrame *frame = nullptr;
         QString text;
         qint64 pts = -1;
@@ -130,7 +131,7 @@ struct Frame
         d->frame = nullptr;
         return f;
     }
-    const Codec *codec() const { return &d->codec; }
+    const Codec *codec() const { return d->codec ? &d->codec.value() : nullptr; }
     qint64 pts() const { return d->pts; }
     qint64 duration() const { return d->duration; }
     qint64 end() const { return d->pts + d->duration; }
@@ -150,14 +151,6 @@ class Decoder : public QObject
     Q_OBJECT
 public:
     Decoder();
-    Decoder(QFFmpegMediaPlayer *player)
-        : player(player)
-    {
-    }
-    Decoder(QFFmpegAudioDecoder *decoder)
-        : audioDecoder(decoder)
-    {
-    }
     ~Decoder();
 
     void setMedia(const QUrl &media, QIODevice *stream);
@@ -179,12 +172,10 @@ public:
     void setVideoSink(QVideoSink *sink);
     void setAudioSink(QPlatformAudioOutput *output);
 
-    void changeAVTrack(QPlatformMediaPlayer::TrackType type, int index);
+    void changeAVTrack(QPlatformMediaPlayer::TrackType type);
 
     void seek(qint64 pos);
     void setPlaybackRate(float rate);
-
-    void checkStreams(AVFormatContext *context);
 
     int activeTrack(QPlatformMediaPlayer::TrackType type);
     void setActiveTrack(QPlatformMediaPlayer::TrackType type, int streamNumber);
@@ -194,15 +185,20 @@ public:
         return m_isSeekable;
     }
 
-    // threadsafe
-    void error(int errorCode, const QString &errorString);
+signals:
+    void endOfStream();
+    void errorOccured(int error, const QString &errorString);
+    void positionChanged(qint64 time);
 
-public Q_SLOTS:
-    void emitError(int error, const QString &errorString);
-    void updateCurrentTime(qint64 time);
+public slots:
     void streamAtEnd();
 
 public:
+    struct StreamInfo {
+        int avStreamIndex = -1;
+        bool isDefault = false;
+        QMediaMetaData metaData;
+    };
 
     // Accessed from multiple threads, but API is threadsafe
     ClockController clockController;
@@ -213,33 +209,25 @@ private:
 protected:
     friend QFFmpegMediaPlayer;
 
-    QFFmpegMediaPlayer *player = nullptr;
-    QFFmpegAudioDecoder *audioDecoder = nullptr;
-
     QMediaPlayer::PlaybackState m_state = QMediaPlayer::StoppedState;
     bool m_isSeekable = false;
 
     Demuxer *demuxer = nullptr;
-    int m_currentAVStreamIndex[QPlatformMediaPlayer::NTrackTypes] = { -1, -1, -1 };
-
     QVideoSink *videoSink = nullptr;
     Renderer *videoRenderer = nullptr;
-
     QPlatformAudioOutput *audioOutput = nullptr;
     Renderer *audioRenderer = nullptr;
 
-    bool playing = false;
-
-    struct StreamInfo {
-        int avStreamIndex = -1;
-        bool isDefault = false;
-        QMediaMetaData metaData;
-    };
-
     QList<StreamInfo> m_streamMap[QPlatformMediaPlayer::NTrackTypes];
-    int m_requestedStreams[3] = { -1, -1, -1 };
+    int m_requestedStreams[QPlatformMediaPlayer::NTrackTypes] = { -1, -1, -1 };
     qint64 m_duration = 0;
     QMediaMetaData m_metaData;
+
+    int avStreamIndex(QPlatformMediaPlayer::TrackType type)
+    {
+        int i = m_requestedStreams[type];
+        return i < 0 || i >= m_streamMap[type].size() ? -1 : m_streamMap[type][i].avStreamIndex;
+    }
 };
 
 class Demuxer : public Thread

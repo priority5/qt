@@ -1360,7 +1360,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterMove()
     auto pos = elementCenter(view.page(), "foo");
     makeClick(window, withTouch, pos);
     QWindow *popup = nullptr;
-    QTRY_VERIFY(popup = findNewTopLevelWindow(oldTlws));
+    QTRY_VERIFY((popup = findNewTopLevelWindow(oldTlws)));
     QVERIFY(QTest::qWaitForWindowExposed(popup));
     QTRY_VERIFY(popup->width() > 0 && popup->height() > 0);
     QTRY_VERIFY(QGuiApplication::topLevelWindows().contains(popup));
@@ -1388,7 +1388,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterMove()
     view.move(view.pos() + offset);
     QTRY_COMPARE(jsViewPosition(), view.pos());
     makeClick(window, withTouch, elementCenter(view.page(), "foo"));
-    QTRY_VERIFY(popup = findNewTopLevelWindow(oldTlws));
+    QTRY_VERIFY((popup = findNewTopLevelWindow(oldTlws)));
     QTRY_VERIFY(popup->width() > 0 && popup->height() > 0);
     QTRY_VERIFY(QGuiApplication::topLevelWindows().contains(popup));
     QTRY_VERIFY(!popup->position().isNull());
@@ -1433,7 +1433,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove()
     makeClick(window, withTouch, view.mapTo(view.window(), elementCenter(view.page(), "foo")));
 
     QWindow *popup = nullptr;
-    QTRY_VERIFY(popup = findNewTopLevelWindow(oldTlws));
+    QTRY_VERIFY((popup = findNewTopLevelWindow(oldTlws)));
     QVERIFY(QTest::qWaitForWindowExposed(popup));
     QTRY_VERIFY(popup->width() > 0 && popup->height() > 0);
     QTRY_VERIFY(QGuiApplication::topLevelWindows().contains(popup));
@@ -1460,7 +1460,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove()
     QTRY_COMPARE(jsViewWidth(), originalViewWidth - offset);
 
     makeClick(window, withTouch, view.mapTo(view.window(), elementCenter(view.page(), "foo")));
-    QTRY_VERIFY(popup = findNewTopLevelWindow(oldTlws));
+    QTRY_VERIFY((popup = findNewTopLevelWindow(oldTlws)));
     QVERIFY(QTest::qWaitForWindowExposed(popup));
     QTRY_VERIFY(popup->width() > 0 && popup->height() > 0);
     QTRY_VERIFY(!popup->position().isNull());
@@ -3224,13 +3224,16 @@ void tst_QWebEnginePage::mouseButtonTranslation()
 
     QVERIFY(view.focusProxy() != nullptr);
 
-    QMouseEvent evpres(QEvent::MouseButtonPress, view.rect().center(), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    const QPoint mousePos = view.rect().center();
+    QMouseEvent evpres(QEvent::MouseButtonPress, mousePos, view.mapToGlobal(mousePos),
+                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QGuiApplication::sendEvent(view.focusProxy(), &evpres);
 
     QTRY_COMPARE(evaluateJavaScriptSync(view.page(), "lastEvent.button").toInt(), 0);
     QCOMPARE(evaluateJavaScriptSync(view.page(), "lastEvent.buttons").toInt(), 1);
 
-    QMouseEvent evpres2(QEvent::MouseButtonPress, view.rect().center(), Qt::RightButton, Qt::LeftButton | Qt::RightButton, Qt::NoModifier);
+    QMouseEvent evpres2(QEvent::MouseButtonPress, mousePos, view.mapToGlobal(mousePos),
+                        Qt::RightButton, Qt::LeftButton | Qt::RightButton, Qt::NoModifier);
     QGuiApplication::sendEvent(view.focusProxy(), &evpres2);
 
     QTRY_COMPARE(evaluateJavaScriptSync(view.page(), "lastEvent.button").toInt(), 2);
@@ -3679,7 +3682,7 @@ void tst_QWebEnginePage::openLinkInNewPage()
         break;
     }
 
-    Qt::MouseButton button;
+    Qt::MouseButton button = Qt::NoButton;
     switch (cause) {
     case Cause::TargetBlank:
         button = Qt::LeftButton;

@@ -283,6 +283,7 @@ QVector3D QAudioEnginePrivate::listenerPosition() const
     \class QAudioEngine
     \inmodule QtSpatialAudio
     \ingroup spatialaudio
+    \ingroup multimedia_audio
 
     \brief QAudioEngine manages a three dimensional sound field.
 
@@ -634,6 +635,25 @@ void QAmbientSoundPrivate::finished()
 {
     m_loading = false;
 }
+
+/*!
+    \fn void QAudioEngine::pause()
+
+    Pauses playback.
+*/
+/*!
+    \fn void QAudioEngine::resume()
+
+    Resumes playback.
+*/
+/*!
+    \variable QAudioEngine::DistanceScaleCentimeter
+    \internal
+*/
+/*!
+    \variable QAudioEngine::DistanceScaleMeter
+    \internal
+*/
 
 QT_END_NAMESPACE
 

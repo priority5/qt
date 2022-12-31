@@ -1350,11 +1350,12 @@ void WriteInitialization::writeProperties(const QString &varName,
                 Buddy buddy = { varName, p->elementCstring() };
                 m_buddies.append(std::move(buddy));
             } else {
+                const bool useQByteArray = !stdset && language::language() == Language::Cpp;
                 QTextStream str(&propertyValue);
-                if (!stdset)
+                if (useQByteArray)
                     str << "QByteArray(";
                 str << language::charliteral(p->elementCstring(), m_dindent);
-                if (!stdset)
+                if (useQByteArray)
                     str << ')';
             }
             break;
@@ -1827,9 +1828,8 @@ QString WriteInitialization::writeIconProperties(const DomResourceIcon *i)
             writeResourceIcon(m_output, iconName, m_dindent, i);
         else
             writePixmapFunctionIcon(m_output, iconName, m_dindent, i);
-        m_output << m_indent;
         if (isCpp)
-            m_output << '}';
+            m_output << m_indent << '}';
         m_output  << '\n';
         return iconName;
     }

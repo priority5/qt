@@ -219,12 +219,6 @@ private:
     QMaskGenerator *m_pMaskGenerator;
     QDefaultMaskGenerator m_defaultMaskGenerator;
 
-    QByteArray m_statusLine;
-    int m_httpStatusCode;
-    int m_httpMajorVersion, m_httpMinorVersion;
-    QString m_httpStatusMessage;
-    QMultiMap<QString, QString> m_headers;
-
     quint64 m_outgoingFrameSize;
 
     friend class QWebSocketServerPrivate;

@@ -102,6 +102,7 @@ void QAudioRoomPrivate::update()
     \class QAudioRoom
     \inmodule QtSpatialAudio
     \ingroup spatialaudio
+    \ingroup multimedia_audio
 
     Defines a room for the spatial audio engine.
 
@@ -258,6 +259,11 @@ QQuaternion QAudioRoom::rotation() const
     return toQuaternion(d->roomProperties.rotation);
 }
 
+/*!
+    \fn void QAudioRoom::wallsChanged()
+
+    Signals when the wall material changes.
+*/
 /*!
     Sets \a wall to \a material.
 

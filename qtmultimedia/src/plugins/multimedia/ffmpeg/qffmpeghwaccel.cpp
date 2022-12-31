@@ -26,11 +26,7 @@ QT_BEGIN_NAMESPACE
 
 namespace QFFmpeg {
 
-// HW context initialization
-
-// preferred order of HW accelerators to use
 static const AVHWDeviceType preferredHardwareAccelerators[] = {
-// Linux/Unix
 #if defined(Q_OS_LINUX)
     AV_HWDEVICE_TYPE_VAAPI,
 //    AV_HWDEVICE_TYPE_DRM,
@@ -41,7 +37,6 @@ static const AVHWDeviceType preferredHardwareAccelerators[] = {
 #elif defined (Q_OS_ANDROID)
     AV_HWDEVICE_TYPE_MEDIACODEC,
 #endif
-    AV_HWDEVICE_TYPE_NONE
 };
 
 static AVBufferRef *loadHWContext(const AVHWDeviceType type)
@@ -63,20 +58,18 @@ static AVBufferRef *hardwareContextForCodec(const AVCodec *codec)
 
     // First try our preferred accelerators. Those are the ones where we can
     // set up a zero copy pipeline
-    auto *preferred = preferredHardwareAccelerators;
-    while (*preferred != AV_HWDEVICE_TYPE_NONE) {
+    for (auto type : preferredHardwareAccelerators) {
         for (int i = 0;; ++i) {
             const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
             if (!config)
                 break;
-            if (config->device_type == *preferred) {
+            if (config->device_type == type) {
                 auto *hwContext = loadHWContext(config->device_type);
                 if (hwContext)
                     return hwContext;
                 break;
             }
         }
-        ++preferred;
     }
 
     // Ok, let's see if we can get any HW acceleration at all. It'll still involve one buffer copy,
@@ -139,38 +132,30 @@ TextureConverter::Data::~Data()
     delete backend;
 }
 
-
-
-HWAccel::Data::~Data()
+HWAccel::~HWAccel()
 {
-    if (hwDeviceContext)
-        av_buffer_unref(&hwDeviceContext);
-    if (hwFramesContext)
-        av_buffer_unref(&hwFramesContext);
+    if (m_hwDeviceContext)
+        av_buffer_unref(&m_hwDeviceContext);
+    if (m_hwFramesContext)
+        av_buffer_unref(&m_hwFramesContext);
 }
 
-
-HWAccel::HWAccel(const AVCodec *codec)
+std::unique_ptr<HWAccel> HWAccel::create(const AVCodec *codec)
 {
-    if (codec->type != AVMEDIA_TYPE_VIDEO)
-        return;
-    auto *ctx = hardwareContextForCodec(codec);
-    if (!ctx)
-        return;
-    d = new Data;
-    d->hwDeviceContext = ctx;
+    if (codec->type == AVMEDIA_TYPE_VIDEO) {
+        if (auto *ctx = hardwareContextForCodec(codec))
+            return std::unique_ptr<HWAccel>(new HWAccel(ctx));
+    }
+    return {};
 }
 
-HWAccel::HWAccel(AVHWDeviceType deviceType)
+std::unique_ptr<HWAccel> HWAccel::create(AVHWDeviceType deviceType)
 {
-    auto *ctx = loadHWContext(deviceType);
-    if (!ctx)
-        return;
-    d = new Data;
-    d->hwDeviceContext = ctx;
+    if (auto *ctx = loadHWContext(deviceType))
+        return std::unique_ptr<HWAccel>(new HWAccel(ctx));
+    else
+        return {};
 }
-
-HWAccel::~HWAccel() = default;
 
 AVPixelFormat HWAccel::format(AVFrame *frame)
 {
@@ -182,16 +167,15 @@ AVPixelFormat HWAccel::format(AVFrame *frame)
     return AVPixelFormat(hwFramesContext->sw_format);
 }
 
-const AVHWDeviceType *HWAccel::preferredDeviceTypes()
+std::pair<const AVHWDeviceType*, qsizetype> HWAccel::preferredDeviceTypes()
 {
-    return preferredHardwareAccelerators;
+    return { preferredHardwareAccelerators,
+             sizeof(preferredHardwareAccelerators) / sizeof(AVHWDeviceType) };
 }
 
 AVHWDeviceContext *HWAccel::hwDeviceContext() const
 {
-    if (!d || !d->hwDeviceContext)
-        return nullptr;
-    return (AVHWDeviceContext *)d->hwDeviceContext->data;
+    return m_hwDeviceContext ? (AVHWDeviceContext *)m_hwDeviceContext->data : nullptr;
 }
 
 AVPixelFormat HWAccel::hwFormat() const
@@ -297,37 +281,33 @@ const AVCodec *HWAccel::hardwareEncoderForCodecId(AVCodecID id) const
     return c;
 }
 
-HWAccel HWAccel::findHardwareAccelForCodecID(AVCodecID id)
+std::unique_ptr<HWAccel> HWAccel::findHardwareAccelForCodecID(AVCodecID id)
 {
-    auto *accels = preferredHardwareAccelerators;
-    while (*accels != AV_HWDEVICE_TYPE_NONE) {
-        auto accel = HWAccel(*accels);
-        if (accel.hardwareEncoderForCodecId(id) != nullptr)
+    for (auto type : preferredHardwareAccelerators) {
+        auto accel = HWAccel::create(type);
+        if (accel && accel->hardwareEncoderForCodecId(id))
             return accel;
-        ++accels;
     }
     return {};
 }
 
 AVHWDeviceType HWAccel::deviceType() const
 {
-    if (!d || !d->hwDeviceContext)
-        return AV_HWDEVICE_TYPE_NONE;
-    return hwDeviceContext()->type;
+    return m_hwDeviceContext ? hwDeviceContext()->type : AV_HWDEVICE_TYPE_NONE;
 }
 
 void HWAccel::createFramesContext(AVPixelFormat swFormat, const QSize &size)
 {
-    if (!d || !d->hwDeviceContext)
+    if (m_hwDeviceContext)
         return;
-    d->hwFramesContext = av_hwframe_ctx_alloc(d->hwDeviceContext);
-    auto *c = (AVHWFramesContext *)d->hwFramesContext->data;
+    m_hwFramesContext = av_hwframe_ctx_alloc(m_hwDeviceContext);
+    auto *c = (AVHWFramesContext *)m_hwFramesContext->data;
     c->format = hwFormat();
     c->sw_format = swFormat;
     c->width = size.width();
     c->height = size.height();
     qDebug() << "init frames context";
-    int err = av_hwframe_ctx_init(d->hwFramesContext);
+    int err = av_hwframe_ctx_init(m_hwFramesContext);
     if (err < 0)
         qWarning() << "failed to init HW frame context" << err << err2str(err);
     else
@@ -336,9 +316,7 @@ void HWAccel::createFramesContext(AVPixelFormat swFormat, const QSize &size)
 
 AVHWFramesContext *HWAccel::hwFramesContext() const
 {
-    if (!d || !d->hwFramesContext)
-        return nullptr;
-    return (AVHWFramesContext *)d->hwFramesContext->data;
+    return m_hwFramesContext ? (AVHWFramesContext *)m_hwFramesContext->data : nullptr;
 }
 
 
@@ -387,11 +365,6 @@ void TextureConverter::updateBackend(AVPixelFormat fmt)
         break;
     }
     d->format = fmt;
-}
-
-std::unique_ptr<QRhiTexture> TextureSet::texture(int /*plane*/)
-{
-    return {};
 }
 
 } // namespace QFFmpeg

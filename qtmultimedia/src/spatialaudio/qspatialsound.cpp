@@ -16,6 +16,7 @@ QT_BEGIN_NAMESPACE
     \class QSpatialSound
     \inmodule QtSpatialAudio
     \ingroup spatialaudio
+    \ingroup multimedia_audio
 
     \brief A sound object in 3D space.
 
@@ -479,6 +480,14 @@ QUrl QSpatialSound::source() const
     return d->url;
 }
 
+/*!
+    \enum QSpatialSound::Loops
+
+    Lets you control the sound playback loop using the following values:
+
+    \value Infinite Playback infinitely
+    \value Once Playback once
+*/
 /*!
    \property QSpatialSound::loops
 

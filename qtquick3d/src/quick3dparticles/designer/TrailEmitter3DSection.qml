@@ -13,7 +13,7 @@ Section {
     SectionLayout {
         PropertyLabel {
             text: qsTr("Follow")
-            tooltip: qsTr("This property defines the logical particle which this emitter follows.")
+            tooltip: qsTr("Sets the logical particle which this emitter follows.")
         }
 
         SecondColumnLayout {

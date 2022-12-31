@@ -322,6 +322,8 @@ void QQuickItemKeyFilter::shortcutOverride(QKeyEvent *event)
 {
     if (m_next)
         m_next->shortcutOverride(event);
+    else
+        event->ignore();
 }
 
 void QQuickItemKeyFilter::componentComplete()
@@ -5480,9 +5482,10 @@ void QQuickItemPrivate::deliverInputMethodEvent(QInputMethodEvent *e)
 
 void QQuickItemPrivate::deliverShortcutOverrideEvent(QKeyEvent *event)
 {
-    if (extra.isAllocated() && extra->keyHandler) {
+    if (extra.isAllocated() && extra->keyHandler)
         extra->keyHandler->shortcutOverride(event);
-    }
+    else
+        event->ignore();
 }
 
 bool QQuickItemPrivate::anyPointerHandlerWants(const QPointerEvent *event, const QEventPoint &point) const
@@ -6307,6 +6310,15 @@ void QQuickItem::setVisible(bool v)
 
     Setting this property to \c false automatically causes \l activeFocus to be
     set to \c false, and this item will longer receive keyboard events.
+
+    \note Hover events are enabled separately by \l setAcceptHoverEvents().
+    Thus, a disabled item can continue to receive hover events, even when this
+    property is \c false. This makes it possible to show informational feedback
+    (such as \l ToolTip) even when an interactive item is disabled.
+    The same is also true for any \l {HoverHandlers}{QQuickHoverHandler}
+    added as children of the item. A HoverHandler can, however, be
+    \l{disabled}{QQuickHoverHandler::enabled} explicitly, or for example
+    be bound to the \c enabled state of the item.
 
     \sa visible
 */
@@ -7791,6 +7803,10 @@ void QQuickItem::setAcceptHoverEvents(bool enabled)
     Q_D(QQuickItem);
     d->hoverEnabled = enabled;
     d->setHasHoverInChild(enabled);
+    // The DA needs to resolve which items and handlers should now be hovered or unhovered.
+    // Marking this item dirty ensures that flushFrameSynchronousEvents() will be called from the render loop,
+    // even if this change is not in response to a mouse event and no item has already marked itself dirty.
+    d->dirty(QQuickItemPrivate::Content);
 }
 
 /*!
@@ -7864,7 +7880,7 @@ void QQuickItemPrivate::setHasHoverInChild(bool hasHover)
             QQuickItemPrivate *otherChildPrivate = QQuickItemPrivate::get(otherChild);
             if (otherChildPrivate->subtreeHoverEnabled || otherChildPrivate->hoverEnabled)
                 return; // nope! sorry, something else wants it kept on.
-            if (otherChildPrivate->hasHoverHandlers())
+            if (otherChildPrivate->hasEnabledHoverHandlers())
                 return; // nope! sorry, we have pointer handlers which are interested.
         }
     }
@@ -8995,12 +9011,12 @@ bool QQuickItemPrivate::hasPointerHandlers() const
     return extra.isAllocated() && !extra->pointerHandlers.isEmpty();
 }
 
-bool QQuickItemPrivate::hasHoverHandlers() const
+bool QQuickItemPrivate::hasEnabledHoverHandlers() const
 {
     if (!hasPointerHandlers())
         return false;
     for (QQuickPointerHandler *h : extra->pointerHandlers)
-        if (qmlobject_cast<QQuickHoverHandler *>(h))
+        if (auto *hh = qmlobject_cast<QQuickHoverHandler *>(h); hh && hh->enabled())
             return true;
     return false;
 }

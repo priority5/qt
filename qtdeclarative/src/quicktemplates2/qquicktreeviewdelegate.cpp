@@ -68,7 +68,7 @@ QT_BEGIN_NAMESPACE
     such as \l {AbstractButton::clicked()}{clicked} when the user clicks on the delegate.
     If needed, you could connect to that signal to implement application specific
     functionality, in addition to the default expand/collapse behavior (and even set \l
-    {QQuickTableView::pointerNavigationEnabled}{pointerNavigationEnabled} to \c false, to
+    {TableView::pointerNavigationEnabled}{pointerNavigationEnabled} to \c false, to
     disable the default behavior as well).
 
     But the ItemDelegate API does not give you information about the position of the
@@ -96,6 +96,10 @@ QT_BEGIN_NAMESPACE
         }
     }
     \endcode
+
+    \note If you want to disable the default behavior that occurs when the
+    user clicks on the delegate (like changing the current index), you can set
+    {QQuickTableView::pointerNavigationEnabled}{pointerNavigationEnabled} to \c false.
 
     \sa TreeView
 */
@@ -146,7 +150,7 @@ QT_BEGIN_NAMESPACE
 
     This property holds if the delegate represent the
     \l {QItemSelectionModel::currentIndex()}{current index}
-    in the \l {QQuickTableView::selectionModel()}{selection model}.
+    in the \l {TableView::selectionModel}{selection model}.
 */
 
 /*!
@@ -154,7 +158,7 @@ QT_BEGIN_NAMESPACE
 
     This property holds if the delegate represent a
     \l {QItemSelectionModel::selection()}{selected index}
-    in the \l {QQuickTableView::selectionModel()}{selection model}.
+    in the \l {TableView::selectionModel}{selection model}.
 */
 
 /*!

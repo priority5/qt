@@ -73,7 +73,6 @@ qt_internal_add_module(Core
         global/q20algorithm.h
         global/q20functional.h
         global/q23functional.h
-        global/qxpfunctional.h
         global/q20iterator.h
         global/qxpfunctional.h
         io/qabstractfileengine.cpp io/qabstractfileengine_p.h
@@ -149,7 +148,7 @@ qt_internal_add_module(Core
         kernel/qsystemerror.cpp kernel/qsystemerror_p.h
         kernel/qsystemsemaphore.cpp kernel/qsystemsemaphore.h kernel/qsystemsemaphore_p.h
         kernel/qtestsupport_core.cpp kernel/qtestsupport_core.h
-        kernel/qtimer.cpp kernel/qtimer.h
+        kernel/qtimer.cpp kernel/qtimer.h kernel/qtimer_p.h
         kernel/qtranslator.cpp kernel/qtranslator.h kernel/qtranslator_p.h
         kernel/qvariant.cpp kernel/qvariant.h kernel/qvariant_p.h
         kernel/qvariantmap.h kernel/qvarianthash.h kernel/qvariantlist.h
@@ -972,6 +971,12 @@ qt_internal_extend_target(Core CONDITION ANDROID
         kernel/qjnihelpers.cpp kernel/qjnihelpers_p.h
         platform/android/qandroidextras_p.h platform/android/qandroidextras.cpp
         platform/android/qandroidnativeinterface.cpp
+)
+
+qt_internal_extend_target(Core CONDITION WIN32
+    SOURCES
+        platform/windows/qfactorycacheregistration_p.h
+        platform/windows/qfactorycacheregistration.cpp
 )
 
 qt_internal_extend_target(Core CONDITION HAIKU AND NOT ANDROID

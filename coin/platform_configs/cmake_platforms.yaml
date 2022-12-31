@@ -2,9 +2,7 @@ Version: 2
 Include: [
     cmake_platforms_qemu.yaml,
     cmake_platforms_qemu_qnx710.yaml,
-    cmake_platforms_target_android_host_linux.yaml,
-    cmake_platforms_target_android_host_macos.yaml,
-    cmake_platforms_target_android_host_windows.yaml,
+    cmake_platforms_target_android.yaml,
     cmake_platforms_wasm.yaml,
     macos.yaml
     ]
@@ -34,7 +32,7 @@ Configurations:
         'CONAN_PROFILE=coin/conan/profiles/ci-linux-x86_64-gcc-debug-developer'
     ]
 -
-    Template: 'qtci-linux-SLES-15_SP3-x86_64-51'
+    Template: 'qtci-linux-SLES-15_SP4-x86_64-50'
     Compiler: 'GCC'
     Features: ['Sccache', 'DisableTests', 'UseConfigure']
     Configure arguments: '-nomake examples -static -no-sql-mysql'
@@ -126,7 +124,7 @@ Configurations:
     Id: 'RHEL-8.4-host'
     Template: 'qtci-linux-RHEL-8.4-x86_64-50'
     Compiler: 'GCC'
-    Features: ['Packaging', 'Sccache', 'UseConfigure']
+    Features: ['Packaging', 'Sccache', 'UseConfigure', 'InstallQt5Dependencies']
     Configure arguments: '-nomake examples -release -force-debug-info -headersclean -separate-debug-info -qt-libjpeg -qt-libpng -qt-pcre -qt-harfbuzz -qt-doubleconversion -no-libudev -bundled-xcb-xinput'
     Environment variables: [
         'CMAKE_ARGS=-DOpenGL_GL_PREFERENCE=LEGACY',
@@ -134,7 +132,7 @@ Configurations:
     ]
 -
     Id: 'ios-universal'
-    Template: 'qtci-macos-12-x86_64-102'
+    Template: 'qtci-macos-12-x86_64-105'
     Target os: 'IOS_ANY'
     Target arch: 'arm64'
     Compiler: 'Clang'

@@ -239,20 +239,24 @@ Item {
     property alias _color: verticalBlur.color;
     /*! \internal */
     property real _thickness: 0;
+    /*! \internal */
+    property bool _componentIsComplete: false
 
     onSamplesChanged: _rebuildShaders();
     on_KernelSizeChanged: _rebuildShaders();
     onDeviationChanged: _rebuildShaders();
     on_DprChanged: _rebuildShaders();
     on_MaskSourceChanged: _rebuildShaders();
-    Component.onCompleted: _rebuildShaders();
-
-    ShaderBuilder {
-        id: shaderBuilder
+    Component.onCompleted: {
+        _componentIsComplete = true
+        _rebuildShaders();
     }
 
     /*! \internal */
     function _rebuildShaders() {
+        if (!_componentIsComplete)
+            return
+
         var params = {
             radius: _kernelRadius,
             // Limit deviation to something very small avoid getting NaN in the shader.
@@ -261,7 +265,7 @@ Item {
             masked: _maskSource != undefined,
             fallback: root.radius != _kernelRadius
         }
-        var shaders = shaderBuilder.gaussianBlur(params);
+        var shaders = ShaderBuilder.gaussianBlur(params);
         horizontalBlur.fragmentShader = shaders.fragmentShader;
         horizontalBlur.vertexShader = shaders.vertexShader;
     }

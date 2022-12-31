@@ -260,6 +260,7 @@ private Q_SLOTS:
     void ioGetFromFileSpecial();
     void ioGetFromFile_data();
     void ioGetFromFile();
+    void ioGetFromFileUrl();
     void ioGetFromFtp_data();
     void ioGetFromFtp();
     void ioGetFromFtpWithReuse();
@@ -512,6 +513,8 @@ private Q_SLOTS:
     void contentEncodingError_data();
     void contentEncodingError();
     void compressedReadyRead();
+    void notFoundWithCompression_data();
+    void notFoundWithCompression();
 
     // NOTE: This test must be last!
     void parentingRepliesToTheApp();
@@ -3326,6 +3329,18 @@ void tst_QNetworkReply::ioGetFromFile()
     QCOMPARE(reply->header(QNetworkRequest::ContentLengthHeader).toLongLong(), file.size());
     QCOMPARE(qint64(reader.data.size()), file.size());
     QCOMPARE(reader.data, data);
+}
+
+void tst_QNetworkReply::ioGetFromFileUrl()
+{
+    // This immediately fails on non-windows platforms:
+    QNetworkRequest request(QUrl("file://unc-server/some/path"));
+    QNetworkReplyPtr reply(manager.get(request));
+    QSignalSpy finishedSpy(reply.get(), &QNetworkReply::finished);
+    // QTBUG-105618: This would, on non-Windows platforms, never happen because the signal
+    // was emitted before the constructor finished, leaving no chance at all to connect to the
+    // signal
+    QVERIFY(finishedSpy.wait());
 }
 
 void tst_QNetworkReply::ioGetFromFtp_data()
@@ -9654,25 +9669,53 @@ void tst_QNetworkReply::contentEncoding_data()
     QTest::addColumn<QByteArray>("encoding");
     QTest::addColumn<QByteArray>("body");
     QTest::addColumn<QByteArray>("expected");
+    QTest::addColumn<bool>("decompress");
 
+    const QByteArray helloWorld = "hello world";
+
+    const QByteArray gzipBody = QByteArray::fromBase64("H4sIAAAAAAAAA8tIzcnJVyjPL8pJAQCFEUoNCwAAAA==");
     QTest::newRow("gzip-hello-world")
             << QByteArray("gzip")
-            << QByteArray::fromBase64("H4sIAAAAAAAAA8tIzcnJVyjPL8pJAQCFEUoNCwAAAA==")
-            << QByteArray("hello world");
+            << gzipBody
+            << helloWorld
+            << true;
+    QTest::newRow("gzip-hello-world-no-decompress")
+            << QByteArray("gzip")
+            << gzipBody
+            << helloWorld
+            << false;
+    const QByteArray deflateBody = QByteArray::fromBase64("eJzLSM3JyVcozy/KSQEAGgsEXQ==");
     QTest::newRow("deflate-hello-world")
-            << QByteArray("deflate") << QByteArray::fromBase64("eJzLSM3JyVcozy/KSQEAGgsEXQ==")
-            << QByteArray("hello world");
+            << QByteArray("deflate") << deflateBody
+            << helloWorld
+            << true;
+    QTest::newRow("deflate-hello-world-no-decompress")
+            << QByteArray("deflate") << deflateBody
+            << helloWorld
+            << false;
 
 #if QT_CONFIG(brotli)
+    const QByteArray brotliBody = QByteArray::fromBase64("DwWAaGVsbG8gd29ybGQD");
     QTest::newRow("brotli-hello-world")
-            << QByteArray("br") << QByteArray::fromBase64("DwWAaGVsbG8gd29ybGQD")
-            << QByteArray("hello world");
+            << QByteArray("br") << brotliBody
+            << helloWorld
+            << true;
+    QTest::newRow("brotli-hello-world-no-decompress")
+            << QByteArray("br") << brotliBody
+            << helloWorld
+            << false;
 #endif
 
 #if defined(QT_BUILD_INTERNAL) && QT_CONFIG(zstd)
+    const QByteArray zstdBody = QByteArray::fromBase64("KLUv/QRYWQAAaGVsbG8gd29ybGRoaR6y");
     QTest::newRow("zstandard-hello-world")
-            << QByteArray("zstd") << QByteArray::fromBase64("KLUv/QRYWQAAaGVsbG8gd29ybGRoaR6y")
-            << QByteArray("hello world");
+            << QByteArray("zstd") << zstdBody
+            << helloWorld
+            << true;
+    QTest::newRow("zstandard-hello-world-no-decompress")
+            << QByteArray("zstd") << zstdBody
+            << helloWorld
+            << false;
 #else
     qDebug("Note: ZStandard testdata is only available for developer builds.");
 #endif
@@ -9682,12 +9725,19 @@ void tst_QNetworkReply::contentEncoding()
 {
     QFETCH(QByteArray, encoding);
     QFETCH(QByteArray, body);
+    QFETCH(bool, decompress);
     QString header("HTTP/1.0 200 OK\r\nContent-Encoding: %1\r\nContent-Length: %2\r\n\r\n");
     header = header.arg(encoding, QString::number(body.size()));
 
     MiniHttpServer server(header.toLatin1() + body);
 
     QNetworkRequest request(QUrl("http://localhost:" + QString::number(server.serverPort())));
+    if (!decompress) {
+        // This disables decompression of the received content:
+        request.setRawHeader("Accept-Encoding", QLatin1String("%1").arg(encoding).toLatin1());
+        // This disables the zerocopy optimization
+        request.setAttribute(QNetworkRequest::MaximumDownloadBufferSizeAttribute, 0);
+    }
     QNetworkReplyPtr reply(manager.get(request));
 
     QVERIFY2(waitForFinish(reply) == Success, msgWaitForFinished(reply));
@@ -9708,10 +9758,14 @@ void tst_QNetworkReply::contentEncoding()
         QVERIFY2(list.contains(encoding), acceptedEncoding.data());
     }
 
-    QFETCH(QByteArray, expected);
-
-    QCOMPARE(reply->bytesAvailable(), expected.size());
-    QCOMPARE(reply->readAll(), expected);
+    if (decompress) {
+        QFETCH(QByteArray, expected);
+        QCOMPARE(reply->bytesAvailable(), expected.size());
+        QCOMPARE(reply->readAll(), expected);
+    } else {
+        QCOMPARE(reply->bytesAvailable(), body.size());
+        QCOMPARE(reply->readAll(), body);
+    }
 }
 
 void tst_QNetworkReply::contentEncodingBigPayload_data()
@@ -9725,7 +9779,7 @@ void tst_QNetworkReply::contentEncodingBigPayload_data()
     QTest::addRow("gzip-4GB") << QByteArray("gzip") << (":/4G.gz") << fourGiB;
 
 #if QT_CONFIG(brotli)
-    QTest::addRow("brotli-4GB") << QByteArray("br") << (testDataDir + "./4G.br") << fourGiB;
+    QTest::addRow("brotli-4GB") << QByteArray("br") << (testDataDir + "/4G.br") << fourGiB;
 #endif
 #if defined(QT_BUILD_INTERNAL) && QT_CONFIG(zstd)
     QTest::addRow("zstd-4GB") << QByteArray("zstd") << (":/4G.zst") << fourGiB;
@@ -9927,6 +9981,31 @@ void tst_QNetworkReply::compressedReadyRead()
                      });
     QTRY_VERIFY(reply->isFinished());
     QCOMPARE(received, expected);
+}
+
+void tst_QNetworkReply::notFoundWithCompression_data()
+{
+    contentEncoding_data();
+}
+
+void tst_QNetworkReply::notFoundWithCompression()
+{
+    QFETCH(QByteArray, encoding);
+    QFETCH(QByteArray, body);
+    QString header("HTTP/1.0 404 OK\r\nContent-Encoding: %1\r\nContent-Length: %2\r\n\r\n");
+    header = header.arg(encoding, QString::number(body.size()));
+
+    MiniHttpServer server(header.toLatin1() + body);
+
+    QNetworkRequest request(
+            QUrl(QLatin1String("http://localhost:%1").arg(QString::number(server.serverPort()))));
+    QNetworkReplyPtr reply(manager.get(request));
+
+    QTRY_VERIFY2_WITH_TIMEOUT(reply->isFinished(), qPrintable(reply->errorString()), 15000);
+    QCOMPARE(reply->error(), QNetworkReply::ContentNotFoundError);
+
+    QFETCH(QByteArray, expected);
+    QCOMPARE(reply->readAll(), expected);
 }
 
 // NOTE: This test must be last testcase in tst_qnetworkreply!

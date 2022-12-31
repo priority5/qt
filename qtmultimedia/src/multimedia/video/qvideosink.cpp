@@ -22,7 +22,12 @@ public:
     QVideoSinkPrivate(QVideoSink *q)
         : q_ptr(q)
     {
-        videoSink = QPlatformMediaIntegration::instance()->createVideoSink(q);
+        auto maybeVideoSink = QPlatformMediaIntegration::instance()->createVideoSink(q);
+        if (maybeVideoSink) {
+            videoSink = maybeVideoSink.value();
+        } else {
+            qWarning() << "Failed to create QVideoSink" << maybeVideoSink.error();
+        }
     }
     ~QVideoSinkPrivate()
     {
@@ -109,7 +114,8 @@ void QVideoSink::setRhi(QRhi *rhi)
     if (d->rhi == rhi)
         return;
     d->rhi = rhi;
-    d->videoSink->setRhi(rhi);
+    if (d->videoSink)
+        d->videoSink->setRhi(rhi);
 }
 
 /*!
@@ -125,23 +131,31 @@ QPlatformVideoSink *QVideoSink::platformVideoSink() const
  */
 QVideoFrame QVideoSink::videoFrame() const
 {
-    return d->videoSink->currentVideoFrame();
+    return d->videoSink ? d->videoSink->currentVideoFrame() : QVideoFrame{};
 }
 
+/*!
+    \fn void QVideoSink::videoFrameChanged(const QVideoFrame &frame) const
+
+    Signals when the video \a frame changes.
+*/
 /*!
     Sets the current video \a frame.
 */
 void QVideoSink::setVideoFrame(const QVideoFrame &frame)
 {
-    d->videoSink->setVideoFrame(frame);
+    if (d->videoSink)
+        d->videoSink->setVideoFrame(frame);
 }
 
 /*!
+    \property QVideoSink::subtitleText
+
     Returns the current subtitle text.
 */
 QString QVideoSink::subtitleText() const
 {
-    return d->videoSink->subtitleText();
+    return d->videoSink ? d->videoSink->subtitleText() : QString{};
 }
 
 /*!
@@ -149,10 +163,13 @@ QString QVideoSink::subtitleText() const
 */
 void QVideoSink::setSubtitleText(const QString &subtitle)
 {
-    d->videoSink->setSubtitleText(subtitle);
+    if (d->videoSink)
+        d->videoSink->setSubtitleText(subtitle);
 }
 
 /*!
+    \property QVideoSink::videoSize
+
     Returns the size of the video currently being played back. If no video is
     being played, this method returns an invalid size.
  */

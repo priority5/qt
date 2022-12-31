@@ -1549,6 +1549,7 @@ static void generateFragmentShader(QSSGStageGeneratorBase &fragmentShader,
         fragmentShader << "    vec4 qt_color_sum = vec4(global_diffuse_light.rgb + global_specular_light + qt_global_emission, global_diffuse_light.a);\n";
 
         if (enableClearcoat) {
+            fragmentShader.addInclude("bsdf.glsllib");
             fragmentShader << "    vec3 qt_clearcoatFresnel = qt_schlick3(qt_clearcoatF0, qt_clearcoatF90, clamp(dot(qt_clearcoatNormal, qt_view_vector), 0.0, 1.0));\n";
             fragmentShader << "    qt_global_clearcoat = qt_global_clearcoat * qt_clearcoatAmount;\n";
             fragmentShader << "    qt_color_sum.rgb = qt_color_sum.rgb * (1.0 - qt_clearcoatAmount * qt_clearcoatFresnel) + qt_global_clearcoat;\n";
@@ -2006,7 +2007,7 @@ void QSSGMaterialShaderGenerator::setRhiMaterialProperties(const QSSGRenderConte
     };
     shaders->setUniform(ubufData, "qt_rhi_properties", rhiProperties, 4 * sizeof(float), &cui.rhiPropertiesIdx);
 
-    quint32 imageIdx = 0;
+    qsizetype imageIdx = 0;
     for (QSSGRenderableImage *theImage = inFirstImage; theImage; theImage = theImage->m_nextImage, ++imageIdx) {
         // we need to map image to uniform name: "image0_rotations", "image0_offsets", etc...
         const auto &names = imageStringTable[int(theImage->m_mapType)];

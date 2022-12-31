@@ -387,8 +387,10 @@ private slots:
     void v4SequenceMethodsWithParams_data();
     void v4SequenceMethodsWithParams();
     void jsFunctionOverridesImport();
-
+    void bindingAliasToComponentUrl();
+    void badGroupedProperty();
     void bindableOnly();
+    void signalInlineComponentArg();
 
 private:
     QQmlEngine engine;
@@ -7365,6 +7367,58 @@ void tst_qqmllanguage::jsFunctionOverridesImport()
     QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QScopedPointer<QObject> object(component.create());
     QCOMPARE(object->objectName(), u"foo"_s);
+}
+
+void tst_qqmllanguage::bindingAliasToComponentUrl()
+{
+    QQmlEngine engine;
+    {
+        QQmlComponent component(&engine, testFileUrl("bindingAliasToComponentUrl.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY(object);
+        QCOMPARE(object->property("accessibleNormalUrl"), object->property("urlClone"));
+    }
+    {
+        QQmlComponent component(&engine, testFileUrl("bindingAliasToComponentUrl2.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY(object);
+        QCOMPARE(object->property("accessibleNormalProgress"), QVariant(1.0));
+    }
+}
+
+void tst_qqmllanguage::badGroupedProperty()
+{
+    QQmlEngine engine;
+    const QUrl url = testFileUrl("badGroupedProperty.qml");
+    QQmlComponent c(&engine, url);
+    QVERIFY(c.isError());
+    QCOMPARE(c.errorString(),
+             QStringLiteral("%1:6 Cannot assign to non-existent property \"onComplete\"\n")
+             .arg(url.toString()));
+}
+
+void tst_qqmllanguage::signalInlineComponentArg()
+{
+    QQmlEngine engine;
+    {
+        QQmlComponent component(&engine, testFileUrl("SignalInlineComponentArg.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+
+        QCOMPARE(object->property("success"), u"Signal was called"_s);
+    }
+    {
+        QQmlComponent component(&engine, testFileUrl("signalInlineComponentArg1.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+
+        QCOMPARE(object->property("successFromOwnSignal"),
+                 u"Own signal was called with component from another file"_s);
+        QCOMPARE(object->property("successFromSignalFromFile"),
+                 u"Signal was called from another file"_s);
+    }
 }
 
 QTEST_MAIN(tst_qqmllanguage)

@@ -326,6 +326,7 @@ qint64 QNetworkReplyHttpImpl::readData(char* data, qint64 maxlen)
             d->error(QNetworkReplyImpl::NetworkError::UnknownContentError,
                      QCoreApplication::translate("QHttp", "Decompression failed: %1")
                              .arg(d->decompressHelper.errorString()));
+            d->decompressHelper.clear();
             return -1;
         }
         if (d->cacheSaveDevice) {
@@ -1050,6 +1051,7 @@ void QNetworkReplyHttpImplPrivate::replyDownloadData(QByteArray d)
             error(QNetworkReplyImpl::NetworkError::UnknownContentError,
                   QCoreApplication::translate("QHttp", "Decompression failed: %1")
                           .arg(decompressHelper.errorString()));
+            decompressHelper.clear();
             return;
         }
 
@@ -1069,6 +1071,7 @@ void QNetworkReplyHttpImplPrivate::replyDownloadData(QByteArray d)
                     error(QNetworkReplyImpl::NetworkError::UnknownContentError,
                           QCoreApplication::translate("QHttp",
                                                       "Data downloaded is too large to store"));
+                    decompressHelper.clear();
                     return;
                 }
                 d.resize(nextSize);
@@ -1077,6 +1080,7 @@ void QNetworkReplyHttpImplPrivate::replyDownloadData(QByteArray d)
                     error(QNetworkReplyImpl::NetworkError::UnknownContentError,
                           QCoreApplication::translate("QHttp", "Decompression failed: %1")
                                   .arg(decompressHelper.errorString()));
+                    decompressHelper.clear();
                     return;
                 }
             }
@@ -1325,6 +1329,11 @@ void QNetworkReplyHttpImplPrivate::replyDownloadMetaData(const QList<QPair<QByte
     q->setAttribute(QNetworkRequest::HttpPipeliningWasUsedAttribute, pu);
     q->setAttribute(QNetworkRequest::Http2WasUsedAttribute, h2Used);
 
+    // A user having manually defined which encodings they accept is, for
+    // somwehat unknown (presumed legacy compatibility) reasons treated as
+    // disabling our decompression:
+    const bool autoDecompress = request.rawHeader("accept-encoding").isEmpty();
+    const bool shouldDecompress = isCompressed && autoDecompress;
     // reconstruct the HTTP header
     QList<QPair<QByteArray, QByteArray> > headerMap = hm;
     QList<QPair<QByteArray, QByteArray> >::ConstIterator it = headerMap.constBegin(),
@@ -1338,7 +1347,7 @@ void QNetworkReplyHttpImplPrivate::replyDownloadMetaData(const QList<QPair<QByte
         if (it->first.toLower() == "location")
             value.clear();
 
-        if (isCompressed && !decompressHelper.isValid()
+        if (shouldDecompress && !decompressHelper.isValid()
             && it->first.compare("content-encoding", Qt::CaseInsensitive) == 0) {
 
             if (!synchronous) // with synchronous all the data is expected to be handled at once
@@ -2114,9 +2123,6 @@ void QNetworkReplyHttpImplPrivate::error(QNetworkReplyImpl::NetworkError code, c
         qWarning("QNetworkReplyImplPrivate::error: Internal problem, this method must only be called once.");
         return;
     }
-
-    if (decompressHelper.isValid())
-        decompressHelper.clear(); // Just get rid of any data that might be stored
 
     errorCode = code;
     q->setErrorString(errorMessage);

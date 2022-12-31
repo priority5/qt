@@ -283,6 +283,7 @@ void QQuickPopupPrivate::closeOrReject()
         dialog->reject();
     else
         q->close();
+    touchId = -1;
 }
 
 bool QQuickPopupPrivate::tryClose(const QPointF &pos, QQuickPopup::ClosePolicy flags)
@@ -329,6 +330,12 @@ bool QQuickPopupPrivate::acceptTouch(const QTouchEvent::TouchPoint &point)
 
 bool QQuickPopupPrivate::blockInput(QQuickItem *item, const QPointF &point) const
 {
+    // don't propagate events within the popup beyond the overlay
+    if (popupItem->contains(popupItem->mapFromScene(point))
+        && item == QQuickOverlay::overlay(window)) {
+        return true;
+    }
+
     // don't block presses and releases
     // a) outside a non-modal popup,
     // b) to popup children/content, or
@@ -715,11 +722,9 @@ static QQuickItem *createDimmer(QQmlComponent *component, QQuickPopup *popup, QQ
 {
     QQuickItem *item = nullptr;
     if (component) {
-        QQmlContext *creationContext = component->creationContext();
-        if (!creationContext)
-            creationContext = qmlContext(popup);
-        QQmlContext *context = new QQmlContext(creationContext, popup);
-        context->setContextObject(popup);
+        QQmlContext *context = component->creationContext();
+        if (!context)
+            context = qmlContext(popup);
         item = qobject_cast<QQuickItem*>(component->beginCreate(context));
     }
 

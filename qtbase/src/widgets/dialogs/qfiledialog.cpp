@@ -193,7 +193,7 @@ Q_GLOBAL_STATIC(QUrl, lastVisitedDir)
     \value DontConfirmOverwrite Don't ask for confirmation if an
     existing file is selected.  By default confirmation is requested.
 
-    Note: This opption is not supported on macOS when using the
+    Note: This option is not supported on macOS when using the
     native file dialog.
 
     \value DontUseNativeDialog Don't use the native file dialog. By
@@ -2304,13 +2304,8 @@ void QFileDialog::getOpenFileContent(const QString &nameFilter, const std::funct
             openFileImpl.reset();
         };
 
-        auto qtFilterStringToWebAcceptString = [](const QString &qtString) {
-            // The Qt and Web name filter string formats are similar, but
-            // not identical.
-            return qtString.toStdString(); // ### TODO
-        };
-
-        QWasmLocalFileAccess::openFile(qtFilterStringToWebAcceptString(nameFilter), fileDialogClosed, acceptFile, fileContentReady);
+        QWasmLocalFileAccess::openFile(nameFilter.toStdString(), fileDialogClosed,
+                                       acceptFile, fileContentReady);
     };
 
     (*openFileImpl)();

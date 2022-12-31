@@ -17,6 +17,7 @@
 
 #include <private/qplatformmediaplayer_p.h>
 #include <qmediametadata.h>
+#include <qtimer.h>
 #include "qffmpeg_p.h"
 
 QT_BEGIN_NAMESPACE
@@ -68,12 +69,20 @@ public:
 
     Q_INVOKABLE void delayedLoadedStatus() { mediaStatusChanged(QMediaPlayer::LoadedMedia); }
 
+private slots:
+    void updatePosition();
+    void endOfStream();
+    void error(int error, const QString &errorString)
+    {
+        QPlatformMediaPlayer::error(error, errorString);
+    }
+
 private:
     friend class QFFmpeg::Decoder;
 
-    QFFmpeg::Decoder *decoder = nullptr;
-    void checkStreams();
+    QTimer positionUpdateTimer;
 
+    QFFmpeg::Decoder *decoder = nullptr;
     QPlatformAudioOutput *m_audioOutput = nullptr;
     QVideoSink *m_videoSink = nullptr;
 
