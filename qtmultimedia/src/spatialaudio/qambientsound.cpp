@@ -14,6 +14,7 @@ QT_BEGIN_NAMESPACE
     \class QAmbientSound
     \inmodule QtSpatialAudio
     \ingroup spatialaudio
+    \ingroup multimedia_audio
 
     \brief A stereo overlay sound.
 
@@ -80,7 +81,14 @@ QUrl QAmbientSound::source() const
 {
     return d->url;
 }
+/*!
+    \enum QAmbientSound::Loops
 
+    Lets you control the playback loop using the following values:
+
+    \value Infinite Loops infinitely
+    \value Once Stops playback after running once
+*/
 /*!
    \property QAmbientSound::loops
 

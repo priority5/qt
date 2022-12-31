@@ -13,7 +13,7 @@ Section {
     SectionLayout {
         PropertyLabel {
             text: qsTr("Buffer")
-            tooltip: qsTr("Input buffer for a pass.")
+            tooltip: qsTr("Sets input buffer for a pass.")
         }
 
         SecondColumnLayout {
@@ -29,7 +29,7 @@ Section {
 
         PropertyLabel {
             text: qsTr("Parameter")
-            tooltip: qsTr("Buffer input buffer name in the shader.")
+            tooltip: qsTr("Sets buffer input buffer name in the shader.")
         }
 
         SecondColumnLayout {

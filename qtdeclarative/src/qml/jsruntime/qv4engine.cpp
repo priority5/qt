@@ -394,12 +394,15 @@ ExecutionEngine::ExecutionEngine(QJSEngine *jsEngine)
         }
     }
 
+    // We allocate guard pages around our stacks.
+    const size_t guardPages = 2 * WTF::pageSize();
+
     memoryManager = new QV4::MemoryManager(this);
     // reserve space for the JS stack
     // we allow it to grow to a bit more than m_maxJSStackSize, as we can overshoot due to ScopedValues
     // allocated outside of JIT'ed methods.
     *jsStack = WTF::PageAllocation::allocate(
-                s_maxJSStackSize + 256*1024, WTF::OSAllocator::JSVMStackPages,
+                s_maxJSStackSize + 256*1024 + guardPages, WTF::OSAllocator::JSVMStackPages,
                 /* writable */ true, /* executable */ false, /* includesGuardPages */ true);
     jsStackBase = (Value *)jsStack->base();
 #ifdef V4_USE_VALGRIND
@@ -408,9 +411,9 @@ ExecutionEngine::ExecutionEngine(QJSEngine *jsEngine)
 
     jsStackTop = jsStackBase;
 
-    *gcStack = WTF::PageAllocation::allocate(s_maxGCStackSize, WTF::OSAllocator::JSVMStackPages,
-                                             /* writable */ true, /* executable */ false,
-                                             /* includesGuardPages */ true);
+    *gcStack = WTF::PageAllocation::allocate(
+                s_maxGCStackSize + guardPages, WTF::OSAllocator::JSVMStackPages,
+                /* writable */ true, /* executable */ false, /* includesGuardPages */ true);
 
     exceptionValue = jsAlloca(1);
     *exceptionValue = Encode::undefined();
@@ -1852,16 +1855,10 @@ QV4::ReturnedValue ExecutionEngine::fromData(
             a->setArrayLengthUnchecked(list.count());
             return a.asReturnedValue();
         } else if (auto flags = metaType.flags(); flags & QMetaType::PointerToQObject) {
-            QV4::ReturnedValue ret = QV4::QObjectWrapper::wrap(this, *reinterpret_cast<QObject* const *>(ptr));
-            if (!flags.testFlag(QMetaType::IsConst))
-                return ret;
-            QV4::ScopedValue v(scope, ret);
-            if (auto obj = v->as<Object>()) {
-                obj->setInternalClass(obj->internalClass()->cryopreserved());
-                return obj->asReturnedValue();
-            } else {
-                return ret;
-            }
+            if (flags.testFlag(QMetaType::IsConst))
+                return QV4::QObjectWrapper::wrapConst(this, *reinterpret_cast<QObject* const *>(ptr));
+            else
+                return QV4::QObjectWrapper::wrap(this, *reinterpret_cast<QObject* const *>(ptr));
         }
 
         bool succeeded = false;
@@ -1982,6 +1979,25 @@ int ExecutionEngine::maxJSStackSize() const
 int ExecutionEngine::maxGCStackSize() const
 {
     return s_maxGCStackSize;
+}
+
+/*!
+    \internal
+    Returns \a length converted to int if its safe to
+    pass to \c Scope::alloc.
+    Otherwise it throws a RangeError, and returns 0.
+ */
+int ExecutionEngine::safeForAllocLength(qint64 len64)
+{
+    if (len64 < 0ll || len64 > qint64(std::numeric_limits<int>::max())) {
+        throwRangeError(QStringLiteral("Invalid array length."));
+        return 0;
+    }
+    if (len64 > qint64(this->jsStackLimit - this->jsStackTop)) {
+        throwRangeError(QStringLiteral("Array too large for apply()."));
+        return 0;
+    }
+    return len64;
 }
 
 ReturnedValue ExecutionEngine::global()

@@ -489,6 +489,16 @@ bool QQmlComponent::isLoading() const
 }
 
 /*!
+    Returns true if the component was created in a QML files that specifies
+    \c{pragma ComponentBehavior: Bound}, otherwise returns false.
+ */
+bool QQmlComponent::isBound() const
+{
+    Q_D(const QQmlComponent);
+    return d->isBound();
+}
+
+/*!
     \qmlproperty real Component::progress
     The progress of loading the component, from 0.0 (nothing loaded)
     to 1.0 (finished).
@@ -1417,8 +1427,16 @@ void QQmlComponentPrivate::setInitialProperties(QV4::ExecutionEngine *engine, QV
                 break;
             }
         }
-        if (engine->hasException || !object) {
+        if (engine->hasException) {
             qmlWarning(createdComponent, engine->catchExceptionAsQmlError());
+            continue;
+        }
+        if (!object) {
+            QQmlError error;
+            error.setUrl(qmlContext ? qmlContext->qmlContext()->url() : QUrl());
+            error.setDescription(QLatin1String("Cannot resolve property \"%1\".")
+                                 .arg(properties.join(u'.')));
+            qmlWarning(createdComponent, error);
             continue;
         }
         name = engine->newString(properties.last());

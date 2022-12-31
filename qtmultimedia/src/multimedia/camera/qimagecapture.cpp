@@ -82,8 +82,16 @@ QImageCapture::QImageCapture(QObject *parent)
 {
     Q_D(QImageCapture);
     d->q_ptr = this;
-    d->control = QPlatformMediaIntegration::instance()->createImageCapture(this);
 
+    auto maybeControl = QPlatformMediaIntegration::instance()->createImageCapture(this);
+    if (!maybeControl) {
+        qWarning() << "Failed to initialize QImageCapture" << maybeControl.error();
+        d->errorString = maybeControl.error();
+        d->error = NotReadyError;
+        return;
+    }
+
+    d->control = maybeControl.value();
     connect(d->control, SIGNAL(imageExposed(int)),
             this, SIGNAL(imageExposed(int)));
     connect(d->control, SIGNAL(imageCaptured(int,QImage)),
@@ -99,6 +107,12 @@ QImageCapture::QImageCapture(QObject *parent)
     connect(d->control, SIGNAL(error(int,int,QString)),
             this, SLOT(_q_error(int,int,QString)));
 }
+
+/*!
+    \fn void QImageCapture::imageMetadataAvailable(int id, const QMediaMetaData &metaData)
+
+    Signals that an image identified by \a id has \a metaData.
+*/
 
 /*!
     \internal
@@ -125,7 +139,7 @@ QImageCapture::~QImageCapture()
 */
 bool QImageCapture::isAvailable() const
 {
-    return d_func()->captureSession && d_func()->captureSession->camera();
+    return d_func()->control && d_func()->captureSession && d_func()->captureSession->camera();
 }
 
 /*!
@@ -141,6 +155,8 @@ QMediaCaptureSession *QImageCapture::captureSession() const
 }
 
 /*!
+    \property QImageCapture::error
+
     Returns the current error state.
 
     \sa errorString()
@@ -152,6 +168,8 @@ QImageCapture::Error QImageCapture::error() const
 }
 
 /*!
+    \property QImageCapture::errorString
+
     Returns a string describing the current error state.
 
     \sa error()
@@ -183,7 +201,8 @@ void QImageCapture::setMetaData(const QMediaMetaData &metaData)
 {
     Q_D(QImageCapture);
     d->metaData = metaData;
-    d->control->setMetaData(d->metaData);
+    if (d->control)
+        d->control->setMetaData(d->metaData);
     emit metaDataChanged();
 }
 
@@ -249,13 +268,12 @@ bool QImageCapture::isReadyForCapture() const
 int QImageCapture::captureToFile(const QString &file)
 {
     Q_D(QImageCapture);
-
-    d->unsetError();
-
     if (!d->control) {
-        d->_q_error(-1, NotSupportedFeatureError, QPlatformImageCapture::msgCameraNotReady());
+        d->_q_error(-1, d->error, d->errorString);
         return -1;
     }
+
+    d->unsetError();
 
     if (!isReadyForCapture()) {
         d->_q_error(-1, NotReadyError, tr("Could not capture in stopped state"));
@@ -280,18 +298,13 @@ int QImageCapture::captureToFile(const QString &file)
 int QImageCapture::capture()
 {
     Q_D(QImageCapture);
-
-    d->unsetError();
-
-    if (d->control)
+    if (!d->control) {
+        d->_q_error(-1, d->error, d->errorString);
+        return -1;
+    } else {
+        d->unsetError();
         return d->control->captureToBuffer();
-
-    d->error = NotSupportedFeatureError;
-    d->errorString = tr("Device does not support images capture.");
-
-    d->_q_error(-1, d->error, d->errorString);
-
-    return -1;
+    }
 }
 
 /*!
@@ -339,6 +352,20 @@ int QImageCapture::capture()
 */
 
 /*!
+    \enum QImageCapture::FileFormat
+
+    Choose one of the following image formats:
+
+    \value UnspecifiedFormat No format specified
+    \value JPEG \c .jpg or \c .jpeg format
+    \value PNG \c .png format
+    \value WebP \c .webp format
+    \value Tiff \c .tiff format
+    \omitvalue LastFileFormat
+*/
+
+
+/*!
     \property QImageCapture::fileFormat
     \brief The image format.
 */
@@ -346,9 +373,7 @@ int QImageCapture::capture()
 QImageCapture::FileFormat QImageCapture::fileFormat() const
 {
     Q_D(const QImageCapture);
-    if (!d->control)
-        return UnspecifiedFormat;
-    return d->control->imageSettings().format();
+    return d->control ? d->control->imageSettings().format() : UnspecifiedFormat;
 }
 
 /*!
@@ -367,11 +392,19 @@ void QImageCapture::setFileFormat(QImageCapture::FileFormat format)
     emit fileFormatChanged();
 }
 
+/*!
+    Returns a list of supported file formats.
+
+    \sa {QImageCapture::}{FileFormat}
+*/
 QList<QImageCapture::FileFormat> QImageCapture::supportedFormats()
 {
     return QPlatformMediaIntegration::instance()->formatInfo()->imageFormats;
 }
 
+/*!
+    Returns the name of the given format, \a f.
+*/
 QString QImageCapture::fileFormatName(QImageCapture::FileFormat f)
 {
     const char *name = nullptr;
@@ -395,6 +428,9 @@ QString QImageCapture::fileFormatName(QImageCapture::FileFormat f)
     return QString::fromUtf8(name);
 }
 
+/*!
+    Returns the description of the given file format, \a f.
+*/
 QString QImageCapture::fileFormatDescription(QImageCapture::FileFormat f)
 {
     const char *name = nullptr;
@@ -425,10 +461,14 @@ QString QImageCapture::fileFormatDescription(QImageCapture::FileFormat f)
 QSize QImageCapture::resolution() const
 {
     Q_D(const QImageCapture);
-    if (!d->control)
-        return QSize();
-    return d->control->imageSettings().resolution();
+    return d->control ? d->control->imageSettings().resolution() : QSize{};
 }
+
+/*!
+    \fn void QImageCapture::resolutionChanged()
+
+    Signals when the image resolution changes.
+*/
 
 /*!
     Sets the \a resolution of the encoded image.
@@ -478,9 +518,7 @@ void QImageCapture::setResolution(int width, int height)
 QImageCapture::Quality QImageCapture::quality() const
 {
     Q_D(const QImageCapture);
-    if (!d->control)
-        return NormalQuality;
-    return d->control->imageSettings().quality();
+    return d->control ? d->control->imageSettings().quality() : NormalQuality;
 }
 
 /*!

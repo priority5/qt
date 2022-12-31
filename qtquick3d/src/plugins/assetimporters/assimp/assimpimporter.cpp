@@ -102,6 +102,7 @@ AssimpImporter::AssimpImporter()
     m_importer = new Assimp::Importer();
     // Remove primatives that are not Triangles
     m_importer->SetPropertyInteger(AI_CONFIG_PP_SBP_REMOVE, aiPrimitiveType_POINT | aiPrimitiveType_LINE);
+    m_importer->SetPropertyInteger(AI_CONFIG_IMPORT_COLLADA_USE_COLLADA_NAMES, 1);
 }
 
 AssimpImporter::~AssimpImporter()
@@ -939,13 +940,11 @@ void AssimpImporter::generateMaterial(aiMaterial *material, QTextStream &output,
     if (result == aiReturn_SUCCESS)
         specularGlossyMode = true;
 
+    QString materialType = (!m_gltfMode) ? QStringLiteral("DefaultMaterial") :
+                                (specularGlossyMode) ? QStringLiteral("SpecularGlossyMaterial") :
+                                                       QStringLiteral("PrincipledMaterial");
 
-    if (!m_gltfMode)
-        output << QSSGQmlUtilities::insertTabs(tabLevel) << QStringLiteral("DefaultMaterial {\n");
-    else if (specularGlossyMode)
-        output << QSSGQmlUtilities::insertTabs(tabLevel) << QStringLiteral("SpecularGlossyMaterial {\n");
-    else
-        output << QSSGQmlUtilities::insertTabs(tabLevel) << QStringLiteral("PrincipledMaterial {\n");
+    output << QSSGQmlUtilities::insertTabs(tabLevel) << materialType << QStringLiteral(" {\n");
 
     // id
     QString id = generateUniqueId(QSSGQmlUtilities::sanitizeQmlId(material->GetName().C_Str() + QStringLiteral("_material")));
@@ -1244,11 +1243,11 @@ void AssimpImporter::generateMaterial(aiMaterial *material, QTextStream &output,
                 const QString mode = QString::fromUtf8(alphaMode.C_Str()).toLower();
                 QString qtMode;
                 if (mode == QStringLiteral("opaque"))
-                    qtMode = QStringLiteral("PrincipledMaterial.Opaque");
+                    qtMode = materialType + QStringLiteral(".Opaque");
                 else if (mode == QStringLiteral("mask"))
-                    qtMode = QStringLiteral("PrincipledMaterial.Mask");
+                    qtMode = materialType + QStringLiteral(".Mask");
                 else if (mode == QStringLiteral("blend"))
-                    qtMode = QStringLiteral("PrincipledMaterial.Blend");
+                    qtMode = materialType + QStringLiteral(".Blend");
 
                 if (!qtMode.isNull())
                     QSSGQmlUtilities::writeQmlPropertyHelper(output,

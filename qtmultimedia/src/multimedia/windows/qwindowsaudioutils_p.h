@@ -26,12 +26,14 @@ struct IMFMediaType;
 
 QT_BEGIN_NAMESPACE
 
+class QWindowsMediaFoundation;
+
 namespace QWindowsAudioUtils
 {
     bool formatToWaveFormatExtensible(const QAudioFormat &format, WAVEFORMATEXTENSIBLE &wfx);
     QAudioFormat waveFormatExToFormat(const WAVEFORMATEX &in);
     Q_MULTIMEDIA_EXPORT QAudioFormat mediaTypeToFormat(IMFMediaType *mediaType);
-    QWindowsIUPointer<IMFMediaType> formatToMediaType(const QAudioFormat &format);
+    QWindowsIUPointer<IMFMediaType> formatToMediaType(QWindowsMediaFoundation &, const QAudioFormat &format);
     QAudioFormat::ChannelConfig maskToChannelConfig(UINT32 mask, int count);
 }
 

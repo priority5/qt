@@ -28,6 +28,8 @@ struct IMFTransform;
 
 QT_BEGIN_NAMESPACE
 
+class QWindowsMediaFoundation;
+
 class Q_MULTIMEDIA_EXPORT QWindowsResampler
 {
 public:
@@ -53,6 +55,7 @@ private:
     HRESULT processOutput(QByteArray &out);
 
     QWindowsIUPointer<IMFTransform> m_resampler;
+    QWindowsMediaFoundation *m_wmf = nullptr;
 
     bool m_resamplerNeedsSampleBuffer = false;
     quint64 m_totalInputBytes = 0;

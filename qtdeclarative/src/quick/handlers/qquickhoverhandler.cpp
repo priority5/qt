@@ -34,17 +34,64 @@ Q_LOGGING_CATEGORY(lcHoverHandler, "qt.quick.handler.hover")
     \sa MouseArea, PointHandler
 */
 
-QQuickHoverHandler::QQuickHoverHandler(QQuickItem *parent)
-    : QQuickSinglePointHandler(parent)
+class QQuickHoverHandlerPrivate : public QQuickSinglePointHandlerPrivate
 {
+    Q_DECLARE_PUBLIC(QQuickHoverHandler)
+
+public:
+    void onEnabledChanged() override;
+    void onParentChanged(QQuickItem *oldParent, QQuickItem *newParent) override;
+
+    void updateHasHoverInChild(QQuickItem *item, bool hasHover);
+};
+
+void QQuickHoverHandlerPrivate::onEnabledChanged()
+{
+    Q_Q(QQuickHoverHandler);
+
+    if (auto parent = q->parentItem())
+        updateHasHoverInChild(parent, enabled);
+    if (!enabled)
+        q->setHovered(false);
+
+    QQuickSinglePointHandlerPrivate::onEnabledChanged();
+}
+
+void QQuickHoverHandlerPrivate::onParentChanged(QQuickItem *oldParent, QQuickItem *newParent)
+{
+    if (oldParent)
+        updateHasHoverInChild(oldParent, false);
+    if (newParent)
+        updateHasHoverInChild(newParent, true);
+
+    QQuickSinglePointHandlerPrivate::onParentChanged(oldParent, newParent);
+}
+
+void QQuickHoverHandlerPrivate::updateHasHoverInChild(QQuickItem *item, bool hasHover)
+{
+    QQuickItemPrivate *itemPriv = QQuickItemPrivate::get(item);
+    itemPriv->setHasHoverInChild(hasHover);
+    // The DA needs to resolve which items and handlers should now be hovered or unhovered.
+    // Marking the parent item dirty ensures that flushFrameSynchronousEvents() will be called from the render loop,
+    // even if this change is not in response to a mouse event and no item has already marked itself dirty.
+    itemPriv->dirty(QQuickItemPrivate::Content);
+}
+
+QQuickHoverHandler::QQuickHoverHandler(QQuickItem *parent)
+    : QQuickSinglePointHandler(*(new QQuickHoverHandlerPrivate), parent)
+{
+    Q_D(QQuickHoverHandler);
     // Tell QQuickPointerDeviceHandler::wantsPointerEvent() to ignore button state
-    d_func()->acceptedButtons = Qt::NoButton;
+    d->acceptedButtons = Qt::NoButton;
+    if (parent)
+        d->updateHasHoverInChild(parent, true);
 }
 
 QQuickHoverHandler::~QQuickHoverHandler()
 {
+    Q_D(QQuickHoverHandler);
     if (auto parent = parentItem())
-        QQuickItemPrivate::get(parent)->setHasHoverInChild(false);
+        d->updateHasHoverInChild(parent, false);
 }
 
 /*!
@@ -52,7 +99,7 @@ QQuickHoverHandler::~QQuickHoverHandler()
     \since 6.3
 
     Whether this handler prevents other items or handlers behind it from
-    being hovered at the same timee. This property is \c false by default.
+    being hovered at the same time. This property is \c false by default.
 */
 void QQuickHoverHandler::setBlocking(bool blocking)
 {
@@ -81,10 +128,12 @@ bool QQuickHoverHandler::event(QEvent *event)
 
 void QQuickHoverHandler::componentComplete()
 {
+    Q_D(QQuickHoverHandler);
     QQuickSinglePointHandler::componentComplete();
-    if (auto par = parentItem()) {
-        par->setAcceptHoverEvents(true);
-        QQuickItemPrivate::get(par)->setHasHoverInChild(true);
+
+    if (d->enabled) {
+        if (auto parent = parentItem())
+            d->updateHasHoverInChild(parent, true);
     }
 }
 

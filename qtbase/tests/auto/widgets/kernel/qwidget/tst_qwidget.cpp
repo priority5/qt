@@ -345,6 +345,7 @@ private slots:
     void enterLeaveOnWindowShowHide_data();
     void enterLeaveOnWindowShowHide();
     void taskQTBUG_4055_sendSyntheticEnterLeave();
+    void hoverPosition();
     void underMouse();
     void taskQTBUG_27643_enterEvents();
 #endif
@@ -368,7 +369,6 @@ private slots:
     void openModal_taskQTBUG_5804();
 
     void focusProxy();
-    void focusProxyAndInputMethods();
     void imEnabledNotImplemented();
 
 #ifdef QT_BUILD_INTERNAL
@@ -5607,8 +5607,8 @@ void tst_QWidget::setWindowGeometry_data()
 
 void tst_QWidget::setWindowGeometry()
 {
-    if (m_platform == QStringLiteral("xcb"))
-         QSKIP("X11: Skip this test due to Window manager positioning issues.");
+    if (m_platform == QStringLiteral("xcb") || m_platform.startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
+         QSKIP("X11/Wayland: Skip this test due to Window manager positioning issues.");
 
     QFETCH(Rects, rects);
     QFETCH(int, windowFlags);
@@ -7466,7 +7466,8 @@ void tst_QWidget::renderChildFillsBackground()
 #ifndef Q_OS_ANDROID
     // On Android all widgets are shown maximized, so the pixmaps
     // will be similar
-    QEXPECT_FAIL("", "This test fails on all platforms", Continue);
+    if (!m_platform.startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
+        QEXPECT_FAIL("", "This test fails on all platforms", Continue);
 #endif
     QCOMPARE(childPixmap, windowPixmap);
 }
@@ -7529,6 +7530,9 @@ void tst_QWidget::renderInvisible()
 {
     if (m_platform == QStringLiteral("xcb"))
         QSKIP("QTBUG-26424");
+
+    if (m_platform.startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
+        QSKIP("Wayland: Skip this test, see also QTBUG-107157");
 
     QScopedPointer<QCalendarWidget> calendar(new QCalendarWidget);
     calendar->move(m_availableTopLeft + QPoint(100, 100));
@@ -9155,6 +9159,9 @@ void tst_QWidget::opaqueChildren()
 
 void tst_QWidget::dumpObjectTree()
 {
+    if (!QGuiApplicationPrivate::platformIntegration()->hasCapability(QPlatformIntegration::WindowActivation))
+        QSKIP("QWindow::requestActivate() is not supported.");
+
     QWidget w;
     w.setWindowTitle(QLatin1String(QTest::currentTestFunction()));
     Q_SET_OBJECT_NAME(w);
@@ -10182,6 +10189,9 @@ void tst_QWidget::enterLeaveOnWindowShowHide_data()
 */
 void tst_QWidget::enterLeaveOnWindowShowHide()
 {
+    if (!QGuiApplicationPrivate::platformIntegration()->hasCapability(QPlatformIntegration::WindowActivation))
+        QSKIP("QWindow::requestActivate() is not supported.");
+
     QFETCH(Qt::WindowType, windowType);
     class Widget : public QWidget
     {
@@ -10381,6 +10391,106 @@ void tst_QWidget::taskQTBUG_4055_sendSyntheticEnterLeave()
     QTRY_COMPARE(child.numEnterEvents, 1);
     QCOMPARE(child.numMouseMoveEvents, 0);
  }
+
+void tst_QWidget::hoverPosition()
+{
+    if (m_platform == QStringLiteral("wayland"))
+        QSKIP("Wayland: Clients can't set cursor position on wayland.");
+
+    class HoverWidget : public QWidget
+    {
+    public:
+        HoverWidget(QWidget *parent = nullptr) : QWidget(parent) {
+            setMouseTracking(true);
+            setAttribute(Qt::WA_Hover);
+        }
+        bool event(QEvent *ev) override {
+            switch (ev->type()) {
+            case QEvent::HoverMove:
+                // The docs say that WA_Hover will cause a paint event on enter and leave, but not on move.
+                update();
+                Q_FALLTHROUGH();
+            case QEvent::HoverEnter:
+            case QEvent::HoverLeave: {
+                qCDebug(lcTests) << ev;
+                lastHoverType = ev->type();
+                ++hoverEventCount;
+                QHoverEvent *hov = static_cast<QHoverEvent *>(ev);
+                mousePos = hov->position().toPoint();
+                mouseScenePos = hov->scenePosition().toPoint();
+                if (ev->type() == QEvent::HoverEnter)
+                    mouseEnterScenePos = hov->scenePosition().toPoint();
+                break;
+            }
+            default:
+                break;
+            }
+            return QWidget::event(ev);
+        }
+        void paintEvent(QPaintEvent *) override {
+            ++paintEventCount;
+            QPainter painter(this);
+            if (mousePos.x() > 0)
+                painter.setPen(Qt::red);
+            painter.drawRect(0, 0, width(), height());
+            painter.setPen(Qt::darkGreen);
+            painter.drawLine(mousePos - QPoint(crossHalfWidth, 0), mousePos + QPoint(crossHalfWidth, 0));
+            painter.drawLine(mousePos - QPoint(0, crossHalfWidth), mousePos + QPoint(0, crossHalfWidth));
+        }
+
+        QEvent::Type lastHoverType = QEvent::None;
+        int hoverEventCount = 0;
+        int paintEventCount = 0;
+        QPoint mousePos;
+        QPoint mouseScenePos;
+        QPoint mouseEnterScenePos;
+
+    private:
+        const int crossHalfWidth = 5;
+    };
+
+    QCursor::setPos(m_safeCursorPos);
+    if (!QTest::qWaitFor([this]{ return QCursor::pos() == m_safeCursorPos; }))
+        QSKIP("Can't move cursor");
+
+    QWidget root;
+    root.resize(300, 300);
+    HoverWidget h(&root);
+    h.setGeometry(100, 100, 100, 100);
+    root.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&root));
+
+    const QPoint middle(50, 50);
+    QPoint curpos = h.mapToGlobal(middle);
+    QCursor::setPos(curpos);
+    if (!QTest::qWaitFor([curpos]{ return QCursor::pos() == curpos; }))
+          QSKIP("Can't move cursor");
+    QTRY_COMPARE_GE(h.hoverEventCount, 1); // HoverEnter and then probably HoverMove, so usually 2
+    QTRY_COMPARE_GE(h.paintEventCount, 2);
+    const int enterHoverEventCount = h.hoverEventCount;
+    qCDebug(lcTests) << "hover enter events:" << enterHoverEventCount << "last was" << h.lastHoverType
+                     << "; paint events:" << h.paintEventCount;
+    QCOMPARE(h.mousePos, middle);
+    QCOMPARE(h.mouseEnterScenePos, h.mapToParent(middle));
+    QCOMPARE(h.mouseScenePos, h.mapToParent(middle));
+    QCOMPARE(h.lastHoverType, enterHoverEventCount == 1 ? QEvent::HoverEnter : QEvent::HoverMove);
+
+    curpos += {10, 10};
+    QCursor::setPos(curpos);
+    if (!QTest::qWaitFor([curpos]{ return QCursor::pos() == curpos; }))
+          QSKIP("Can't move cursor");
+    QTRY_COMPARE(h.hoverEventCount, enterHoverEventCount + 1);
+    QCOMPARE(h.lastHoverType, QEvent::HoverMove);
+    QTRY_COMPARE_GE(h.paintEventCount, 3);
+
+    curpos += {50, 50}; // in the outer widget, but leaving the inner widget
+    QCursor::setPos(curpos);
+    if (!QTest::qWaitFor([curpos]{ return QCursor::pos() == curpos; }))
+          QSKIP("Can't move cursor");
+    QTRY_COMPARE(h.lastHoverType, QEvent::HoverLeave);
+    QCOMPARE_GE(h.hoverEventCount, enterHoverEventCount + 2);
+    QTRY_COMPARE_GE(h.paintEventCount, 4);
+}
 #endif
 
 void tst_QWidget::windowFlags()
@@ -10956,36 +11066,11 @@ void tst_QWidget::focusProxy()
     QCOMPARE(container2->focusOutCount, 1);
 }
 
-void tst_QWidget::focusProxyAndInputMethods()
-{
-    if (!QGuiApplicationPrivate::platformIntegration()->hasCapability(QPlatformIntegration::WindowActivation))
-        QSKIP("Window activation is not supported.");
-    QScopedPointer<QWidget> toplevel(new QWidget(nullptr, Qt::X11BypassWindowManagerHint));
-    toplevel->setWindowTitle(QLatin1String(QTest::currentTestFunction()));
-    toplevel->resize(200, 200);
-    toplevel->setAttribute(Qt::WA_InputMethodEnabled, true);
-
-    QWidget *child = new QWidget(toplevel.data());
-    child->setFocusProxy(toplevel.data());
-    child->setAttribute(Qt::WA_InputMethodEnabled, true);
-
-    toplevel->setFocusPolicy(Qt::WheelFocus);
-    child->setFocusPolicy(Qt::WheelFocus);
-
-    QVERIFY(!child->hasFocus());
-    QVERIFY(!toplevel->hasFocus());
-
-    toplevel->show();
-    QVERIFY(QTest::qWaitForWindowExposed(toplevel.data()));
-    QApplication::setActiveWindow(toplevel.data());
-    QVERIFY(QTest::qWaitForWindowActive(toplevel.data()));
-    QVERIFY(toplevel->hasFocus());
-    QVERIFY(child->hasFocus());
-    QCOMPARE(qApp->focusObject(), toplevel.data());
-}
-
 void tst_QWidget::imEnabledNotImplemented()
 {
+    if (!QGuiApplicationPrivate::platformIntegration()->hasCapability(QPlatformIntegration::WindowActivation))
+        QSKIP("QWindow::requestActivate() is not supported.");
+
     // Check that a plain widget doesn't report that it supports IM. Only
     // widgets that implements either Qt::ImEnabled, or the Qt4 backup
     // solution, Qt::ImSurroundingText, should do so.
@@ -11506,6 +11591,9 @@ public:
 
 void tst_QWidget::touchEventSynthesizedMouseEvent()
 {
+    if (m_platform.startsWith(QLatin1String("wayland"), Qt::CaseInsensitive))
+        QSKIP("This test failed on Wayland. See also QTBUG-107157.");
+
     {
         // Simple case, we ignore the touch events, we get mouse events instead
         TouchMouseWidget widget;
@@ -12790,6 +12878,9 @@ void tst_QWidget::setParentChangesFocus()
 
 void tst_QWidget::activateWhileModalHidden()
 {
+    if (!QGuiApplicationPrivate::platformIntegration()->hasCapability(QPlatformIntegration::WindowActivation))
+        QSKIP("QWindow::requestActivate() is not supported.");
+
     QDialog dialog;
     dialog.setWindowModality(Qt::ApplicationModal);
     dialog.show();

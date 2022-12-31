@@ -151,7 +151,7 @@ QQuick3DViewport::QQuick3DViewport(QQuickItem *parent)
     m_sceneRoot = new QQuick3DSceneRootNode(this);
     m_environment = new QQuick3DSceneEnvironment(m_sceneRoot);
     m_renderStats = new QQuick3DRenderStats();
-    QQuick3DSceneManager *sceneManager = new QQuick3DSceneManager(m_sceneRoot);
+    QQuick3DSceneManager *sceneManager = new QQuick3DSceneManager();
     QQuick3DObjectPrivate::get(m_sceneRoot)->refSceneManager(*sceneManager);
     Q_ASSERT(sceneManager == QQuick3DObjectPrivate::get(m_sceneRoot)->sceneManager);
     connect(sceneManager, &QQuick3DSceneManager::needsUpdate,
@@ -1113,10 +1113,13 @@ bool QQuick3DViewport::internalPick(QPointerEvent *event, const QVector3D &origi
                     const auto customMaterial = qobject_cast<QQuick3DCustomMaterial *>(frontendMaterial);
                     if (customMaterial) {
                         // This case is a bit harder because we can not know how the textures will be used
-                        for (const auto texture : customMaterial->dynamicTextureMaps()) {
-                            if (texture->sourceItem()) {
-                                subsceneRootItem = texture->sourceItem();
-                                break;
+                        const auto &texturesInputs = customMaterial->m_dynamicTextureMaps;
+                        for (const auto &textureInput : texturesInputs) {
+                            if (auto texture = textureInput->texture()) {
+                                if (texture->sourceItem()) {
+                                    subsceneRootItem = texture->sourceItem();
+                                    break;
+                                }
                             }
                         }
                     }

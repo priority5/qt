@@ -46,13 +46,14 @@ VideoFrameEncoder::VideoFrameEncoder(const QMediaEncoderSettings &encoderSetting
     auto codecID = QFFmpegMediaFormatInfo::codecIdForVideoCodec(qVideoCodec);
 
 #ifndef QT_DISABLE_HW_ENCODING
-    const auto *accels = HWAccel::preferredDeviceTypes();
-    while (*accels != AV_HWDEVICE_TYPE_NONE) {
-        auto accel = HWAccel(*accels);
-        ++accels;
+    auto [preferredTypes, size] = HWAccel::preferredDeviceTypes();
+    for (qsizetype i = 0; i < size; i++) {
+        auto accel = HWAccel::create(preferredTypes[i]);
+        if (!accel)
+            continue;
 
         auto matchesSizeConstraints = [&]() -> bool {
-            auto *constraints = av_hwdevice_get_hwframe_constraints(accel.hwDeviceContextAsBuffer(), nullptr);
+            auto *constraints = av_hwdevice_get_hwframe_constraints(accel->hwDeviceContextAsBuffer(), nullptr);
             if (!constraints)
                 return true;
                 // Check size constraints
@@ -65,15 +66,15 @@ VideoFrameEncoder::VideoFrameEncoder(const QMediaEncoderSettings &encoderSetting
         if (!matchesSizeConstraints())
             continue;
 
-        d->codec = accel.hardwareEncoderForCodecId(codecID);
+        d->codec = accel->hardwareEncoderForCodecId(codecID);
         if (!d->codec)
             continue;
-        d->accel = accel;
+        d->accel = std::move(accel);
         break;
     }
 #endif
 
-    if (d->accel.isNull()) {
+    if (!d->accel) {
         d->codec = avcodec_find_encoder(codecID);
         if (!d->codec) {
             qWarning() << "Could not find encoder for codecId" << codecID;
@@ -122,7 +123,7 @@ VideoFrameEncoder::VideoFrameEncoder(const QMediaEncoderSettings &encoderSetting
     }
 
     if (d->targetFormatIsHWFormat) {
-        Q_ASSERT(!d->accel.isNull());
+        Q_ASSERT(d->accel);
         // if source and target formats don't agree, but the target is a HW format, we need to upload
         if (d->sourceFormat != d->targetFormat || needToScale) {
             d->uploadToHW = true;
@@ -135,7 +136,7 @@ VideoFrameEncoder::VideoFrameEncoder(const QMediaEncoderSettings &encoderSetting
 
             d->targetSWFormat = AV_PIX_FMT_NONE;
 
-            auto *constraints = av_hwdevice_get_hwframe_constraints(d->accel.hwDeviceContextAsBuffer(), nullptr);
+            auto *constraints = av_hwdevice_get_hwframe_constraints(d->accel->hwDeviceContextAsBuffer(), nullptr);
             auto *f = constraints->valid_sw_formats;
             int score = INT_MIN;
             while (*f != AV_PIX_FMT_NONE) {
@@ -183,7 +184,7 @@ VideoFrameEncoder::VideoFrameEncoder(const QMediaEncoderSettings &encoderSetting
 
             av_hwframe_constraints_free(&constraints);
             // need to create a frames context to convert the input data
-            d->accel.createFramesContext(d->targetSWFormat, sourceSize);
+            d->accel->createFramesContext(d->targetSWFormat, sourceSize);
         }
     } else {
         d->targetSWFormat = d->targetFormat;
@@ -225,22 +226,22 @@ void QFFmpeg::VideoFrameEncoder::initWithFormatContext(AVFormatContext *formatCo
     float delta = 1e10;
     if (d->codec->supported_framerates) {
         // codec only supports fixed frame rates
-        auto *f = d->codec->supported_framerates;
-        auto *best = f;
+        auto *best = d->codec->supported_framerates;
         qCDebug(qLcVideoFrameEncoder) << "Finding fixed rate:";
-        while (f->num != 0) {
-            float rate = float(f->num)/float(f->den);
-            float d = qAbs(rate - requestedRate);
+        for (auto *f = d->codec->supported_framerates; f->num != 0; f++) {
+            auto maybeRate = toFloat(*f);
+            if (!maybeRate)
+                continue;
+            float d = qAbs(*maybeRate - requestedRate);
             qCDebug(qLcVideoFrameEncoder) << "    " << f->num << f->den << d;
             if (d < delta) {
                 best = f;
                 delta = d;
             }
-            ++f;
         }
         qCDebug(qLcVideoFrameEncoder) << "Fixed frame rate required. Requested:" << requestedRate << "Using:" << best->num << "/" << best->den;
-        d->stream->time_base = { best->den, best->num };
-        requestedRate = float(best->num)/float(best->den);
+        d->stream->time_base = *best;
+        requestedRate = toFloat(*best).value_or(0.f);
     }
 
     Q_ASSERT(d->codec);
@@ -256,12 +257,14 @@ void QFFmpeg::VideoFrameEncoder::initWithFormatContext(AVFormatContext *formatCo
     qCDebug(qLcVideoFrameEncoder) << "requesting time base" << d->codecContext->time_base.num << d->codecContext->time_base.den;
     auto [num, den] = qRealToFraction(requestedRate);
     d->codecContext->framerate = { num, den };
-    auto deviceContext = d->accel.hwDeviceContextAsBuffer();
-    if (deviceContext)
-        d->codecContext->hw_device_ctx = av_buffer_ref(deviceContext);
-    auto framesContext = d->accel.hwFramesContextAsBuffer();
-    if (framesContext)
-        d->codecContext->hw_frames_ctx = av_buffer_ref(framesContext);
+    if (d->accel) {
+        auto deviceContext = d->accel->hwDeviceContextAsBuffer();
+        if (deviceContext)
+            d->codecContext->hw_device_ctx = av_buffer_ref(deviceContext);
+        auto framesContext = d->accel->hwFramesContextAsBuffer();
+        if (framesContext)
+            d->codecContext->hw_frames_ctx = av_buffer_ref(framesContext);
+    }
 }
 
 bool VideoFrameEncoder::open()
@@ -282,8 +285,8 @@ bool VideoFrameEncoder::open()
 qint64 VideoFrameEncoder::getPts(qint64 us)
 {
     Q_ASSERT(d);
-    qint64 div = 1000000*d->stream->time_base.num;
-    return (us*d->stream->time_base.den + (div>>1))/div;
+    qint64 div = 1'000'000 * d->stream->time_base.num;
+    return div != 0 ? (us * d->stream->time_base.den + div / 2) / div : 0;
 }
 
 int VideoFrameEncoder::sendFrame(AVFrame *frame)
@@ -316,7 +319,7 @@ int VideoFrameEncoder::sendFrame(AVFrame *frame)
     }
 
     if (d->uploadToHW) {
-        auto *hwFramesContext = d->accel.hwFramesContextAsBuffer();
+        auto *hwFramesContext = d->accel->hwFramesContextAsBuffer();
         Q_ASSERT(hwFramesContext);
         auto *f = av_frame_alloc();
         if (!f)
@@ -360,7 +363,8 @@ AVPacket *VideoFrameEncoder::retrievePacket()
             qCDebug(qLcVideoFrameEncoder) << "Error receiving packet" << ret << err2str(ret);
         return nullptr;
     }
-    qCDebug(qLcVideoFrameEncoder) << "got a packet" << packet->pts << timeStamp(packet->pts, d->stream->time_base);
+    auto ts = timeStampMs(packet->pts, d->stream->time_base);
+    qCDebug(qLcVideoFrameEncoder) << "got a packet" << packet->pts << (ts ? *ts : 0);
     packet->stream_index = d->stream->id;
     return packet;
 }

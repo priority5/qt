@@ -720,8 +720,15 @@ inline QMetaType QQmlPropertyCacheCreator<ObjectContainer>::metaTypeForParameter
                               QQmlType::AnyRegistrationType, &selfReference))
         return QMetaType();
 
-    if (!qmltype.isComposite())
-        return qmltype.typeId();
+    if (!qmltype.isComposite()) {
+        const QMetaType typeId = qmltype.typeId();
+        if (!typeId.isValid() && qmltype.isInlineComponentType()) {
+            const int objectId = qmltype.inlineComponentId();
+            return objectContainer->typeIdsForComponent(objectId).id;
+        } else {
+            return typeId;
+        }
+    }
 
     if (selfReference)
         return objectContainer->typeIdsForComponent().id;
@@ -919,10 +926,16 @@ inline QQmlError QQmlPropertyCacheAliasCreator<ObjectContainer>::propertyDataFor
         }
 
         const auto referencedType = typeRef->type();
-        if (referencedType.isValid())
+        if (referencedType.isValid()) {
             *type = referencedType.typeId();
-        else
+            if (!type->isValid() && referencedType.isInlineComponentType()) {
+                int objectId = referencedType.inlineComponentId();
+                *type = objectContainer->typeIdsForComponent(objectId).id;
+                Q_ASSERT(type->isValid());
+            }
+        } else {
             *type = typeRef->compilationUnit()->typeIds.id;
+        }
 
         *version = typeRef->version();
 

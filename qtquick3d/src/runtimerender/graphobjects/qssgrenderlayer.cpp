@@ -51,13 +51,8 @@ QSSGRenderLayer::QSSGRenderLayer()
 
 QSSGRenderLayer::~QSSGRenderLayer()
 {
-    if (importSceneNode) {
-        // Remove the dummy from the list or it's siblings will still link to it.
-        children.remove(*importSceneNode);
-        importSceneNode->children.clear();
-        delete importSceneNode;
-        importSceneNode = nullptr;
-    }
+    delete importSceneNode;
+    importSceneNode = nullptr;
     delete renderData;
 }
 
@@ -75,6 +70,15 @@ void QSSGRenderLayer::addEffect(QSSGRenderEffect &inEffect)
     inEffect.m_nextEffect = firstEffect;
     firstEffect = &inEffect;
     inEffect.m_layer = this;
+}
+
+bool QSSGRenderLayer::hasEffect(QSSGRenderEffect *inEffect) const
+{
+    for (auto currentEffect = firstEffect; currentEffect != nullptr; currentEffect = currentEffect->m_nextEffect) {
+        if (currentEffect == inEffect)
+            return true;
+    }
+    return false;
 }
 
 void QSSGRenderLayer::setImportScene(QSSGRenderNode &rootNode)

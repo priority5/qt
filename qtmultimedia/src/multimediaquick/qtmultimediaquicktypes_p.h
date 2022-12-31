@@ -35,6 +35,13 @@ struct QCameraForeign
     QML_NAMED_ELEMENT(Camera)
 };
 
+struct QImageCaptureForeign
+{
+    Q_GADGET
+    QML_ANONYMOUS
+    QML_FOREIGN(QImageCapture)
+};
+
 struct QMediaRecorderForeign
 {
     Q_GADGET
@@ -124,6 +131,13 @@ struct QCameraFormatForeign
     Q_GADGET
     QML_FOREIGN(QCameraFormat)
     QML_NAMED_ELEMENT(cameraFormat)
+};
+
+struct QVideoSinkForeign
+{
+    Q_GADGET
+    QML_FOREIGN(QVideoSink)
+    QML_NAMED_ELEMENT(VideoSink)
 };
 
 QT_END_NAMESPACE

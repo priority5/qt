@@ -188,13 +188,80 @@
     \note \l{Qt Quick Controls} offers a SelectionRectangle that can be used
     to let the user select cells.
 
+    \note By default, a cell will become
+    \l {QQuickItemSelectionModel::currentIndex()}{current}, and any selections will
+    be removed, when the user taps on it. If such default tap behavior is not wanted
+    (e.g if you use custom pointer handlers inside your delegate), you can set
+    \l pointerNavigationEnabled to \c false.
+
     \section1 Keyboard navigation
 
     In order to support keyboard navigation, you need to assign an \l ItemSelectionModel
     to the \l selectionModel property. TableView will then use this model to manipulate
-    the model's \l {QQuickItemSelectionModel::currentIndex()}{currentIndex}. You can
+    the model's \l {ItemSelectionModel::currentIndex}{currentIndex}. You can
     disable keyboard navigation fully (in case you want to implement your own key
     handlers) by setting \l keyNavigationEnabled to \c false.
+
+    \section1 Copy and paste
+
+    Implementing copy and paste operations for a TableView usually also includes using
+    a QUndoStack (or some other undo/redo framework). The QUndoStack can be used to
+    store the different operations done on the model, like adding or removing rows, or
+    pasting data from the clipboard, with a way to undo it again later. However, an
+    accompanying QUndoStack that describes the possible operations, and how to undo them,
+    should be designed according to the needs of the model and the application.
+    As such, TableView doesn't offer a built-in API for handling copy and paste.
+
+    The following snippet can be used as a reference for how to add copy and paste support
+    to your model and TableView. It uses the existing mime data API in QAbstractItemModel,
+    together with QClipboard. The snippet will work as it is, but can also be extended to
+    use a QUndoStack.
+
+    \code
+    // Inside your C++ QAbstractTableModel subclass:
+
+    Q_INVOKABLE void copyToClipboard(const QModelIndexList &indexes) const
+    {
+        QGuiApplication::clipboard()->setMimeData(mimeData(indexes));
+    }
+
+    Q_INVOKABLE bool pasteFromClipboard(const QModelIndex &targetIndex)
+    {
+        const QMimeData *mimeData = QGuiApplication::clipboard()->mimeData();
+        // Consider using a QUndoCommand for the following call. It should store
+        // the (mime) data for the model items that are about to be overwritten, so
+        // that a later call to undo can revert it.
+        return dropMimeData(mimeData, Qt::CopyAction, -1, -1, targetIndex);
+    }
+    \endcode
+
+    The two functions can, for example, be used from QML like this:
+
+    \code
+    TableView {
+        id: tableView
+        model: tableModel
+        selectionModel: ItemSelectionModel {}
+
+        Shortcut {
+           sequence: StandardKey.Copy
+           onActivated: {
+               let indexes = tableView.selectionModel.selectedIndexes
+               tableView.model.copyToClipboard(indexes)
+           }
+        }
+
+        Shortcut {
+           sequence: StandardKey.Paste
+           onActivated: {
+               let targetIndex = tableView.selectionModel.currentIndex
+               tableView.model.pasteFromClipboard(targetIndex)
+           }
+        }
+    }
+    \endcode
+
+    \sa mimeData(), dropMimeData(), QUndoStack, QUndoCommand, QClipboard
 */
 
 /*!
@@ -3098,7 +3165,7 @@ void QQuickTableViewPrivate::unloadEdge(Qt::Edge edge)
 void QQuickTableViewPrivate::loadEdge(Qt::Edge edge, QQmlIncubator::IncubationMode incubationMode)
 {
     const int edgeIndex = nextVisibleEdgeIndexAroundLoadedTable(edge);
-    qCDebug(lcTableViewDelegateLifecycle) << edge << edgeIndex;
+    qCDebug(lcTableViewDelegateLifecycle) << edge << edgeIndex <<  q_func();
 
     const auto &visibleCells = edge & (Qt::LeftEdge | Qt::RightEdge)
             ? loadedRows.values() : loadedColumns.values();
@@ -4010,10 +4077,26 @@ void QQuickTableViewPrivate::setLocalViewportY(qreal contentY)
 
 void QQuickTableViewPrivate::syncViewportRect()
 {
-    // Sync viewportRect so that it contains the actual geometry of the viewport
+    // Sync viewportRect so that it contains the actual geometry of the viewport.
+    // Since the column (and row) size of a sync child is decided by the column size
+    // of its sync view, the viewport width of a sync view needs to be the maximum of
+    // the sync views width, and its sync childrens width. This to ensure that no sync
+    // child loads a column which is not yet loaded by the sync view, since then the
+    // implicit column size cannot be resolved.
     Q_Q(QQuickTableView);
-    viewportRect = QRectF(q->contentX(), q->contentY(), q->width(), q->height());
-    qCDebug(lcTableViewDelegateLifecycle) << viewportRect;
+
+    qreal w = q->width();
+    qreal h = q->height();
+
+    for (auto syncChild : std::as_const(syncChildren)) {
+        auto syncChild_d = syncChild->d_func();
+        if (syncChild_d->syncHorizontally)
+            w = qMax(w, syncChild->width());
+        if (syncChild_d->syncHorizontally)
+            h = qMax(h, syncChild->height());
+    }
+
+    viewportRect = QRectF(q->contentX(), q->contentY(), w, h);
 }
 
 void QQuickTableViewPrivate::init()

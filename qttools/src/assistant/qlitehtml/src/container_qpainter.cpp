@@ -23,7 +23,6 @@
 #include <QUrl>
 
 #include <algorithm>
-#include <set>
 
 const int kDragDistance = 5;
 
@@ -33,14 +32,6 @@ using Context = QPainter;
 namespace {
 static Q_LOGGING_CATEGORY(log, "qlitehtml", QtCriticalMsg)
 }
-
-#if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
-namespace Qt {
-namespace {
-auto constexpr SkipEmptyParts = QString::SkipEmptyParts;
-}
-}
-#endif
 
 static QFont toQFont(litehtml::uint_ptr hFont)
 {
@@ -467,28 +458,7 @@ litehtml::uint_ptr DocumentContainerPrivate::create_font(const litehtml::tchar_t
                        return name;
                    });
     auto font = new QFont();
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
     font->setFamilies(familyNames);
-#else
-    struct CompareCaseinsensitive
-    {
-        bool operator()(const QString &a, const QString &b) const
-        {
-            return a.compare(b, Qt::CaseInsensitive) < 0;
-        }
-    };
-    static const QStringList known = QFontDatabase().families();
-    static const std::set<QString, CompareCaseinsensitive> knownFamilies(known.cbegin(),
-                                                                         known.cend());
-    font->setFamily(familyNames.last());
-    for (const QString &name : qAsConst(familyNames)) {
-        const auto found = knownFamilies.find(name);
-        if (found != knownFamilies.end()) {
-            font->setFamily(*found);
-            break;
-        }
-    }
-#endif
     font->setPixelSize(size);
     font->setWeight(cssWeightToQtWeight(weight));
     font->setStyle(toQFontStyle(italic));
@@ -1358,7 +1328,7 @@ QUrl DocumentContainerPrivate::resolveUrl(const QString &url, const QString &bas
     // server relative path: "/foo/bar.css"
     // net path: "//foo.bar/blah.css"
     // fragment only: "#foo-fragment"
-    const QUrl qurl(url);
+    const QUrl qurl = QUrl::fromEncoded(url.toUtf8());
     if (qurl.scheme().isEmpty()) {
         if (url.startsWith('#')) // leave alone if just a fragment
             return qurl;
@@ -1371,7 +1341,7 @@ QUrl DocumentContainerPrivate::resolveUrl(const QString &url, const QString &bas
                                           ? serverUrl.toString(QUrl::FullyEncoded)
                                           : pageBaseUrl.toString(QUrl::FullyEncoded);
         QUrl resolvedUrl(actualBaseUrl + '/' + url);
-        resolvedUrl.setPath(QDir::cleanPath(resolvedUrl.path(QUrl::FullyEncoded)));
+        resolvedUrl.setPath(resolvedUrl.path(QUrl::FullyEncoded | QUrl::NormalizePathSegments), QUrl::TolerantMode);
         return resolvedUrl;
     }
     return qurl;

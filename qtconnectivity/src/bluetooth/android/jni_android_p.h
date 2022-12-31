@@ -41,12 +41,14 @@ Q_DECLARE_JNI_CLASS(BluetoothGattDescriptor, "android/bluetooth/BluetoothGattDes
 Q_DECLARE_JNI_CLASS(BluetoothGattCharacteristic, "android/bluetooth/BluetoothGattCharacteristic")
 Q_DECLARE_JNI_CLASS(BluetoothDevice, "android/bluetooth/BluetoothDevice")
 Q_DECLARE_JNI_CLASS(IntentFilter, "android/content/IntentFilter")
+Q_DECLARE_JNI_CLASS(AndroidContext, "android/content/Context")
 Q_DECLARE_JNI_CLASS(UUID, "java/util/UUID")
 
 Q_DECLARE_JNI_TYPE(ParcelableArray, "[Landroid/os/Parcelable;")
 Q_DECLARE_JNI_TYPE(ParcelUuidArray, "[Landroid/os/ParcelUuid;")
 Q_DECLARE_JNI_TYPE(StringArray, "[Ljava/lang/String;")
 
+Q_DECLARE_JNI_TYPE(BluetoothManager, "Landroid/bluetooth/BluetoothManager;")
 Q_DECLARE_JNI_TYPE(AdvertiseData, "Landroid/bluetooth/le/AdvertiseData;")
 Q_DECLARE_JNI_TYPE(AdvertiseSettings, "Landroid/bluetooth/le/AdvertiseSettings;")
 Q_DECLARE_JNI_TYPE(InputStream, "Ljava/io/InputStream;")
@@ -86,7 +88,50 @@ enum JavaNames {
     ExtraUuid
 };
 
-QJniObject valueForStaticField(JavaNames javaName, JavaNames javaFieldName);
+QJniObject valueFromStaticFieldCache(const char *key, const char *className, const char *fieldName);
+
+
+template<typename Klass, JavaNames Field>
+QJniObject valueForStaticField()
+{
+    constexpr auto className = QtJniTypes::className<Klass>();
+    constexpr auto fieldName = []() -> auto {
+        if constexpr (Field == JavaNames::ActionAclConnected)
+            return QtJniTypes::String("ACTION_ACL_CONNECTED");
+        else if constexpr (Field == ActionAclDisconnected)
+            return QtJniTypes::String("ACTION_ACL_DISCONNECTED");
+        else if constexpr (Field == ActionBondStateChanged)
+            return QtJniTypes::String("ACTION_BOND_STATE_CHANGED");
+        else if constexpr (Field == ActionDiscoveryStarted)
+            return QtJniTypes::String("ACTION_DISCOVERY_STARTED");
+        else if constexpr (Field == ActionDiscoveryFinished)
+            return QtJniTypes::String("ACTION_DISCOVERY_FINISHED");
+        else if constexpr (Field == ActionFound)
+            return QtJniTypes::String("ACTION_FOUND");
+        else if constexpr (Field == ActionScanModeChanged)
+            return QtJniTypes::String("ACTION_SCAN_MODE_CHANGED");
+        else if constexpr (Field == ActionUuid)
+            return QtJniTypes::String("ACTION_UUID");
+        else if constexpr (Field == ExtraBondState)
+            return QtJniTypes::String("EXTRA_BOND_STATE");
+        else if constexpr (Field == ExtraDevice)
+            return QtJniTypes::String("EXTRA_DEVICE");
+        else if constexpr (Field == ExtraPairingKey)
+            return QtJniTypes::String("EXTRA_PAIRING_KEY");
+        else if constexpr (Field == ExtraPairingVariant)
+            return QtJniTypes::String("EXTRA_PAIRING_VARIANT");
+        else if constexpr (Field == ExtraRssi)
+            return QtJniTypes::String("EXTRA_RSSI");
+        else if constexpr (Field == ExtraScanMode)
+            return QtJniTypes::String("EXTRA_SCAN_MODE");
+        else if constexpr (Field == ExtraUuid)
+            return QtJniTypes::String("EXTRA_UUID");
+        else
+            QtJniTypes::staticAssertTypeMismatch();
+    }();
+
+    return valueFromStaticFieldCache(className + fieldName, className.data(), fieldName.data());
+}
 
 QT_END_NAMESPACE
 

@@ -15,6 +15,8 @@
 #include <QLabel>
 #include <QTimer>
 
+using namespace Qt::StringLiterals;
+
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     m_ui(new Ui::MainWindow),
@@ -72,7 +74,7 @@ void MainWindow::initActionsConnections()
     connect(m_ui->actionAboutQt, &QAction::triggered, qApp, &QApplication::aboutQt);
     connect(m_ui->actionClearLog, &QAction::triggered, m_model, &ReceivedFramesModel::clear);
     connect(m_ui->actionPluginDocumentation, &QAction::triggered, this, []() {
-        QDesktopServices::openUrl(QUrl("http://doc.qt.io/qt-5/qtcanbus-backends.html#can-bus-plugins"));
+        QDesktopServices::openUrl(QUrl("http://doc.qt.io/qt-6/qtcanbus-backends.html#can-bus-plugins"));
     });
     connect(m_ui->actionDeviceInformation, &QAction::triggered, this, [this]() {
         auto info = m_canDevice->deviceInfo();
@@ -110,7 +112,7 @@ void MainWindow::connectDevice()
                                                         &errorString));
     if (!m_canDevice) {
         m_status->setText(tr("Error creating device '%1', reason: '%2'")
-                          .arg(p.pluginName).arg(errorString));
+                          .arg(p.pluginName, errorString));
         return;
     }
 
@@ -147,16 +149,16 @@ void MainWindow::connectDevice()
                     m_canDevice->configurationParameter(QCanBusDevice::DataBitRateKey);
             if (isCanFd && dataBitRate.isValid()) {
                 m_status->setText(tr("Plugin: %1, connected to %2 at %3 / %4 kBit/s")
-                                  .arg(p.pluginName).arg(p.deviceInterfaceName)
+                                  .arg(p.pluginName, p.deviceInterfaceName)
                                   .arg(bitRate.toInt() / 1000).arg(dataBitRate.toInt() / 1000));
             } else {
                 m_status->setText(tr("Plugin: %1, connected to %2 at %3 kBit/s")
-                                  .arg(p.pluginName).arg(p.deviceInterfaceName)
+                                  .arg(p.pluginName, p.deviceInterfaceName)
                                   .arg(bitRate.toInt() / 1000));
             }
         } else {
             m_status->setText(tr("Plugin: %1, connected to %2")
-                    .arg(p.pluginName).arg(p.deviceInterfaceName));
+                    .arg(p.pluginName, p.deviceInterfaceName));
         }
 
         if (m_canDevice->hasBusStatus())
@@ -225,14 +227,14 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 static QString frameFlags(const QCanBusFrame &frame)
 {
-    QString result = QLatin1String(" --- ");
+    QString result = u" --- "_s;
 
     if (frame.hasBitrateSwitch())
-        result[1] = QLatin1Char('B');
+        result[1] = u'B';
     if (frame.hasErrorStateIndicator())
-        result[2] = QLatin1Char('E');
+        result[2] = u'E';
     if (frame.hasLocalEcho())
-        result[3] = QLatin1Char('L');
+        result[3] = u'L';
 
     return result;
 }
@@ -250,11 +252,11 @@ void MainWindow::processReceivedFrames()
         if (frame.frameType() == QCanBusFrame::ErrorFrame)
             data = m_canDevice->interpretErrorFrame(frame);
         else
-            data = QLatin1String(frame.payload().toHex(' ').toUpper());
+            data = QString::fromLatin1(frame.payload().toHex(' ').toUpper());
 
         const QString time = QString::fromLatin1("%1.%2  ")
-                .arg(frame.timeStamp().seconds(), 10, 10, QLatin1Char(' '))
-                .arg(frame.timeStamp().microSeconds() / 100, 4, 10, QLatin1Char('0'));
+                .arg(frame.timeStamp().seconds(), 10, 10, ' '_L1)
+                .arg(frame.timeStamp().microSeconds() / 100, 4, 10, '0'_L1);
 
         const QString flags = frameFlags(frame);
 

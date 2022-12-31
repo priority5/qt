@@ -249,6 +249,8 @@ private slots:
     void sortNonStringArray();
     void iterateInvalidProxy();
     void applyOnHugeArray();
+    void reflectApplyOnHugeArray();
+    void jsonStringifyHugeArray();
 
     void tostringRecursionCheck();
     void arrayIncludesWithLargeArray();
@@ -5327,6 +5329,36 @@ void tst_QJSEngine::applyOnHugeArray()
     QCOMPARE(value.toString(), "RangeError: Array too large for apply().");
 }
 
+
+void tst_QJSEngine::reflectApplyOnHugeArray()
+{
+    QQmlEngine engine;
+    const QJSValue value = engine.evaluate(R"(
+(function(){
+const v1 = [];
+const v3 = [];
+v3.length = 3900000000;
+Reflect.apply(v1.reverse,v1,v3);
+})()
+    )");
+    QVERIFY(value.isError());
+    QCOMPARE(value.toString(), QLatin1String("RangeError: Invalid array length."));
+}
+
+void tst_QJSEngine::jsonStringifyHugeArray()
+{
+    QQmlEngine engine;
+    const QJSValue value = engine.evaluate(R"(
+(function(){
+const v3 = [];
+v3.length = 3900000000;
+JSON.stringify([], v3);
+})()
+    )");
+    QVERIFY(value.isError());
+    QCOMPARE(value.toString(), QLatin1String("RangeError: Invalid array length."));
+}
+
 void tst_QJSEngine::typedArraySet()
 {
     QJSEngine engine;
@@ -5426,7 +5458,7 @@ void tst_QJSEngine::urlObject()
 
     check(QStringLiteral("href"), url.toString());
     check(QStringLiteral("origin"), QStringLiteral("http://example.com:777"));
-    check(QStringLiteral("protocol"), url.scheme());
+    check(QStringLiteral("protocol"), url.scheme() + QLatin1Char(':'));
     check(QStringLiteral("username"), url.userName());
     check(QStringLiteral("password"), url.password());
     check(QStringLiteral("host"), url.host() + u':' + QString::number(url.port()));
