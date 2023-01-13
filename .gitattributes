@@ -1,2 +1,4 @@
 # Force LF checkout of the pins files to avoid transport_security_state_generator errors.
 qtwebengine/src/3rdparty/chromium/net/http/*.pins text eol=lf
+# Force LF checkout of all .idl files
+*.idl text eol=lf
