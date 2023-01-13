@@ -1760,7 +1760,7 @@ void QQuickTableViewPrivate::updateExtents()
         relayoutTableItems();
 
         // Inform the sync children that they need to rebuild to stay in sync
-        for (auto syncChild : qAsConst(syncChildren)) {
+        for (auto syncChild : std::as_const(syncChildren)) {
             auto syncChild_d = syncChild->d_func();
             syncChild_d->scheduledRebuildOptions |= RebuildOption::ViewportOnly;
             if (tableMovedHorizontally)
@@ -3720,6 +3720,13 @@ void QQuickTableViewPrivate::syncSyncView()
         q->setLeftMargin(syncView->leftMargin());
         q->setRightMargin(syncView->rightMargin());
         updateContentWidth();
+
+        if (syncView->leftColumn() != q->leftColumn()) {
+            // The left column is no longer the same as the left
+            // column in syncView. This requires a rebuild.
+            scheduledRebuildOptions |= QQuickTableViewPrivate::RebuildOption::CalculateNewTopLeftColumn;
+            scheduledRebuildOptions.setFlag(RebuildOption::ViewportOnly);
+        }
     }
 
     if (syncVertically) {
@@ -3728,6 +3735,13 @@ void QQuickTableViewPrivate::syncSyncView()
         q->setTopMargin(syncView->topMargin());
         q->setBottomMargin(syncView->bottomMargin());
         updateContentHeight();
+
+        if (syncView->topRow() != q->topRow()) {
+            // The top row is no longer the same as the top
+            // row in syncView. This requires a rebuild.
+            scheduledRebuildOptions |= QQuickTableViewPrivate::RebuildOption::CalculateNewTopLeftRow;
+            scheduledRebuildOptions.setFlag(RebuildOption::ViewportOnly);
+        }
     }
 
     if (syncView && loadedItems.isEmpty() && !tableSize.isEmpty()) {
@@ -4154,7 +4168,7 @@ void QQuickTableViewPrivate::syncViewportPosRecursive()
         }
     }
 
-    for (auto syncChild : qAsConst(syncChildren)) {
+    for (auto syncChild : std::as_const(syncChildren)) {
         auto syncChild_d = syncChild->d_func();
         if (!syncChild_d->inSyncViewportPosRecursive) {
             if (syncChild_d->syncHorizontally)
@@ -4941,7 +4955,10 @@ void QQuickTableView::geometryChange(const QRectF &newGeometry, const QRectF &ol
         d->tableModel->drainReusableItemsPool(0);
     }
 
-    polish();
+    d->scheduleRebuildTable(
+                QQuickTableViewPrivate::RebuildOption::LayoutOnly |
+                QQuickTableViewPrivate::RebuildOption::CalculateNewContentWidth |
+                QQuickTableViewPrivate::RebuildOption::CalculateNewContentHeight);
 }
 
 void QQuickTableView::viewportMoved(Qt::Orientations orientation)

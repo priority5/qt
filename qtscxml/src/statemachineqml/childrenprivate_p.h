@@ -119,7 +119,7 @@ public:
 
     static qsizetype count(QQmlListProperty<QObject> *prop)
     {
-        return static_cast<Self *>(prop->data)->children.count();
+        return static_cast<Self *>(prop->data)->children.size();
     }
 
     static QObject *at(QQmlListProperty<QObject> *prop, qsizetype index)
@@ -130,7 +130,7 @@ public:
     static void clear(QQmlListProperty<QObject> *prop)
     {
         auto &children = static_cast<Self *>(prop->data)->children;
-        for (QObject *oldItem : qAsConst(children))
+        for (QObject *oldItem : std::as_const(children))
             Handler::unparentItem(prop, oldItem);
 
         children.clear();

@@ -107,7 +107,7 @@ QQmlListProperty<QQuick3DTexture> QQuick3DResourceLoader::textures()
 void QQuick3DResourceLoader::onGeometryDestroyed(QObject *object)
 {
     bool found = false;
-    for (int i = 0; i < m_geometries.count(); ++i) {
+    for (int i = 0; i < m_geometries.size(); ++i) {
         if (m_geometries[i] == object) {
             m_geometries.removeAt(i--);
             found = true;
@@ -120,7 +120,7 @@ void QQuick3DResourceLoader::onGeometryDestroyed(QObject *object)
 void QQuick3DResourceLoader::onTextureDestroyed(QObject *object)
 {
     bool found = false;
-    for (int i = 0; i < m_textures.count(); ++i) {
+    for (int i = 0; i < m_textures.size(); ++i) {
         if (m_textures[i] == object) {
             m_textures.removeAt(i--);
             found = true;
@@ -142,13 +142,13 @@ QSSGRenderGraphObject *QQuick3DResourceLoader::updateSpatialNode(QSSGRenderGraph
     auto resourceLoaderNode = static_cast<QSSGRenderResourceLoader *>(node);
     if (m_dirtyAttributes & MeshesDirty) {
         resourceLoaderNode->meshes.clear();
-        for (const auto &mesh : qAsConst(m_meshSources))
+        for (const auto &mesh : std::as_const(m_meshSources))
             resourceLoaderNode->meshes.push_back(QSSGRenderPath(QQuick3DModel::translateMeshSource(mesh, this)));
     }
 
     if (m_dirtyAttributes & TexturesDirty) {
         resourceLoaderNode->textures.clear();
-        for (const auto &texture : qAsConst(m_textures)) {
+        for (const auto &texture : std::as_const(m_textures)) {
             auto graphObject = QQuick3DObjectPrivate::get(texture)->spatialNode;
             if (graphObject)
                 resourceLoaderNode->textures.push_back(graphObject);
@@ -159,7 +159,7 @@ QSSGRenderGraphObject *QQuick3DResourceLoader::updateSpatialNode(QSSGRenderGraph
 
     if (m_dirtyAttributes & GeometriesDirty) {
         resourceLoaderNode->geometries.clear();
-        for (const auto &geometry : qAsConst(m_geometries)) {
+        for (const auto &geometry : std::as_const(m_geometries)) {
             auto graphObject = QQuick3DObjectPrivate::get(geometry)->spatialNode;
             if (graphObject)
                 resourceLoaderNode->geometries.push_back(graphObject);
@@ -227,13 +227,13 @@ QQuick3DGeometry *QQuick3DResourceLoader::qmlGeometryAt(QQmlListProperty<QQuick3
 qsizetype QQuick3DResourceLoader::qmlGeometriesCount(QQmlListProperty<QQuick3DGeometry> *list)
 {
     QQuick3DResourceLoader *self = static_cast<QQuick3DResourceLoader *>(list->object);
-    return self->m_geometries.count();
+    return self->m_geometries.size();
 }
 
 void QQuick3DResourceLoader::qmlClearGeometries(QQmlListProperty<QQuick3DGeometry> *list)
 {
     QQuick3DResourceLoader *self = static_cast<QQuick3DResourceLoader *>(list->object);
-    for (const auto &geometry : qAsConst(self->m_geometries)) {
+    for (const auto &geometry : std::as_const(self->m_geometries)) {
         if (geometry->parentItem() == nullptr)
             QQuick3DObjectPrivate::get(geometry)->derefSceneManager();
         geometry->disconnect(self, SLOT(onMorphTargetDestroyed(QObject*)));
@@ -283,13 +283,13 @@ QQuick3DTexture *QQuick3DResourceLoader::qmlTextureAt(QQmlListProperty<QQuick3DT
 qsizetype QQuick3DResourceLoader::qmlTexturesCount(QQmlListProperty<QQuick3DTexture> *list)
 {
     QQuick3DResourceLoader *self = static_cast<QQuick3DResourceLoader *>(list->object);
-    return self->m_textures.count();
+    return self->m_textures.size();
 }
 
 void QQuick3DResourceLoader::qmlClearTextures(QQmlListProperty<QQuick3DTexture> *list)
 {
     QQuick3DResourceLoader *self = static_cast<QQuick3DResourceLoader *>(list->object);
-    for (const auto &data : qAsConst(self->m_textures)) {
+    for (const auto &data : std::as_const(self->m_textures)) {
         if (data->parentItem() == nullptr)
             QQuick3DObjectPrivate::get(data)->derefSceneManager();
         data->disconnect(self, SLOT(onMorphTargetDestroyed(QObject*)));

@@ -38,6 +38,7 @@ class tst_seatv4 : public QObject, private SeatV4Compositor
 {
     Q_OBJECT
 private slots:
+    void init();
     void cleanup();
     void bindsToSeat();
     void keyboardKeyPress();
@@ -59,6 +60,12 @@ private slots:
     void animatedCursor();
 #endif
 };
+
+void tst_seatv4::init()
+{
+    // Remove the extra outputs to clean up for the next test
+    exec([&] { while (auto *o = output(1)) remove(o); });
+}
 
 void tst_seatv4::cleanup()
 {
@@ -110,7 +117,7 @@ void tst_seatv4::setsCursorOnEnter()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
 
-    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {32, 32}); });
+    exec([&] { pointer()->sendEnter(xdgSurface()->m_surface, {24, 24}); });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
 }
 
@@ -127,7 +134,7 @@ void tst_seatv4::usesEnterSerial()
     });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
 
-    QTRY_COMPARE(setCursorSpy.count(), 1);
+    QTRY_COMPARE(setCursorSpy.size(), 1);
     QCOMPARE(setCursorSpy.takeFirst().at(0).toUInt(), enterSerial);
 }
 
@@ -139,13 +146,13 @@ void tst_seatv4::focusDestruction()
     window.show();
     QCOMPOSITOR_TRY_VERIFY(xdgSurface() && xdgSurface()->m_committedConfigureSerial);
     // Setting a cursor now is not allowed since there has been no enter event
-    QCOMPARE(setCursorSpy.count(), 0);
+    QCOMPARE(setCursorSpy.size(), 0);
 
     uint enterSerial = exec([&] {
         return pointer()->sendEnter(xdgSurface()->m_surface, {32, 32});
     });
     QCOMPOSITOR_TRY_VERIFY(cursorSurface());
-    QTRY_COMPARE(setCursorSpy.count(), 1);
+    QTRY_COMPARE(setCursorSpy.size(), 1);
     QCOMPARE(setCursorSpy.takeFirst().at(0).toUInt(), enterSerial);
 
     // Destroy the focus
@@ -159,7 +166,7 @@ void tst_seatv4::focusDestruction()
 
     // Setting a cursor now is not allowed since there has been no enter event
     xdgPingAndWaitForPong();
-    QCOMPARE(setCursorSpy.count(), 0);
+    QCOMPARE(setCursorSpy.size(), 0);
 }
 
 void tst_seatv4::mousePress()
@@ -335,7 +342,7 @@ static bool supportsCursorSizes(const QList<uint> &sizes)
 
 static uint defaultCursorSize() {
     const int xCursorSize = qEnvironmentVariableIntValue("XCURSOR_SIZE");
-    return xCursorSize > 0 ? uint(xCursorSize) : 32;
+    return xCursorSize > 0 ? uint(xCursorSize) : 24;
 }
 
 void tst_seatv4::scaledCursor()
@@ -568,7 +575,7 @@ void tst_seatv4::animatedCursor()
     });
 
     // Verify that we get a new cursor buffer
-    QTRY_COMPARE(bufferSpy.count(), 1);
+    QTRY_COMPARE(bufferSpy.size(), 1);
 }
 
 #endif // QT_CONFIG(cursor)

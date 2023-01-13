@@ -3,6 +3,8 @@ if(QT_CONFIGURE_RUNNING)
     endfunction()
     function(add_check_for_support)
     endfunction()
+    function(check_for_ulimit)
+    endfunction()
 else()
     find_package(Ninja 1.7.2)
     find_package(Gn ${QT_REPO_MODULE_VERSION} EXACT)
@@ -341,7 +343,6 @@ qt_feature("webengine-system-minizip" PRIVATE
 )
 qt_feature("webengine-system-libevent" PRIVATE
     LABEL "libevent"
-    AUTODETECT FALSE # coin bug 711
     CONDITION UNIX AND LIBEVENT_FOUND
 )
 qt_feature("webengine-system-libxml" PRIVATE

@@ -244,11 +244,11 @@ void QNearFieldTagType1Private::progressToNextNdefWriteMessageState()
         m_tlvWriter = new QTlvWriter(q);
 
         // write old TLVs
-        for (const Tlv &tlv : qAsConst(m_tlvs))
+        for (const Tlv &tlv : std::as_const(m_tlvs))
             m_tlvWriter->writeTlv(tlv.first, tlv.second);
 
         // write new NDEF message TLVs
-        for (const QNdefMessage &message : qAsConst(m_ndefWriteMessages))
+        for (const QNdefMessage &message : std::as_const(m_ndefWriteMessages))
             m_tlvWriter->writeTlv(0x03, message.toByteArray());
 
         // write terminator TLV
@@ -335,7 +335,7 @@ static QVariant decodeResponse(const QByteArray &command, const QByteArray &resp
         if (writeBlockAddress != blockAddress)
             return false;
 
-        for (int i = 0; i < writeData.length(); ++i) {
+        for (int i = 0; i < writeData.size(); ++i) {
             if ((writeData.at(i) & data.at(i)) != data.at(i))
                 return false;
         }
@@ -642,7 +642,7 @@ QNearFieldTarget::RequestId QNearFieldTagType1::writeBlock(quint8 blockAddress,
                                                            const QByteArray &data,
                                                            WriteMode mode)
 {
-    if (data.length() != 8)
+    if (data.size() != 8)
         return QNearFieldTarget::RequestId();
 
     QByteArray command;

@@ -222,7 +222,7 @@ struct String
     qint32_le size;
 
     static int calculateSize(const QString &str) {
-        return (sizeof(String) + (str.length() + 1) * sizeof(quint16) + 7) & ~0x7;
+        return (sizeof(String) + (str.size() + 1) * sizeof(quint16) + 7) & ~0x7;
     }
 };
 
@@ -578,7 +578,7 @@ struct Binding
     static QString escapedString(const QString &string)
     {
         QString tmp = QLatin1String("\"");
-        for (int i = 0; i < string.length(); ++i) {
+        for (int i = 0; i < string.size(); ++i) {
             const QChar &c = string.at(i);
             switch (c.unicode()) {
             case 0x08:
@@ -1047,8 +1047,8 @@ public:
     InlineComponentIterator inlineComponentsEnd() const {return InlineComponentIterator(this, nInlineComponents);}
 
     typedef TableIterator<RequiredPropertyExtraData, Object, &Object::requiredPropertyExtraDataAt> RequiredPropertyExtraDataIterator;
-    RequiredPropertyExtraDataIterator requiredPropertyExtraDataBegin() const {return RequiredPropertyExtraDataIterator(this, 0); };
-    RequiredPropertyExtraDataIterator requiredPropertyExtraDataEnd() const {return RequiredPropertyExtraDataIterator(this, nRequiredPropertyExtraData); };
+    RequiredPropertyExtraDataIterator requiredPropertyExtraDataBegin() const {return RequiredPropertyExtraDataIterator(this, 0); }
+    RequiredPropertyExtraDataIterator requiredPropertyExtraDataEnd() const {return RequiredPropertyExtraDataIterator(this, nRequiredPropertyExtraData); }
 
     int namedObjectsInComponentCount() const { return nNamedObjectsInComponent; }
     // ---

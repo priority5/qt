@@ -581,7 +581,7 @@ int QQmlPrivate::qmlregister(RegistrationType type, void *data)
         auto revisions = prepareRevisions(type.instanceMetaObject, added) + furtherRevisions;
         uniqueRevisions(&revisions, type.version, added);
 
-        for (QTypeRevision revision : qAsConst(revisions)) {
+        for (QTypeRevision revision : std::as_const(revisions)) {
             if (revision.hasMajorVersion() && revision.majorVersion() > type.version.majorVersion())
                 break;
 
@@ -624,7 +624,7 @@ int QQmlPrivate::qmlregister(RegistrationType type, void *data)
         revisions.append(added);
         uniqueRevisions(&revisions, type.version, added);
 
-        for (QTypeRevision revision : qAsConst(revisions)) {
+        for (QTypeRevision revision : std::as_const(revisions)) {
             if (revision < added)
                 continue;
             if (revision.hasMajorVersion() && revision.majorVersion() > type.version.majorVersion())
@@ -976,7 +976,8 @@ static ObjectLookupResult initObjectLookup(
         // & 1 to tell the gc that this is not heap allocated; see markObjects in qv4lookup_p.h
         l->qobjectFallbackLookup.metaObject = quintptr(metaObject) + 1;
         l->qobjectFallbackLookup.coreIndex = coreIndex;
-        l->qobjectFallbackLookup.notifyIndex = property.notifySignalIndex();
+        l->qobjectFallbackLookup.notifyIndex =
+                QMetaObjectPrivate::signalIndex(property.notifySignal());
         l->qobjectFallbackLookup.isConstant = property.isConstant() ? 1 : 0;
         return ObjectLookupResult::Fallback;
     }

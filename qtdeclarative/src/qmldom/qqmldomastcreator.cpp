@@ -67,6 +67,26 @@ static QString toString(const UiQualifiedId *qualifiedId, QChar delimiter = QLat
     return result;
 }
 
+static QString typeToString(AST::Type *t)
+{
+    Q_ASSERT(t);
+    QString res = toString(t->typeId);
+    if (!t->typeArguments)
+        return res;
+    res += u"<";
+    bool first = true;
+    for (TypeArgumentList *tt = static_cast<TypeArgumentList *>(t->typeArguments);
+         tt; tt = tt->next) {
+        if (first)
+            first = false;
+        else
+            res += u",";
+        res += typeToString(tt->typeId);
+    }
+    res += u">";
+    return res;
+}
+
 SourceLocation combineLocations(SourceLocation s1, SourceLocation s2)
 {
     return combine(s1, s2);
@@ -113,9 +133,9 @@ class QmlDomAstCreator final : public AST::Visitor
     template<typename T>
     StackEl &currentEl(int idx = 0)
     {
-        Q_ASSERT_X(idx < nodeStack.length() && idx >= 0, "currentQmlObjectOrComponentEl",
+        Q_ASSERT_X(idx < nodeStack.size() && idx >= 0, "currentQmlObjectOrComponentEl",
                    "Stack does not contain enough elements!");
-        int i = nodeStack.length() - idx;
+        int i = nodeStack.size() - idx;
         while (i-- > 0) {
             DomType k = nodeStack.at(i).item.kind;
             if (k == T::kindValue)
@@ -135,9 +155,9 @@ class QmlDomAstCreator final : public AST::Visitor
 
     StackEl &currentQmlObjectOrComponentEl(int idx = 0)
     {
-        Q_ASSERT_X(idx < nodeStack.length() && idx >= 0, "currentQmlObjectOrComponentEl",
+        Q_ASSERT_X(idx < nodeStack.size() && idx >= 0, "currentQmlObjectOrComponentEl",
                    "Stack does not contain enough elements!");
-        int i = nodeStack.length() - idx;
+        int i = nodeStack.size() - idx;
         while (i-- > 0) {
             DomType k = nodeStack.at(i).item.kind;
             if (k == DomType::QmlObject || k == DomType::QmlComponent)
@@ -149,16 +169,16 @@ class QmlDomAstCreator final : public AST::Visitor
 
     StackEl &currentNodeEl(int i = 0)
     {
-        Q_ASSERT_X(i < nodeStack.length() && i >= 0, "currentNode",
+        Q_ASSERT_X(i < nodeStack.size() && i >= 0, "currentNode",
                    "Stack does not contain element!");
-        return nodeStack[nodeStack.length() - i - 1];
+        return nodeStack[nodeStack.size() - i - 1];
     }
 
     DomValue &currentNode(int i = 0)
     {
-        Q_ASSERT_X(i < nodeStack.length() && i >= 0, "currentNode",
+        Q_ASSERT_X(i < nodeStack.size() && i >= 0, "currentNode",
                    "Stack does not contain element!");
-        return nodeStack[nodeStack.length() - i - 1].item;
+        return nodeStack[nodeStack.size() - i - 1].item;
     }
 
     void removeCurrentNode(std::optional<DomType> expectedType)
@@ -451,7 +471,7 @@ public:
                                 currentEl<QmlObject>()
                                         .path.field(Fields::bindings)
                                         .key(pDef.name)
-                                        .index(obj.m_bindings.values(pDef.name).length() - 1),
+                                        .index(obj.m_bindings.values(pDef.name).size() - 1),
                                 ann);
                     }
                 }
@@ -487,13 +507,8 @@ public:
             MethodInfo m;
             m.name = fDef->name.toString();
             if (AST::TypeAnnotation *tAnn = fDef->typeAnnotation) {
-                if (AST::Type *t = tAnn->type) {
-                    m.typeName = toString(t->typeId);
-                    if (t->typeArguments) {
-                        Q_ASSERT_X(false, className,
-                                   "todo: type argument should be added to the typeName");
-                    }
-                }
+                if (AST::Type *t = tAnn->type)
+                    m.typeName = typeToString(t);
             }
             m.access = MethodInfo::Public;
             m.methodType = MethodInfo::Method;
@@ -528,13 +543,8 @@ public:
                 MethodParameter param;
                 param.name = args->element->bindingIdentifier.toString();
                 if (AST::TypeAnnotation *tAnn = args->element->typeAnnotation) {
-                    if (AST::Type *t = tAnn->type) {
-                        param.typeName = toString(t->typeId);
-                        if (t->typeArguments) {
-                            Q_ASSERT_X(false, className,
-                                       "todo: type argument should be added to the typeName");
-                        }
-                    }
+                    if (AST::Type *t = tAnn->type)
+                        param.typeName = typeToString(t);
                 }
                 if (args->element->initializer) {
                     SourceLocation loc = combineLocations(args->element->initializer);
@@ -581,11 +591,11 @@ public:
         scope.addPrototypePath(Paths::lookupTypePath(scope.name()));
         QmlObject *sPtr = nullptr;
         Path sPathFromOwner;
-        if (!arrayBindingLevels.isEmpty() && nodeStack.length() == arrayBindingLevels.last()) {
+        if (!arrayBindingLevels.isEmpty() && nodeStack.size() == arrayBindingLevels.last()) {
             if (currentNode().kind == DomType::Binding) {
                 QList<QmlObject> *vals = std::get<Binding>(currentNode().value).arrayValue();
                 if (vals) {
-                    int idx = vals->length();
+                    int idx = vals->size();
                     vals->append(scope);
                     sPathFromOwner = currentNodeEl().path.field(Fields::value).index(idx);
                     sPtr = &((*vals)[idx]);
@@ -621,7 +631,7 @@ public:
     {
         QmlObject &obj = current<QmlObject>();
         int idx = currentIndex();
-        if (!arrayBindingLevels.isEmpty() && nodeStack.length() == arrayBindingLevels.last() + 1) {
+        if (!arrayBindingLevels.isEmpty() && nodeStack.size() == arrayBindingLevels.last() + 1) {
             if (currentNode(1).kind == DomType::Binding) {
                 Binding &b = std::get<Binding>(currentNode(1).value);
                 QList<QmlObject> *vals = b.arrayValue();
@@ -804,7 +814,7 @@ public:
                 createMap(currentNodeEl().fileLocations, Path::Field(Fields::value), nullptr);
         FileLocations::addRegion(arrayList, u"leftSquareBrace", el->lbracketToken);
         FileLocations::addRegion(arrayList, u"rightSquareBrace", el->lbracketToken);
-        arrayBindingLevels.append(nodeStack.length());
+        arrayBindingLevels.append(nodeStack.size());
         return true;
     }
 

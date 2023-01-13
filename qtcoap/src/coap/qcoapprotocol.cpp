@@ -150,7 +150,7 @@ void QCoapProtocol::sendRequest(QPointer<QCoapReply> reply, QCoapConnection *con
     // Set block size for blockwise request/replies, if specified
     if (d->blockSize > 0) {
         internalRequest->setToRequestBlock(0, d->blockSize);
-        if (requestMessage->payload().length() > d->blockSize)
+        if (requestMessage->payload().size() > d->blockSize)
             internalRequest->setToSendBlock(0, d->blockSize);
     }
 
@@ -523,7 +523,7 @@ void QCoapProtocolPrivate::onLastMessageReceived(QCoapInternalRequest *request,
 
         QByteArray finalPayload;
         int lastBlockNumber = -1;
-        for (auto reply : qAsConst(replies)) {
+        for (auto reply : std::as_const(replies)) {
             int currentBlock = static_cast<int>(reply->currentBlockNumber());
             QByteArray replyPayload = reply->message()->payload();
             if (replyPayload.isEmpty() || currentBlock <= lastBlockNumber)

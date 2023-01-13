@@ -38,7 +38,7 @@ static CXTranslationUnit_Flags flags_ = static_cast<CXTranslationUnit_Flags>(0);
 static CXIndex index_ = nullptr;
 
 QByteArray ClangCodeParser::s_fn;
-constexpr const char *fnDummyFileName = "/fn_dummyfile.cpp";
+constexpr const char fnDummyFileName[] = "/fn_dummyfile.cpp";
 
 #ifndef QT_NO_DEBUG_STREAM
 template<class T>
@@ -166,6 +166,48 @@ static Access fromCX_CXXAccessSpecifier(CX_CXXAccessSpecifier spec)
 /*!
    Returns the spelling in the file for a source range
  */
+
+struct FileCacheEntry
+{
+    QByteArray fileName;
+    QByteArray content;
+};
+
+static inline QString fromCache(const QByteArray &cache,
+                                unsigned int offset1, unsigned int offset2)
+{
+    return QString::fromUtf8(cache.mid(offset1, offset2 - offset1));
+}
+
+static QString readFile(CXFile cxFile, unsigned int offset1, unsigned int offset2)
+{
+    using FileCache = QList<FileCacheEntry>;
+    static FileCache cache;
+
+    CXString cxFileName = clang_getFileName(cxFile);
+    const QByteArray fileName = clang_getCString(cxFileName);
+    clang_disposeString(cxFileName);
+
+    for (const auto &entry : std::as_const(cache)) {
+        if (fileName == entry.fileName)
+            return fromCache(entry.content, offset1, offset2);
+    }
+
+    // "fn_dummyfile.cpp" comes with varying cxFile values
+    if (fileName == fnDummyFileName)
+        return fromCache(ClangCodeParser::fn(), offset1, offset2);
+
+    QFile file(QString::fromUtf8(fileName));
+    if (file.open(QIODeviceBase::ReadOnly)) { // binary to match clang offsets
+        FileCacheEntry entry{fileName, file.readAll()};
+        cache.prepend(entry);
+        while (cache.size() > 5)
+            cache.removeLast();
+        return fromCache(entry.content, offset1, offset2);
+    }
+    return {};
+}
+
 static QString getSpelling(CXSourceRange range)
 {
     auto start = clang_getRangeStart(range);
@@ -177,14 +219,8 @@ static QString getSpelling(CXSourceRange range)
 
     if (file1 != file2 || offset2 <= offset1)
         return QString();
-    QFile file(fromCXString(clang_getFileName(file1)));
-    if (!file.open(QFile::ReadOnly)) {
-        if (file.fileName() == fnDummyFileName)
-            return QString::fromUtf8(ClangCodeParser::fn().mid(offset1, offset2 - offset1));
-        return QString();
-    }
-    file.seek(offset1);
-    return QString::fromUtf8(file.read(offset2 - offset1));
+
+    return readFile(file1, offset1, offset2);
 }
 
 /*!
@@ -290,7 +326,7 @@ static Node *findNodeForCursor(QDocDatabase *qdb, CXCursor cur)
         auto numArg = clang_getNumArgTypes(funcType);
         bool isVariadic = clang_isFunctionTypeVariadic(funcType);
         QVarLengthArray<QString, 20> args;
-        for (Node *candidate : qAsConst(candidates)) {
+        for (Node *candidate : std::as_const(candidates)) {
             if (!candidate->isFunction(Node::CPP))
                 continue;
             auto fn = static_cast<FunctionNode *>(candidate);
@@ -717,7 +753,7 @@ CXChildVisitResult ClangVisitor::visitHeader(CXCursor cursor, CXSourceLocation l
 #endif
     case CXCursor_EnumDecl: {
         auto *en = static_cast<EnumNode *>(findNodeForCursor(qdb_, cursor));
-        if (en && en->items().count())
+        if (en && en->items().size())
             return CXChildVisit_Continue; // Was already parsed, probably in another TU
         QString enumTypeName = fromCXString(clang_getCursorSpelling(cursor));
         if (enumTypeName.isEmpty()) {
@@ -1060,8 +1096,8 @@ Node *ClangVisitor::nodeForCommentAtLocation(CXSourceLocation loc, CXSourceLocat
   \a config. Call the initializeParser() in the base class.
   Get the defines list from the qdocconf database.
 
-  \note on \macos, we try to also query the system/framework
-  include paths from the compiler.
+  \note on \macos and Linux, we try to also query the system
+  and framework (\macos) include paths from the compiler.
  */
 void ClangCodeParser::initializeParser()
 {
@@ -1071,9 +1107,11 @@ void ClangCodeParser::initializeParser()
                                             Config::IncludePaths);
 #ifdef Q_OS_MACOS
     args.append(Utilities::getInternalIncludePaths(QStringLiteral("clang++")));
+#elif defined(Q_OS_LINUX)
+    args.append(Utilities::getInternalIncludePaths(QStringLiteral("g++")));
 #endif
     m_includePaths.clear();
-    for (const auto &path : qAsConst(args)) {
+    for (const auto &path : std::as_const(args)) {
         if (!path.isEmpty())
             m_includePaths.append(path.toUtf8());
     }
@@ -1169,7 +1207,17 @@ void ClangCodeParser::parseHeaderFile(const Location & /*location*/, const QStri
 }
 
 static const char *defaultArgs_[] = {
+/*
+  https://bugreports.qt.io/browse/QTBUG-94365
+  An unidentified bug in Clang 15.x causes parsing failures due to errors in
+  the AST. This replicates only with C++20 support enabled - avoid the issue
+  by using C++17 with Clang 15.
+ */
+#if LIBCLANG_VERSION_MAJOR == 15
+    "-std=c++17",
+#else
     "-std=c++20",
+#endif
 #ifndef Q_OS_WIN
     "-fPIC",
 #else
@@ -1199,7 +1247,7 @@ void ClangCodeParser::getDefaultArgs()
     m_args.clear();
     m_args.insert(m_args.begin(), std::begin(defaultArgs_), std::end(defaultArgs_));
     // Add the defines from the qdocconf file.
-    for (const auto &p : qAsConst(m_defines))
+    for (const auto &p : std::as_const(m_defines))
         m_args.push_back(p.constData());
 }
 
@@ -1380,7 +1428,7 @@ void ClangCodeParser::precompileHeaders()
 {
     getDefaultArgs();
     getMoreArgs();
-    for (const auto &p : qAsConst(m_moreArgs))
+    for (const auto &p : std::as_const(m_moreArgs))
         m_args.push_back(p.constData());
 
     flags_ = static_cast<CXTranslationUnit_Flags>(CXTranslationUnit_Incomplete
@@ -1428,7 +1476,7 @@ void ClangCodeParser::parseSourceFile(const Location & /*location*/, const QStri
         m_args.push_back(m_pchName.constData());
     }
     getMoreArgs();
-    for (const auto &p : qAsConst(m_moreArgs))
+    for (const auto &p : std::as_const(m_moreArgs))
         m_args.push_back(p.constData());
 
     CXTranslationUnit tu;
@@ -1595,7 +1643,7 @@ Node *ClangCodeParser::parseFnArg(const Location &location, const QString &fnSig
 
     std::vector<const char *> args(std::begin(defaultArgs_), std::end(defaultArgs_));
     // Add the defines from the qdocconf file.
-    for (const auto &p : qAsConst(m_defines))
+    for (const auto &p : std::as_const(m_defines))
         args.push_back(p.constData());
     if (!m_pchName.isEmpty()) {
         args.push_back("-w");
@@ -1604,7 +1652,7 @@ Node *ClangCodeParser::parseFnArg(const Location &location, const QString &fnSig
     }
     CXTranslationUnit tu;
     s_fn.clear();
-    for (const auto &ns : qAsConst(m_namespaceScope))
+    for (const auto &ns : std::as_const(m_namespaceScope))
         s_fn.prepend("namespace " + ns.toUtf8() + " {");
     s_fn += fnSignature.toUtf8();
     if (!s_fn.endsWith(";"))

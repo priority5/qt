@@ -22,7 +22,8 @@ QT_BEGIN_NAMESPACE
 
 //#define DEBUG_AUDIO 1
 
-QWindowsAudioSource::QWindowsAudioSource(int deviceId)
+QWindowsAudioSource::QWindowsAudioSource(int deviceId, QObject *parent)
+    : QPlatformAudioSource(parent)
 {
     bytesAvailable = 0;
     buffer_size = 0;
@@ -313,7 +314,7 @@ bool QWindowsAudioSource::open()
     for(int i=0; i<buffer_size/period_size; i++) {
         result = waveInAddBuffer(hWaveIn, &waveBlocks[i], sizeof(WAVEHDR));
         if(result != MMSYSERR_NOERROR) {
-            qWarning("QAudioSource: failed to setup block %d,err=%d",i,result);
+            qWarning("QAudioSource: failed to set up block %d,err=%d",i,result);
             errorState = QAudio::OpenError;
             deviceState = QAudio::StoppedState;
             emit stateChanged(deviceState);
@@ -494,7 +495,7 @@ qint64 QWindowsAudioSource::read(char* data, qint64 len)
             }
             result = waveInAddBuffer(hWaveIn, &waveBlocks[header], sizeof(WAVEHDR));
             if(result != MMSYSERR_NOERROR) {
-                qWarning("QAudioSource: failed to setup block %d,err=%d",header,result);
+                qWarning("QAudioSource: failed to set up block %d,err=%d",header,result);
                 errorState = QAudio::IOError;
 
                 mutex.lock();
@@ -534,7 +535,7 @@ void QWindowsAudioSource::resume()
         for(int i=0; i<buffer_size/period_size; i++) {
             result = waveInAddBuffer(hWaveIn, &waveBlocks[i], sizeof(WAVEHDR));
             if(result != MMSYSERR_NOERROR) {
-                qWarning("QAudioSource: failed to setup block %d,err=%d",i,result);
+                qWarning("QAudioSource: failed to set up block %d,err=%d",i,result);
                 errorState = QAudio::OpenError;
                 deviceState = QAudio::StoppedState;
                 emit stateChanged(deviceState);

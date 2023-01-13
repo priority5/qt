@@ -90,6 +90,7 @@ private slots:
     void checkColumnWidthProviderInvalidReturnValues();
     void checkColumnWidthProviderNegativeReturnValue();
     void checkColumnWidthProviderNotCallable();
+    void checkColumnWidthBoundToViewWidth();
     void checkRowHeightWithoutProvider();
     void checkRowHeightProvider();
     void checkRowHeightProviderInvalidReturnValues();
@@ -160,6 +161,7 @@ private slots:
     void checkSyncView_connect_late();
     void checkSyncView_pageFlicking();
     void checkSyncView_emptyModel();
+    void checkSyncView_topLeftChanged();
     void delegateWithRequiredProperties();
     void checkThatFetchMoreIsCalledWhenScrolledToTheEndOfTable();
     void replaceModel();
@@ -285,8 +287,9 @@ void tst_QQuickTableView::emptyModel()
     LOAD_TABLEVIEW("plaintableview.qml");
 
     tableView->setModel(model);
-    WAIT_UNTIL_POLISHED;
-    QCOMPARE(tableViewPrivate->loadedItems.count(), 0);
+    if (QQuickTest::qIsPolishScheduled(tableView))
+        WAIT_UNTIL_POLISHED;
+    QCOMPARE(tableViewPrivate->loadedItems.size(), 0);
 }
 
 void tst_QQuickTableView::checkPreload_data()
@@ -503,6 +506,27 @@ void tst_QQuickTableView::checkColumnWidthProviderNotCallable()
 
     for (auto fxItem : tableViewPrivate->loadedItems)
         QCOMPARE(fxItem->item->width(), kDefaultColumnWidth);
+}
+
+void tst_QQuickTableView::checkColumnWidthBoundToViewWidth()
+{
+    // Check that you can bind the width of a delegate to the
+    // width of TableView, and that it updates when TableView is resized.
+    LOAD_TABLEVIEW("columnwidthboundtoviewwidth.qml");
+
+    auto model = TestModelAsVariant(10, 1);
+    tableView->setModel(model);
+
+    WAIT_UNTIL_POLISHED;
+
+    for (auto fxItem : tableViewPrivate->loadedItems)
+        QCOMPARE(fxItem->item->width(), tableView->width());
+
+    tableView->setWidth(200);
+    WAIT_UNTIL_POLISHED;
+
+    for (auto fxItem : tableViewPrivate->loadedItems)
+        QCOMPARE(fxItem->item->width(), 200);
 }
 
 void tst_QQuickTableView::checkRowHeightWithoutProvider()
@@ -3095,6 +3119,42 @@ void tst_QQuickTableView::checkSyncView_emptyModel()
 
     QCOMPARE(tableViewVPrivate->loadedTableOuterRect.top(), tableViewPrivate->loadedTableOuterRect.top());
     QCOMPARE(tableViewVPrivate->loadedTableOuterRect.left(), 0);
+}
+
+void tst_QQuickTableView::checkSyncView_topLeftChanged()
+{
+    LOAD_TABLEVIEW("syncviewsimple.qml");
+    GET_QML_TABLEVIEW(tableViewH);
+    GET_QML_TABLEVIEW(tableViewV);
+    GET_QML_TABLEVIEW(tableViewHV);
+    QQuickTableView *views[] = {tableViewH, tableViewV, tableViewHV};
+
+    auto model = TestModelAsVariant(100, 100);
+    tableView->setModel(model);
+
+    for (auto view : views)
+        view->setModel(model);
+
+    tableView->setColumnWidthProvider(QJSValue());
+    tableView->setRowHeightProvider(QJSValue());
+    view->rootObject()->setProperty("delegateWidth", 300);
+    view->rootObject()->setProperty("delegateHeight", 300);
+    tableView->forceLayout();
+
+    tableViewHV->setContentX(350);
+    tableViewHV->setContentY(350);
+
+    WAIT_UNTIL_POLISHED;
+
+    QCOMPARE(tableViewH->leftColumn(), tableView->leftColumn());
+    QCOMPARE(tableViewV->topRow(), tableView->topRow());
+
+    view->rootObject()->setProperty("delegateWidth", 50);
+    view->rootObject()->setProperty("delegateHeight", 50);
+    tableView->forceLayout();
+
+    QCOMPARE(tableViewH->leftColumn(), tableView->leftColumn());
+    QCOMPARE(tableViewV->topRow(), tableView->topRow());
 }
 
 void tst_QQuickTableView::checkThatFetchMoreIsCalledWhenScrolledToTheEndOfTable()

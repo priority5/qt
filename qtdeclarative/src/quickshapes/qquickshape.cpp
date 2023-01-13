@@ -903,7 +903,7 @@ void QQuickShape::itemChange(ItemChange change, const ItemChangeData &data)
     if (change == ItemVisibleHasChanged && data.boolValue)
         d->_q_shapePathChanged();
     else if (change == QQuickItem::ItemSceneChange) {
-        for (int i = 0; i < d->sp.count(); ++i)
+        for (int i = 0; i < d->sp.size(); ++i)
             QQuickShapePathPrivate::get(d->sp[i])->dirty = QQuickShapePathPrivate::DirtyAll;
         d->_q_shapePathChanged();
     }
@@ -1002,7 +1002,7 @@ void QQuickShapePrivate::sync()
         renderer->setAsyncCallback(asyncShapeReady, this);
     }
 
-    const int count = sp.count();
+    const int count = sp.size();
     bool countChanged = false;
     renderer->beginSync(count, &countChanged);
 
@@ -1440,6 +1440,7 @@ static void generateGradientColorTable(const QQuickShapeGradientCacheKey &gradie
 {
     int pos = 0;
     const QGradientStops &s = gradient.stops;
+    Q_ASSERT(!s.isEmpty());
     const bool colorInterpolation = true;
 
     uint alpha = qRound(opacity * 256);
@@ -1477,8 +1478,6 @@ static void generateGradientColorTable(const QQuickShapeGradientCacheKey &gradie
         current_color = next_color;
     }
 
-    Q_ASSERT(s.size() > 0);
-
     uint last_color = ARGB2RGBA(qPremultiply(ARGB_COMBINE_ALPHA(s[sLast].second.rgba(), alpha)));
     for ( ; pos < size; ++pos)
         colorTable[pos] = last_color;
@@ -1513,7 +1512,10 @@ QSGTexture *QQuickShapeGradientCache::get(const QQuickShapeGradientCacheKey &gra
     if (!tx) {
         static const int W = 1024; // texture size is 1024x1
         QImage gradTab(W, 1, QImage::Format_RGBA8888_Premultiplied);
-        generateGradientColorTable(grad, reinterpret_cast<uint *>(gradTab.bits()), W, 1.0f);
+        if (!grad.stops.isEmpty())
+            generateGradientColorTable(grad, reinterpret_cast<uint *>(gradTab.bits()), W, 1.0f);
+        else
+            gradTab.fill(Qt::black);
         tx = new QSGPlainTexture;
         tx->setImage(gradTab);
         switch (grad.spread) {

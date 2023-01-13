@@ -42,7 +42,7 @@ QString cEscape(const QString &str)
 {
     QString res;
     int lastI = 0;
-    for (int i = 0; i < str.length(); ++i) {
+    for (int i = 0; i < str.size(); ++i) {
         QChar c = str.at(i);
         if (c < QLatin1Char(' ') || c == QLatin1Char('\\') || c == QLatin1Char('\"')) {
             res.append(str.mid(lastI, i - lastI));
@@ -137,7 +137,7 @@ static void generateList(QString &out, std::function<QString(int)> next)
         if (i != 0)
             line += QLatin1Char(',');
 
-        if (line.length() + nr.length() + 1 > maxLineLength) {
+        if (line.size() + nr.size() + 1 > maxLineLength) {
             out += line + QLatin1Char('\n');
             line.clear();
         } else if (i != 0) {
@@ -512,7 +512,7 @@ void CppDumper::writeImplStart()
         << Qt::endl;
 
     QStringList includes;
-    for (DocumentModel::ScxmlDocument *doc : qAsConst(m_translationUnit->allDocuments)) {
+    for (DocumentModel::ScxmlDocument *doc : std::as_const(m_translationUnit->allDocuments)) {
         switch (doc->root->dataModel) {
         case DocumentModel::Scxml::NullDataModel:
             includes += l("QScxmlNullDataModel");
@@ -534,7 +534,7 @@ void CppDumper::writeImplStart()
     cpp << Qt::endl
         << QStringLiteral("#include <qscxmlinvokableservice.h>") << Qt::endl
         << QStringLiteral("#include <qscxmltabledata.h>") << Qt::endl;
-    for (const QString &inc : qAsConst(includes)) {
+    for (const QString &inc : std::as_const(includes)) {
         cpp << l("#include <") << inc << l(">") << Qt::endl;
     }
     cpp << Qt::endl
@@ -652,7 +652,7 @@ QString CppDumper::mangleIdentifier(const QString &str)
         }
     }
 
-    for (int ei = str.length(); i != ei; ++i) {
+    for (int ei = str.size(); i != ei; ++i) {
         auto c = str.at(i);
         if ((c >= QLatin1Char('0') && c <= QLatin1Char('9')) || isNonDigit(c)) {
             mangled += c;

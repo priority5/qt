@@ -604,7 +604,7 @@ void QQuick3DParticleEmitter::generateEmitBursts()
     QQuaternion rotation = calculateParticleRotation(parentNode(), m_systemSharedParent);
     QVector3D centerPos = position();
 
-    for (auto emitBurst : qAsConst(m_emitBursts)) {
+    for (auto emitBurst : std::as_const(m_emitBursts)) {
         // Ignore all dynamic bursts here
         if (qobject_cast<QQuick3DParticleDynamicBurst *>(emitBurst))
             continue;
@@ -765,7 +765,7 @@ int QQuick3DParticleEmitter::getEmitAmountFromDynamicBursts(int triggerType)
     const int currentTime = m_system->time();
     const int prevTime = m_prevBurstTime;
     // First go through dynamic bursts and see if any of them tiggers
-    for (auto *burst : qAsConst(m_emitBursts)) {
+    for (auto *burst : std::as_const(m_emitBursts)) {
         auto *burstPtr = qobject_cast<QQuick3DParticleDynamicBurst *>(burst);
         if (!burstPtr)
             continue;
@@ -799,7 +799,7 @@ int QQuick3DParticleEmitter::getEmitAmountFromDynamicBursts(int triggerType)
         }
     }
     // Then go through the triggered emit bursts list
-    for (int burstIndex = 0; burstIndex < m_burstEmitData.count(); ++burstIndex) {
+    for (int burstIndex = 0; burstIndex < m_burstEmitData.size(); ++burstIndex) {
         auto &burstData = m_burstEmitData[burstIndex];
         const int amountLeft = burstData.emitAmount - burstData.emitCounter;
         if (currentTime >= burstData.endTime) {
@@ -1020,7 +1020,7 @@ void QQuick3DParticleEmitter::appendEmitBurst(QQuick3DParticleEmitBurst* n) {
 
 qsizetype QQuick3DParticleEmitter::emitBurstCount() const
 {
-    return m_emitBursts.count();
+    return m_emitBursts.size();
 }
 
 QQuick3DParticleEmitBurst *QQuick3DParticleEmitter::emitBurst(qsizetype index) const

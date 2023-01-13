@@ -262,7 +262,7 @@ private Q_SLOTS:
 
         Qt3DCore::QComponentVector rootComponents = root->components();
         Qt3DRender::QRayCaster *rayCaster = nullptr;
-        for (Qt3DCore::QComponent *c: qAsConst(rootComponents)) {
+        for (Qt3DCore::QComponent *c: std::as_const(rootComponents)) {
             rayCaster = qobject_cast<Qt3DRender::QRayCaster *>(c);
             if (rayCaster)
                 break;
@@ -294,7 +294,7 @@ private Q_SLOTS:
         QVERIFY(!rayCaster->isEnabled());
         auto dirtyNodes = test->arbiter()->takeDirtyFrontEndNodes();
         qDebug() << dirtyNodes;
-        QCOMPARE(dirtyNodes.count(), 1); // hits & disable
+        QCOMPARE(dirtyNodes.size(), 1); // hits & disable
         QCOMPARE(rayCaster->hits().size(), numIntersections);
 
         if (numIntersections)
@@ -325,7 +325,7 @@ private Q_SLOTS:
 
         Qt3DCore::QComponentVector rootComponents = root->components();
         Qt3DRender::QScreenRayCaster *rayCaster = nullptr;
-        for (Qt3DCore::QComponent *c: qAsConst(rootComponents)) {
+        for (Qt3DCore::QComponent *c: std::as_const(rootComponents)) {
             rayCaster = qobject_cast<Qt3DRender::QScreenRayCaster *>(c);
             if (rayCaster)
                 break;
@@ -356,7 +356,7 @@ private Q_SLOTS:
         QVERIFY(!backendRayCaster->isEnabled());
         QVERIFY(!rayCaster->isEnabled());
         auto dirtyNodes = test->arbiter()->takeDirtyFrontEndNodes();
-        QCOMPARE(dirtyNodes.count(), 1); // hits & disable
+        QCOMPARE(dirtyNodes.size(), 1); // hits & disable
         QCOMPARE(rayCaster->hits().size(), numIntersections);
 
         if (numIntersections)

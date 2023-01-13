@@ -54,7 +54,7 @@ void tst_Compiled::stateNames()
 
     QCOMPARE(stateMachine.stateNames(false), ids1States);
 
-    for (const QString &state : qAsConst(ids1States)) {
+    for (const QString &state : std::as_const(ids1States)) {
         QVariant prop = stateMachine.property(state.toUtf8().constData());
         QVERIFY(!prop.isNull());
         QVERIFY(prop.isValid());
@@ -236,14 +236,14 @@ void tst_Compiled::topMachine()
 
     QObject::connect(&stateMachine, &QScxmlStateMachine::invokedServicesChanged,
                      [&invokableServicesCount](const QList<QScxmlInvokableService *> &services) {
-        invokableServicesCount = services.count();
+        invokableServicesCount = services.size();
     });
 
     stateMachine.start();
 
     QTRY_COMPARE(invokableServicesCount, 3);
     QTRY_COMPARE(doneCounter, 3);
-    QCOMPARE(stateMachine.invokedServices().count(), 3);
+    QCOMPARE(stateMachine.invokedServices().size(), 3);
     QTRY_COMPARE(invokableServicesCount, 0);
 }
 
@@ -261,14 +261,14 @@ void tst_Compiled::topMachineDynamic()
 
     QObject::connect(stateMachine.data(), &QScxmlStateMachine::invokedServicesChanged,
                      [&invokableServicesCount](const QList<QScxmlInvokableService *> &services) {
-        invokableServicesCount = services.count();
+        invokableServicesCount = services.size();
     });
 
     stateMachine->start();
 
     QTRY_COMPARE(invokableServicesCount, 3);
     QTRY_COMPARE(doneCounter, 3);
-    QCOMPARE(stateMachine->invokedServices().count(), 3);
+    QCOMPARE(stateMachine->invokedServices().size(), 3);
     QTRY_COMPARE(invokableServicesCount, 0);
 }
 

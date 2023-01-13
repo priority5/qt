@@ -219,7 +219,7 @@ QStringList dumpSGFilterState(Qt3DRender::Render::TechniqueManager *manager,
                     res += QLatin1String(" [ %1 ]").arg(filters.join(QLatin1String(" ")));
             }
         }
-        reply += res.rightJustified(res.length() + level * 2, QLatin1Char(' '));
+        reply += res.rightJustified(res.size() + level * 2, QLatin1Char(' '));
         level++;
     }
 
@@ -475,7 +475,7 @@ void QRenderAspectPrivate::registerBackendTypes()
     q->registerBackendType<QScreenRayCaster>(QSharedPointer<Render::NodeFunctor<Render::RayCaster, Render::RayCasterManager> >::create(m_renderer));
 
     // Plugins
-    for (const QString &plugin : qAsConst(m_pluginConfig))
+    for (const QString &plugin : std::as_const(m_pluginConfig))
         loadRenderPlugin(plugin);
 }
 
@@ -551,7 +551,7 @@ void QRenderAspectPrivate::unregisterBackendTypes()
     unregisterBackendType<QScreenRayCaster>();
 
     // Plugins
-    for (Render::QRenderPlugin *plugin : qAsConst(m_renderPlugins))
+    for (Render::QRenderPlugin *plugin : std::as_const(m_renderPlugins))
         plugin->unregisterBackendTypes(q);
 }
 
@@ -964,7 +964,7 @@ void QRenderAspectPrivate::configurePlugin(const QString &plugin)
     if (!m_pluginConfig.contains(plugin)) {
         m_pluginConfig.append(plugin);
 
-        for (QRenderAspectPrivate *instance : qAsConst(m_instances))
+        for (QRenderAspectPrivate *instance : std::as_const(m_instances))
             instance->loadRenderPlugin(plugin);
     }
 }

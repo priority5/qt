@@ -629,7 +629,7 @@ void QQuick3DObjectPrivate::resources_clear(QQmlListProperty<QObject> *prop)
     QQuick3DObject *quickItem = static_cast<QQuick3DObject *>(prop->object);
     QQuick3DObjectPrivate *quickItemPrivate = QQuick3DObjectPrivate::get(quickItem);
     if (quickItemPrivate->extra.isAllocated()) { // If extra is not allocated resources is empty.
-        for (QObject *object : qAsConst(quickItemPrivate->extra->resourcesList)) {
+        for (QObject *object : std::as_const(quickItemPrivate->extra->resourcesList)) {
             // clang-format off
             qmlobject_disconnect(object, QObject, SIGNAL(destroyed(QObject*)),
                                  quickItem, QQuick3DObject, SLOT(_q_resourceObjectDeleted(QObject*)));
@@ -924,8 +924,15 @@ void QQuick3DObjectPrivate::refSceneManager(QQuick3DSceneManager &c)
     Q_ASSERT((sceneManager != nullptr) == (sceneRefCount > 0));
     if (++sceneRefCount > 1) {
         // Sanity check. Even if there's a different scene manager the window should be the same.
-        if (c.window() != sceneManager->window())
+        if (c.window() != sceneManager->window()) {
             qWarning("QSSGObject: Cannot use same item on different windows at the same time.");
+            return;
+        }
+
+        // NOTE: Simple tracking for resources that are shared between scenes.
+        if (&c != sceneManager && QSSGRenderGraphObject::isResource(type))
+            sharedResource = true;
+
         return; // Scene manager already set.
     }
 
@@ -1126,7 +1133,7 @@ void QV4::Heap::QSSGItemWrapper::markObjects(QV4::Heap::Base *that, QV4::MarkSta
 {
     QObjectWrapper *This = static_cast<QObjectWrapper *>(that);
     if (QQuick3DObject *item = static_cast<QQuick3DObject *>(This->object())) {
-        for (QQuick3DObject *child : qAsConst(QQuick3DObjectPrivate::get(item)->childItems))
+        for (QQuick3DObject *child : std::as_const(QQuick3DObjectPrivate::get(item)->childItems))
             QV4::QObjectWrapper::markWrapper(child, markStack);
     }
     QObjectWrapper::markObjects(that, markStack);

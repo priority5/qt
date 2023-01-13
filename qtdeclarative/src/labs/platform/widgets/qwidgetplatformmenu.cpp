@@ -6,6 +6,7 @@
 
 #include <QtGui/qaction.h>
 #include <QtGui/qwindow.h>
+#include <QtGui/private/qhighdpiscaling_p.h>
 #include <QtWidgets/qmenu.h>
 
 QT_BEGIN_NAMESPACE
@@ -38,7 +39,7 @@ void QWidgetPlatformMenu::insertMenuItem(QPlatformMenuItem *item, QPlatformMenuI
     m_menu->insertAction(widgetBefore ? widgetBefore->action() : nullptr, widgetItem->action());
     int index = m_items.indexOf(widgetBefore);
     if (index < 0)
-        index = m_items.count();
+        index = m_items.size();
     m_items.insert(index, widgetItem);
 }
 
@@ -112,7 +113,7 @@ void QWidgetPlatformMenu::showPopup(const QWindow *window, const QRect &targetRe
 
     QPoint targetPos = targetRect.bottomLeft();
     if (window)
-        targetPos = window->mapToGlobal(targetPos);
+        targetPos = window->mapToGlobal(QHighDpi::fromNativeLocalPosition(targetPos, window));
 
     const QWidgetPlatformMenuItem *widgetItem = qobject_cast<const QWidgetPlatformMenuItem *>(item);
     m_menu->popup(targetPos, widgetItem ? widgetItem->action() : nullptr);

@@ -35,6 +35,15 @@ using namespace Qt::StringLiterals;
         m_body += u"// "_s + QStringLiteral(#function) + u'\n'; \
     }
 
+
+static bool isTypeStorable(const QQmlJSTypeResolver *resolver, const QQmlJSScope::ConstPtr &type)
+{
+    return !type.isNull()
+            && !resolver->equals(type, resolver->nullType())
+            && !resolver->equals(type, resolver->emptyListType())
+            && !resolver->equals(type, resolver->voidType());
+}
+
 QString QQmlJSCodeGenerator::castTargetName(const QQmlJSScope::ConstPtr &type) const
 {
     return type->augmentedInternalName();
@@ -75,14 +84,6 @@ QString QQmlJSCodeGenerator::metaObject(const QQmlJSScope::ConstPtr &objectType)
     return QString();
 }
 
-static bool isTypeStorable(const QQmlJSTypeResolver *resolver, const QQmlJSScope::ConstPtr &type)
-{
-    return !type.isNull()
-            && !resolver->equals(type, resolver->nullType())
-            && !resolver->equals(type, resolver->emptyListType())
-            && !resolver->equals(type, resolver->voidType());
-}
-
 QQmlJSAotFunction QQmlJSCodeGenerator::run(
         const Function *function, const InstructionAnnotations *annotations,
         QQmlJS::DiagnosticMessage *error)
@@ -103,7 +104,7 @@ QQmlJSAotFunction QQmlJSCodeGenerator::run(
             auto &currentRegisterNames = registerNames[registerIndex];
             QString &name = currentRegisterNames[m_typeResolver->comparableType(seenType)];
             if (name.isEmpty())
-                name = u"r%1_%2"_s.arg(registerIndex).arg(currentRegisterNames.count());
+                name = u"r%1_%2"_s.arg(registerIndex).arg(currentRegisterNames.size());
             typesForRegisters[seenType] = name;
         }
     };
@@ -123,7 +124,7 @@ QT_WARNING_POP
 
     // ensure we have m_labels for loops
     for (const auto loopLabel : m_context->labelInfo)
-        m_labels.insert(loopLabel, u"label_%1"_s.arg(m_labels.count()));
+        m_labels.insert(loopLabel, u"label_%1"_s.arg(m_labels.size()));
 
     // Initialize the first instruction's state to hold the arguments.
     // After this, the arguments (or whatever becomes of them) are carried
@@ -131,7 +132,7 @@ QT_WARNING_POP
     m_state.State::operator=(initialState(m_function));
 
     const QByteArray byteCode = function->code;
-    decode(byteCode.constData(), static_cast<uint>(byteCode.length()));
+    decode(byteCode.constData(), static_cast<uint>(byteCode.size()));
 
     QQmlJSAotFunction result;
     result.includes.swap(m_includes);
@@ -204,7 +205,7 @@ QT_WARNING_POP
 
     result.code += m_body;
 
-    for (const QQmlJSRegisterContent &argType : qAsConst(function->argumentTypes)) {
+    for (const QQmlJSRegisterContent &argType : std::as_const(function->argumentTypes)) {
         if (argType.isValid()) {
             result.argumentTypes.append(
                         m_typeResolver->originalType(argType.storedType())
@@ -309,17 +310,41 @@ void QQmlJSCodeGenerator::generate_LoadConst(int index)
 {
     INJECT_TRACE_INFO(generate_LoadConst);
 
-    auto encodedConst = m_jsUnitGenerator->constant(index);
-    double value = QV4::StaticValue::fromReturnedValue(encodedConst).doubleValue();
-    m_body += m_state.accumulatorVariableOut;
+    // You cannot actually get it to generate LoadConst for anything but double. We have
+    // a numer of specialized instructions for the other types, after all. However, let's
+    // play it safe.
 
-    // ### handle other types?
-    m_body += u" = "_s + conversion(
-                m_typeResolver->intType(), m_state.accumulatorOut().storedType(),
-                toNumericString(value));
+    const QV4::ReturnedValue encodedConst = m_jsUnitGenerator->constant(index);
+    const QV4::StaticValue value = QV4::StaticValue::fromReturnedValue(encodedConst);
+    const QQmlJSScope::ConstPtr type = m_typeResolver->typeForConst(encodedConst);
+
+    m_body += m_state.accumulatorVariableOut + u" = "_s;
+    if (type == m_typeResolver->realType()) {
+        m_body += conversion(
+                    type, m_state.accumulatorOut().storedType(),
+                    toNumericString(value.doubleValue()));
+    } else if (type == m_typeResolver->intType()) {
+        m_body += conversion(
+                    type, m_state.accumulatorOut().storedType(),
+                    QString::number(value.integerValue()));
+    } else if (type == m_typeResolver->boolType()) {
+        m_body += conversion(
+                    type, m_state.accumulatorOut().storedType(),
+                    value.booleanValue() ? u"true"_s : u"false"_s);
+    } else if (type == m_typeResolver->voidType()) {
+        m_body += conversion(
+                    type, m_state.accumulatorOut().storedType(),
+                    QString());
+    } else if (type == m_typeResolver->nullType()) {
+        m_body += conversion(
+                    type, m_state.accumulatorOut().storedType(),
+                    u"nullptr"_s);
+    } else {
+        reject(u"unsupported constant type"_s);
+    }
 
     m_body += u";\n"_s;
-    generateOutputVariantConversion(m_typeResolver->intType());
+    generateOutputVariantConversion(type);
 }
 
 void QQmlJSCodeGenerator::generate_LoadZero()
@@ -2291,9 +2316,18 @@ void QQmlJSCodeGenerator::generateEqualityOperation(int lhs, const QString &func
 
     const auto primitive = m_typeResolver->jsPrimitiveType();
     if (m_typeResolver->equals(lhsType, rhsType) && !m_typeResolver->equals(lhsType, primitive)) {
-        m_body += conversion(m_typeResolver->boolType(), m_state.accumulatorOut().storedType(),
-                             registerVariable(lhs) + (invert ? u" != "_s : u" == "_s)
-                             + m_state.accumulatorVariableIn);
+        if (isTypeStorable(m_typeResolver, lhsType)) {
+            m_body += conversion(m_typeResolver->boolType(), m_state.accumulatorOut().storedType(),
+                                 registerVariable(lhs) + (invert ? u" != "_s : u" == "_s)
+                                 + m_state.accumulatorVariableIn);
+        } else if (m_typeResolver->equals(lhsType, m_typeResolver->emptyListType())) {
+            // We cannot compare two empty lists, because we don't know whether it's
+            // the same  instance or not. "[] === []" is false, but "var a = []; a === a" is true;
+            reject(u"comparison of two empty lists"_s);
+        } else {
+            // null === null and  undefined === undefined
+            m_body += invert ? u"false"_s : u"true"_s;
+        }
     } else {
         m_body += conversion(
                     m_typeResolver->boolType(), m_state.accumulatorOut().storedType(),
@@ -2462,7 +2496,7 @@ void QQmlJSCodeGenerator::generateJumpCodeWithTypeConversions(int relativeOffset
     if (relativeOffset) {
         auto labelIt = m_labels.find(absoluteOffset);
         if (labelIt == m_labels.end())
-            labelIt = m_labels.insert(absoluteOffset, u"label_%1"_s.arg(m_labels.count()));
+            labelIt = m_labels.insert(absoluteOffset, u"label_%1"_s.arg(m_labels.size()));
         conversionCode += u"    goto "_s + *labelIt + u";\n"_s;
     }
 
