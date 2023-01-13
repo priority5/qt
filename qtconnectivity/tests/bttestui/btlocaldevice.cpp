@@ -198,7 +198,7 @@ void BtLocalDevice::deviceDiscovered(const QBluetoothDeviceInfo &info)
     if (info.serviceClasses() & QBluetoothDeviceInfo::InformationService)
         services += "Information|";
 
-    services.truncate(services.length()-1); //cut last '/'
+    services.truncate(services.size()-1); //cut last '/'
 
     qDebug() << "Found new device: " << info.name() << info.isValid() << info.address().toString()
                                      << info.rssi() << info.majorDeviceClass()
@@ -300,7 +300,7 @@ void BtLocalDevice::serviceDiscovered(const QBluetoothServiceInfo &info)
     {
         //This is here to detect the test server for SPP testing later on
         bool alreadyKnown = false;
-        for (const QBluetoothServiceInfo& found : qAsConst(foundTestServers)) {
+        for (const QBluetoothServiceInfo& found : std::as_const(foundTestServers)) {
             if (found.device().address() == info.device().address()) {
                 alreadyKnown = true;
                 break;
@@ -354,7 +354,7 @@ void BtLocalDevice::dumpServiceDiscovery()
         }
 
         qDebug() << "###### TestServer offered by:";
-        for (const QBluetoothServiceInfo& found : qAsConst(foundTestServers)) {
+        for (const QBluetoothServiceInfo& found : std::as_const(foundTestServers)) {
             qDebug() << found.device().name() << found.device().address().toString();
         }
     }
@@ -493,7 +493,7 @@ void BtLocalDevice::readData()
             qDebug() << ">> peer(" << socket->peerName() << socket->peerAddress()
                      << socket->peerPort() << ") local("
                      << socket->localName() << socket->localAddress() << socket->localPort()
-                     << ")>>" << QString::fromUtf8(line.constData(), line.length());
+                     << ")>>" << QString::fromUtf8(line.constData(), line.size());
         }
     }
 }
@@ -655,7 +655,7 @@ void BtLocalDevice::clientSocketReadyRead()
 
     while (socket->canReadLine()) {
         const QByteArray line = socket->readLine().trimmed();
-        QString lineString = QString::fromUtf8(line.constData(), line.length());
+        QString lineString = QString::fromUtf8(line.constData(), line.size());
         qDebug() <<  ">>(" << server->serverAddress() << server->serverPort()  <<")>>"
                  << lineString;
 
@@ -690,7 +690,7 @@ void BtLocalDevice::dumpServerInformation()
 
         //server->setSecurityFlags(secFlag);
 
-        for (const QBluetoothSocket *client : qAsConst(serverSockets)) {
+        for (const QBluetoothSocket *client : std::as_const(serverSockets)) {
             qDebug() << "##" << client->localAddress().toString()
                      << client->localName() << client->localPort();
             qDebug() << "##" << client->peerAddress().toString()

@@ -133,7 +133,7 @@ void QQuickKeyframeGroupPrivate::append_keyframe(QQmlListProperty<QQuickKeyframe
 qsizetype QQuickKeyframeGroupPrivate::keyframe_count(QQmlListProperty<QQuickKeyframe> *list)
 {
     auto q = static_cast<QQuickKeyframeGroup *>(list->object);
-    return q->d_func()->keyframes.count();
+    return q->d_func()->keyframes.size();
 }
 
 QQuickKeyframe* QQuickKeyframeGroupPrivate::keyframe_at(QQmlListProperty<QQuickKeyframe> *list, qsizetype pos)
@@ -343,7 +343,7 @@ void QQuickKeyframeGroup::setKeyframeSource(const QUrl &source)
     if (d->keyframeSource == source)
         return;
 
-    if (d->keyframes.count() > 0) {
+    if (d->keyframes.size() > 0) {
         // Remove possible previously loaded keyframes
         qDeleteAll(d->keyframes);
         d->keyframes.clear();
@@ -370,7 +370,7 @@ void QQuickKeyframeGroup::setKeyframeData(const QByteArray &data)
     if (d->keyframeData == data)
         return;
 
-    if (d->keyframes.count() > 0) {
+    if (d->keyframes.size() > 0) {
         // Remove possible previously loaded keyframes
         qDeleteAll(d->keyframes);
         d->keyframes.clear();
@@ -400,7 +400,7 @@ QVariant QQuickKeyframeGroup::evaluate(qreal frame) const
 
      QQuickKeyframe *lastFrame = &dummy;
 
-    for (auto keyFrame :  qAsConst(d->sortedKeyframes)) {
+    for (auto keyFrame :  std::as_const(d->sortedKeyframes)) {
         if (qFuzzyCompare(frame, keyFrame->frame()) || frame < keyFrame->frame())
             return keyFrame->evaluate(lastFrame, frame, d->userType);
         lastFrame = keyFrame;

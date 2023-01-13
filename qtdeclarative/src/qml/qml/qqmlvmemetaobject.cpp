@@ -99,7 +99,7 @@ static void list_append(QQmlListProperty<QObject> *prop, QObject *o)
 
 static qsizetype list_count(QQmlListProperty<QObject> *prop)
 {
-    return ResolvedList(prop).list()->count();
+    return ResolvedList(prop).list()->size();
 }
 
 static QObject *list_at(QQmlListProperty<QObject> *prop, qsizetype index)
@@ -896,7 +896,7 @@ int QQmlVMEMetaObject::metaCall(QObject *o, QMetaObject::Call c, int _id, void *
                                     QObject *arg = *reinterpret_cast<QObject **>(a[0]);
                                     if (const auto *wrap = sv->as<QV4::QObjectWrapper>())
                                         needActivate = wrap->object() != arg;
-                                    else
+                                    else if (arg != nullptr || !sv->isNull())
                                         needActivate = true;
                                     if (needActivate)
                                         writeProperty(id, arg);
@@ -1050,7 +1050,7 @@ int QQmlVMEMetaObject::metaCall(QObject *o, QMetaObject::Call c, int _id, void *
                 auto arguments = methodData->hasArguments() ? methodData->arguments() : nullptr;
 
                 if (arguments && arguments->names) {
-                    const quint32 parameterCount = arguments->names->count();
+                    const quint32 parameterCount = arguments->names->size();
                     Q_ASSERT(parameterCount == function->formalParameterCount());
                     if (void *result = a[0])
                         arguments->types[0].destruct(result);

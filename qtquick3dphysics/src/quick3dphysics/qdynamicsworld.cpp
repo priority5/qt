@@ -1032,8 +1032,8 @@ void QDynamicsWorld::updateDebugDraw()
             continue;
 
         const auto &collisionShapes = node->frontendNode->getCollisionShapesList();
-        const int length = collisionShapes.length();
-        if (node->shapes.length() < length)
+        const int length = collisionShapes.size();
+        if (node->shapes.size() < length)
             continue; // CharacterController has shapes, but not PhysX shapes
         for (int idx = 0; idx < length; idx++) {
             const auto collisionShape = collisionShapes[idx];
@@ -1205,7 +1205,7 @@ void QDynamicsWorld::disableDebugDraw()
     for (QAbstractPhysXNode *body : m_physXBodies) {
         // TODO: refactor debug geometry handling as well
         const auto &collisionShapes = body->frontendNode->getCollisionShapesList();
-        const int length = collisionShapes.length();
+        const int length = collisionShapes.size();
         for (int idx = 0; idx < length; idx++) {
             const auto collisionShape = collisionShapes[idx];
             DebugModelHolder &holder = m_collisionShapeDebugModels[collisionShape];
@@ -1392,7 +1392,7 @@ void QDynamicsWorld::updatePhysics()
         return;
 
     cleanupRemovedNodes();
-    for (auto *node : qAsConst(m_newCollisionNodes)) {
+    for (auto *node : std::as_const(m_newCollisionNodes)) {
         auto *body = QPhysXFactory::createBackend(node);
         body->init(this, m_physx);
         m_physXBodies.push_back(body);
@@ -1404,7 +1404,7 @@ void QDynamicsWorld::updatePhysics()
     const auto deltaTime = qMin(float(deltaMS), m_maxTimestep) * 0.001f;
 
     // TODO: Use dirty flag/dirty list to avoid redoing things that didn't change
-    for (auto *physXBody : qAsConst(m_physXBodies)) {
+    for (auto *physXBody : std::as_const(m_physXBodies)) {
         physXBody->markDirtyShapes();
         physXBody->rebuildDirtyShapes(this, m_physx);
 

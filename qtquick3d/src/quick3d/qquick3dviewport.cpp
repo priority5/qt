@@ -171,7 +171,7 @@ QQuick3DViewport::~QQuick3DViewport()
     if (auto qw = window())
         disconnect(qw, nullptr, this, nullptr);
 
-    for (const auto &connection : qAsConst(m_connections))
+    for (const auto &connection : std::as_const(m_connections))
         disconnect(connection);
     auto sceneManager = QQuick3DObjectPrivate::get(m_sceneRoot)->sceneManager;
     if (sceneManager)
@@ -597,6 +597,8 @@ void QQuick3DViewport::itemChange(QQuickItem::ItemChange change, const QQuickIte
             if (m_importScene)
                 QQuick3DObjectPrivate::get(m_importScene)->sceneManager->setWindow(value.window);
         }
+    } else if (change == ItemVisibleHasChanged && isVisible()) {
+        update();
     }
 }
 
@@ -951,14 +953,14 @@ void QQuick3DViewport::updateDynamicTextures()
     // Must be called on the render thread.
 
     const auto &sceneManager = QQuick3DObjectPrivate::get(m_sceneRoot)->sceneManager;
-    for (auto *texture : qAsConst(sceneManager->qsgDynamicTextures))
+    for (auto *texture : std::as_const(sceneManager->qsgDynamicTextures))
         texture->updateTexture();
 
     QQuick3DNode *scene = m_importScene;
     while (scene) {
         const auto &importSm = QQuick3DObjectPrivate::get(scene)->sceneManager;
         if (importSm != sceneManager) {
-            for (auto *texture : qAsConst(importSm->qsgDynamicTextures))
+            for (auto *texture : std::as_const(importSm->qsgDynamicTextures))
                 texture->updateTexture();
         }
 
@@ -1029,7 +1031,7 @@ bool QQuick3DViewport::internalPick(QPointerEvent *event, const QVector3D &origi
                 pickResults = renderer->syncPickAll(rayResult.getValue());
         }
         if (!isHover)
-            qCDebug(lcPick) << pickResults.count() << "pick results for" << event->point(pointIndex);
+            qCDebug(lcPick) << pickResults.size() << "pick results for" << event->point(pointIndex);
         if (pickResults.isEmpty()) {
             eventPoint.setAccepted(false); // let it fall through the viewport to Items underneath
             continue; // next eventPoint
@@ -1073,8 +1075,8 @@ bool QQuick3DViewport::internalPick(QPointerEvent *event, const QVector3D &origi
                 int materialSubset = pickResult.m_subset;
                 const auto backendModel = static_cast<const QSSGRenderModel *>(backendObject);
                 // Get material
-                if (backendModel->materials.count() < (pickResult.m_subset + 1))
-                    materialSubset = backendModel->materials.count() - 1;
+                if (backendModel->materials.size() < (pickResult.m_subset + 1))
+                    materialSubset = backendModel->materials.size() - 1;
                 if (materialSubset < 0)
                     continue;
                 const auto backendMaterial = backendModel->materials.at(materialSubset);
@@ -1168,7 +1170,7 @@ bool QQuick3DViewport::internalPick(QPointerEvent *event, const QVector3D &origi
     for (auto subscene : visitedSubscenes) {
         QQuickItem *subsceneRoot = subscene.first;
         auto &subsceneInfo = subscene.second;
-        Q_ASSERT(subsceneInfo.eventPointScenePositions.count() == event->pointCount());
+        Q_ASSERT(subsceneInfo.eventPointScenePositions.size() == event->pointCount());
         auto da = QQuickItemPrivate::get(subsceneRoot)->deliveryAgent();
         if (!isHover)
             qCDebug(lcPick) << "delivering to" << subsceneRoot << "via" << da << event;

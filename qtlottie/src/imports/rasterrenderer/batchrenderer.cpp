@@ -43,7 +43,7 @@ BatchRenderer::~BatchRenderer()
 {
     QMutexLocker mlocker(&m_mutex);
 
-    for (Entry *entry : qAsConst(m_animData)) {
+    for (Entry *entry : std::as_const(m_animData)) {
         qDeleteAll(entry->frameCache);
         delete entry->bmTreeBlueprint;
         delete entry;
@@ -152,7 +152,7 @@ BMBase *BatchRenderer::getFrame(LottieAnimation *animator, int frameNumber)
 
 void BatchRenderer::prerender(Entry *animEntry)
 {
-    while (animEntry->frameCache.count() < m_cacheSize) {
+    while (animEntry->frameCache.size() < m_cacheSize) {
         BMBase *&bmTree = animEntry->frameCache[animEntry->currentFrame];
         if (bmTree == nullptr) {
             bmTree = new BMBase(*animEntry->bmTreeBlueprint);
@@ -203,7 +203,7 @@ void BatchRenderer::run()
     while (!isInterruptionRequested()) {
         QMutexLocker mlocker(&m_mutex);
 
-        for (Entry *e : qAsConst(m_animData))
+        for (Entry *e : std::as_const(m_animData))
             prerender(e);
 
         m_waitCondition.wait(&m_mutex);

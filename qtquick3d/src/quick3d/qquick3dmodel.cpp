@@ -104,7 +104,7 @@ QQuick3DModel::~QQuick3DModel()
 {
     disconnect(m_skeletonConnection);
     disconnect(m_geometryConnection);
-    for (const auto &connection : qAsConst(m_connections))
+    for (const auto &connection : std::as_const(m_connections))
         disconnect(connection);
 
     auto matList = materials();
@@ -798,7 +798,7 @@ QSSGRenderGraphObject *QQuick3DModel::updateSpatialNode(QSSGRenderGraphObject *n
             const int numMorphTarget = m_morphTargets.size();
             if (modelNode->morphTargets.isEmpty()) {
                 // Easy mode, just add each morphTarget
-                for (const auto morphTarget : qAsConst(m_morphTargets)) {
+                for (const auto morphTarget : std::as_const(m_morphTargets)) {
                     QSSGRenderGraphObject *graphObject = QQuick3DObjectPrivate::get(morphTarget)->spatialNode;
                     if (graphObject)
                         modelNode->morphTargets.append(graphObject);
@@ -867,10 +867,14 @@ QSSGRenderGraphObject *QQuick3DModel::updateSpatialNode(QSSGRenderGraphObject *n
         modelNode->lightmapBaseResolution = uint(m_lightmapBaseResolution);
         if (m_bakedLightmap && m_bakedLightmap->isEnabled()) {
             modelNode->lightmapKey = m_bakedLightmap->key();
-            modelNode->lightmapLoadPrefix = m_bakedLightmap->loadPrefix();
+            const QString srcPrefix = m_bakedLightmap->loadPrefix();
+            const QString srcPath = srcPrefix.isEmpty() ? QStringLiteral(".") : srcPrefix;
+            const QQmlContext *context = qmlContext(m_bakedLightmap);
+            const QUrl resolvedUrl = context ? context->resolvedUrl(srcPath) : srcPath;
+            modelNode->lightmapLoadPath = QQmlFile::urlToLocalFileOrQrc(resolvedUrl);
         } else {
             modelNode->lightmapKey.clear();
-            modelNode->lightmapLoadPrefix.clear();
+            modelNode->lightmapLoadPath.clear();
         }
     }
 
@@ -925,7 +929,7 @@ void QQuick3DModel::updateSceneManager(QQuick3DSceneManager *sceneManager)
 void QQuick3DModel::onMaterialDestroyed(QObject *object)
 {
     bool found = false;
-    for (int i = 0; i < m_materials.count(); ++i) {
+    for (int i = 0; i < m_materials.size(); ++i) {
         if (m_materials[i].material == object) {
             m_materials.removeAt(i--);
             found = true;
@@ -977,7 +981,7 @@ QQuick3DMaterial *QQuick3DModel::qmlMaterialAt(QQmlListProperty<QQuick3DMaterial
 qsizetype QQuick3DModel::qmlMaterialsCount(QQmlListProperty<QQuick3DMaterial> *list)
 {
     QQuick3DModel *self = static_cast<QQuick3DModel *>(list->object);
-    return self->m_materials.count();
+    return self->m_materials.size();
 }
 
 void QQuick3DModel::qmlClearMaterials(QQmlListProperty<QQuick3DMaterial> *list)
@@ -1051,13 +1055,13 @@ QQuick3DMorphTarget *QQuick3DModel::qmlMorphTargetAt(QQmlListProperty<QQuick3DMo
 qsizetype QQuick3DModel::qmlMorphTargetsCount(QQmlListProperty<QQuick3DMorphTarget> *list)
 {
     QQuick3DModel *self = static_cast<QQuick3DModel *>(list->object);
-    return self->m_morphTargets.count();
+    return self->m_morphTargets.size();
 }
 
 void QQuick3DModel::qmlClearMorphTargets(QQmlListProperty<QQuick3DMorphTarget> *list)
 {
     QQuick3DModel *self = static_cast<QQuick3DModel *>(list->object);
-    for (const auto &morph : qAsConst(self->m_morphTargets)) {
+    for (const auto &morph : std::as_const(self->m_morphTargets)) {
         if (morph->parentItem() == nullptr)
             QQuick3DObjectPrivate::get(morph)->derefSceneManager();
         morph->disconnect(self, SLOT(onMorphTargetDestroyed(QObject*)));

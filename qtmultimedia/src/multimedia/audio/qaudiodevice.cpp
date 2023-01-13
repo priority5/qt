@@ -53,7 +53,7 @@ QT_DEFINE_QESDP_SPECIALIZATION_DTOR(QAudioDevicePrivate);
     sound, i.e., play an audio stream in a supported format. For each device we
     find, we simply print the deviceName().
 
-    \sa QAudioSink,QAudioSource,QAudioFormat
+    \sa QAudioSink, QAudioSource, QAudioFormat
 */
 
 /*!
@@ -131,7 +131,7 @@ bool QAudioDevice::operator==(const QAudioDevice &other) const
         return true;
     if (!d || !other.d)
         return false;
-    if (d->mode == other.d->mode && d->id == other.d->id)
+    if (d->mode == other.d->mode && d->id == other.d->id && d->isDefault == other.d->isDefault)
         return true;
     return false;
 }

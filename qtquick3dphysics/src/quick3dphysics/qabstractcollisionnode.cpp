@@ -62,6 +62,7 @@ QAbstractCollisionNode::QAbstractCollisionNode()
 
 QAbstractCollisionNode::~QAbstractCollisionNode()
 {
+    disconnect(m_rebuildConnection);
     if (auto world = QDynamicsWorld::getWorld(); world != nullptr)
         world->deregisterNode(this);
 }
@@ -188,7 +189,7 @@ void QAbstractCollisionNode::qmlAppendShape(QQmlListProperty<QAbstractCollisionS
             &QAbstractCollisionNode::onShapeDestroyed);
 
     // Connect to rebuild signal
-    connect(shape, &QAbstractCollisionShape::needsRebuild, self,
+    self->m_rebuildConnection = connect(shape, &QAbstractCollisionShape::needsRebuild, self,
             &QAbstractCollisionNode::onShapeNeedsRebuild);
 }
 
@@ -202,13 +203,13 @@ QAbstractCollisionNode::qmlShapeAt(QQmlListProperty<QAbstractCollisionShape> *li
 qsizetype QAbstractCollisionNode::qmlShapeCount(QQmlListProperty<QAbstractCollisionShape> *list)
 {
     QAbstractCollisionNode *self = static_cast<QAbstractCollisionNode *>(list->object);
-    return self->m_collisionShapes.count();
+    return self->m_collisionShapes.size();
 }
 
 void QAbstractCollisionNode::qmlClearShapes(QQmlListProperty<QAbstractCollisionShape> *list)
 {
     QAbstractCollisionNode *self = static_cast<QAbstractCollisionNode *>(list->object);
-    for (const auto &shape : qAsConst(self->m_collisionShapes)) {
+    for (const auto &shape : std::as_const(self->m_collisionShapes)) {
         if (shape->parentItem() == nullptr)
             QQuick3DObjectPrivate::get(shape)->derefSceneManager();
         shape->disconnect(self, SLOT(onMaterialDestroyed(QObject *)));

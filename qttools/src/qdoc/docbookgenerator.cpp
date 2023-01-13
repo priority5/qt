@@ -72,6 +72,14 @@ void DocBookGenerator::startSectionBegin(const QString &id)
     m_writer->writeStartElement(dbNamespace, "title");
 }
 
+void DocBookGenerator::startSectionBegin(const Node *node)
+{
+    m_writer->writeStartElement(dbNamespace, "section");
+    writeXmlId(node);
+    newLine();
+    m_writer->writeStartElement(dbNamespace, "title");
+}
+
 void DocBookGenerator::startSectionEnd()
 {
     m_writer->writeEndElement(); // title
@@ -83,6 +91,19 @@ void DocBookGenerator::startSection(const QString &id, const QString &title)
     startSectionBegin(id);
     m_writer->writeCharacters(title);
     startSectionEnd();
+}
+
+void DocBookGenerator::startSection(const Node *node, const QString &title)
+{
+    startSectionBegin(node);
+    m_writer->writeCharacters(title);
+    startSectionEnd();
+}
+
+void DocBookGenerator::startSection(const QString &title)
+{
+    // No xml:id given: down the calls, "" is interpreted as "no ID".
+    startSection("", title);
 }
 
 void DocBookGenerator::endSection()
@@ -1251,7 +1272,7 @@ void DocBookGenerator::generateCompactList(ListType listType, const Node *relati
         return;
 
     const int NumParagraphs = 37; // '0' to '9', 'A' to 'Z', '_'
-    qsizetype commonPrefixLen = commonPrefix.length();
+    qsizetype commonPrefixLen = commonPrefix.size();
 
     /*
       Divide the data into 37 paragraphs: 0, ..., 9, A, ..., Z,
@@ -1296,7 +1317,7 @@ void DocBookGenerator::generateCompactList(ListType listType, const Node *relati
     int paragraphOffset[NumParagraphs + 1]; // 37 + 1
     paragraphOffset[0] = 0;
     for (int i = 0; i < NumParagraphs; i++) // i = 0..36
-        paragraphOffset[i + 1] = paragraphOffset[i] + paragraph[i].count();
+        paragraphOffset[i + 1] = paragraphOffset[i] + paragraph[i].size();
 
     // No table of contents in DocBook.
 
@@ -1306,8 +1327,8 @@ void DocBookGenerator::generateCompactList(ListType listType, const Node *relati
     QString previousName;
     bool multipleOccurrences = false;
 
-    for (int i = 0; i < nmm.count(); i++) {
-        while ((curParNr < NumParagraphs) && (curParOffset == paragraph[curParNr].count())) {
+    for (int i = 0; i < nmm.size(); i++) {
+        while ((curParNr < NumParagraphs) && (curParOffset == paragraph[curParNr].size())) {
             ++curParNr;
             curParOffset = 0;
         }
@@ -1400,7 +1421,7 @@ void DocBookGenerator::generateCompactList(ListType listType, const Node *relati
         newLine();
         curParOffset++;
     }
-    if (nmm.count() > 0) {
+    if (nmm.size() > 0) {
         m_writer->writeEndElement(); // variablelist
     }
 }
@@ -1901,7 +1922,7 @@ void DocBookGenerator::generateSortedNames(const ClassNode *cn, const QList<Rela
     int index = 0;
     for (const QString &className : classNames) {
         generateFullName(classMap.value(className), cn);
-        m_writer->writeCharacters(Utilities::comma(index++, classNames.count()));
+        m_writer->writeCharacters(Utilities::comma(index++, classNames.size()));
     }
 }
 
@@ -1921,7 +1942,7 @@ void DocBookGenerator::generateSortedQmlNames(const Node *base, const NodeList &
 
     for (const QString &name : names) {
         generateFullName(classMap.value(name), base);
-        m_writer->writeCharacters(Utilities::comma(index++, names.count()));
+        m_writer->writeCharacters(Utilities::comma(index++, names.size()));
     }
 }
 
@@ -1990,7 +2011,7 @@ void DocBookGenerator::generateRequisites(const Aggregate *aggregate)
                     else if ((*r).m_access == Access::Private)
                         m_writer->writeCharacters(" (private)");
                     m_writer->writeCharacters(
-                            Utilities::comma(index++, classe->baseClasses().count()));
+                            Utilities::comma(index++, classe->baseClasses().size()));
                 }
                 ++r;
             }
@@ -2382,18 +2403,14 @@ void DocBookGenerator::generateLinkToExample(const ExampleNode *en, const QStrin
 
     // Write the link to the example. Typically, this link comes after sections, hence
     // wrap it in a section too.
-    m_writer->writeStartElement(dbNamespace, "section");
-    newLine();
-    m_writer->writeStartElement(dbNamespace, "title");
-    m_writer->writeCharacters("Example project");
-    m_writer->writeEndElement(); // title
-    newLine();
+    startSection("Example project");
+
     m_writer->writeStartElement(dbNamespace, "para");
     generateSimpleLink(exampleUrl.replace(placeholder, path.join(separator)), link);
     m_writer->writeEndElement(); // para
     newLine();
-    m_writer->writeEndElement(); // section
-    newLine();
+
+    endSection();
 }
 
 // TODO: [multi-purpose-function-with-flag][generate-file-list]
@@ -2407,7 +2424,6 @@ void DocBookGenerator::generateLinkToExample(const ExampleNode *en, const QStrin
 */
 void DocBookGenerator::generateFileList(const ExampleNode *en, bool images)
 {
-
     // TODO: [possibly-stale-duplicate-code][generator-insufficient-structural-abstraction]
     // Review and compare this code with
     // Generator::generateFileList.
@@ -2437,9 +2453,11 @@ void DocBookGenerator::generateFileList(const ExampleNode *en, bool images)
     m_writer->writeEndElement(); // para
     newLine();
 
+    startSection("List of Files");
+
     m_writer->writeStartElement(dbNamespace, "itemizedlist");
 
-    for (const auto &path : qAsConst(paths)) {
+    for (const auto &path : std::as_const(paths)) {
         auto maybe_resolved_file{file_resolver.resolve(path)};
         if (!maybe_resolved_file) {
             // TODO: [uncentralized-admonition][failed-resolve-file]
@@ -2471,6 +2489,8 @@ void DocBookGenerator::generateFileList(const ExampleNode *en, bool images)
 
     m_writer->writeEndElement(); // itemizedlist
     newLine();
+
+    endSection();
 }
 
 /*!
@@ -2544,13 +2564,7 @@ void DocBookGenerator::generateAlsoList(const Node *node)
     supplementAlsoList(node, alsoList);
 
     if (!alsoList.isEmpty()) {
-        m_writer->writeStartElement(dbNamespace, "section");
-        newLine();
-
-        m_writer->writeStartElement(dbNamespace, "title");
-        m_writer->writeCharacters("See Also");
-        m_writer->writeEndElement(); // title
-        newLine();
+        startSection("See Also");
 
         m_writer->writeStartElement(dbNamespace, "para");
         m_writer->writeStartElement(dbNamespace, "emphasis");
@@ -2576,8 +2590,7 @@ void DocBookGenerator::generateAlsoList(const Node *node)
         m_writer->writeEndElement(); // para
         newLine();
 
-        m_writer->writeEndElement(); // section
-        newLine();
+        endSection();
     }
 }
 
@@ -3086,7 +3099,7 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
                             m_writer->writeCharacters(" (private)");
                         }
                         m_writer->writeCharacters(
-                                Utilities::comma(index++, classe->baseClasses().count()));
+                                Utilities::comma(index++, classe->baseClasses().size()));
                     }
                     ++r;
                 }
@@ -3656,7 +3669,7 @@ void DocBookGenerator::generateAddendum(const Node *node, Addendum type, CodeMar
         if (nodes.isEmpty())
             return;
         std::sort(nodes.begin(), nodes.end(), Node::nodeNameLessThan);
-        for (const auto node : qAsConst(nodes)) {
+        for (const auto node : std::as_const(nodes)) {
             QString msg;
             const auto pn = static_cast<const PropertyNode *>(node);
             switch (pn->role(fn)) {
@@ -3710,7 +3723,6 @@ void DocBookGenerator::generateAddendum(const Node *node, Addendum type, CodeMar
 void DocBookGenerator::generateDetailedMember(const Node *node, const PageNode *relative)
 {
     // From HtmlGenerator::generateDetailedMember.
-    m_writer->writeStartElement(dbNamespace, "section");
     if (node->isSharedCommentNode()) {
         const auto scn = reinterpret_cast<const SharedCommentNode *>(node);
         const QList<Node *> &collective = scn->collective();
@@ -3719,12 +3731,9 @@ void DocBookGenerator::generateDetailedMember(const Node *node, const PageNode *
         for (const Node *n : collective) {
             if (n->isFunction()) {
                 if (firstFunction) {
-                    writeXmlId(collective.at(0));
-                    newLine();
-                    m_writer->writeStartElement(dbNamespace, "title");
+                    startSectionBegin(collective.at(0));
                     generateSynopsis(n, relative, Section::Details);
-                    m_writer->writeEndElement(); // title
-                    newLine();
+                    startSectionEnd();
 
                     firstFunction = false;
                 } else {
@@ -3738,24 +3747,20 @@ void DocBookGenerator::generateDetailedMember(const Node *node, const PageNode *
             }
         }
     } else {
-        writeXmlId(node);
-        newLine();
-
         const EnumNode *etn;
         if (node->isEnumType() && (etn = static_cast<const EnumNode *>(node))->flagsType()) {
-            m_writer->writeStartElement(dbNamespace, "title");
+            startSectionBegin(node);
             generateSynopsis(etn, relative, Section::Details);
-            m_writer->writeEndElement(); // title
-            newLine();
+            startSectionEnd();
+
             m_writer->writeStartElement(dbNamespace, "bridgehead");
             generateSynopsis(etn->flagsType(), relative, Section::Details);
             m_writer->writeEndElement(); // bridgehead
             newLine();
         } else {
-            m_writer->writeStartElement(dbNamespace, "title");
+            startSectionBegin(node);
             generateSynopsis(node, relative, Section::Details);
-            m_writer->writeEndElement(); // title
-            newLine();
+            startSectionEnd();
         }
     }
 
@@ -4110,7 +4115,7 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
             heading = scn->name() + " group";
         else
             heading = node->name();
-        startSection(refForNode(scn), heading);
+        startSection(scn, heading);
         // This last call creates a title for this section. In other words,
         // titles are forbidden for the rest of the section.
 
@@ -4131,7 +4136,7 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
         }
     } else if (node->isQmlProperty() || node->isJsProperty()) {
         auto qpn = static_cast<QmlPropertyNode *>(node);
-        startSection(refForNode(qpn), getQmlPropertyTitle(qpn));
+        startSection(qpn, getQmlPropertyTitle(qpn));
         generateDocBookSynopsis(qpn);
     } else if (node->isSharedCommentNode()) {
         const auto scn = reinterpret_cast<const SharedCommentNode *>(node);
@@ -4147,17 +4152,13 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
                 continue;
             }
 
-            // Complete the section tag.
-            if (i == 0) {
-                m_writer->writeStartElement(dbNamespace, "section");
-                writeXmlId(m);
-                newLine();
-            }
-
             // Write the tag containing the title.
-            m_writer->writeStartElement(dbNamespace, (i == 0) ? "title" : "bridgehead");
-            if (i > 0)
+            if (i == 0) {
+                startSectionBegin(m);
+            } else {
+                m_writer->writeStartElement(dbNamespace, "bridgehead");
                 m_writer->writeAttribute("renderas", "sect2");
+            }
 
             // Write the title.
             if (node->isFunction(Node::QML) || node->isFunction(Node::JS))
@@ -4167,6 +4168,8 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
                         getQmlPropertyTitle(static_cast<QmlPropertyNode *>(node)));
 
             // Complete the title and the synopsis.
+            if (i == 0)
+                startSectionEnd();
             generateDocBookSynopsis(m);
             ++i;
         }
@@ -4174,7 +4177,7 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
         if (i == 0)
             generateEndSection = false;
     } else { // assume the node is a method/signal handler
-        startSectionBegin(refForNode(node));
+        startSectionBegin(node);
         generateQmlMethodTitle(node);
         startSectionEnd();
     }
@@ -4294,7 +4297,7 @@ void DocBookGenerator::generateProxyPage(Aggregate *aggregate)
     Sections sections(aggregate);
     SectionVector *detailsSections = &sections.stdDetailsSections();
 
-    for (const auto &section : qAsConst(*detailsSections)) {
+    for (const auto &section : std::as_const(*detailsSections)) {
         if (section.isEmpty())
             continue;
 

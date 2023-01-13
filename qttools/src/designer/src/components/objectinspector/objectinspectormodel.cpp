@@ -47,8 +47,10 @@ static bool sameIcon(const QIcon &i1, const QIcon &i2)
     return i1.cacheKey() == i2.cacheKey();
 }
 
-static inline bool isNameColumnEditable(const QObject *)
+static inline bool isNameColumnEditable(const QObject *o)
 {
+    if (auto *action = qobject_cast<const QAction *>(o))
+        return !action->isSeparator();
     return true;
 }
 
@@ -276,7 +278,7 @@ namespace qdesigner_internal {
             }
             // Add button groups
             if (!buttonGroups.isEmpty()) {
-                for (QButtonGroup *group : qAsConst(buttonGroups))
+                for (QButtonGroup *group : std::as_const(buttonGroups))
                     createModelRecursion(fwi, object, group, model, ctx);
             }
         } // has children

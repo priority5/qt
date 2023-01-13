@@ -27,7 +27,7 @@ QQuick3DParticleAffector::QQuick3DParticleAffector(QQuick3DNode *parent)
 
 QQuick3DParticleAffector::~QQuick3DParticleAffector()
 {
-    for (const auto &connection : qAsConst(m_connections))
+    for (const auto &connection : std::as_const(m_connections))
         QObject::disconnect(connection);
     if (m_system)
         m_system->unRegisterParticleAffector(this);
@@ -126,7 +126,7 @@ void QQuick3DParticleAffector::appendParticle(QQuick3DParticle *n) {
 
 qsizetype QQuick3DParticleAffector::particleCount() const
 {
-    return m_particles.count();
+    return m_particles.size();
 }
 
 QQuick3DParticle *QQuick3DParticleAffector::particle(qsizetype index) const

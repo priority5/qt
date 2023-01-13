@@ -175,7 +175,7 @@ void OpcUaMethodNode::callMethod()
     }
 
     QList<QOpcUa::TypedVariant> arguments;
-    for (const auto item : qAsConst(m_inputArguments))
+    for (const auto item : std::as_const(m_inputArguments))
         arguments.push_back(QOpcUa::TypedVariant(item->value(), item->type()));
     m_objectNode->node()->callMethod(m_node->nodeId(), arguments);
 }
@@ -248,7 +248,7 @@ OpcUaMethodArgument* OpcUaMethodNode::argument(QQmlListProperty<OpcUaMethodArgum
 }
 
 qsizetype OpcUaMethodNode::argumentCount(QQmlListProperty<OpcUaMethodArgument>* list) {
-    return reinterpret_cast< QList<OpcUaMethodArgument*>* >(list->data)->count();
+    return reinterpret_cast< QList<OpcUaMethodArgument*>* >(list->data)->size();
 }
 
 

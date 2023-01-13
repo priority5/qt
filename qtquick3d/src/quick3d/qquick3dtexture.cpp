@@ -105,8 +105,9 @@ QQuick3DTexture::QQuick3DTexture(QQuick3DObjectPrivate &dd, QQuick3DObject *pare
 
 QQuick3DTexture::~QQuick3DTexture()
 {
-    if (m_layer && m_sceneManagerForLayer) {
-        m_sceneManagerForLayer->qsgDynamicTextures.removeAll(m_layer);
+    if (m_layer) {
+        if (m_sceneManagerForLayer)
+            m_sceneManagerForLayer->qsgDynamicTextures.removeAll(m_layer);
         m_layer->deleteLater(); // uhh...
     }
 
@@ -115,7 +116,7 @@ QQuick3DTexture::~QQuick3DTexture()
         sourcePrivate->removeItemChangeListener(this, QQuickItemPrivate::Geometry);
     }
 
-    for (const auto &connection : qAsConst(m_connections))
+    for (const auto &connection : std::as_const(m_connections))
         disconnect(connection);
 }
 

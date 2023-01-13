@@ -237,7 +237,7 @@ QString QWaylandInputDevice::Pointer::cursorThemeName() const
 
 int QWaylandInputDevice::Pointer::cursorSize() const
 {
-    constexpr int defaultCursorSize = 32;
+    constexpr int defaultCursorSize = 24;
     static const int xCursorSize = qEnvironmentVariableIntValue("XCURSOR_SIZE");
     return xCursorSize > 0 ? xCursorSize : defaultCursorSize;
 }
@@ -1464,7 +1464,7 @@ void QWaylandInputDevice::handleTouchPoint(int id, QEventPoint::State state, con
 
 bool QWaylandInputDevice::Touch::allTouchPointsReleased()
 {
-    for (const auto &tp : qAsConst(mPendingTouchPoints)) {
+    for (const auto &tp : std::as_const(mPendingTouchPoints)) {
         if (tp.state != QEventPoint::Released)
             return false;
     }

@@ -61,6 +61,7 @@ Q_DECLARE_LOGGING_CATEGORY(lcPtr)
 Q_DECLARE_LOGGING_CATEGORY(lcTransient)
 Q_LOGGING_CATEGORY(lcHandlerParent, "qt.quick.handler.parent")
 Q_LOGGING_CATEGORY(lcVP, "qt.quick.viewport")
+Q_LOGGING_CATEGORY(lcChangeListeners, "qt.quick.item.changelisteners")
 
 // after 100ms, a mouse/non-mouse cursor conflict is resolved in favor of the mouse handler
 static const quint64 kCursorOverrideTimeout = 100;
@@ -2619,6 +2620,12 @@ QQuickItem* QQuickItemPrivate::nextPrevItemInTabFocusChain(QQuickItem *item, boo
     \e {QObject parent}. An item's visual parent may not necessarily be the
     same as its object parent. See \l {Concepts - Visual Parent in Qt Quick}
     for more details.
+
+    \note The notification signal for this property gets emitted during destruction
+    of the visual parent. C++ signal handlers cannot assume that items in the
+    visual parent hierarchy are still fully constructed. Use \l qobject_cast to
+    verify that items in the parent hierarchy can be used safely as the expected
+    type.
 */
 QQuickItem *QQuickItem::parentItem() const
 {
@@ -3367,7 +3374,7 @@ void QQuickItemPrivate::resources_clear(QQmlListProperty<QObject> *prop)
     QQuickItem *quickItem = static_cast<QQuickItem *>(prop->object);
     QQuickItemPrivate *quickItemPrivate = QQuickItemPrivate::get(quickItem);
     if (quickItemPrivate->extra.isAllocated()) {//If extra is not allocated resources is empty.
-        for (QObject *object : qAsConst(quickItemPrivate->extra->resourcesList)) {
+        for (QObject *object : std::as_const(quickItemPrivate->extra->resourcesList)) {
             qmlobject_disconnect(object, QObject, SIGNAL(destroyed(QObject*)),
                                  quickItem, QQuickItem, SLOT(_q_resourceObjectDeleted(QObject*)));
         }
@@ -3895,9 +3902,23 @@ void QQuickItem::updatePolish()
 {
 }
 
+#define PRINT_LISTENERS() \
+do { \
+    qDebug().nospace() << q_func() << " (" << this \
+        << ") now has the following listeners:"; \
+    for (const auto &listener : std::as_const(changeListeners)) { \
+        const auto objectPrivate = dynamic_cast<QObjectPrivate*>(listener.listener); \
+        qDebug().nospace() << "- " << listener << " (QObject: " << (objectPrivate ? objectPrivate->q_func() : nullptr) << ")"; \
+    } \
+} \
+while (false)
+
 void QQuickItemPrivate::addItemChangeListener(QQuickItemChangeListener *listener, ChangeTypes types)
 {
     changeListeners.append(ChangeListener(listener, types));
+
+    if (lcChangeListeners().isDebugEnabled())
+        PRINT_LISTENERS();
 }
 
 void QQuickItemPrivate::updateOrAddItemChangeListener(QQuickItemChangeListener *listener, ChangeTypes types)
@@ -3908,12 +3929,18 @@ void QQuickItemPrivate::updateOrAddItemChangeListener(QQuickItemChangeListener *
         changeListeners[index].types = changeListener.types;
     else
         changeListeners.append(changeListener);
+
+    if (lcChangeListeners().isDebugEnabled())
+        PRINT_LISTENERS();
 }
 
 void QQuickItemPrivate::removeItemChangeListener(QQuickItemChangeListener *listener, ChangeTypes types)
 {
     ChangeListener change(listener, types);
     changeListeners.removeOne(change);
+
+    if (lcChangeListeners().isDebugEnabled())
+        PRINT_LISTENERS();
 }
 
 void QQuickItemPrivate::updateOrAddGeometryChangeListener(QQuickItemChangeListener *listener,
@@ -3925,6 +3952,9 @@ void QQuickItemPrivate::updateOrAddGeometryChangeListener(QQuickItemChangeListen
         changeListeners[index].gTypes = change.gTypes;  //we may have different GeometryChangeTypes
     else
         changeListeners.append(change);
+
+    if (lcChangeListeners().isDebugEnabled())
+        PRINT_LISTENERS();
 }
 
 void QQuickItemPrivate::updateOrRemoveGeometryChangeListener(QQuickItemChangeListener *listener,
@@ -3938,6 +3968,9 @@ void QQuickItemPrivate::updateOrRemoveGeometryChangeListener(QQuickItemChangeLis
         if (index > -1)
             changeListeners[index].gTypes = change.gTypes;  //we may have different GeometryChangeTypes
     }
+
+    if (lcChangeListeners().isDebugEnabled())
+        PRINT_LISTENERS();
 }
 
 /*!
@@ -5197,6 +5230,13 @@ void QQuickItem::componentComplete()
         d->addToDirtyList();
         QQuickWindowPrivate::get(d->window)->dirtyItem(this);
     }
+
+#if QT_CONFIG(accessibility)
+    if (d->isAccessible && d->effectiveVisible) {
+        QAccessibleEvent ev(this, QAccessible::ObjectShow);
+        QAccessible::updateAccessibility(&ev);
+    }
+#endif
 }
 
 QQuickStateGroup *QQuickItemPrivate::_states()
@@ -6252,6 +6292,12 @@ void QQuickItem::setOpacity(qreal newOpacity)
     \note This property's value is only affected by changes to this property or
     the parent's \c visible property. It does not change, for example, if this
     item moves off-screen, or if the \l opacity changes to 0.
+
+    \note The notification signal for this property gets emitted during destruction
+    of the visual parent. C++ signal handlers cannot assume that items in the
+    visual parent hierarchy are still fully constructed. Use \l qobject_cast to
+    verify that items in the parent hierarchy can be used safely as the expected
+    type.
 
     \sa opacity, enabled
 */
@@ -7849,7 +7895,7 @@ void QQuickItemPrivate::setHasCursorInChild(bool hc)
     if (!hc && subtreeCursorEnabled) {
         if (hasCursor)
             return; // nope! sorry, I have a cursor myself
-        for (QQuickItem *otherChild : qAsConst(childItems)) {
+        for (QQuickItem *otherChild : std::as_const(childItems)) {
             QQuickItemPrivate *otherChildPrivate = QQuickItemPrivate::get(otherChild);
             if (otherChildPrivate->subtreeCursorEnabled || otherChildPrivate->hasCursor)
                 return; // nope! sorry, something else wants it kept on.
@@ -7876,7 +7922,10 @@ void QQuickItemPrivate::setHasHoverInChild(bool hasHover)
     if (!hasHover && subtreeHoverEnabled) {
         if (hoverEnabled)
             return; // nope! sorry, I need hover myself
-        for (QQuickItem *otherChild : qAsConst(childItems)) {
+        if (hasEnabledHoverHandlers())
+            return; // nope! sorry, this item has enabled HoverHandlers
+
+        for (QQuickItem *otherChild : std::as_const(childItems)) {
             QQuickItemPrivate *otherChildPrivate = QQuickItemPrivate::get(otherChild);
             if (otherChildPrivate->subtreeHoverEnabled || otherChildPrivate->hoverEnabled)
                 return; // nope! sorry, something else wants it kept on.
@@ -8743,18 +8792,18 @@ bool QQuickItem::event(QEvent *ev)
 #endif // gestures
     case QEvent::LanguageChange:
     case QEvent::LocaleChange:
-        for (QQuickItem *item : qAsConst(d->childItems))
+        for (QQuickItem *item : std::as_const(d->childItems))
             QCoreApplication::sendEvent(item, ev);
         break;
     case QEvent::WindowActivate:
     case QEvent::WindowDeactivate:
         if (d->providesPalette())
             d->setCurrentColorGroup();
-        for (QQuickItem *item : qAsConst(d->childItems))
+        for (QQuickItem *item : std::as_const(d->childItems))
             QCoreApplication::sendEvent(item, ev);
         break;
     case QEvent::ApplicationPaletteChange:
-        for (QQuickItem *item : qAsConst(d->childItems))
+        for (QQuickItem *item : std::as_const(d->childItems))
             QCoreApplication::sendEvent(item, ev);
         break;
     default:
@@ -9634,7 +9683,7 @@ void QV4::Heap::QQuickItemWrapper::markObjects(QV4::Heap::Base *that, QV4::MarkS
 {
     QObjectWrapper *This = static_cast<QObjectWrapper *>(that);
     if (QQuickItem *item = static_cast<QQuickItem*>(This->object())) {
-        for (QQuickItem *child : qAsConst(QQuickItemPrivate::get(item)->childItems))
+        for (QQuickItem *child : std::as_const(QQuickItemPrivate::get(item)->childItems))
             QV4::QObjectWrapper::markWrapper(child, markStack);
     }
     QObjectWrapper::markObjects(that, markStack);
@@ -9643,6 +9692,13 @@ void QV4::Heap::QQuickItemWrapper::markObjects(QV4::Heap::Base *that, QV4::MarkS
 quint64 QQuickItemPrivate::_q_createJSWrapper(QV4::ExecutionEngine *engine)
 {
     return (engine->memoryManager->allocate<QQuickItemWrapper>(q_func()))->asReturnedValue();
+}
+
+QDebug operator<<(QDebug debug, const QQuickItemPrivate::ChangeListener &listener)
+{
+   QDebugStateSaver stateSaver(debug);
+   debug.nospace() << "ChangeListener listener=" << listener.listener << " types=" << listener.types;
+   return debug;
 }
 
 QT_END_NAMESPACE

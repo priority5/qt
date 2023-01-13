@@ -77,7 +77,7 @@ void Open62541AsyncBackend::readAttributes(quint64 handle, UA_NodeId id, QOpcUa:
 
         current.attributeId = QOpen62541ValueConverter::toUaAttributeId(attribute);
         UA_NodeId_copy(&id, &current.nodeId);
-        if (indexRange.length())
+        if (indexRange.size())
             QOpen62541ValueConverter::scalarFromQt<UA_String, QString>(indexRange, &current.indexRange);
 
         QOpcUaReadResult temp;
@@ -118,7 +118,7 @@ void Open62541AsyncBackend::writeAttribute(quint64 handle, UA_NodeId id, QOpcUa:
     req.nodesToWrite->nodeId = id;
     req.nodesToWrite->value.value = QOpen62541ValueConverter::toOpen62541Variant(value, type);
     req.nodesToWrite->value.hasValue = true;
-    if (indexRange.length())
+    if (indexRange.size())
         QOpen62541ValueConverter::scalarFromQt<UA_String, QString>(indexRange, &req.nodesToWrite->indexRange);
 
     quint32 requestId = 0;
@@ -257,7 +257,7 @@ QOpen62541Subscription *Open62541AsyncBackend::getSubscription(const QOpcUaMonit
     if (settings.subscriptionType() == QOpcUaMonitoringParameters::SubscriptionType::Shared) {
         // Requesting multiple subscriptions with publishing interval < minimum publishing interval breaks subscription sharing
         double interval = revisePublishingInterval(settings.publishingInterval(), m_minPublishingInterval);
-        for (auto entry : qAsConst(m_subscriptions)) {
+        for (auto entry : std::as_const(m_subscriptions)) {
             if (qFuzzyCompare(entry->interval(), interval) && entry->shared() == QOpcUaMonitoringParameters::SubscriptionType::Shared)
                 return entry;
         }
@@ -1092,7 +1092,7 @@ void Open62541AsyncBackend::iterateClient()
 
 void Open62541AsyncBackend::handleSubscriptionTimeout(QOpen62541Subscription *sub, QList<QPair<quint64, QOpcUa::NodeAttribute>> items)
 {
-    for (auto it : qAsConst(items)) {
+    for (auto it : std::as_const(items)) {
         auto item = m_attributeMapping.find(it.first);
         if (item == m_attributeMapping.end())
             continue;
@@ -1513,14 +1513,14 @@ bool Open62541AsyncBackend::loadFileToByteString(const QString &location, UA_Byt
     QByteArray data = file.readAll();
 
     UA_ByteString temp;
-    temp.length = data.length();
+    temp.length = data.size();
     if (data.isEmpty())
         temp.data = nullptr;
     else {
         if (data.startsWith('-')) { // PEM file
             // mbedTLS expects PEM encoded data to be null terminated
             data = data.append('\0');
-            temp.length = data.length();
+            temp.length = data.size();
         }
         temp.data = reinterpret_cast<unsigned char *>(data.data());
     }

@@ -272,14 +272,14 @@ void ShaderManager::invalidated()
 
 void ShaderManager::clearCachedRendererData()
 {
-    for (ShaderManager::Shader *sms : qAsConst(stockShaders)) {
+    for (ShaderManager::Shader *sms : std::as_const(stockShaders)) {
         QSGMaterialShader *s = sms->programRhi.program;
         if (s) {
             QSGMaterialShaderPrivate *sd = QSGMaterialShaderPrivate::get(s);
             sd->clearCachedRendererData();
         }
     }
-    for (ShaderManager::Shader *sms : qAsConst(rewrittenShaders)) {
+    for (ShaderManager::Shader *sms : std::as_const(rewrittenShaders)) {
         QSGMaterialShader *s = sms->programRhi.program;
         if (s) {
             QSGMaterialShaderPrivate *sd = QSGMaterialShaderPrivate::get(s);
@@ -915,8 +915,14 @@ Renderer::~Renderer()
             qsg_wipeBatch(m_batchPool.at(i));
     }
 
-    for (Node *n : qAsConst(m_nodes))
+    for (Node *n : std::as_const(m_nodes)) {
+        if (n->type() == QSGNode::GeometryNodeType) {
+            Element *e = n->element();
+            if (!e->removed)
+                m_elementsToDelete.add(e);
+        }
         m_nodeAllocator.release(n);
+    }
 
     // Remaining elements...
     for (int i=0; i<m_elementsToDelete.size(); ++i)
@@ -2869,11 +2875,11 @@ void Renderer::updateMaterialDynamicData(ShaderManager::Shader *sms,
             pd->samplerBindingTable[binding] = samplers; // does not own
         }
 
-        if (pd->textureBindingTable[binding].count() == pd->samplerBindingTable[binding].count()) {
+        if (pd->textureBindingTable[binding].size() == pd->samplerBindingTable[binding].size()) {
 
             QVarLengthArray<QRhiShaderResourceBinding::TextureAndSampler, 4> textureSamplers;
 
-            for (int i = 0; i < pd->textureBindingTable[binding].count(); ++i) {
+            for (int i = 0; i < pd->textureBindingTable[binding].size(); ++i) {
 
                 QRhiTexture *texture = pd->textureBindingTable[binding].at(i)->rhiTexture();
 
@@ -2960,7 +2966,7 @@ void Renderer::updateMaterialDynamicData(ShaderManager::Shader *sms,
         // with increasing binding points afterwards, so the list is already sorted based
         // on the binding points, thus we can save some time by telling the QRhi backend
         // not to sort again.
-        if (pd->ubufBinding <= 0 || bindings.count() <= 1)
+        if (pd->ubufBinding <= 0 || bindings.size() <= 1)
             flags |= QRhiShaderResourceBindings::BindingsAreSorted;
 
         e->srb->updateResources(flags);
@@ -3440,7 +3446,7 @@ void Renderer::releaseElement(Element *e, bool inDestructor)
     } else {
         if (e->srb) {
             if (!inDestructor) {
-                if (m_shaderManager->srbPool.count() < m_srbPoolThreshold)
+                if (m_shaderManager->srbPool.size() < m_srbPoolThreshold)
                     m_shaderManager->srbPool.insert(e->srb->serializedLayoutDescription(), e->srb);
                 else
                     delete e->srb;
@@ -3783,7 +3789,7 @@ void Renderer::recordRenderPass(RenderPassContext *ctx)
     QRhiCommandBuffer *cb = commandBuffer();
     cb->debugMarkBegin(QByteArrayLiteral("Qt Quick scene render"));
 
-    for (int i = 0, ie = ctx->opaqueRenderBatches.count(); i != ie; ++i) {
+    for (int i = 0, ie = ctx->opaqueRenderBatches.size(); i != ie; ++i) {
         PreparedRenderBatch *renderBatch = &ctx->opaqueRenderBatches[i];
         if (renderBatch->batch->merged)
             renderMergedBatch(renderBatch);
@@ -3791,7 +3797,7 @@ void Renderer::recordRenderPass(RenderPassContext *ctx)
             renderUnmergedBatch(renderBatch);
     }
 
-    for (int i = 0, ie = ctx->alphaRenderBatches.count(); i != ie; ++i) {
+    for (int i = 0, ie = ctx->alphaRenderBatches.size(); i != ie; ++i) {
         PreparedRenderBatch *renderBatch = &ctx->alphaRenderBatches[i];
         if (renderBatch->batch->merged)
             renderMergedBatch(renderBatch);
@@ -3803,7 +3809,7 @@ void Renderer::recordRenderPass(RenderPassContext *ctx)
 
     if (m_renderMode == QSGRendererInterface::RenderMode3D) {
         // depth post-pass
-        for (int i = 0, ie = ctx->alphaRenderBatches.count(); i != ie; ++i) {
+        for (int i = 0, ie = ctx->alphaRenderBatches.size(); i != ie; ++i) {
             PreparedRenderBatch *renderBatch = &ctx->alphaRenderBatches[i];
             if (renderBatch->batch->merged)
                 renderMergedBatch(renderBatch, true);

@@ -13,6 +13,8 @@
 #include <QtQuick3DRuntimeRender/private/qssgrendermodel_p.h>
 QT_BEGIN_NAMESPACE
 
+static constexpr char qtQQ3DWAPropName[] { "_qtquick3dWindowAttachment" };
+
 QQuick3DSceneManager::QQuick3DSceneManager(QObject *parent)
     : QObject(parent)
     , dirtySpatialNodeList(nullptr)
@@ -27,6 +29,8 @@ QQuick3DSceneManager::~QQuick3DSceneManager()
     cleanupNodes();
     // If there's resources queued for deletion it's too late for them, so clean them out now
     qDeleteAll(resourceCleanupQueue);
+    if (wattached)
+        wattached->unregisterSceneManager(*this);
 }
 
 void QQuick3DSceneManager::setWindow(QQuickWindow *window)
@@ -35,10 +39,18 @@ void QQuick3DSceneManager::setWindow(QQuickWindow *window)
         return;
 
     if (window != m_window) {
-        if (m_window)
-            disconnect(m_window, &QQuickWindow::afterAnimating, this, &QQuick3DSceneManager::preSync);
+        if (wattached) {
+            // Unregister from old windows attached object
+            wattached->unregisterSceneManager(*this);
+            wattached = nullptr;
+        }
         m_window = window;
-        connect(m_window, &QQuickWindow::afterAnimating, this, &QQuick3DSceneManager::preSync);
+        if (m_window) {
+            wattached = getOrSetWindowAttachment(*m_window);
+            if (wattached)
+                wattached->registerSceneManager(*this);
+        }
+
         emit windowChanged();
     }
 }
@@ -98,10 +110,10 @@ void QQuick3DSceneManager::updateBoundingBoxes(const QSSGRef<QSSGBufferManager> 
     }
 }
 
-void QQuick3DSceneManager::updateDirtyResourceNodes() {
-    updateNodes(&dirtyTextureDataList);
-    updateNodes(&dirtyImageList);
-    updateNodes(&dirtyResourceList);
+bool QQuick3DSceneManager::updateDirtyResourceNodes() {
+    return int(updateNodes(&dirtyTextureDataList))
+            | int(updateNodes(&dirtyImageList))
+            | int(updateNodes(&dirtyResourceList));
 }
 
 void QQuick3DSceneManager::updateDirtySpatialNodes() {
@@ -211,9 +223,25 @@ QQuick3DObject *QQuick3DSceneManager::lookUpNode(const QSSGRenderGraphObject *no
     return m_nodeMap[node];
 }
 
+QQuick3DWindowAttachment *QQuick3DSceneManager::getOrSetWindowAttachment(QQuickWindow &window)
+{
+
+    QQuick3DWindowAttachment *wa = nullptr;
+    if (auto aProperty = window.property(qtQQ3DWAPropName); aProperty.isValid())
+        wa = aProperty.value<QQuick3DWindowAttachment *>();
+
+    if (!wa) {
+        wa = new QQuick3DWindowAttachment(&window);
+        window.setProperty(qtQQ3DWAPropName, QVariant::fromValue(wa));
+        QObject::connect(&window, &QQuickWindow::afterAnimating, wa, &QQuick3DWindowAttachment::preSync);
+    }
+
+    return wa;
+}
+
 void QQuick3DSceneManager::cleanupNodes()
 {
-    for (auto node : qAsConst(cleanupNodeList)) {
+    for (auto node : std::as_const(cleanupNodeList)) {
         // Remove "spatial" nodes from scenegraph
         if (QSSGRenderGraphObject::isNodeType(node->type)) {
             QSSGRenderNode *spatialNode = static_cast<QSSGRenderNode *>(node);
@@ -240,11 +268,12 @@ void QQuick3DSceneManager::cleanupNodes()
     cleanupNodeList.clear();
 }
 
-void QQuick3DSceneManager::updateNodes(QQuick3DObject **listHead)
+bool QQuick3DSceneManager::updateNodes(QQuick3DObject **listHead)
 {
     // Detach the current list head first, and consume all reachable entries.
     // New entries may be added to the new list while traversing, which will be
     // visited on the next updateDirtyNodes() call.
+    bool ret = false;
     QQuick3DObject *updateList = *listHead;
     *listHead = nullptr;
     if (updateList)
@@ -253,10 +282,13 @@ void QQuick3DSceneManager::updateNodes(QQuick3DObject **listHead)
     while (updateList) {
         QQuick3DObject *item = updateList;
         QQuick3DObjectPrivate *itemPriv = QQuick3DObjectPrivate::get(item);
+        ret |= itemPriv->sharedResource;
         itemPriv->removeFromDirtyList();
 
         updateDirtyNode(item);
     }
+
+    return ret;
 }
 
 void QQuick3DSceneManager::preSync()
@@ -268,5 +300,57 @@ void QQuick3DSceneManager::preSync()
         next = QQuick3DObjectPrivate::get(next)->nextDirtyItem;
     }
 }
+
+////////
+/// QQuick3DWindowAttachment
+////////
+
+QQuick3DWindowAttachment::QQuick3DWindowAttachment(QQuickWindow *window)
+    : QObject(window)
+{
+}
+
+QQuick3DWindowAttachment::~QQuick3DWindowAttachment()
+{
+
+}
+
+void QQuick3DWindowAttachment::preSync()
+{
+    for (auto &sceneManager : std::as_const(sceneManagers))
+        sceneManager->preSync();
+}
+
+void QQuick3DWindowAttachment::synchronize(QSSGRenderContextInterface *rci, QSet<QSSGRenderGraphObject *> &resourceLoaders)
+{
+    // Cleanup (+ rci update)
+    for (auto &sceneManager : std::as_const(sceneManagers)) {
+        sceneManager->rci = rci;
+        sceneManager->cleanupNodes();
+    }
+
+    // Resources
+    bool sharedUpdateNeeded = false;
+    for (auto &sceneManager : std::as_const(sceneManagers))
+        sharedUpdateNeeded |= sceneManager->updateDirtyResourceNodes();
+    // Spatial Nodes
+    for (auto &sceneManager : std::as_const(sceneManagers))
+        sceneManager->updateDirtySpatialNodes();
+    // Bounding Boxes
+    for (auto &sceneManager : std::as_const(sceneManagers))
+        sceneManager->updateBoundingBoxes(rci->bufferManager());
+    // Resource Loaders
+    for (auto &sceneManager : std::as_const(sceneManagers))
+        resourceLoaders.unite(sceneManager->resourceLoaders);
+
+    if (sharedUpdateNeeded) {
+        // We know there are shared resources in the scene, so notify the "world".
+        // Ideally we should be more targeted, but for now this will do the job.
+        for (auto &sceneManager : std::as_const(sceneManagers))
+            emit sceneManager->needsUpdate();
+    }
+}
+
+QQuickWindow *QQuick3DWindowAttachment::window() const { return qobject_cast<QQuickWindow *>(parent()); }
 
 QT_END_NAMESPACE

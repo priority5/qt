@@ -124,7 +124,7 @@ FrameJob::FrameJob(QV4DataCollector *collector, int frameNr) :
 void FrameJob::run()
 {
     QVector<QV4::StackFrame> frames = collector->engine()->stackTrace(frameNr + 1);
-    if (frameNr >= frames.length()) {
+    if (frameNr >= frames.size()) {
         success = false;
     } else {
         result = collector->buildFrame(frames[frameNr], frameNr);
@@ -175,8 +175,8 @@ void ValueLookupJob::run()
     QScopedPointer<QObject> scopeObject;
     QV4::ExecutionEngine *engine = collector->engine();
     QV4::Scope scope(engine);
-    QV4::Heap::ExecutionContext *qmlContext = nullptr;
-    if (engine->qmlEngine() && !engine->qmlContext()) {
+    QV4::Heap::ExecutionContext *qmlContext = engine->qmlContext();
+    if (engine->qmlEngine() && !qmlContext) {
         scopeObject.reset(new QObject);
         qmlContext = QV4::QmlContext::create(engine->currentContext(),
                                 QQmlContextData::get(engine->qmlEngine()->rootContext()),

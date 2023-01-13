@@ -703,7 +703,7 @@ public:
     void setExtensionData(int, Deletable *);
     Deletable *extensionData(int index) const
     {
-        if (index < m_extensionData.count())
+        if (index < m_extensionData.size())
             return m_extensionData[index];
         else
             return nullptr;
@@ -737,6 +737,9 @@ public:
                                      QV4::ExecutionContext *ctxt, int argc, const QV4::Value *argv);
 
 private:
+    template<int Frames>
+    friend struct ExecutionEngineCallDepthRecorder;
+
     QV4::ReturnedValue fromData(QMetaType type, const void *ptr, const QVariant *variant = nullptr);
     static void initializeStaticMembers();
 
@@ -773,12 +776,15 @@ private:
 #define CHECK_STACK_LIMITS(v4) if ((v4)->checkStackLimits()) return Encode::undefined(); \
     ExecutionEngineCallDepthRecorder _executionEngineCallDepthRecorder(v4);
 
+template<int Frames = 1>
 struct ExecutionEngineCallDepthRecorder
 {
     ExecutionEngine *ee;
 
-    ExecutionEngineCallDepthRecorder(ExecutionEngine *e): ee(e) { ++ee->callDepth; }
-    ~ExecutionEngineCallDepthRecorder() { --ee->callDepth; }
+    ExecutionEngineCallDepthRecorder(ExecutionEngine *e): ee(e) { ee->callDepth += Frames; }
+    ~ExecutionEngineCallDepthRecorder() { ee->callDepth -= Frames; }
+
+    bool hasOverflow() const { return ee->callDepth >= ExecutionEngine::s_maxCallDepth; }
 };
 
 inline bool ExecutionEngine::checkStackLimits()

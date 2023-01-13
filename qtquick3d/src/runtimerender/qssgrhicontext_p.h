@@ -326,7 +326,7 @@ public:
 
     void resetShadowMaps() { m_shadowMaps.clear(); }
     QSSGRhiShadowMapProperties &addShadowMap() { m_shadowMaps.append(QSSGRhiShadowMapProperties()); return m_shadowMaps.last(); }
-    int shadowMapCount() const { return m_shadowMaps.count(); }
+    int shadowMapCount() const { return m_shadowMaps.size(); }
     const QSSGRhiShadowMapProperties &shadowMapAt(int index) const { return m_shadowMaps[index]; }
     QSSGRhiShadowMapProperties &shadowMapAt(int index) { return m_shadowMaps[index]; }
 
@@ -359,8 +359,9 @@ public:
 
     void resetExtraTextures() { m_extraTextures.clear(); }
     void addExtraTexture(const QSSGRhiTexture &t) { m_extraTextures.append(t); }
-    int extraTextureCount() const { return m_extraTextures.count(); }
-    const QSSGRhiTexture &extraTextureAt(int index) { return m_extraTextures[index]; }
+    int extraTextureCount() const { return m_extraTextures.size(); }
+    const QSSGRhiTexture &extraTextureAt(int index) const { return m_extraTextures[index]; }
+    QSSGRhiTexture &extraTextureAt(int index) { return m_extraTextures[index]; }
 
     QSSGShaderLightsUniformData &lightsUniformData() { return m_lightsUniformData; }
     InstanceLocations instanceBufferLocations() const { return instanceLocations; }
@@ -777,7 +778,7 @@ public:
 
     void stop()
     {
-        const int rpCount = renderPasses.count();
+        const int rpCount = renderPasses.size();
         qDebug("%d render passes in 3D renderer %p", rpCount, rendererPtr);
         for (int i = 0; i < rpCount; ++i) {
             const RenderPassInfo &rp(renderPasses[i]);
@@ -796,7 +797,7 @@ public:
     void beginRenderPass(QRhiTextureRenderTarget *rt)
     {
         renderPasses.append({ rt->pixelSize(), {}, {} });
-        currentRenderPassIndex = renderPasses.count() - 1;
+        currentRenderPassIndex = renderPasses.size() - 1;
     }
 
     void endRenderPass()
@@ -919,10 +920,9 @@ public:
     }
 
     QRhiSampler *sampler(const QSSGRhiSamplerDescription &samplerDescription);
+    void checkAndAdjustForNPoT(QRhiTexture *texture, QSSGRhiSamplerDescription *samplerDescription);
 
-    // ### this will become something more sophisticated later on, for now just hold on
-    // to whatever texture we get, and make sure they get destroyed in the dtor
-    void registerTexture(QRhiTexture *texture) { m_textures.insert(texture); }
+    void registerTexture(QRhiTexture *texture);
     void releaseTexture(QRhiTexture *texture);
 
     void cleanupDrawCallData(const QSSGRenderModel *model);

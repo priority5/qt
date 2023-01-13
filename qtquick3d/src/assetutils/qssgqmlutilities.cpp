@@ -457,7 +457,7 @@ PropertyMap::PropertyMap()
 
 PropertyMap::~PropertyMap()
 {
-    for (const auto &proprtyMap : qAsConst(m_properties))
+    for (const auto &proprtyMap : std::as_const(m_properties))
         delete proprtyMap;
 }
 
@@ -1377,7 +1377,7 @@ void writeQmlForResources(const QSSGSceneDesc::Scene::ResourceNodes &resources, 
 
         return false;
     });
-    for (const auto &res : qAsConst(sortedResources))
+    for (const auto &res : std::as_const(sortedResources))
         writeQmlForResourceNode(*res, output);
 }
 
@@ -1494,7 +1494,7 @@ void writeQml(const QSSGSceneDesc::Scene &scene, QTextStream &stream, const QDir
     auto root = scene.root;
     Q_ASSERT(root);
     OutputContext output { stream, outdir, 0, OutputContext::Header };
-    writeImportHeader(output, scene.animations.count() > 0);
+    writeImportHeader(output, scene.animations.size() > 0);
     output.type = OutputContext::RootNode;
     writeQml(*root, output); // Block scope will be left open!
     output.type = OutputContext::Resource;

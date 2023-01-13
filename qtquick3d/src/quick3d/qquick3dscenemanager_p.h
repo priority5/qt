@@ -30,6 +30,33 @@ class QQuickWindow;
 class QSSGBufferManager;
 class QSSGRenderContextInterface;
 
+class Q_QUICK3D_PRIVATE_EXPORT QQuick3DWindowAttachment : public QObject
+{
+    Q_OBJECT
+public:
+    explicit QQuick3DWindowAttachment(QQuickWindow *window);
+    ~QQuick3DWindowAttachment() override;
+
+    Q_INVOKABLE void preSync();
+    Q_INVOKABLE void synchronize(QSSGRenderContextInterface *rci, QSet<QSSGRenderGraphObject *> &resourceLoaders);
+
+    QQuickWindow *window() const;
+
+    void registerSceneManager(QQuick3DSceneManager &manager)
+    {
+        if (!sceneManagers.contains(&manager))
+            sceneManagers.push_back(&manager);
+    }
+
+    void unregisterSceneManager(QQuick3DSceneManager &manager)
+    {
+        sceneManagers.removeAll(&manager);
+    }
+
+private:
+    QList<QQuick3DSceneManager *> sceneManagers;
+};
+
 class Q_QUICK3D_PRIVATE_EXPORT QQuick3DSceneManager : public QObject
 {
     Q_OBJECT
@@ -46,15 +73,17 @@ public:
     void polishItems();
     void forcePolish();
     void sync();
+    void preSync();
 
     void cleanupNodes();
-    void updateDirtyResourceNodes();
+    bool updateDirtyResourceNodes();
     void updateDirtySpatialNodes();
 
     void updateDirtyNode(QQuick3DObject *object);
     void updateDirtyResource(QQuick3DObject *resourceObject);
     void updateDirtySpatialNode(QQuick3DNode *spatialNode);
     void updateBoundingBoxes(const QSSGRef<QSSGBufferManager> &mgr);
+    static QQuick3DWindowAttachment *getOrSetWindowAttachment(QQuickWindow &window);
 
     QQuick3DObject *lookUpNode(const QSSGRenderGraphObject *node) const;
 
@@ -63,14 +92,17 @@ public:
     QQuick3DObject *dirtyImageList;
     QQuick3DObject *dirtyTextureDataList;
     QList<QQuick3DObject *> dirtyLightList;
+
     QList<QQuick3DObject *> dirtyBoundingBoxList;
     QList<QSSGRenderGraphObject *> cleanupNodeList;
     QList<QSSGRenderGraphObject *> resourceCleanupQueue;
+
     QSet<QQuick3DObject *> parentlessItems;
     QVector<QSGDynamicTexture *> qsgDynamicTextures;
     QHash<const QSSGRenderGraphObject *, QQuick3DObject *> m_nodeMap;
     QSet<QSSGRenderGraphObject *> resourceLoaders;
     QQuickWindow *m_window = nullptr;
+    QPointer<QQuick3DWindowAttachment> wattached;
     QSSGRenderContextInterface *rci = nullptr;
     friend QQuick3DObject;
 
@@ -79,8 +111,7 @@ Q_SIGNALS:
     void windowChanged();
 
 private Q_SLOTS:
-    void updateNodes(QQuick3DObject **listHead);
-    void preSync();
+    bool updateNodes(QQuick3DObject **listHead);
 };
 
 QT_END_NAMESPACE

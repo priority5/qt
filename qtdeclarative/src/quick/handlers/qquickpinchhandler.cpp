@@ -203,8 +203,8 @@ void QQuickPinchHandler::onActiveChanged()
             m_startRotation = t->rotation();
             m_startPos = t->position();
         } else {
-            m_startScale = 1;
-            m_startRotation = 0;
+            m_startScale = m_accumulatedScale;
+            m_startRotation = 0; // TODO m_accumulatedRotation (QTBUG-94168)
         }
         qCDebug(lcPinchHandler) << "activated with starting scale" << m_startScale << "rotation" << m_startRotation;
     } else {
@@ -334,9 +334,9 @@ void QQuickPinchHandler::handlePointerEventImpl(QPointerEvent *event)
             }
 
             const bool requiredNumberOfPointsDraggedOverThreshold = numberOfPointsDraggedOverThreshold >= minimumPointCount() && numberOfPointsDraggedOverThreshold <= maximumPointCount();
-            accumulatedMovementMagnitude /= currentPoints().count();
+            accumulatedMovementMagnitude /= currentPoints().size();
 
-            QVector2D avgDrag = accumulatedDrag / currentPoints().count();
+            QVector2D avgDrag = accumulatedDrag / currentPoints().size();
             if (!xAxis()->enabled())
                 avgDrag.setX(0);
             if (!yAxis()->enabled())
@@ -472,6 +472,9 @@ void QQuickPinchHandler::handlePointerEventImpl(QPointerEvent *event)
 
     The translation of the gesture \l centroid. It is \c (0, 0) when the
     gesture begins.
+
+    \note On some touchpads, such as on a \macos trackpad, native gestures do
+    not generate any translation values, and this property stays at \c (0, 0).
 */
 
 QT_END_NAMESPACE

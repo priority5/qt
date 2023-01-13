@@ -67,11 +67,11 @@ public:
 
     template <typename MemFun>
     void apply0(QString &s, MemFun mf) const
-    { for (QChar ch : qAsConst(this->pinned)) (s.*mf)(ch); }
+    { for (QChar ch : std::as_const(this->pinned)) (s.*mf)(ch); }
 
     template <typename MemFun, typename A1>
     void apply1(QString &s, MemFun mf, A1 a1) const
-    { for (QChar ch : qAsConst(this->pinned)) (s.*mf)(a1, ch); }
+    { for (QChar ch : std::as_const(this->pinned)) (s.*mf)(a1, ch); }
 };
 
 template <>
@@ -855,6 +855,9 @@ void tst_QString::replace_regexp_data()
     remove_regexp_data(); // Sets up the columns, adds rows with empty replacement text.
     // Columns (all QString): string, regexp, after, result; string.replace(regexp, after) == result
     // Test-cases with empty after (replacement text, third column) go in remove_regexp_data()
+
+    QTest::newRow("empty-in-null") << QString() << "" << "after" << "after";
+    QTest::newRow("empty-in-empty") << "" << "" << "after" << "after";
 
     QTest::newRow( "rep00" ) << QString("A <i>bon mot</i>.") << QString("<i>([^<]*)</i>") << QString("\\emph{\\1}") << QString("A \\emph{bon mot}.");
     QTest::newRow( "rep01" ) << QString("banana") << QString("^.a()") << QString("\\1") << QString("nana");

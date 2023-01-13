@@ -879,7 +879,7 @@ bool QSSGLayerRenderData::prepareModelForRender(const QSSGRenderModel &inModel,
                 theMesh->bvh = bufferManager->loadMeshBVH(inModel.geometry);
 
             if (theMesh->bvh) {
-                for (int i = 0; i < theMesh->bvh->roots.count(); ++i)
+                for (int i = 0; i < theMesh->bvh->roots.size(); ++i)
                     theMesh->subsets[i].bvhRoot = theMesh->bvh->roots.at(i);
             }
         }
@@ -914,7 +914,7 @@ bool QSSGLayerRenderData::prepareModelForRender(const QSSGRenderModel &inModel,
         bool hasJoint = false;
         bool hasWeight = false;
         bool hasMorphTarget = false;
-        for (const QSSGRhiInputAssemblerState::InputSemantic &sem : qAsConst(theSubset.rhi.ia.inputs)) {
+        for (const QSSGRhiInputAssemblerState::InputSemantic &sem : std::as_const(theSubset.rhi.ia.inputs)) {
             if (sem == QSSGRhiInputAssemblerState::PositionSemantic) {
                 renderableFlagsForModel.setHasAttributePosition(true);
             } else if (sem == QSSGRhiInputAssemblerState::NormalSemantic) {
@@ -964,7 +964,7 @@ bool QSSGLayerRenderData::prepareModelForRender(const QSSGRenderModel &inModel,
         QSSGRenderGraphObject *theMaterialObject = nullptr;
         if (inModel.materials.isEmpty())
             break;
-        if (idx + 1 > inModel.materials.count())
+        if (idx + 1 > inModel.materials.size())
             theMaterialObject = inModel.materials.last();
         else
             theMaterialObject = inModel.materials.at(idx);
@@ -1287,7 +1287,7 @@ void QSSGLayerRenderData::prepareResourceLoaders()
     QSSGRenderContextInterface &contextInterface = *renderer->contextInterface();
     const QSSGRef<QSSGBufferManager> &bufferManager = contextInterface.bufferManager();
 
-    for (const auto resourceLoader : qAsConst(layer.resourceLoaders))
+    for (const auto resourceLoader : std::as_const(layer.resourceLoaders))
         bufferManager->processResourceLoader(static_cast<QSSGRenderResourceLoader *>(resourceLoader));
 }
 
@@ -1540,7 +1540,7 @@ void QSSGLayerRenderData::prepareForRender()
             // Lights
             const int maxLightCount = effectiveMaxLightCount(features);
             for (auto rIt = lights.crbegin(); rIt != lights.crend(); rIt++) {
-                if (renderableLights.count() == maxLightCount) {
+                if (renderableLights.size() == maxLightCount) {
                     if (!tooManyLightsWarningShown) {
                         qWarning("Too many lights in scene, maximum is %d", maxLightCount);
                         tooManyLightsWarningShown = true;
@@ -1601,7 +1601,7 @@ void QSSGLayerRenderData::prepareForRender()
                 }
             }
 
-            for (const QSSGShaderLight &shaderLight : qAsConst(renderableLights)) {
+            for (const QSSGShaderLight &shaderLight : std::as_const(renderableLights)) {
                 if (!shaderLight.light->m_scope)
                     globalLights.append(shaderLight);
             }
@@ -1971,7 +1971,7 @@ static int setupInstancing(QSSGSubsetRenderable *renderable, QSSGRhiGraphicsPipe
         QVarLengthArray<QRhiVertexInputBinding, 8> bindings;
         std::copy(ps->ia.inputLayout.cbeginBindings(), ps->ia.inputLayout.cendBindings(), std::back_inserter(bindings));
         bindings.append({ stride, QRhiVertexInputBinding::PerInstance });
-        instanceBufferBinding = bindings.count() - 1;
+        instanceBufferBinding = bindings.size() - 1;
         ps->ia.inputLayout.setBindings(bindings.cbegin(), bindings.cend());
     }
     return instanceBufferBinding;
@@ -2090,13 +2090,16 @@ static void rhiPrepareRenderable(QSSGRhiContext *rhiCtx,
                     QRhiTexture *texture = renderableImage->m_texture.m_texture;
                     if (samplerBinding >= 0 && texture) {
                         const bool mipmapped = texture->flags().testFlag(QRhiTexture::MipMapped);
-                        QRhiSampler *sampler = rhiCtx->sampler({ toRhi(renderableImage->m_imageNode.m_minFilterType),
-                                                                 toRhi(renderableImage->m_imageNode.m_magFilterType),
-                                                                 mipmapped ? toRhi(renderableImage->m_imageNode.m_mipFilterType) : QRhiSampler::None,
-                                                                 toRhi(renderableImage->m_imageNode.m_horizontalTilingMode),
-                                                                 toRhi(renderableImage->m_imageNode.m_verticalTilingMode),
-                                                                 QRhiSampler::Repeat
-                                                               });
+                        QSSGRhiSamplerDescription samplerDesc = {
+                            toRhi(renderableImage->m_imageNode.m_minFilterType),
+                            toRhi(renderableImage->m_imageNode.m_magFilterType),
+                            mipmapped ? toRhi(renderableImage->m_imageNode.m_mipFilterType) : QRhiSampler::None,
+                            toRhi(renderableImage->m_imageNode.m_horizontalTilingMode),
+                            toRhi(renderableImage->m_imageNode.m_verticalTilingMode),
+                            QRhiSampler::Repeat
+                        };
+                        rhiCtx->checkAndAdjustForNPoT(texture, &samplerDesc);
+                        QRhiSampler *sampler = rhiCtx->sampler(samplerDesc);
                         bindings.addTexture(samplerBinding, VISIBILITY_ALL, texture, sampler);
                     }
                 } // else this is not necessarily an error, e.g. having metalness/roughness maps with metalness disabled
@@ -3284,7 +3287,7 @@ static void rhiRenderShadowMap(QSSGRhiContext *rhiCtx,
     ps.slopeScaledDepthBias = 1.5f;
 
 
-    for (int i = 0, ie = globalLights.count(); i != ie; ++i) {
+    for (int i = 0, ie = globalLights.size(); i != ie; ++i) {
         if (!globalLights[i].shadows || globalLights[i].light->m_fullyBaked)
             continue;
 
@@ -3396,7 +3399,7 @@ static void rhiRenderReflectionMap(QSSGRhiContext *rhiCtx,
     ps.depthWriteEnable = true;
     ps.blendEnable = true;
 
-    for (int i = 0, ie = reflectionProbes.count(); i != ie; ++i) {
+    for (int i = 0, ie = reflectionProbes.size(); i != ie; ++i) {
         QSSGReflectionMapEntry *pEntry = reflectionMapManager->reflectionMapEntry(i);
         if (!pEntry)
             continue;
@@ -4263,7 +4266,7 @@ void QSSGLayerRenderData::maybeBakeLightmap()
     m_lightmapper->reset();
     m_lightmapper->setOptions(layer.lmOptions);
 
-    for (int i = 0, ie = sortedBakedLightingModels.count(); i != ie; ++i)
+    for (int i = 0, ie = sortedBakedLightingModels.size(); i != ie; ++i)
         m_lightmapper->add(sortedBakedLightingModels[i]);
 
     QRhiCommandBuffer *cb = rhiCtx->commandBuffer();

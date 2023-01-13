@@ -257,7 +257,7 @@ void QV4L2CameraBuffers::release(int index)
 
 void QV4L2CameraBuffers::unmapBuffers()
 {
-    for (const auto &b : qAsConst(mappedBuffers))
+    for (const auto &b : std::as_const(mappedBuffers))
         munmap(b.data, b.size);
     mappedBuffers.clear();
 }
@@ -582,7 +582,7 @@ void QV4L2Camera::readFrame()
             qWarning() << "error calling VIDIOC_DQBUF" << errno << strerror(errno);
     }
 
-    Q_ASSERT(buf.index < d->mappedBuffers.size());
+    Q_ASSERT(qsizetype(buf.index) < d->mappedBuffers.size());
     int i = buf.index;
 
 //    auto textureDesc = QVideoTextureHelper::textureDescription(m_format.pixelFormat());
@@ -910,7 +910,7 @@ void QV4L2Camera::startCapturing()
         return;
 
     // #### better to use the user data method instead of mmap???
-    unsigned int i;
+    qsizetype i;
 
     for (i = 0; i < d->mappedBuffers.size(); ++i) {
         v4l2_buffer buf = {};
@@ -919,7 +919,7 @@ void QV4L2Camera::startCapturing()
         buf.memory = V4L2_MEMORY_MMAP;
 
         if (ioctl(d->v4l2FileDescriptor, VIDIOC_QBUF, &buf) < 0) {
-            qWarning() << "failed to setup mapped buffer";
+            qWarning() << "failed to set up mapped buffer";
             return;
         }
     }

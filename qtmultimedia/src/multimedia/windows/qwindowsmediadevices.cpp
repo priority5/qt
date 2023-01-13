@@ -208,10 +208,11 @@ QList<QAudioDevice> QWindowsMediaDevices::availableDevices(QAudioDevice::Mode mo
         LPWSTR id = nullptr;
         QString sid;
 
-        if (SUCCEEDED(m_deviceEnumerator->GetDefaultAudioEndpoint(dataFlow, ERole::eMultimedia, dev.address()))
-            && SUCCEEDED(dev->GetId(&id))) {
-            sid = QString::fromWCharArray(id);
-            CoTaskMemFree(id);
+        if (SUCCEEDED(m_deviceEnumerator->GetDefaultAudioEndpoint(dataFlow, ERole::eMultimedia, dev.address()))) {
+            if (dev && SUCCEEDED(dev->GetId(&id))) {
+                sid = QString::fromWCharArray(id);
+                CoTaskMemFree(id);
+            }
         }
         return sid.toUtf8();
     }();
@@ -270,16 +271,18 @@ QList<QAudioDevice> QWindowsMediaDevices::audioOutputs() const
     return availableDevices(QAudioDevice::Output);
 }
 
-QPlatformAudioSource *QWindowsMediaDevices::createAudioSource(const QAudioDevice &deviceInfo)
+QPlatformAudioSource *QWindowsMediaDevices::createAudioSource(const QAudioDevice &deviceInfo,
+                                                              QObject *parent)
 {
     const auto *devInfo = static_cast<const QWindowsAudioDeviceInfo *>(deviceInfo.handle());
-    return new QWindowsAudioSource(devInfo->waveId());
+    return new QWindowsAudioSource(devInfo->waveId(), parent);
 }
 
-QPlatformAudioSink *QWindowsMediaDevices::createAudioSink(const QAudioDevice &deviceInfo)
+QPlatformAudioSink *QWindowsMediaDevices::createAudioSink(const QAudioDevice &deviceInfo,
+                                                          QObject *parent)
 {
     const auto *devInfo = static_cast<const QWindowsAudioDeviceInfo *>(deviceInfo.handle());
-    return new QWindowsAudioSink(devInfo->immDev());
+    return new QWindowsAudioSink(devInfo->immDev(), parent);
 }
 
 QT_END_NAMESPACE

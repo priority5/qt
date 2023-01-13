@@ -54,6 +54,9 @@ QList<qreal> QQuickNinePatchData::coordsForSize(qreal size) const
     return coords;
 }
 
+/*
+    Adds the 0 index coordinate if appropriate, and the one at "size".
+*/
 void QQuickNinePatchData::fill(const QList<qreal> &coords, qreal size)
 {
     data.clear();
@@ -174,6 +177,31 @@ public:
     QQuickNinePatchData yDivs;
 };
 
+/*
+    Examines each pixel in a horizontal or vertical (if offset is equal to the image's width)
+    line, storing the start and end index ("coordinate") of each 9-patch line.
+
+    For instance, in the 7x3 (9x5 actual size) 9-patch image below, which has no horizontal
+    stretchable area, it would return {}:
+
+     +-----+
+     |     |
+     +-----+
+
+    If indices 3 to 5 were marked, it would return {2, 5}:
+
+       xxx
+     +-----+
+     |     |
+     +-----+
+
+    If indices 3 and 5 were marked, it would store {0, 2, 3, 4, 5, 7}:
+
+       x x
+     +-----+
+     |     |
+     +-----+
+*/
 static QList<qreal> readCoords(const QRgb *data, int from, int count, int offset, QRgb color)
 {
     int p1 = -1;
@@ -182,12 +210,16 @@ static QList<qreal> readCoords(const QRgb *data, int from, int count, int offset
         int p2 = from + i * offset;
         if (data[p2] == color) {
             // colored pixel
-            if (p1 == -1)
+            if (p1 == -1) {
+                // This is the start of a 9-patch line.
                 p1 = i;
+            }
         } else {
             // empty pixel
             if (p1 != -1) {
+                // This is the end of a 9-patch line; add the start and end indices as coordinates...
                 coords << p1 << i;
+                // ... and reset p1 so that we can search for the next one.
                 p1 = -1;
             }
         }
@@ -195,6 +227,12 @@ static QList<qreal> readCoords(const QRgb *data, int from, int count, int offset
     return coords;
 }
 
+/*
+    Called whenever a 9-patch image is set as the image's source.
+
+    Reads the 9-patch lines from the source image and sets the
+    inset and padding properties accordingly.
+*/
 void QQuickNinePatchImagePrivate::updatePatches()
 {
     if (ninePatch.isNull())
@@ -228,7 +266,7 @@ void QQuickNinePatchImagePrivate::updatePaddings(const QSizeF &size, const QList
     qreal oldRightPadding = rightPadding;
     qreal oldBottomPadding = bottomPadding;
 
-    if (horizontal.count() >= 2) {
+    if (horizontal.size() >= 2) {
         leftPadding = horizontal.first();
         rightPadding = size.width() - horizontal.last() - 2;
     } else {
@@ -236,7 +274,7 @@ void QQuickNinePatchImagePrivate::updatePaddings(const QSizeF &size, const QList
         rightPadding = 0;
     }
 
-    if (vertical.count() >= 2) {
+    if (vertical.size() >= 2) {
         topPadding = vertical.first();
         bottomPadding = size.height() - vertical.last() - 2;
     } else {
@@ -262,26 +300,26 @@ void QQuickNinePatchImagePrivate::updateInsets(const QList<qreal> &horizontal, c
     qreal oldRightInset = rightInset;
     qreal oldBottomInset = bottomInset;
 
-    if (horizontal.count() >= 2 && horizontal.first() == 0)
+    if (horizontal.size() >= 2 && horizontal.first() == 0)
         leftInset = horizontal.at(1);
     else
         leftInset = 0;
 
-    if (horizontal.count() == 2 && horizontal.first() > 0)
+    if (horizontal.size() == 2 && horizontal.first() > 0)
         rightInset = horizontal.last() - horizontal.first();
-    else if (horizontal.count() == 4)
+    else if (horizontal.size() == 4)
         rightInset = horizontal.last() - horizontal.at(2);
     else
         rightInset = 0;
 
-    if (vertical.count() >= 2 && vertical.first() == 0)
+    if (vertical.size() >= 2 && vertical.first() == 0)
         topInset = vertical.at(1);
     else
         topInset = 0;
 
-    if (vertical.count() == 2 && vertical.first() > 0)
+    if (vertical.size() == 2 && vertical.first() > 0)
         bottomInset = vertical.last() - vertical.first();
-    else if (vertical.count() == 4)
+    else if (vertical.size() == 4)
         bottomInset = vertical.last() - vertical.at(2);
     else
         bottomInset = 0;
@@ -299,6 +337,8 @@ void QQuickNinePatchImagePrivate::updateInsets(const QList<qreal> &horizontal, c
 QQuickNinePatchImage::QQuickNinePatchImage(QQuickItem *parent)
     : QQuickImage(*(new QQuickNinePatchImagePrivate), parent)
 {
+    Q_D(QQuickNinePatchImage);
+    d->smooth = qEnvironmentVariableIntValue("QT_QUICK_CONTROLS_IMAGINE_SMOOTH");
 }
 
 qreal QQuickNinePatchImage::topPadding() const
@@ -432,6 +472,8 @@ QSGNode *QQuickNinePatchImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNode
 
     QSGTexture *texture = window()->createTextureFromImage(image);
     patchNode->initialize(texture, sz * d->devicePixelRatio, image.size(), d->xDivs, d->yDivs, d->devicePixelRatio);
+    auto patchNodeMaterial = static_cast<QSGTextureMaterial *>(patchNode->material());
+    patchNodeMaterial->setFiltering(d->smooth ? QSGTexture::Linear : QSGTexture::Nearest);
     return patchNode;
 }
 

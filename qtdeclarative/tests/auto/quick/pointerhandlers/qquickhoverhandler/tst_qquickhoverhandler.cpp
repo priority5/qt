@@ -47,6 +47,7 @@ private slots:
     void deviceCursor_data();
     void deviceCursor();
     void addHandlerFromCpp();
+    void ensureHoverHandlerWorksWhenItemHasHoverDisabled();
 
 private:
     void createView(QScopedPointer<QQuickView> &window, const char *fileName);
@@ -100,45 +101,45 @@ void tst_HoverHandler::hoverHandlerAndUnderlyingHoverHandler()
 
     QTest::mouseMove(window, outOfSidebar);
     QCOMPARE(topSidebarHH->isHovered(), false);
-    QCOMPARE(sidebarHoveredSpy.count(), 0);
+    QCOMPARE(sidebarHoveredSpy.size(), 0);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ArrowCursor);
 #endif
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(topSidebarHH->isHovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), 1);
+    QCOMPARE(sidebarHoveredSpy.size(), 1);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::OpenHandCursor);
 #endif
 
     QTest::mouseMove(window, buttonCenter);
     QCOMPARE(topSidebarHH->isHovered(), !blocking);
-    QCOMPARE(sidebarHoveredSpy.count(), blocking ? 2 : 1);
+    QCOMPARE(sidebarHoveredSpy.size(), blocking ? 2 : 1);
     QCOMPARE(buttonHH->isHovered(), true);
-    QCOMPARE(buttonHoveredSpy.count(), 1);
+    QCOMPARE(buttonHoveredSpy.size(), 1);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::PointingHandCursor);
 #endif
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(topSidebarHH->isHovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), blocking ? 3 : 1);
+    QCOMPARE(sidebarHoveredSpy.size(), blocking ? 3 : 1);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 2);
+    QCOMPARE(buttonHoveredSpy.size(), 2);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::OpenHandCursor);
 #endif
 
     QTest::mouseMove(window, outOfSidebar);
     QCOMPARE(topSidebarHH->isHovered(), false);
-    QCOMPARE(sidebarHoveredSpy.count(), blocking ? 4 : 2);
+    QCOMPARE(sidebarHoveredSpy.size(), blocking ? 4 : 2);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 2);
+    QCOMPARE(buttonHoveredSpy.size(), 2);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ArrowCursor);
 #endif
@@ -171,45 +172,45 @@ void tst_HoverHandler::mouseAreaAndUnderlyingHoverHandler()
 
     QTest::mouseMove(window, outOfSidebar);
     QCOMPARE(topSidebarHH->isHovered(), false);
-    QCOMPARE(sidebarHoveredSpy.count(), 0);
+    QCOMPARE(sidebarHoveredSpy.size(), 0);
     QCOMPARE(buttonMA->hovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ArrowCursor);
 #endif
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(topSidebarHH->isHovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), 1);
+    QCOMPARE(sidebarHoveredSpy.size(), 1);
     QCOMPARE(buttonMA->hovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::OpenHandCursor);
 #endif
 
     QTest::mouseMove(window, buttonCenter);
     QCOMPARE(topSidebarHH->isHovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), 1);
+    QCOMPARE(sidebarHoveredSpy.size(), 1);
     QCOMPARE(buttonMA->hovered(), true);
-    QCOMPARE(buttonHoveredSpy.count(), 1);
+    QCOMPARE(buttonHoveredSpy.size(), 1);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::UpArrowCursor);
 #endif
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(topSidebarHH->isHovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), 1);
+    QCOMPARE(sidebarHoveredSpy.size(), 1);
     QCOMPARE(buttonMA->hovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 2);
+    QCOMPARE(buttonHoveredSpy.size(), 2);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::OpenHandCursor);
 #endif
 
     QTest::mouseMove(window, outOfSidebar);
     QCOMPARE(topSidebarHH->isHovered(), false);
-    QCOMPARE(sidebarHoveredSpy.count(), 2);
+    QCOMPARE(sidebarHoveredSpy.size(), 2);
     QCOMPARE(buttonMA->hovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 2);
+    QCOMPARE(buttonHoveredSpy.size(), 2);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ArrowCursor);
 #endif
@@ -237,45 +238,45 @@ void tst_HoverHandler::hoverHandlerAndUnderlyingMouseArea()
 
     QTest::mouseMove(window, outOfSidebar);
     QCOMPARE(bottomSidebarMA->hovered(), false);
-    QCOMPARE(sidebarHoveredSpy.count(), 0);
+    QCOMPARE(sidebarHoveredSpy.size(), 0);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ArrowCursor);
 #endif
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(bottomSidebarMA->hovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), 1);
+    QCOMPARE(sidebarHoveredSpy.size(), 1);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ClosedHandCursor);
 #endif
 
     QTest::mouseMove(window, buttonCenter);
     QCOMPARE(bottomSidebarMA->hovered(), false);
-    QCOMPARE(sidebarHoveredSpy.count(), 2);
+    QCOMPARE(sidebarHoveredSpy.size(), 2);
     QCOMPARE(buttonHH->isHovered(), true);
-    QCOMPARE(buttonHoveredSpy.count(), 1);
+    QCOMPARE(buttonHoveredSpy.size(), 1);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::PointingHandCursor);
 #endif
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(bottomSidebarMA->hovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), 3);
+    QCOMPARE(sidebarHoveredSpy.size(), 3);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 2);
+    QCOMPARE(buttonHoveredSpy.size(), 2);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ClosedHandCursor);
 #endif
 
     QTest::mouseMove(window, outOfSidebar);
     QCOMPARE(bottomSidebarMA->hovered(), false);
-    QCOMPARE(sidebarHoveredSpy.count(), 4);
+    QCOMPARE(sidebarHoveredSpy.size(), 4);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 2);
+    QCOMPARE(buttonHoveredSpy.size(), 2);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ArrowCursor);
 #endif
@@ -310,21 +311,21 @@ void tst_HoverHandler::disabledHoverHandlerAndUnderlyingMouseArea()
 
     QTest::mouseMove(window, outOfSidebar);
     QCOMPARE(bottomSidebarMA->hovered(), false);
-    QCOMPARE(sidebarHoveredSpy.count(), 0);
+    QCOMPARE(sidebarHoveredSpy.size(), 0);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 
     QTest::mouseMove(window, buttonCenter);
     QCOMPARE(bottomSidebarMA->hovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), 1);
+    QCOMPARE(sidebarHoveredSpy.size(), 1);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(bottomSidebarMA->hovered(), true);
-    QCOMPARE(sidebarHoveredSpy.count(), 1);
+    QCOMPARE(sidebarHoveredSpy.size(), 1);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 }
 
 void tst_HoverHandler::hoverHandlerOnDisabledItem()
@@ -351,15 +352,15 @@ void tst_HoverHandler::hoverHandlerOnDisabledItem()
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 0);
+    QCOMPARE(buttonHoveredSpy.size(), 0);
 
     QTest::mouseMove(window, buttonCenter);
     QCOMPARE(buttonHH->isHovered(), true);
-    QCOMPARE(buttonHoveredSpy.count(), 1);
+    QCOMPARE(buttonHoveredSpy.size(), 1);
 
     QTest::mouseMove(window, rightOfButton);
     QCOMPARE(buttonHH->isHovered(), false);
-    QCOMPARE(buttonHoveredSpy.count(), 2);
+    QCOMPARE(buttonHoveredSpy.size(), 2);
 }
 
 void tst_HoverHandler::movingItemWithHoverHandler()
@@ -415,21 +416,21 @@ void tst_HoverHandler::margin() // QTBUG-85303
 
     QTest::mouseMove(window, {10, 10});
     QCOMPARE(hh->isHovered(), false);
-    QCOMPARE(hoveredSpy.count(), 0);
+    QCOMPARE(hoveredSpy.size(), 0);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::ArrowCursor);
 #endif
 
     QTest::mouseMove(window, leftMargin);
     QCOMPARE(hh->isHovered(), true);
-    QCOMPARE(hoveredSpy.count(), 1);
+    QCOMPARE(hoveredSpy.size(), 1);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::OpenHandCursor);
 #endif
 
     QTest::mouseMove(window, itemCenter);
     QCOMPARE(hh->isHovered(), true);
-    QCOMPARE(hoveredSpy.count(), 1);
+    QCOMPARE(hoveredSpy.size(), 1);
 #if QT_CONFIG(cursor)
     QCOMPARE(window->cursor().shape(), Qt::OpenHandCursor);
 #endif
@@ -595,12 +596,12 @@ void tst_HoverHandler::addHandlerFromCpp()
     // Move mouse inside child
     QTest::mouseMove(window.data(), inside);
     QVERIFY(handler->isHovered());
-    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.size(), 1);
 
     // Move mouse outside child
     QTest::mouseMove(window.data(), outside);
     QVERIFY(!handler->isHovered());
-    QCOMPARE(spy.count(), 2);
+    QCOMPARE(spy.size(), 2);
 
     // Remove the parent item from the handler
     spy.clear();
@@ -609,12 +610,12 @@ void tst_HoverHandler::addHandlerFromCpp()
     // Move mouse inside child
     QTest::mouseMove(window.data(), inside);
     QVERIFY(!handler->isHovered());
-    QCOMPARE(spy.count(), 0);
+    QCOMPARE(spy.size(), 0);
 
     // Move mouse outside child
     QTest::mouseMove(window.data(), outside);
     QVERIFY(!handler->isHovered());
-    QCOMPARE(spy.count(), 0);
+    QCOMPARE(spy.size(), 0);
 
     // Reparent back the item to the handler
     spy.clear();
@@ -623,12 +624,51 @@ void tst_HoverHandler::addHandlerFromCpp()
     // Move mouse inside child
     QTest::mouseMove(window.data(), inside);
     QVERIFY(handler->isHovered());
-    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.size(), 1);
 
     // Move mouse outside child
     QTest::mouseMove(window.data(), outside);
     QVERIFY(!handler->isHovered());
-    QCOMPARE(spy.count(), 2);
+    QCOMPARE(spy.size(), 2);
+}
+
+void tst_HoverHandler::ensureHoverHandlerWorksWhenItemHasHoverDisabled()
+{
+    // Check that a hover handler with a leaf item as parent, continues to
+    // receive hover, even if the item itself stops listening for hover.
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.loadUrl(testFileUrl("nohandler.qml"));
+    QScopedPointer<QQuickWindow> window(qobject_cast<QQuickWindow *>(component.create()));
+    QVERIFY(!window.isNull());
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
+
+    QQuickItem *childItem = window->findChild<QQuickItem *>("childItem");
+    QVERIFY(childItem);
+
+    // Move mouse outside child
+    const QPoint outside(200, 200);
+    const QPoint inside(50, 50);
+    QTest::mouseMove(window.data(), outside);
+
+    QQuickHoverHandler *handler = new QQuickHoverHandler(childItem);
+
+    // Toggle hover on the item. This should not clear subtreeHoverEnabled
+    // on the item as a whole, since it still has a hover handler.
+    childItem->setAcceptHoverEvents(true);
+    childItem->setAcceptHoverEvents(false);
+    QSignalSpy spy(handler, &QQuickHoverHandler::hoveredChanged);
+
+    // Move mouse inside child
+    QTest::mouseMove(window.data(), inside);
+    QVERIFY(handler->isHovered());
+    QCOMPARE(spy.size(), 1);
+
+    // Move mouse outside child
+    QTest::mouseMove(window.data(), outside);
+    QVERIFY(!handler->isHovered());
+    QCOMPARE(spy.size(), 2);
 }
 
 QTEST_MAIN(tst_HoverHandler)
