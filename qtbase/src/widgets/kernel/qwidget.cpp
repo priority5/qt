@@ -1365,8 +1365,11 @@ void QWidgetPrivate::create()
     if (data.crect.width() == 0 || data.crect.height() == 0) {
         q->setAttribute(Qt::WA_OutsideWSRange, true);
     } else if (q->isVisible()) {
-        // If widget is already shown, set window visible, too
-        win->setNativeWindowVisibility(true);
+        // If widget is already shown, set window visible, as long as the widget
+        // is supposed to be shown on the screen.
+        if (!q->testAttribute(Qt::WA_DontShowOnScreen)) {
+            win->setNativeWindowVisibility(true);
+        }
     }
 }
 
