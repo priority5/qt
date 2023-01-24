@@ -538,7 +538,12 @@ void QGraphicsWidgetPrivate::windowFrameMouseMoveEvent(QGraphicsSceneMouseEvent 
     if (!(event->buttons() & Qt::LeftButton) || windowData->hoveredSubControl != QStyle::SC_TitleBarLabel)
         return;
 
+#ifdef Q_OS_LINUX
+    QLineF delta(q->mapFromScene(event->buttonDownScenePos(Qt::LeftButton)), q->mapFromScene(event->scenePos()));
+#else
     QLineF delta(q->mapFromScene(event->buttonDownScenePos(Qt::LeftButton)), event->pos());
+#endif
+
     QLineF parentDelta(q->mapToParent(delta.p1()), q->mapToParent(delta.p2()));
     QLineF parentXDelta(q->mapToParent(QPointF(delta.p1().x(), 0)), q->mapToParent(QPointF(delta.p2().x(), 0)));
     QLineF parentYDelta(q->mapToParent(QPointF(0, delta.p1().y())), q->mapToParent(QPointF(0, delta.p2().y())));
