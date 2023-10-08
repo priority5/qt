@@ -71,12 +71,12 @@ struct Q_QUICK3DRUNTIMERENDER_EXPORT QSSGShaderMaterialAdapter
     virtual bool isUnshaded();
     virtual bool hasCustomShaderSnippet(QSSGShaderCache::ShaderType type);
     virtual QByteArray customShaderSnippet(QSSGShaderCache::ShaderType type,
-                                           const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager);
+                                           QSSGShaderLibraryManager &shaderLibraryManager);
     virtual bool hasCustomShaderFunction(QSSGShaderCache::ShaderType shaderType,
                                          const QByteArray &funcName,
-                                         const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager);
+                                         QSSGShaderLibraryManager &shaderLibraryManager);
     virtual void setCustomPropertyUniforms(char *ubufData,
-                                           QSSGRef<QSSGRhiShaderPipeline> &shaderPipeline,
+                                           QSSGRhiShaderPipeline &shaderPipeline,
                                            const QSSGRenderContextInterface &context);
     virtual bool usesSharedVariables();
 };
@@ -172,12 +172,12 @@ struct Q_QUICK3DRUNTIMERENDER_EXPORT QSSGShaderCustomMaterialAdapter final : pub
     bool isUnshaded() override;
     bool hasCustomShaderSnippet(QSSGShaderCache::ShaderType type) override;
     QByteArray customShaderSnippet(QSSGShaderCache::ShaderType type,
-                                   const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager) override;
+                                   QSSGShaderLibraryManager &shaderLibraryManager) override;
     bool hasCustomShaderFunction(QSSGShaderCache::ShaderType shaderType,
                                  const QByteArray &funcName,
-                                 const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager) override;
+                                 QSSGShaderLibraryManager &shaderLibraryManager) override;
     void setCustomPropertyUniforms(char *ubufData,
-                                   QSSGRef<QSSGRhiShaderPipeline> &shaderPipeline,
+                                   QSSGRhiShaderPipeline &shaderPipeline,
                                    const QSSGRenderContextInterface &context) override;
     bool usesSharedVariables() override;
 

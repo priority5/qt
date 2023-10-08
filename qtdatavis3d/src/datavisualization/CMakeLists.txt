@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 qt_internal_add_module(DataVisualization
     TARGET_PRODUCT "Qt Data Visualization (Qt $$QT_VERSION)"
     TARGET_DESCRIPTION "3D Data Visualization component for Qt."
@@ -85,13 +88,10 @@ qt_internal_add_module(DataVisualization
         input
         theme
         utils
-        ../datavisualizationqml
     PUBLIC_LIBRARIES
         Qt::Core
         Qt::Gui
         Qt::OpenGL
-        Qt::Qml
-        Qt::Quick
     GENERATE_CPP_EXPORTS
 )
 
@@ -399,6 +399,17 @@ qt_internal_extend_target(DataVisualization CONDITION MACOS
     PRIVATE_MODULE_INTERFACE
         Qt::GuiPrivate
 )
+
+qt_internal_extend_target(DataVisualization CONDITION MINGW
+    NO_UNITY_BUILD_SOURCES
+        data/qbardataitem.cpp
+        data/qscatterdataitem.cpp
+        data/qsurfacedataitem.cpp
+    # MinGW triggers `-Werror=maybe-uninitialized` on d_ptr while
+    # proper checks are in place and d_ptr is initialized in
+    # operator=()
+)
+
 qt_internal_add_docs(DataVisualization
     doc/qtdatavis3d.qdocconf
 )

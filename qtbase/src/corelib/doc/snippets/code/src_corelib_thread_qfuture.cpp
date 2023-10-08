@@ -6,7 +6,7 @@ QFuture<QString> future = ...;
 
 QFuture<QString>::const_iterator i;
 for (i = future.constBegin(); i != future.constEnd(); ++i)
-    cout << *i << Qt::endl;
+    cout << qPrintable(*i) << endl;
 //! [0]
 
 
@@ -385,3 +385,17 @@ QFuture<QFuture<QFuture<int>>>> outerFuture;
 QFuture<int> unwrappedFuture = outerFuture.unwrap();
 
 //! [30]
+
+//! [31]
+QPromise<int> p;
+
+QFuture<int> f1 = p.future();
+f1.then([](int) { qDebug("first"); });
+
+QFuture<int> f2 = p.future();
+f2.then([](int) { qDebug("second"); });
+
+p.start();
+p.addResult(42);
+p.finish();
+//! [31]

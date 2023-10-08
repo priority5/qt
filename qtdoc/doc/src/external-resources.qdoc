@@ -332,6 +332,11 @@
 */
 
 /*!
+    \externalpage https://developer.android.com/studio/publish/versioning.html#appversioning
+    \title Android: App Versioning
+*/
+
+/*!
     \externalpage https://bugreports.qt.io/browse/QTBUG-81461
     \title QTBUG-81461
 */
@@ -638,11 +643,6 @@
 */
 
 /*!
-    \externalpage https://doc.qt.io/qtvstools/index.html
-    \title Qt VS Tools Manual
-*/
-
-/*!
     \externalpage https://doc.qt.io/qt-5.15/
     \title Qt 5.15
 */
@@ -750,5 +750,25 @@
 /*!
     \externalpage https://www.gsmarena.com/google_pixel_4-9896.php
     \title Pixel 4
+*/
+
+/*!
+    \externalpage https://m3.material.io
+    \title Material 3
+*/
+
+/*!
+    \externalpage https://www.qt.io/terms-conditions/#appendix-9
+    \title Qt Support Terms and Conditions
+*/
+
+/*!
+    \externalpage https://doc.qt.io/Boot2Qt/b2qt-qbsp-overview.html
+    \title Qt Board Support Package
+*/
+
+/*!
+    \externalpage https://www.qt.io/product/supported-platforms-languages/other-targets
+    \title Other Targets
 */
 

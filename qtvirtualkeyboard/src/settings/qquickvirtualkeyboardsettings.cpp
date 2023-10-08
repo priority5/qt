@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QRegularExpression>
 #include <QtCore/private/qobject_p.h>
+#include <QtCore/qmutex.h>
 
 QT_BEGIN_NAMESPACE
 namespace QtVirtualKeyboard {
@@ -18,9 +19,10 @@ class QQuickVirtualKeyboardSettingsPrivate : public QObjectPrivate
 {
     Q_DECLARE_PUBLIC(QQuickVirtualKeyboardSettings)
 public:
-    QQuickVirtualKeyboardSettingsPrivate(QQuickVirtualKeyboardSettings *q_ptr) :
+    QQuickVirtualKeyboardSettingsPrivate(QQuickVirtualKeyboardSettings *q_ptr, QQmlEngine *engine) :
         QObjectPrivate(),
-        q_ptr(q_ptr)
+        q_ptr(q_ptr),
+        engine(engine)
     {}
 
     QString buildStylePath(const QString &path, const QString &name) const
@@ -43,13 +45,7 @@ public:
 
     QStringList qmlImportPathList() const
     {
-        Q_Q(const QQuickVirtualKeyboardSettings);
-        if (QQmlContext *context = QQmlEngine::contextForObject(q)) {
-            if (QQmlEngine *engine = context->engine()) {
-                return engine->importPathList();
-            }
-        }
-        return QStringList();
+        return engine ? engine->importPathList() : QStringList();
     }
 
     QString stylePath(const QString &name) const
@@ -67,6 +63,9 @@ public:
             stylePathList += stylesPath;
         }
 
+        // Path for backwards compatibility
+        stylePathList << QLatin1String("qrc:/QtQuick/VirtualKeyboard/content/styles/");
+
         for (const QString &stylePath : std::as_const(stylePathList)) {
             QString filePath = buildStyleFilePath(stylePath, name);
             bool pathExist = false;
@@ -78,6 +77,7 @@ public:
     }
 
     QQuickVirtualKeyboardSettings *q_ptr;
+    QQmlEngine *engine;
     QQuickWordCandidateListSettings wordCandidateListSettings;
 };
 
@@ -125,8 +125,8 @@ public:
 /*!
     \internal
 */
-QQuickVirtualKeyboardSettings::QQuickVirtualKeyboardSettings(QObject *parent) :
-    QObject(*new QQuickVirtualKeyboardSettingsPrivate(this), parent)
+QQuickVirtualKeyboardSettings::QQuickVirtualKeyboardSettings(QQmlEngine *engine, QObject *parent) :
+    QObject(*new QQuickVirtualKeyboardSettingsPrivate(this, engine), parent)
 {
     Q_D(QQuickVirtualKeyboardSettings);
     Settings *settings = Settings::instance();
@@ -152,6 +152,22 @@ QQuickVirtualKeyboardSettings::QQuickVirtualKeyboardSettings(QObject *parent) :
     connect(settings, SIGNAL(handwritingModeDisabledChanged()), SIGNAL(handwritingModeDisabledChanged()));
     connect(settings, SIGNAL(defaultInputMethodDisabledChanged()), SIGNAL(defaultInputMethodDisabledChanged()));
     connect(settings, SIGNAL(defaultDictionaryDisabledChanged()), SIGNAL(defaultDictionaryDisabledChanged()));
+}
+
+/*!
+    \internal
+    TODO: Remove this method when QML stops creating separate singleton instances for each version.
+ */
+QQuickVirtualKeyboardSettings *QQuickVirtualKeyboardSettings::create(
+        QQmlEngine *qmlEngine, QJSEngine *)
+{
+    static QMutex mutex;
+    static QHash<QQmlEngine *, QQuickVirtualKeyboardSettings *> instances;
+    QMutexLocker locker(&mutex);
+    QQuickVirtualKeyboardSettings *&instance = instances[qmlEngine];
+    if (instance == nullptr)
+        instance = new QQuickVirtualKeyboardSettings(qmlEngine);
+    return instance;
 }
 
 /*!
@@ -525,9 +541,8 @@ void QQuickVirtualKeyboardSettings::resetStyle()
 
 /*!
     \since QtQuick.VirtualKeyboard.Settings 2.2
-    \qmlpropertygroup QtQuick.VirtualKeyboard::VirtualKeyboardSettings::wordCandidateList
-    \qmlproperty int QtQuick.VirtualKeyboard::VirtualKeyboardSettings::wordCandidateList.autoHideDelay
-    \qmlproperty bool QtQuick.VirtualKeyboard::VirtualKeyboardSettings::wordCandidateList.alwaysVisible
+    \qmlproperty int VirtualKeyboardSettings::wordCandidateList.autoHideDelay
+    \qmlproperty bool VirtualKeyboardSettings::wordCandidateList.alwaysVisible
 
     \table
     \header

@@ -5,7 +5,9 @@
 #include <QtCore/QConcatenateTablesProxyModel>
 #include <QtGui/QStandardItemModel>
 #include <QtQml/qqmlcomponent.h>
+#include <QtQml/qqmlapplicationengine.h>
 #include <QtQmlModels/private/qqmldelegatemodel_p.h>
+#include <QtQmlModels/private/qqmllistmodel_p.h>
 #include <QtQuick/qquickview.h>
 #include <QtQuick/qquickitem.h>
 #include <QtQuickTestUtils/private/qmlutils_p.h>
@@ -19,6 +21,7 @@ public:
     tst_QQmlDelegateModel();
 
 private slots:
+    void resettingRolesRespected();
     void valueWithoutCallingObjectFirst_data();
     void valueWithoutCallingObjectFirst();
     void qtbug_86017();
@@ -26,6 +29,10 @@ private slots:
     void contextAccessedByHandler();
     void redrawUponColumnChange();
     void nestedDelegates();
+    void typedModelData();
+    void deleteRace();
+    void persistedItemsStayInCache();
+    void doNotUnrefObjectUnderConstruction();
 };
 
 class AbstractItemModel : public QAbstractItemModel
@@ -83,6 +90,61 @@ tst_QQmlDelegateModel::tst_QQmlDelegateModel()
     : QQmlDataTest(QT_QMLTEST_DATADIR)
 {
     qmlRegisterType<AbstractItemModel>("Test", 1, 0, "AbstractItemModel");
+}
+
+class TableModel : public QAbstractTableModel
+{
+    Q_OBJECT
+
+public:
+    int rowCount(const QModelIndex & = QModelIndex()) const override
+    {
+        return 1;
+    }
+
+    int columnCount(const QModelIndex & = QModelIndex()) const override
+    {
+        return 1;
+    }
+
+    QVariant data(const QModelIndex &index, int role) const override
+    {
+        switch (role) {
+        case 0:
+            return QString("foo: %1, %2").arg(index.column()).arg(index.row());
+        case 1:
+            return 42;
+        default:
+            break;
+        }
+
+        return QVariant();
+    }
+
+    Q_INVOKABLE void change() { beginResetModel(); toggle = !toggle; endResetModel(); }
+
+    QHash<int, QByteArray> roleNames() const override
+    {
+        if (toggle)
+            return { {0, "foo"} };
+        else
+            return { {1, "bar"} };
+    }
+
+    bool toggle = true;
+};
+
+void tst_QQmlDelegateModel::resettingRolesRespected()
+{
+    auto model = std::make_unique<TableModel>();
+    QQmlApplicationEngine engine;
+    engine.setInitialProperties({ {"model", QVariant::fromValue(model.get()) }} );
+    engine.load(testFileUrl("resetModelData.qml"));
+    QTRY_VERIFY(!engine.rootObjects().isEmpty());
+    QObject *root = engine.rootObjects().constFirst();
+    QVERIFY(!root->property("success").toBool());
+    model->change();
+    QTRY_VERIFY(root->property("success").toBool());
 }
 
 void tst_QQmlDelegateModel::valueWithoutCallingObjectFirst_data()
@@ -205,6 +267,111 @@ void tst_QQmlDelegateModel::nestedDelegates()
         return; // loader found
     }
     QFAIL("Loader not found");
+}
+
+void tst_QQmlDelegateModel::typedModelData()
+{
+    QQmlEngine engine;
+    const QUrl url = testFileUrl("typedModelData.qml");
+    QQmlComponent c(&engine, url);
+    QVERIFY2(c.isReady(), qPrintable(c.errorString()));
+    QScopedPointer<QObject> o(c.create());
+
+    QQmlDelegateModel *delegateModel = qobject_cast<QQmlDelegateModel *>(o.data());
+    QVERIFY(delegateModel);
+
+    for (int i = 0; i < 3; ++i) {
+        if (i == 0) {
+            for (int j = 0; j < 2; ++j) {
+                QTest::ignoreMessage(
+                    QtWarningMsg,
+                    "Could not find any constructor for value type QQmlPointFValueType "
+                    "to call with value QVariant(double, 11)");
+            }
+
+            QTest::ignoreMessage(
+                QtWarningMsg,
+                qPrintable(url.toString() + ":48:9: Unable to assign double to QPointF"));
+        } else if (i == 1) {
+            QTest::ignoreMessage(
+                QtWarningMsg,
+                qPrintable(url.toString() + ":44:9: Unable to assign [undefined] to double"));
+        }
+
+        delegateModel->setProperty("n", i);
+        QObject *delegate = delegateModel->object(0);
+        QVERIFY(delegate);
+        switch (i) {
+        case 0: {
+            // list model with 1 role.
+            // Does not work, for the most part, because the model is singular
+            QCOMPARE(delegate->property("modelX"), 11.0);
+            QCOMPARE(delegate->property("modelDataX"), 0.0);
+            QCOMPARE(delegate->property("modelSelf"), QPointF(11.0, 0.0));
+            QCOMPARE(delegate->property("modelDataSelf"), QPointF());
+            QCOMPARE(delegate->property("modelModelData"), QPointF());
+            break;
+        }
+        case 1: {
+            // JS array of objects
+            QCOMPARE(delegate->property("modelDataX"), 17.0);
+            const QPointF modelData = delegate->property("modelDataSelf").value<QPointF>();
+            QCOMPARE(modelData, QPointF(17, 18));
+            QCOMPARE(delegate->property("modelModelData").value<QPointF>(), modelData);
+            break;
+        }
+        case 2: {
+            // single object
+            QCOMPARE(delegate->property("modelX"), 21);
+            QCOMPARE(delegate->property("modelDataX"), 21);
+            const QPointF modelData = delegate->property("modelDataSelf").value<QPointF>();
+            QCOMPARE(modelData, QPointF(21, 22));
+            QCOMPARE(delegate->property("modelSelf"), QVariant::fromValue(modelData));
+            QCOMPARE(delegate->property("modelModelData"), QVariant::fromValue(modelData));
+            break;
+        }
+        default:
+            QFAIL("wrong model number");
+            break;
+        }
+    }
+
+}
+
+void tst_QQmlDelegateModel::deleteRace()
+{
+    QQmlEngine engine;
+    QQmlComponent c(&engine, testFileUrl("deleteRace.qml"));
+    QVERIFY2(c.isReady(), qPrintable(c.errorString()));
+    QScopedPointer<QObject> o(c.create());
+    QVERIFY(!o.isNull());
+    QTRY_COMPARE(o->property("count").toInt(), 2);
+    QTRY_COMPARE(o->property("count").toInt(), 0);
+}
+
+void tst_QQmlDelegateModel::persistedItemsStayInCache()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("persistedItemsCache.qml"));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create());
+    QVERIFY(object);
+    const QVariant properyListModel = object->property("testListModel");
+    QQmlListModel *listModel = qvariant_cast<QQmlListModel *>(properyListModel);
+    QVERIFY(listModel);
+    QTRY_COMPARE(object->property("createCount").toInt(), 3);
+    listModel->clear();
+    QTRY_COMPARE(object->property("destroyCount").toInt(), 3);
+}
+
+void tst_QQmlDelegateModel::doNotUnrefObjectUnderConstruction()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("modifyObjectUnderConstruction.qml"));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> object(component.create());
+    QVERIFY(object);
+    QTRY_COMPARE(object->property("testModel").toInt(), 0);
 }
 
 QTEST_MAIN(tst_QQmlDelegateModel)

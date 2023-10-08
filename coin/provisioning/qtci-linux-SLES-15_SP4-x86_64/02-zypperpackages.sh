@@ -1,43 +1,6 @@
 #!/usr/bin/env bash
-
-#############################################################################
-##
-## Copyright (C) 2020 The Qt Company Ltd.
-## Contact: https://www.qt.io/licensing/
-##
-## This file is part of the provisioning scripts of the Qt Toolkit.
-##
-## $QT_BEGIN_LICENSE:LGPL$
-## Commercial License Usage
-## Licensees holding valid commercial Qt licenses may use this file in
-## accordance with the commercial license agreement provided with the
-## Software or, alternatively, in accordance with the terms contained in
-## a written agreement between you and The Qt Company. For licensing terms
-## and conditions see https://www.qt.io/terms-conditions. For further
-## information use the contact form at https://www.qt.io/contact-us.
-##
-## GNU Lesser General Public License Usage
-## Alternatively, this file may be used under the terms of the GNU Lesser
-## General Public License version 3 as published by the Free Software
-## Foundation and appearing in the file LICENSE.LGPL3 included in the
-## packaging of this file. Please review the following information to
-## ensure the GNU Lesser General Public License version 3 requirements
-## will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-##
-## GNU General Public License Usage
-## Alternatively, this file may be used under the terms of the GNU
-## General Public License version 2.0 or (at your option) the GNU General
-## Public license version 3 or any later version approved by the KDE Free
-## Qt Foundation. The licenses are as published by the Free Software
-## Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-## included in the packaging of this file. Please review the following
-## information to ensure the GNU General Public License requirements will
-## be met: https://www.gnu.org/licenses/gpl-2.0.html and
-## https://www.gnu.org/licenses/gpl-3.0.html.
-##
-## $QT_END_LICENSE$
-##
-#############################################################################
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 set -ex
 
@@ -58,7 +21,7 @@ sudo zypper -nq install bison flex gperf \
         zlib-devel \
         libudev-devel \
         glib2-devel \
-        libopenssl-devel \
+        libopenssl-3-devel \
         freetype2-devel \
         fontconfig-devel \
         sqlite3-devel \
@@ -85,13 +48,24 @@ sudo zypper -nq install libXi-devel postgresql14 postgresql14-devel mysql-devel 
 sudo zypper -nq install xcb-util-devel xcb-util-image-devel xcb-util-keysyms-devel \
          xcb-util-wm-devel xcb-util-renderutil-devel
 
+# temporary solution for libxcb-cursor0 xcb-util-cursor-devel
+sudo zypper addrepo --no-gpgcheck https://download.opensuse.org/repositories/home:liangqi_qt:branches:SUSE:SLE-15-SP4:GA/standard/home:liangqi_qt:branches:SUSE:SLE-15-SP4:GA.repo
+sudo zypper refresh
+sudo zypper -nq install --force-resolution libxcb-cursor0 xcb-util-cursor-devel
+
 # qtwebengine
 sudo zypper -nq install alsa-devel dbus-1-devel libxkbfile-devel libdrm-devel \
          libXcomposite-devel libXcursor-devel libXrandr-devel libXtst-devel \
          mozilla-nspr-devel mozilla-nss-devel glproto-devel libxshmfence-devel
 
+# qtwebengine, qtmultimedia+ffmpeg
+sudo zypper -nq install libva-devel
+
 # qtwebkit
 sudo zypper -nq install libxml2-devel libxslt-devel
+
+# yasm (for ffmpeg in multimedia)
+sudo zypper -nq install yasm
 
 # GStreamer (qtwebkit and qtmultimedia), pulseaudio (qtmultimedia)
 sudo zypper -nq install gstreamer-devel gstreamer-plugins-base-devel libpulse-devel
@@ -121,8 +95,8 @@ sudo zypper -nq install autoconf libcurl-devel libexpat-devel
 # Nodejs - required by QtWebengine
 sudo zypper -nq install nodejs16
 
+# OpenSSL 3
+sudo zypper -nq install openssl-3
+
 gccVersion="$(gcc --version |grep gcc |cut -b 17-23)"
 echo "GCC = $gccVersion" >> versions.txt
-
-OpenSSLVersion="$(openssl version |cut -b 9-14)"
-echo "OpenSSL = $OpenSSLVersion" >> ~/versions.txt

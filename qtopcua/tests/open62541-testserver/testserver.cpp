@@ -68,7 +68,7 @@ static UA_ByteString loadFile(const QString &filePath) {
         return fileContents;
 
     if (file.read(reinterpret_cast<char*>(fileContents.data), fileContents.length) != static_cast<qint64>(fileContents.length)) {
-        UA_ByteString_deleteMembers(&fileContents);
+        UA_ByteString_clear(&fileContents);
         fileContents.length = 0;
         return fileContents;
     }
@@ -81,9 +81,9 @@ bool TestServer::createSecureServerConfig(UA_ServerConfig *config)
     const QString privateKeyFilePath = QLatin1String(":/pki/own/private/open62541-testserver.der");
 
     UA_ByteString certificate = loadFile(certificateFilePath);
-    UaDeleter<UA_ByteString> certificateDeleter(&certificate, UA_ByteString_deleteMembers);
+    UaDeleter<UA_ByteString> certificateDeleter(&certificate, UA_ByteString_clear);
     UA_ByteString privateKey = loadFile(privateKeyFilePath);
-    UaDeleter<UA_ByteString> privateKeyDeleter(&privateKey, UA_ByteString_deleteMembers);
+    UaDeleter<UA_ByteString> privateKeyDeleter(&privateKey, UA_ByteString_clear);
 
     if (certificate.length == 0) {
         UA_LOG_WARNING(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
@@ -154,10 +154,40 @@ bool TestServer::createSecureServerConfig(UA_ServerConfig *config)
         return false;
     }
 
-    result = UA_ServerConfig_addAllSecurityPolicies(config, &certificate, &privateKey);
+    // result = UA_ServerConfig_addAllSecurityPolicies(config, &certificate, &privateKey);
 
-    if (result != UA_STATUSCODE_GOOD) {
-        qWarning() << "Failed to add security policies";
+    // Add the security policies manually because we need to skip Basic128Rsa15 and Basic256
+    // if OpenSSL doesn't support SHA-1 signatures (e.g. RHEL 9).
+
+    UA_StatusCode retval = UA_ServerConfig_addSecurityPolicyNone(config, &certificate);
+    if(retval != UA_STATUSCODE_GOOD) {
+        qWarning() << "Failed to add security policy None";
+        return false;
+    }
+
+    if (Open62541Utils::checkSha1SignatureSupport()) {
+        retval = UA_ServerConfig_addSecurityPolicyBasic128Rsa15(config, &certificate, &privateKey);
+        if(retval != UA_STATUSCODE_GOOD) {
+            qWarning() << "Failed to add security policy Basic128Rsa15";
+            return false;
+        }
+
+        retval = UA_ServerConfig_addSecurityPolicyBasic256(config, &certificate, &privateKey);
+        if(retval != UA_STATUSCODE_GOOD) {
+            qWarning() << "Failed to add security policy Basic256";
+            return false;
+        }
+    }
+
+    retval = UA_ServerConfig_addSecurityPolicyBasic256Sha256(config, &certificate, &privateKey);
+    if(retval != UA_STATUSCODE_GOOD) {
+        qWarning() << "Failed to add security policy Basic256Sha256";
+        return false;
+    }
+
+    retval = UA_ServerConfig_addSecurityPolicyAes128Sha256RsaOaep(config, &certificate, &privateKey);
+    if(retval != UA_STATUSCODE_GOOD) {
+        qWarning() << "Failed to add security policy Aes128Sha256RsaOaep";
         return false;
     }
 
@@ -166,7 +196,7 @@ bool TestServer::createSecureServerConfig(UA_ServerConfig *config)
     certificateDeleter.release();
     privateKeyDeleter.release();
 
-    result = UA_AccessControl_default(config, true,
+    result = UA_AccessControl_default(config, true, nullptr,
                 &config->securityPolicies[0].policyUri,
                 usernamePasswordsSize, usernamePasswords);
 
@@ -243,9 +273,9 @@ UA_NodeId TestServer::addFolder(const QString &nodeString, const QString &displa
                                      nullptr,
                                      &resultNode);
 
-    UA_QualifiedName_deleteMembers(&nodeBrowseName);
-    UA_NodeId_deleteMembers(&requestedNodeId);
-    UA_ObjectAttributes_deleteMembers(&oAttr);
+    UA_QualifiedName_clear(&nodeBrowseName);
+    UA_NodeId_clear(&requestedNodeId);
+    UA_ObjectAttributes_clear(&oAttr);
 
     if (result != UA_STATUSCODE_GOOD) {
         qWarning() << "Could not add folder:" << nodeString << " :" << result;
@@ -274,8 +304,8 @@ UA_NodeId TestServer::addObject(const UA_NodeId &parentFolder, int namespaceInde
                                      nullptr,
                                      &resultNode);
 
-    UA_QualifiedName_deleteMembers(&nodeBrowseName);
-    UA_ObjectAttributes_deleteMembers(&oAttr);
+    UA_QualifiedName_clear(&nodeBrowseName);
+    UA_ObjectAttributes_clear(&oAttr);
 
     if (result != UA_STATUSCODE_GOOD) {
         qWarning() << "Could not add object to folder:" << result;
@@ -315,8 +345,8 @@ UA_NodeId TestServer::addVariableWithWriteMask(const UA_NodeId &folder, const QS
                                                      &resultId);
 
 
-    UA_NodeId_deleteMembers(&variableNodeId);
-    UA_VariableAttributes_deleteMembers(&attr);
+    UA_NodeId_clear(&variableNodeId);
+    UA_VariableAttributes_clear(&attr);
 
     if (result != UA_STATUSCODE_GOOD) {
         qWarning() << "Could not add variable:" << result;
@@ -366,7 +396,7 @@ UA_NodeId TestServer::addVariable(const UA_NodeId &folder, const QString &variab
                                                      nullptr,
                                                      &resultId);
 
-    // Prevent deletion of the QList's value by UA_VariableAttribute_deleteMembers
+    // Prevent deletion of the QList's value by UA_VariableAttribute_clear
     attr.arrayDimensions = nullptr;
     attr.arrayDimensionsSize = 0;
 
@@ -382,8 +412,8 @@ UA_NodeId TestServer::addVariable(const UA_NodeId &folder, const QString &variab
         }
     }
 
-    UA_NodeId_deleteMembers(&variableNodeId);
-    UA_VariableAttributes_deleteMembers(&attr);
+    UA_NodeId_clear(&variableNodeId);
+    UA_VariableAttributes_clear(&attr);
 
     if (result != UA_STATUSCODE_GOOD) {
         qWarning() << "Could not add variable:" << result << "for node" << variableNode;
@@ -427,8 +457,8 @@ UA_NodeId TestServer::addEmptyArrayVariable(const UA_NodeId &folder, const QStri
                                                      nullptr,
                                                      &resultId);
 
-    UA_NodeId_deleteMembers(&variableNodeId);
-    UA_VariableAttributes_deleteMembers(&attr);
+    UA_NodeId_clear(&variableNodeId);
+    UA_VariableAttributes_clear(&attr);
 
     if (result != UA_STATUSCODE_GOOD) {
         qWarning() << "Could not add empty array variable:" << result;
@@ -507,12 +537,12 @@ UA_NodeId TestServer::addMultiplyMethod(const UA_NodeId &folder, const QString &
                                                      1, &outputArgument,
                                                      nullptr, &resultId);
 
-    UA_QualifiedName_deleteMembers(&nodeBrowseName);
-    UA_NodeId_deleteMembers(&methodNodeId);
-    UA_MethodAttributes_deleteMembers(&attr);
-    UA_Argument_deleteMembers(&inputArguments[0]);
-    UA_Argument_deleteMembers(&inputArguments[1]);
-    UA_Argument_deleteMembers(&outputArgument);
+    UA_QualifiedName_clear(&nodeBrowseName);
+    UA_NodeId_clear(&methodNodeId);
+    UA_MethodAttributes_clear(&attr);
+    UA_Argument_clear(&inputArguments[0]);
+    UA_Argument_clear(&inputArguments[1]);
+    UA_Argument_clear(&outputArgument);
 
     if (result != UA_STATUSCODE_GOOD) {
         qWarning() << "Could not add variable:" << result;
@@ -598,13 +628,13 @@ UA_NodeId TestServer::addMultipleOutputArgumentsMethod(const UA_NodeId &folder, 
                                                      2, outputArgument,
                                                      nullptr, &resultId);
 
-    UA_QualifiedName_deleteMembers(&nodeBrowseName);
-    UA_NodeId_deleteMembers(&methodNodeId);
-    UA_MethodAttributes_deleteMembers(&attr);
-    UA_Argument_deleteMembers(&inputArguments[0]);
-    UA_Argument_deleteMembers(&inputArguments[1]);
-    UA_Argument_deleteMembers(&outputArgument[0]);
-    UA_Argument_deleteMembers(&outputArgument[1]);
+    UA_QualifiedName_clear(&nodeBrowseName);
+    UA_NodeId_clear(&methodNodeId);
+    UA_MethodAttributes_clear(&attr);
+    UA_Argument_clear(&inputArguments[0]);
+    UA_Argument_clear(&inputArguments[1]);
+    UA_Argument_clear(&outputArgument[0]);
+    UA_Argument_clear(&outputArgument[1]);
 
     if (result != UA_STATUSCODE_GOOD) {
         qWarning() << "Could not add variable:" << result;
@@ -650,11 +680,11 @@ UA_NodeId TestServer::addAddNamespaceMethod(const UA_NodeId &folder, const QStri
                                                      1, &outputArgument,
                                                      nullptr, &resultId);
 
-    UA_QualifiedName_deleteMembers(&nodeBrowseName);
-    UA_NodeId_deleteMembers(&methodNodeId);
-    UA_MethodAttributes_deleteMembers(&attr);
-    UA_Argument_deleteMembers(&inputArguments[0]);
-    UA_Argument_deleteMembers(&outputArgument);
+    UA_QualifiedName_clear(&nodeBrowseName);
+    UA_NodeId_clear(&methodNodeId);
+    UA_MethodAttributes_clear(&attr);
+    UA_Argument_clear(&inputArguments[0]);
+    UA_Argument_clear(&outputArgument);
 
     if (result != UA_STATUSCODE_GOOD) {
         qWarning() << "Could not add method:" << result;

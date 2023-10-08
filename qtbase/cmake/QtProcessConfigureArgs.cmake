@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 # This script reads Qt configure arguments from config.opt,
 # translates the arguments to CMake arguments and calls CMake.
 #
@@ -40,12 +43,22 @@ function(warn_in_per_repo_build arg)
     endif()
 endfunction()
 
+function(is_valid_qt_hex_version arg version)
+    if(NOT version MATCHES "^0x[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]$")
+        message(FATAL_ERROR "Incorrect version ${version} specified for ${arg}")
+    endif()
+endfunction()
+
 if("${MODULE_ROOT}" STREQUAL "")
     # If MODULE_ROOT is not set, assume that we want to build qtbase or top-level.
     get_filename_component(MODULE_ROOT ".." ABSOLUTE BASE_DIR "${CMAKE_CURRENT_LIST_DIR}")
     set(qtbase_or_top_level_build TRUE)
 else()
-    file(TO_CMAKE_PATH "${MODULE_ROOT}" MODULE_ROOT)
+    # If MODULE_ROOT is passed without drive letter, we try to add it to the path.
+    # The check is necessary; otherwise, `get_filename_component` returns an empty string.
+    if(NOT MODULE_ROOT STREQUAL ".")
+        get_filename_component(MODULE_ROOT "." REALPATH BASE_DIR "${MODULE_ROOT}")
+    endif()
     set(qtbase_or_top_level_build FALSE)
 endif()
 set(configure_filename "configure.cmake")
@@ -122,6 +135,10 @@ while(NOT "${configure_args}" STREQUAL "")
         set(cmake_file_api FALSE)
     elseif(arg STREQUAL "-verbose")
         list(APPEND cmake_args "--log-level=STATUS")
+    elseif(arg STREQUAL "-disable-deprecated-up-to")
+        list(POP_FRONT configure_args version)
+        is_valid_qt_hex_version("${arg}" "${version}")
+        push("-DQT_DISABLE_DEPRECATED_UP_TO=${version}")
     elseif(arg STREQUAL "--")
         # Everything after this argument will be passed to CMake verbatim.
         list(APPEND cmake_args "${configure_args}")
@@ -131,6 +148,15 @@ while(NOT "${configure_args}" STREQUAL "")
     endif()
 endwhile()
 
+if(FRESH_REQUESTED)
+    push("-DQT_INTERNAL_FRESH_REQUESTED:BOOL=TRUE")
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+        push("--fresh")
+    else()
+        file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/CMakeCache.txt"
+                            "${CMAKE_BINARY_DIR}/CMakeFiles")
+    endif()
+endif()
 
 ####################################################################################################
 # Define functions/macros that are called in configure.cmake files
@@ -797,6 +823,8 @@ endfunction()
 drop_input(commercial)
 drop_input(confirm-license)
 translate_boolean_input(precompile_header BUILD_WITH_PCH)
+translate_boolean_input(unity_build QT_UNITY_BUILD)
+translate_string_input(unity_build_batch_size QT_UNITY_BUILD_BATCH_SIZE)
 translate_boolean_input(ccache QT_USE_CCACHE)
 translate_boolean_input(shared BUILD_SHARED_LIBS)
 translate_boolean_input(warnings_are_errors WARNINGS_ARE_ERRORS)

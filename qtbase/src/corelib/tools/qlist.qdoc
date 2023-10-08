@@ -422,14 +422,20 @@
 */
 
 /*! \fn template <typename T> void QList<T>::resize(qsizetype size)
+    \fn template <typename T> void QList<T>::resize(qsizetype size, parameter_type c)
+    \since 6.0
 
     Sets the size of the list to \a size. If \a size is greater than the
     current size, elements are added to the end; the new elements are
-    initialized with a \l{default-constructed value}. If \a size is less
-    than the current size, elements are removed from the end.
+    initialized with either a \l{default-constructed value} or \a c. If \a size
+    is less than the current size, elements are removed from the end.
 
-    Since Qt 5.6, resize() doesn't shrink the capacity anymore.
-    To shed excess capacity, use squeeze().
+    If this list is not shared, the capacity() is preserved. Use squeeze()
+    to shed excess capacity.
+
+    \note In Qt versions prior to 5.7 (for QVector; QList lacked a resize()
+    until 6.0), this function released the memory used by the list instead of
+    preserving the capacity.
 
     \sa size()
 */
@@ -1316,18 +1322,14 @@
     \sa append(), operator<<()
 */
 
-/*! \fn template <typename T> QList<T> QList<T>::operator+(const QList<T> &other) const
+/*!
+    \fn template <typename T> QList<T> QList<T>::operator+(const QList<T> &other) const &
+    \fn template <typename T> QList<T> QList<T>::operator+(const QList<T> &other) &&
+    \fn template <typename T> QList<T> QList<T>::operator+(QList<T> &&other) const &
+    \fn template <typename T> QList<T> QList<T>::operator+(QList<T> &&other) &&
 
     Returns a list that contains all the items in this list
     followed by all the items in the \a other list.
-
-    \sa operator+=()
-*/
-
-/*! \fn template <typename T> QList<T> QList<T>::operator+(QList<T> &&other) const
-    \since 6.0
-
-    \overload
 
     \sa operator+=()
 */

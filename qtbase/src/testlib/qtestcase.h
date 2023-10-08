@@ -149,7 +149,7 @@ inline void useVerifyThrowsException() {}
  * what the following provides as QTRY_LOOP_IMPL(); however, for now, the
  * reporting of how much to increase the timeout to (if within a factor of two)
  * on failure and the check for (QTest::runningTest() &&
- * QTest::currentTestFailed()) go beyond qWaitFor(). (We no longer care about
+ * QTest::currentTestResolved()) go beyond qWaitFor(). (We no longer care about
  * the bug in MSVC < 2017 that precluded using qWaitFor() in the implementation
  * here, see QTBUG-59096.)
  */
@@ -160,14 +160,14 @@ inline void useVerifyThrowsException() {}
         QTest::qWait(0); \
     } \
     int qt_test_i = 0; \
-    for (; qt_test_i < timeoutValue && !(QTest::runningTest() && QTest::currentTestFailed()) \
+    for (; qt_test_i < timeoutValue && !(QTest::runningTest() && QTest::currentTestResolved()) \
              && !(expr); qt_test_i += step) { \
         QTest::qWait(step); \
     }
 // Ends in a for-block, so doesn't want a following semicolon.
 
 #define QTRY_TIMEOUT_DEBUG_IMPL(expr, timeoutValue, step) \
-    if (!(QTest::runningTest() && QTest::currentTestFailed()) && !(expr)) { \
+    if (!(QTest::runningTest() && QTest::currentTestResolved()) && !(expr)) { \
         QTRY_LOOP_IMPL(expr, 2 * (timeoutValue), step) \
         if ((expr)) { \
             QFAIL(qPrintable(QTest::Internal::formatTryTimeoutDebugMessage(\
@@ -315,16 +315,17 @@ namespace QTest
     template <typename T> // Fallback; for built-in types debug streaming must be possible
     inline typename std::enable_if<!QtPrivate::IsQEnumHelper<T>::Value && !std::is_enum_v<T>, char *>::type toString(const T &t)
     {
+        char *result = nullptr;
 #ifndef QT_NO_DEBUG_STREAM
         if constexpr (QTypeTraits::has_ostream_operator_v<QDebug, T>) {
-            return qstrdup(QDebug::toString(t).toUtf8().constData());
+            result = qstrdup(QDebug::toString(t).toUtf8().constData());
         } else {
             static_assert(!QMetaTypeId2<T>::IsBuiltIn,
                         "Built-in type must implement debug streaming operator "
                         "or provide QTest::toString specialization");
         }
 #endif
-        return nullptr;
+        return result;
     }
 
     template<typename F> // Output QFlags of registered enumerations
@@ -375,6 +376,11 @@ namespace QTest
     Q_TESTLIB_EXPORT int qExec(QObject *testObject, int argc = 0, char **argv = nullptr);
     Q_TESTLIB_EXPORT int qExec(QObject *testObject, const QStringList &arguments);
 
+#if QT_CONFIG(batch_test_support) || defined(Q_QDOC)
+    using TestEntryFunction = int (*)(int, char **);
+    Q_TESTLIB_EXPORT void qRegisterTestCase(const QString &name, TestEntryFunction entryFunction);
+#endif  // QT_CONFIG(batch_test_support)
+
     Q_TESTLIB_EXPORT void setMainSourcePath(const char *file, const char *builddir = nullptr);
 
     Q_TESTLIB_EXPORT bool qVerify(bool statement, const char *statementStr, const char *description,
@@ -415,6 +421,7 @@ namespace QTest
     Q_TESTLIB_EXPORT const char *currentTestFunction();
     Q_TESTLIB_EXPORT const char *currentDataTag();
     Q_TESTLIB_EXPORT bool currentTestFailed();
+    Q_TESTLIB_EXPORT bool currentTestResolved();
     Q_TESTLIB_EXPORT bool runningTest(); // Internal, for use by macros and QTestEventLoop.
 
     Q_TESTLIB_EXPORT Qt::Key asciiToKey(char ascii);
@@ -572,7 +579,7 @@ namespace QTest
     QTEST_COMPARE_DECL(bool)
 #endif
 
-    template <typename T1, typename T2>
+    template <typename T1, typename T2 = T1>
     inline bool qCompare(const T1 &t1, const T2 &t2, const char *actual, const char *expected,
                          const char *file, int line)
     {

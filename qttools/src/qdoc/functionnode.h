@@ -34,9 +34,6 @@ public:
         QmlSignal,
         QmlSignalHandler,
         QmlMethod,
-        JsSignal,
-        JsSignalHandler,
-        JsMethod
     };
 
     FunctionNode(Aggregate *parent, const QString &name); // C++ function (Plain)
@@ -45,7 +42,6 @@ public:
     Node *clone(Aggregate *parent) override;
     [[nodiscard]] Metaness metaness() const { return m_metaness; }
     [[nodiscard]] QString metanessString() const;
-    bool changeMetaness(Metaness from, Metaness to);
     void setMetaness(Metaness metaness) { m_metaness = metaness; }
     [[nodiscard]] QString kindString() const;
     static Metaness getMetaness(const QString &value);
@@ -79,6 +75,12 @@ public:
     }
     [[nodiscard]] bool isDeprecated() const override;
 
+    void markExplicit() { m_explicit = true; }
+    bool isExplicit() const { return m_explicit; }
+
+    void markConstexpr() { m_constexpr = true; }
+    bool isConstexpr() const { return m_constexpr; }
+
     [[nodiscard]] bool isCppFunction() const { return m_metaness == Plain; } // Is this correct?
     [[nodiscard]] bool isSignal() const { return (m_metaness == Signal); }
     [[nodiscard]] bool isSlot() const { return (m_metaness == Slot); }
@@ -88,10 +90,6 @@ public:
     [[nodiscard]] bool isMCtor() const { return (m_metaness == MCtor); }
     [[nodiscard]] bool isCAssign() const { return (m_metaness == CAssign); }
     [[nodiscard]] bool isMAssign() const { return (m_metaness == MAssign); }
-
-    [[nodiscard]] bool isJsMethod() const { return (m_metaness == JsMethod); }
-    [[nodiscard]] bool isJsSignal() const { return (m_metaness == JsSignal); }
-    [[nodiscard]] bool isJsSignalHandler() const { return (m_metaness == JsSignalHandler); }
 
     [[nodiscard]] bool isQmlMethod() const { return (m_metaness == QmlMethod); }
     [[nodiscard]] bool isQmlSignal() const { return (m_metaness == QmlSignal); }
@@ -110,18 +108,15 @@ public:
     [[nodiscard]] const Parameters &parameters() const { return m_parameters; }
     [[nodiscard]] bool isPrivateSignal() const { return m_parameters.isPrivateSignal(); }
     void setParameters(const QString &signature) { m_parameters.set(signature); }
-    [[nodiscard]] QString signature(bool values, bool noReturnType,
-                                    bool templateParams = false) const override;
+    [[nodiscard]] QString signature(Node::SignatureOptions options) const override;
 
     [[nodiscard]] const QString &overridesThis() const { return m_overridesThis; }
-    [[nodiscard]] const NodeList &associatedProperties() const { return m_associatedProperties; }
+    [[nodiscard]] const QList<PropertyNode *> &associatedProperties() const { return m_associatedProperties; }
     [[nodiscard]] bool hasAssociatedProperties() const { return !m_associatedProperties.isEmpty(); }
     [[nodiscard]] bool hasOneAssociatedProperty() const
     {
         return (m_associatedProperties.size() == 1);
     }
-    [[nodiscard]] Node *firstAssociatedProperty() const { return m_associatedProperties[0]; }
-
     [[nodiscard]] QString element() const override { return parent()->name(); }
     [[nodiscard]] bool isAttached() const override { return m_attached; }
     [[nodiscard]] bool isQtQuickNode() const override { return parent()->isQtQuickNode(); }
@@ -138,8 +133,6 @@ public:
     {
         return parent()->logicalModuleIdentifier();
     }
-
-    void debug() const;
 
     void setFinal(bool b) { m_isFinal = b; }
     [[nodiscard]] bool isFinal() const { return m_isFinal; }
@@ -188,6 +181,9 @@ private:
     bool m_isRef : 1;
     bool m_isRefRef : 1;
     bool m_isInvokable : 1;
+    bool m_explicit;
+    bool m_constexpr;
+
     Metaness m_metaness {};
     Virtualness m_virtualness {};
     signed short m_overloadNumber {};
@@ -196,7 +192,7 @@ private:
     QStringList m_parentPath {};
     QString m_overridesThis {};
     QString m_tag {};
-    NodeList m_associatedProperties {};
+    QList<PropertyNode *> m_associatedProperties {};
     Parameters m_parameters {};
 };
 

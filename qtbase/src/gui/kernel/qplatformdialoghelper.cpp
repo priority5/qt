@@ -15,6 +15,7 @@
 #include <QtCore/QUrl>
 #include <QtCore/QVariant>
 #include <QtGui/QColor>
+#include <QtGui/QPixmap>
 
 #include <algorithm>
 
@@ -774,6 +775,9 @@ public:
     QPlatformDialogHelper::StandardButtons buttons;
     QList<QMessageDialogOptions::CustomButton> customButtons;
     int nextCustomButtonId;
+    QPixmap iconPixmap;
+    QString checkBoxLabel;
+    Qt::CheckState checkBoxState = Qt::Unchecked;
 };
 
 QMessageDialogOptions::QMessageDialogOptions(QMessageDialogOptionsPrivate *dd)
@@ -823,6 +827,16 @@ QMessageDialogOptions::Icon QMessageDialogOptions::icon() const
 void QMessageDialogOptions::setIcon(Icon icon)
 {
     d->icon = icon;
+}
+
+void QMessageDialogOptions::setIconPixmap(const QPixmap &pixmap)
+{
+    d->iconPixmap = pixmap;
+}
+
+QPixmap QMessageDialogOptions::iconPixmap() const
+{
+    return d->iconPixmap;
 }
 
 QString QMessageDialogOptions::text() const
@@ -890,8 +904,24 @@ const QList<QMessageDialogOptions::CustomButton> &QMessageDialogOptions::customB
 
 const QMessageDialogOptions::CustomButton *QMessageDialogOptions::customButton(int id)
 {
-    int i = d->customButtons.indexOf(CustomButton(id));
+    const int i = int(d->customButtons.indexOf(CustomButton(id)));
     return (i < 0 ? nullptr : &d->customButtons.at(i));
+}
+
+void QMessageDialogOptions::setCheckBox(const QString &label, Qt::CheckState state)
+{
+    d->checkBoxLabel = label;
+    d->checkBoxState = state;
+}
+
+QString QMessageDialogOptions::checkBoxLabel() const
+{
+    return d->checkBoxLabel;
+}
+
+Qt::CheckState QMessageDialogOptions::checkBoxState() const
+{
+    return d->checkBoxState;
 }
 
 QPlatformDialogHelper::ButtonRole QPlatformDialogHelper::buttonRole(QPlatformDialogHelper::StandardButton button)

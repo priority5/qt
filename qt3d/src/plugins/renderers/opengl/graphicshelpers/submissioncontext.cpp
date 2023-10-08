@@ -47,12 +47,8 @@
 #include <QSurface>
 #include <QWindow>
 #include <QOpenGLTexture>
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #ifdef QT_OPENGL_LIB
 #include <QtOpenGL/QOpenGLDebugLogger>
-#endif
-#else
-#include <QOpenGLDebugLogger>
 #endif
 
 QT_BEGIN_NAMESPACE
@@ -64,8 +60,6 @@ QT_BEGIN_NAMESPACE
 #ifndef GL_DRAW_FRAMEBUFFER
 #define GL_DRAW_FRAMEBUFFER 0x8CA9
 #endif
-
-using namespace Qt3DCore;
 
 namespace Qt3DRender {
 namespace Render {
@@ -87,14 +81,14 @@ unsigned int nextFreeContextId()
 
 namespace {
 
-GLBuffer::Type attributeTypeToGLBufferType(QAttribute::AttributeType type)
+GLBuffer::Type attributeTypeToGLBufferType(Qt3DCore::QAttribute::AttributeType type)
 {
     switch (type) {
-    case QAttribute::VertexAttribute:
+    case Qt3DCore::QAttribute::VertexAttribute:
         return GLBuffer::ArrayBuffer;
-    case QAttribute::IndexAttribute:
+    case Qt3DCore::QAttribute::IndexAttribute:
         return GLBuffer::IndexBuffer;
-    case QAttribute::DrawIndirectAttribute:
+    case Qt3DCore::QAttribute::DrawIndirectAttribute:
         return GLBuffer::DrawIndirectBuffer;
     default:
         Q_UNREACHABLE();
@@ -340,8 +334,7 @@ GLint glAttachmentPoint(const QRenderTargetOutput::AttachmentPoint &attachmentPo
     case QRenderTargetOutput::Stencil:
         return GL_STENCIL_ATTACHMENT;
     default:
-        Q_UNREACHABLE();
-        return GL_NONE;
+        Q_UNREACHABLE_RETURN(GL_NONE);
     }
 }
 
@@ -451,6 +444,10 @@ bool SubmissionContext::beginDrawing(QSurface *surface)
     }
 
     m_boundArrayBuffer = nullptr;
+
+    // Record the default FBO value as there's no guarantee it remains constant over time
+    m_defaultFBO = m_gl->defaultFramebufferObject();
+
     return true;
 }
 
@@ -467,6 +464,8 @@ void SubmissionContext::endDrawing(bool swapBuffers)
 void SubmissionContext::activateRenderTarget(Qt3DCore::QNodeId renderTargetNodeId, const AttachmentPack &attachments, GLuint defaultFboId)
 {
     GLuint fboId = defaultFboId; // Default FBO
+    resolveRenderTargetFormat(); // Reset m_renderTargetFormat based on the default FBO
+
     if (renderTargetNodeId) {
         // New RenderTarget
         if (!m_renderTargets.contains(renderTargetNodeId)) {
@@ -477,9 +476,10 @@ void SubmissionContext::activateRenderTarget(Qt3DCore::QNodeId renderTargetNodeI
                 fboId = createRenderTarget(renderTargetNodeId, attachments);
             }
         } else {
-            fboId = updateRenderTarget(renderTargetNodeId, attachments, true);
+            fboId = updateRenderTarget(renderTargetNodeId, attachments, true); // Overwrites m_renderTargetFormat based on custom FBO
         }
     }
+
     m_activeFBO = fboId;
     m_activeFBONodeId = renderTargetNodeId;
     m_glHelper->bindFrameBufferObject(m_activeFBO, GraphicsHelperInterface::FBODraw);
@@ -609,6 +609,7 @@ QImage SubmissionContext::readFramebuffer(const QRect &rect)
     QImage::Format imageFormat;
     uint stride;
 
+    // m_renderTargetFormat is set when the current RV FBO is set in activateRenderTarget
     /* format value should match GL internalFormat */
     GLenum internalFormat = m_renderTargetFormat;
 

@@ -179,6 +179,9 @@ public:
 
     virtual std::string flagsForDumping() const;
 
+    QtPrivate::QPropertyAdaptorSlotObject *
+    getPropertyAdaptorSlotObject(const QMetaProperty &property);
+
 public:
     mutable ExtraData *extraData; // extra data set by the user
     // This atomic requires acquire/release semantics in a few places,
@@ -240,6 +243,7 @@ inline void QObjectPrivate::disconnectNotify(const QMetaMethod &signal)
 }
 
 namespace QtPrivate {
+inline const QObject *getQObject(const QObjectPrivate *d) { return d->q_func(); }
 
 template <typename Func>
 struct FunctionStorageByValue
@@ -319,7 +323,7 @@ inline QMetaObject::Connection QObjectPrivate::connect(const typename QtPrivate:
         types = QtPrivate::ConnectionTypes<typename SignalType::Arguments>::types();
 
     return QObject::connectImpl(sender, reinterpret_cast<void **>(&signal),
-        receiverPrivate->q_ptr, reinterpret_cast<void **>(&slot),
+        QtPrivate::getQObject(receiverPrivate), reinterpret_cast<void **>(&slot),
         new QtPrivate::QPrivateSlotObject<Func2, typename QtPrivate::List_Left<typename SignalType::Arguments, SlotType::ArgumentCount>::Value,
                                         typename SignalType::ReturnType>(slot),
         type, types, &SignalType::Object::staticMetaObject);
@@ -377,6 +381,9 @@ public:
     QMetaCallEvent(QtPrivate::QSlotObjectBase *slotObj,
                    const QObject *sender, int signalId,
                    void **args, QSemaphore *semaphore);
+    QMetaCallEvent(QtPrivate::SlotObjUniquePtr slotObj,
+                   const QObject *sender, int signalId,
+                   void **args, QSemaphore *semaphore);
 
     // queued - args allocated by event, copied by caller
     QMetaCallEvent(ushort method_offset, ushort method_relative,
@@ -386,8 +393,30 @@ public:
     QMetaCallEvent(QtPrivate::QSlotObjectBase *slotObj,
                    const QObject *sender, int signalId,
                    int nargs);
+    QMetaCallEvent(QtPrivate::SlotObjUniquePtr slotObj,
+                   const QObject *sender, int signalId,
+                   int nargs);
 
     ~QMetaCallEvent() override;
+
+    template<typename ...Args>
+    static QMetaCallEvent *create(QtPrivate::QSlotObjectBase *slotObj, const QObject *sender,
+                                  int signal_index, const Args &...argv)
+    {
+        const void* const argp[] = { nullptr, std::addressof(argv)... };
+        const QMetaType metaTypes[] = { QMetaType::fromType<void>(), QMetaType::fromType<Args>()... };
+        constexpr auto argc = sizeof...(Args) + 1;
+        return create_impl(slotObj, sender, signal_index, argc, argp, metaTypes);
+    }
+    template<typename ...Args>
+    static QMetaCallEvent *create(QtPrivate::SlotObjUniquePtr slotObj, const QObject *sender,
+                                  int signal_index, const Args &...argv)
+    {
+        const void* const argp[] = { nullptr, std::addressof(argv)... };
+        const QMetaType metaTypes[] = { QMetaType::fromType<void>(), QMetaType::fromType<Args>()... };
+        constexpr auto argc = sizeof...(Args) + 1;
+        return create_impl(std::move(slotObj), sender, signal_index, argc, argp, metaTypes);
+    }
 
     inline int id() const { return d.method_offset_ + d.method_relative_; }
     inline const void * const* args() const { return d.args_; }
@@ -398,10 +427,22 @@ public:
     virtual void placeMetaCall(QObject *object) override;
 
 private:
+    static QMetaCallEvent *create_impl(QtPrivate::QSlotObjectBase *slotObj, const QObject *sender,
+                                       int signal_index, size_t argc, const void * const argp[],
+                                       const QMetaType metaTypes[])
+    {
+        if (slotObj)
+            slotObj->ref();
+        return create_impl(QtPrivate::SlotObjUniquePtr{slotObj}, sender,
+                           signal_index, argc, argp, metaTypes);
+    }
+    static QMetaCallEvent *create_impl(QtPrivate::SlotObjUniquePtr slotObj, const QObject *sender,
+                                       int signal_index, size_t argc, const void * const argp[],
+                                       const QMetaType metaTypes[]);
     inline void allocArgs();
 
     struct Data {
-        QtPrivate::QSlotObjectBase *slotObj_;
+        QtPrivate::SlotObjUniquePtr slotObj_;
         void **args_;
         QObjectPrivate::StaticMetaCallFunction callFunction_;
         int nargs_;

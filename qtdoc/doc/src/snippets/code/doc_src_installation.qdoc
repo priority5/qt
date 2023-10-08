@@ -1,55 +1,20 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
-//! [0]
-cd /tmp
-gunzip qt-everywhere-opensource-src-%VERSION%.tar.gz        # uncompress the archive
-tar xvf qt-everywhere-opensource-src-%VERSION%.tar          # unpack it
-//! [0]
-
-
-//! [1]
-cd /tmp/qt-everywhere-opensource-src-%VERSION%
-./configure
-//! [1]
-
-
-//! [2]
-cmake --build . --parallel
-//! [2]
-
-
-//! [3]
-cmake --install .
-//! [3]
-
-
-//! [4]
-PATH               - to locate qmake, moc and other Qt tools
-//! [4]
-
-
-//! [5]
-PATH=/usr/local/Qt-%VERSION%/bin:$PATH
-export PATH
-//! [5]
-
-
-//! [6]
-setenv PATH /usr/local/Qt-%VERSION%/bin:$PATH
-//! [6]
-
-
 //! [11]
+\badcode \QtVersion
 cd /tmp
-gunzip qt-everywhere-opensource-src-%VERSION%.tar.gz        # uncompress the archive
-tar xvf qt-everywhere-opensource-src-%VERSION%.tar          # unpack it
+tar xf ~/Downloads/qt-everywhere-src-\1.tar.xz
+\endcode
 //! [11]
 
 
 //! [12]
-cd /tmp/qt-everywhere-opensource-src-%VERSION%
-./configure
+\badcode \QtVersion
+mkdir -p ~/dev/qt-build
+cd ~/dev/qt-build
+/tmp/qt-everywhere-src-\1/configure
+\endcode
 //! [12]
 
 

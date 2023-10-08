@@ -24,22 +24,19 @@ class ManifestWriter
 public:
     ManifestWriter();
     void generateManifestFiles();
-    void generateManifestFile(const QString &manifest, const QString &element);
+    void generateExampleManifestFile();
     void readManifestMetaContent();
     QString retrieveExampleInstallationPath(const ExampleNode *example) const;
 
 private:
-    QSet<QString> m_tags {};
     QString m_manifestDir {};
     QString m_examplesPath {};
     QString m_outputDirectory {};
     QString m_project {};
     QDocDatabase *m_qdb { nullptr };
     QList<ManifestMetaFilter> m_manifestMetaContent {};
+    QStringList m_exampleCategories {};
 
-    void addModuleNameAsTag();
-    void includeTagsAddedWithMetaCommand(const ExampleNode *example);
-    void writeTagsElement(QXmlStreamWriter *writer);
     template <typename F>
     void processManifestMetaContent(const QString &fullName, F matchFunc);
 };

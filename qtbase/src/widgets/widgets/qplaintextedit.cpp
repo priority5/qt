@@ -622,10 +622,7 @@ void QPlainTextEditPrivate::setTopBlock(int blockNumber, int lineNumber, int dx)
         lineNumber = maxTopLine - block.firstLineNumber();
     }
 
-    {
-        const QSignalBlocker blocker(vbar);
-        vbar->setValue(newTopLine);
-    }
+    vbar->setValue(newTopLine);
 
     if (!dx && blockNumber == control->topBlock && lineNumber == topLine)
         return;
@@ -641,10 +638,7 @@ void QPlainTextEditPrivate::setTopBlock(int blockNumber, int lineNumber, int dx)
         control->topBlock = blockNumber;
         topLine = lineNumber;
 
-        {
-            const QSignalBlocker blocker(vbar);
-            vbar->setValue(block.firstLineNumber() + lineNumber);
-        }
+        vbar->setValue(block.firstLineNumber() + lineNumber);
 
         if (dx || dy) {
             viewport->scroll(q->isRightToLeft() ? -dx : dx, dy);
@@ -1002,10 +996,7 @@ void QPlainTextEditPrivate::_q_adjustScrollbars()
     if (firstVisibleBlock.isValid())
         visualTopLine = firstVisibleBlock.firstLineNumber() + topLine;
 
-    {
-        const QSignalBlocker blocker(vbar);
-        vbar->setValue(visualTopLine);
-    }
+    vbar->setValue(visualTopLine);
 
     hbar->setRange(0, (int)documentSize.width() - viewport->width());
     hbar->setPageStep(viewport->width());
@@ -1186,9 +1177,8 @@ void QPlainTextEditPrivate::ensureViewportLayouted()
    fast log viewer (see setMaximumBlockCount()).
 
 
-    \sa QTextDocument, QTextCursor, {Qt Widgets - Application Example},
-        {Code Editor Example}, {Syntax Highlighter Example},
-        {Rich Text Processing}
+    \sa QTextDocument, QTextCursor
+        {Syntax Highlighter Example}, {Rich Text Processing}
 
 */
 
@@ -2294,6 +2284,7 @@ void QPlainTextEdit::changeEvent(QEvent *e)
         || e->type() == QEvent::FontChange) {
         d->control->document()->setDefaultFont(font());
     }  else if (e->type() == QEvent::ActivationChange) {
+        d->control->setPalette(palette());
         if (!isActiveWindow())
             d->autoScrollTimer.stop();
     } else if (e->type() == QEvent::EnabledChange) {

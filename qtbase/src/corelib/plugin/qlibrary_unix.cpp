@@ -90,6 +90,11 @@ QStringList QLibraryPrivate::prefixes_sys()
 
 bool QLibraryPrivate::load_sys()
 {
+#if defined(Q_OS_WASM) && defined(QT_STATIC)
+    // emscripten does not support dlopen when using static linking
+    return false;
+#endif
+
     QMutexLocker locker(&mutex);
     QString attempt;
     QFileSystemEntry fsEntry(fileName);
@@ -194,7 +199,7 @@ bool QLibraryPrivate::load_sys()
                 continue;
             if (loadHints & QLibrary::LoadArchiveMemberHint) {
                 attempt = name;
-                int lparen = attempt.indexOf(u'(');
+                qsizetype lparen = attempt.indexOf(u'(');
                 if (lparen == -1)
                     lparen = attempt.size();
                 attempt = path + prefixes.at(prefix) + attempt.insert(lparen, suffixes.at(suffix));

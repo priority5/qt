@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(tweetsearch LANGUAGES CXX)
 
@@ -20,11 +23,11 @@ set_target_properties(tweetsearch PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_link_libraries(tweetsearch PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
+target_link_libraries(tweetsearch PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
 )
 
 # Resources:
@@ -50,7 +53,7 @@ set(qmake_content_resource_files
     "tweetsearch.qml"
 )
 
-qt6_add_resources(tweetsearch "qmake_content"
+qt_add_resources(tweetsearch "qmake_content"
     PREFIX
         "/demos/tweetsearch"
     FILES

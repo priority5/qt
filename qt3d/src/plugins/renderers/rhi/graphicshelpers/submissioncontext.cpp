@@ -26,7 +26,9 @@
 #include <Qt3DRender/private/managers_p.h>
 #include <Qt3DRender/private/attachmentpack_p.h>
 #include <Qt3DRender/private/stringtoint_p.h>
-#include <Qt3DRender/private/vulkaninstance_p.h>
+#if QT_CONFIG(qt3d_vulkan) && QT_CONFIG(vulkan)
+#  include <Qt3DRender/private/vulkaninstance_p.h>
+#endif
 #include <QGuiApplication>
 #include <texture_p.h>
 #include <rendercommand_p.h>
@@ -53,14 +55,12 @@
 #include <QtGui/private/qrhigles2_p.h>
 #endif
 
-#if QT_CONFIG(qt3d_vulkan)
+#if QT_CONFIG(vulkan)
 #include <QtGui/private/qrhivulkan_p.h>
 #endif
 #include <bitset>
 
 QT_BEGIN_NAMESPACE
-
-using namespace Qt3DCore;
 
 namespace Qt3DRender {
 namespace Render {
@@ -542,7 +542,7 @@ void SubmissionContext::initialize()
 
     QRhi::Flags rhiFlags = QRhi::EnableDebugMarkers;
 
-#if QT_CONFIG(qt3d_vulkan)
+#if QT_CONFIG(qt3d_vulkan) && QT_CONFIG(vulkan)
     if (requestedApi == Qt3DRender::API::Vulkan) {
         QRhiVulkanInitParams params;
         params.inst = &Qt3DRender::staticVulkanInstance();
@@ -801,6 +801,11 @@ void SubmissionContext::releaseResources()
 {
     m_renderBufferHash.clear();
     RHI_UNIMPLEMENTED;
+
+    if (m_currentUpdates) {
+        m_currentUpdates->release();
+        m_currentUpdates = nullptr;
+    }
 
     // Free RHI resources
     {
@@ -1418,26 +1423,45 @@ void preprocessRHIShader(std::vector<QByteArray> &shaderCodes)
     }
 }
 
-int glslVersionForFormat(const QSurfaceFormat &format) noexcept
+QShaderVersion glslVersionForFormat(const QSurfaceFormat &format) noexcept
 {
     const int major = format.majorVersion();
     const int minor = format.minorVersion();
+    const auto type = format.renderableType();
 
-    static const QHash<std::pair<int, int>, int> glVersionToGLSLVersion = {
-        { { 4, 6 }, 460 }, { { 4, 5 }, 450 }, { { 4, 4 }, 440 }, { { 4, 3 }, 430 },
-        { { 4, 2 }, 420 }, { { 4, 1 }, 410 }, { { 4, 0 }, 400 }, { { 3, 3 }, 330 },
-        { { 3, 2 }, 150 }, { { 3, 2 }, 120 }, { { 3, 1 }, 120 },
-    };
+    if (type != QSurfaceFormat::OpenGLES) {
+        static const QHash<std::pair<int, int>, int> glVersionToGLSLVersion = {
+            { { 4, 6 }, 460 }, { { 4, 5 }, 450 }, { { 4, 4 }, 440 }, { { 4, 3 }, 430 },
+            { { 4, 2 }, 420 }, { { 4, 1 }, 410 }, { { 4, 0 }, 400 }, { { 3, 3 }, 330 },
+            { { 3, 2 }, 150 }, { { 3, 2 }, 120 }, { { 3, 1 }, 120 },
+        };
 
-    const auto it = glVersionToGLSLVersion.find({ major, minor });
-    if (it == glVersionToGLSLVersion.end()) {
-        if (major < 3) {
-            return 120;
+        const auto it = glVersionToGLSLVersion.find({ major, minor });
+        if (it == glVersionToGLSLVersion.end()) {
+            if (major < 3) {
+                return 120;
+            } else {
+                return major * 100 + minor * 10;
+            }
         } else {
-            return major * 100 + minor * 10;
+            return *it;
         }
-    } else {
-        return *it;
+    }
+    else {
+        static const QHash<std::pair<int, int>, int> glVersionToGLSLVersion = {
+            { { 3, 2 }, 320 }, { { 3, 1 }, 310 }, { { 3, 0 }, 300 },
+        };
+
+        const auto it = glVersionToGLSLVersion.find({ major, minor });
+        if (it == glVersionToGLSLVersion.end()) {
+            if (major < 3) {
+                return {100, QShaderVersion::GlslEs};
+            } else {
+                return {major * 100 + minor * 10, QShaderVersion::GlslEs};
+            }
+        } else {
+            return {*it, QShaderVersion::GlslEs};
+        }
     }
 }
 }

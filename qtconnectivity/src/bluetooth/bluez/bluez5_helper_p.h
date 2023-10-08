@@ -43,6 +43,8 @@ QString sanitizeNameForDBus(const QString& text);
 
 QString findAdapterForAddress(const QBluetoothAddress &wantedAddress, bool *ok);
 
+QString adapterWithDBusPeripheralInterface(const QBluetoothAddress &localAddress);
+
 class QtBluezDiscoveryManagerPrivate;
 class QtBluezDiscoveryManager : public QObject
 {
@@ -73,6 +75,11 @@ private:
 
     QtBluezDiscoveryManagerPrivate *d;
 };
+
+inline uint qHash(const QBluetoothAddress &address)
+{
+    return qHash(address.toUInt64());
+}
 
 QT_END_NAMESPACE
 

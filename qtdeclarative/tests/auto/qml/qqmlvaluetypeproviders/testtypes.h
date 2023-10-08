@@ -17,7 +17,128 @@
 #include <QMatrix4x4>
 #include <QFont>
 #include <QColor>
+#include <QDateTime>
+#include <QDate>
+#include <QTime>
 #include <qqml.h>
+
+struct ConstructibleValueType
+{
+    Q_GADGET
+    Q_PROPERTY(int foo MEMBER m_foo CONSTANT)
+
+    QML_VALUE_TYPE(constructible)
+    QML_CONSTRUCTIBLE_VALUE
+
+public:
+    ConstructibleValueType() = default;
+    Q_INVOKABLE ConstructibleValueType(int foo) : m_foo(foo) {}
+    Q_INVOKABLE ConstructibleValueType(QObject *) : m_foo(67) {}
+    Q_INVOKABLE ConstructibleValueType(const QUrl &) : m_foo(68) {}
+
+    int foo() const { return m_foo; }
+
+private:
+    friend bool operator==(const ConstructibleValueType &a, const ConstructibleValueType &b)
+    {
+        return a.m_foo == b.m_foo;
+    }
+
+    int m_foo = 0;
+};
+
+struct ConstructibleFromQReal
+{
+    Q_GADGET
+    Q_PROPERTY(qreal foo MEMBER m_foo CONSTANT)
+
+    QML_VALUE_TYPE(constructibleFromQReal)
+    QML_CONSTRUCTIBLE_VALUE
+
+public:
+    ConstructibleFromQReal() = default;
+    Q_INVOKABLE ConstructibleFromQReal(qreal foo) : m_foo(foo) {}
+
+    qreal foo() const { return m_foo; }
+
+private:
+    friend bool operator==(const ConstructibleFromQReal &a, const ConstructibleFromQReal &b)
+    {
+        if (qIsNaN(a.m_foo) && qIsNaN(b.m_foo))
+            return true;
+        if (qIsInf(a.m_foo) && qIsInf(b.m_foo))
+            return (a.m_foo > 0) == (b.m_foo > 0);
+        return qFuzzyCompare(a.m_foo, b.m_foo);
+    }
+
+    qreal m_foo = 0;
+};
+
+struct StructuredValueType
+{
+    Q_GADGET
+    Q_PROPERTY(int i READ i WRITE setI)
+    Q_PROPERTY(ConstructibleValueType c READ c WRITE setC)
+    Q_PROPERTY(QPointF p READ p WRITE setP)
+    Q_PROPERTY(QList<QSizeF> sizes READ sizes WRITE setSizes)
+
+    QML_VALUE_TYPE(structured)
+    QML_STRUCTURED_VALUE
+
+public:
+    int i() const { return m_i; }
+    void setI(int newI) { m_i = newI; }
+
+    const ConstructibleValueType &c() const { return m_c; }
+    void setC(const ConstructibleValueType &newC) { m_c = newC; }
+
+    QPointF p() const { return m_p; }
+    void setP(QPointF newP) { m_p = newP; }
+
+    const QList<QSizeF> &sizes() const { return m_sizes; }
+    void setSizes(const QList<QSizeF> &sizes) { m_sizes = sizes; }
+
+private:
+
+    friend bool operator==(const StructuredValueType &a, const StructuredValueType &b)
+    {
+        return a.m_i == b.m_i && a.m_c == b.m_c && a.m_p == b.m_p && a.m_sizes == b.m_sizes;
+    }
+
+    int m_i = 0;
+    ConstructibleValueType m_c;
+    QPointF m_p;
+    QList<QSizeF> m_sizes = { QSizeF(1, 1), QSizeF(2, 2) };
+};
+
+struct BarrenValueType
+{
+    Q_GADGET
+    Q_PROPERTY(int i READ i WRITE setI)
+
+public:
+    BarrenValueType() = default;
+    Q_INVOKABLE BarrenValueType(const QString &) : m_i(25) {}
+
+    int i() const { return m_i; }
+    void setI(int newI) { m_i = newI; }
+
+private:
+    friend bool operator==(const BarrenValueType &a, const BarrenValueType &b)
+    {
+        return a.m_i == b.m_i;
+    }
+
+    int m_i = 0;
+};
+
+struct ForeignAnonymousStructuredValueType
+{
+    Q_GADGET
+    QML_ANONYMOUS
+    QML_FOREIGN(BarrenValueType)
+    QML_STRUCTURED_VALUE
+};
 
 class MyTypeObject : public QObject
 {
@@ -41,6 +162,14 @@ class MyTypeObject : public QObject
     Q_PROPERTY(QFont font READ font WRITE setFont NOTIFY changed)
     Q_PROPERTY(QColor color READ color WRITE setColor NOTIFY changed)
     Q_PROPERTY(QVariant variant READ variant NOTIFY changed)
+    Q_PROPERTY(ConstructibleValueType constructible READ constructible WRITE setConstructible NOTIFY constructibleChanged)
+    Q_PROPERTY(StructuredValueType structured READ structured WRITE setStructured NOTIFY structuredChanged)
+    Q_PROPERTY(BarrenValueType barren READ barren WRITE setBarren NOTIFY barrenChanged)
+
+    Q_PROPERTY(QDateTime aDateTime READ aDateTime WRITE setADateTime NOTIFY aDateTimeChanged)
+    Q_PROPERTY(QDate aDate READ aDate WRITE setADate NOTIFY aDateChanged)
+    Q_PROPERTY(QTime aTime READ aTime WRITE setATime NOTIFY aTimeChanged)
+    Q_PROPERTY(QVariant aVariant READ aVariant WRITE setAVariant NOTIFY aVariantChanged)
 
 public:
     MyTypeObject() :
@@ -144,12 +273,140 @@ public:
 
     void emitRunScript() { emit runScript(); }
 
+    const ConstructibleValueType &constructible() const { return m_constructible; }
+    void setConstructible(const ConstructibleValueType &newConstructible)
+    {
+        if (m_constructible == newConstructible)
+            return;
+        m_constructible = newConstructible;
+        emit constructibleChanged();
+    }
+
+    const StructuredValueType &structured() const { return m_structured; }
+    void setStructured(const StructuredValueType &newStructured)
+    {
+        if (m_structured == newStructured)
+            return;
+        m_structured = newStructured;
+        emit structuredChanged();
+    }
+
+    QDateTime aDateTime() const
+    {
+        return m_aDateTime;
+    }
+    void setADateTime(const QDateTime &newADateTime)
+    {
+        if (m_aDateTime == newADateTime)
+            return;
+        m_aDateTime = newADateTime;
+        emit aDateTimeChanged();
+    }
+
+    QDate aDate() const
+    {
+        return m_aDate;
+    }
+    void setADate(const QDate &newADate)
+    {
+        if (m_aDate == newADate)
+            return;
+        m_aDate = newADate;
+        emit aDateChanged();
+    }
+
+    QTime aTime() const
+    {
+        return m_aTime;
+    }
+    void setATime(const QTime &newATime)
+    {
+        if (m_aTime == newATime)
+            return;
+        m_aTime = newATime;
+        emit aTimeChanged();
+    }
+
+    QVariant aVariant() const
+    {
+        return m_aVariant;
+    }
+    void setAVariant(const QVariant &newAVariant)
+    {
+        if (m_aVariant == newAVariant)
+            return;
+        m_aVariant = newAVariant;
+        emit aVariantChanged();
+    }
+
+    BarrenValueType barren() const
+    {
+        return m_barren;
+    }
+
+    void setBarren(const BarrenValueType &newBarren)
+    {
+        if (m_barren == newBarren)
+            return;
+        m_barren = newBarren;
+        emit barrenChanged();
+    }
+
+    Q_INVOKABLE void acceptConstructible(const ConstructibleValueType &a)
+    {
+        setAVariant(QVariant::fromValue(a));
+    }
+
+    Q_INVOKABLE int acceptConstructibles(const QList<ConstructibleValueType> &constructibles)
+    {
+        int result = 0;
+        for (const auto &c: constructibles) {
+            result += c.foo();
+        }
+        return result;
+    }
+
+    Q_INVOKABLE StructuredValueType acceptStructured(const StructuredValueType &a)
+    {
+        return a;
+    }
+
+    Q_INVOKABLE void setEffectPadding(const QRect &r)
+    {
+        m_hasEffectPadding = true;
+        m_effectPadding = r;
+    }
+
+    bool hasEffectPadding() const { return m_hasEffectPadding; }
+    QRectF effectPadding() const { return m_effectPadding; }
+
 signals:
     void changed();
     void runScript();
 
+    void constructibleChanged();
+    void structuredChanged();
+
+    void aDateTimeChanged();
+    void aDateChanged();
+    void aTimeChanged();
+    void aVariantChanged();
+
+    void barrenChanged();
+
 public slots:
     QSize method() { return QSize(13, 14); }
+private:
+    ConstructibleValueType m_constructible;
+    StructuredValueType m_structured;
+
+    QDateTime m_aDateTime;
+    QDate m_aDate;
+    QTime m_aTime;
+    QVariant m_aVariant;
+    BarrenValueType m_barren;
+    QRectF m_effectPadding;
+    bool m_hasEffectPadding = false;
 };
 
 void registerTypes();

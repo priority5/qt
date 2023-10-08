@@ -13,31 +13,6 @@ void deduplicate(Container &container)
     container.erase(erase, container.end());
 }
 
-static bool instructionManipulatesContext(QV4::Moth::Instr::Type type)
-{
-    using Type = QV4::Moth::Instr::Type;
-    switch (type) {
-    case Type::PopContext:
-    case Type::PopScriptContext:
-    case Type::CreateCallContext:
-    case Type::CreateCallContext_Wide:
-    case Type::PushCatchContext:
-    case Type::PushCatchContext_Wide:
-    case Type::PushWithContext:
-    case Type::PushWithContext_Wide:
-    case Type::PushBlockContext:
-    case Type::PushBlockContext_Wide:
-    case Type::CloneBlockContext:
-    case Type::CloneBlockContext_Wide:
-    case Type::PushScriptContext:
-    case Type::PushScriptContext_Wide:
-        return true;
-    default:
-        break;
-    }
-    return false;
-}
-
 QQmlJSCompilePass::InstructionAnnotations QQmlJSBasicBlocks::run(
         const Function *function,
         const InstructionAnnotations &annotations)
@@ -73,6 +48,8 @@ QQmlJSCompilePass::InstructionAnnotations QQmlJSBasicBlocks::run(
             it->second.jumpTarget = -1;
             it->second.jumpIsUnconditional = false;
         }
+
+        m_skipUntilNextLabel = false;
 
         reset();
         decode(byteCode.constData(), static_cast<uint>(byteCode.size()));
@@ -320,10 +297,10 @@ void QQmlJSBasicBlocks::populateReaderLocations()
                      end = blockInstr->second.readRegisters.constEnd();
                      readIt != end; ++readIt) {
                     if (!blockInstr->second.isRename && containsAny(
-                                readIt->second.conversionOrigins(), access.trackedTypes)) {
-                        Q_ASSERT(readIt->second.isConversion());
+                                readIt->second.content.conversionOrigins(), access.trackedTypes)) {
+                        Q_ASSERT(readIt->second.content.isConversion());
                         access.typeReaders[blockInstr.key()]
-                                = readIt->second.conversionResult();
+                                = readIt->second.content.conversionResult();
                     }
                     if (registerActive && readIt->first == writtenRegister)
                         access.registerReadersAndConversions[blockInstr.key()] = conversions;
@@ -402,7 +379,7 @@ void QQmlJSBasicBlocks::populateReaderLocations()
 
 void QQmlJSBasicBlocks::adjustTypes()
 {
-    using NewVirtualRegisters = NewFlatMap<int, QQmlJSRegisterContent>;
+    using NewVirtualRegisters = NewFlatMap<int, VirtualRegister>;
 
     QHash<int, QList<int>> liveConversions;
 
@@ -426,7 +403,7 @@ void QQmlJSBasicBlocks::adjustTypes()
         // QQmlJSTypePropagator.
         if (QQmlJSScope::ConstPtr valueType = it->trackedTypes[0]->valueType()) {
             m_typeResolver->adjustTrackedType(
-                    m_typeResolver->containedType(annotation.readRegisters.begin().value()),
+                    m_typeResolver->containedType(annotation.readRegisters.begin().value().content),
                     valueType);
         }
 
@@ -469,13 +446,13 @@ void QQmlJSBasicBlocks::adjustTypes()
             if (!liveConversions[i.key()].contains(conversion.key()))
                 continue;
 
-            QQmlJSScope::ConstPtr conversionResult = conversion->second.conversionResult();
-            const auto conversionOrigins = conversion->second.conversionOrigins();
+            QQmlJSScope::ConstPtr conversionResult = conversion->second.content.conversionResult();
+            const auto conversionOrigins = conversion->second.content.conversionOrigins();
             QQmlJSScope::ConstPtr newResult;
             for (const auto &origin : conversionOrigins)
                 newResult = m_typeResolver->merge(newResult, origin);
             m_typeResolver->adjustTrackedType(conversionResult, newResult);
-            transformRegister(conversion->second);
+            transformRegister(conversion->second.content);
             newRegisters.appendOrdered(conversion);
         }
         i->second.typeConversions = newRegisters.take();
@@ -500,8 +477,9 @@ void QQmlJSBasicBlocks::populateBasicBlocks()
             for (auto it = instruction.readRegisters.begin(), end = instruction.readRegisters.end();
                  it != end; ++it) {
                 if (!instruction.isRename) {
-                    Q_ASSERT(it->second.isConversion());
-                    for (const QQmlJSScope::ConstPtr &origin : it->second.conversionOrigins()) {
+                    Q_ASSERT(it->second.content.isConversion());
+                    for (const QQmlJSScope::ConstPtr &origin :
+                         it->second.content.conversionOrigins()) {
                         if (!writtenTypes.contains(origin))
                             block.readTypes.append(origin);
                     }

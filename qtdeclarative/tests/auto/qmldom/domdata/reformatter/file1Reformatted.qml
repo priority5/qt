@@ -14,6 +14,9 @@ Window {
     Rectangle {
         anchors.fill: parent
 
+        Behavior on opacity {
+        }
+
         ListView {
             model: {
                 MySingleton.mySignal();
@@ -23,6 +26,7 @@ Window {
 
             delegate: ItemDelegate {
                 id: root
+
                 text: "Item " + (index + 1)
                 width: parent.width
 

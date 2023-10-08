@@ -15,7 +15,7 @@
 #include <QtGui/QPainter>
 #include <QtOpenGL/QOpenGLFramebufferObject>
 #include <QtGui/QOffscreenSurface>
-#if defined(Q_OS_OSX)
+#if defined(Q_OS_MACOS)
 #include <qpa/qplatformnativeinterface.h>
 #endif
 
@@ -200,7 +200,7 @@ QAbstract3DGraph::QAbstract3DGraph(QAbstract3DGraphPrivate *d, const QSurfaceFor
 
     d_ptr->renderLater();
 
-#if defined(Q_OS_OSX)
+#if defined(Q_OS_MACOS)
     // Enable touch events for Mac touchpads
     typedef void * (*EnableTouch)(QWindow*, bool);
     EnableTouch enableTouch =
@@ -567,7 +567,7 @@ QCustom3DItem *QAbstract3DGraph::selectedCustomItem() const
  * \c selectedElementChanged signal is emitted.
  *
  * The signal can be used for example for implementing custom input handlers, as
- * demonstrated by the \l {Axis Range Dragging With Labels Example}.
+ * demonstrated in the \l {Graph Gallery} example under \uicontrol {Scatter Graph} tab.
  *
  * \sa selectedLabelIndex(), selectedAxis(), selectedCustomItemIndex(), selectedCustomItem(),
  * Q3DBars::selectedSeries(), Q3DScatter::selectedSeries(), Q3DSurface::selectedSeries(),

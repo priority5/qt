@@ -15,10 +15,10 @@
 
 QT_BEGIN_NAMESPACE
 
-QSSGMaterialVertexPipeline::QSSGMaterialVertexPipeline(const QSSGRef<QSSGProgramGenerator> &programGen,
+QSSGMaterialVertexPipeline::QSSGMaterialVertexPipeline(QSSGProgramGenerator &programGen,
                                                        const QSSGShaderDefaultMaterialKeyProperties &materialProperties,
                                                        QSSGShaderMaterialAdapter *materialAdapter)
-    : m_programGenerator(programGen)
+    : m_programGenerator(&programGen)
     , defaultMaterialShaderKeyProperties(materialProperties)
     , materialAdapter(materialAdapter)
     , hasCustomShadedMain(false)
@@ -100,7 +100,7 @@ static inline const char *customMainCallWithArguments(bool usesInstancing)
 
 void QSSGMaterialVertexPipeline::beginVertexGeneration(const QSSGShaderDefaultMaterialKey &inKey,
                                                        const QSSGShaderFeatures &inFeatureSet,
-                                                       const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager)
+                                                       QSSGShaderLibraryManager &shaderLibraryManager)
 {
     QSSGShaderGeneratorStageFlags theStages(QSSGProgramGenerator::defaultFlags());
     programGenerator()->beginProgram(theStages);
@@ -202,12 +202,16 @@ void QSSGMaterialVertexPipeline::beginVertexGeneration(const QSSGShaderDefaultMa
     vertexShader.append("    vec3 qt_vertNormal = vec3(0.0);");
     vertexShader.append("    vec3 qt_vertTangent = vec3(0.0);");
     vertexShader.append("    vec3 qt_vertBinormal = vec3(0.0);");
-    vertexShader.append("    vec2 qt_vertUV0 = vec2(0.0);");
-    vertexShader.append("    vec2 qt_vertUV1 = vec2(0.0);");
-    vertexShader.append("    vec2 qt_vertLightmapUV = vec2(0.0);");
-    vertexShader.append("    ivec4 qt_vertJoints = ivec4(0);");
-    vertexShader.append("    vec4 qt_vertWeights = vec4(0.0);");
-    vertexShader.append("    vec4 qt_vertColor = vec4(1.0);"); // must be 1,1,1,1 to not alter when multiplying with it
+    if (meshHasTexCoord0 || hasCustomVertexShader)
+        vertexShader.append("    vec2 qt_vertUV0 = vec2(0.0);");
+    if (meshHasTexCoord1 || hasCustomVertexShader)
+        vertexShader.append("    vec2 qt_vertUV1 = vec2(0.0);");
+    if (m_hasSkinning || hasCustomVertexShader)
+        vertexShader.append("    ivec4 qt_vertJoints = ivec4(0);");
+    if (meshHasJointsAndWeights || m_hasSkinning || hasCustomVertexShader)
+        vertexShader.append("    vec4 qt_vertWeights = vec4(0.0);");
+    if (meshHasColors || usesInstancing || blendParticles || hasCustomVertexShader || hasCustomFragmentShader)
+        vertexShader.append("    vec4 qt_vertColor = vec4(1.0);"); // must be 1,1,1,1 to not alter when multiplying with it
 
     if (!usesInstancing) {
         vertexShader.addUniform("qt_modelViewProjection", "mat4");
@@ -257,7 +261,7 @@ void QSSGMaterialVertexPipeline::beginVertexGeneration(const QSSGShaderDefaultMa
         vertexShader.addIncoming("attr_uv1", "vec2");
     }
     if (meshHasTexCoordLightmap) {
-        vertexShader.append("    qt_vertLightmapUV = attr_lightmapuv;");
+        vertexShader.append("    vec2 qt_vertLightmapUV = attr_lightmapuv;");
         vertexShader.addIncoming("attr_lightmapuv", "vec2");
     }
     if (meshHasTangents) {
@@ -331,7 +335,7 @@ void QSSGMaterialVertexPipeline::beginVertexGeneration(const QSSGShaderDefaultMa
     } // with a custom vertex shader it is up to it to set gl_PointSize (aka POINT_SIZE)
 }
 
-void QSSGMaterialVertexPipeline::beginFragmentGeneration(const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager)
+void QSSGMaterialVertexPipeline::beginFragmentGeneration(QSSGShaderLibraryManager &shaderLibraryManager)
 {
     fragment().addUniform("qt_material_properties", "vec4");
     fragment().addUniform("qt_rhi_properties", "vec4");

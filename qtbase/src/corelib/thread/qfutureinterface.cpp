@@ -618,7 +618,6 @@ void QFutureInterfaceBase::reset()
 {
     d->m_progressValue = 0;
     d->m_progress.reset();
-    d->setState(QFutureInterfaceBase::NoState);
     d->progressTime.invalidate();
     d->isValid = false;
 }
@@ -800,7 +799,7 @@ void QFutureInterfaceBasePrivate::connectOutputInterface(QFutureCallOutInterface
 void QFutureInterfaceBasePrivate::disconnectOutputInterface(QFutureCallOutInterface *interface)
 {
     QMutexLocker lock(&m_mutex);
-    const int index = outputConnections.indexOf(interface);
+    const qsizetype index = outputConnections.indexOf(interface);
     if (index == -1)
         return;
     outputConnections.removeAt(index);
@@ -834,6 +833,10 @@ void QFutureInterfaceBase::setContinuation(std::function<void(const QFutureInter
     // store the move-only continuation, to guarantee that the associated
     // future's data stays alive.
     if (d->continuationState != QFutureInterfaceBasePrivate::Cleaned) {
+        if (d->continuation) {
+            qWarning() << "Adding a continuation to a future which already has a continuation. "
+                          "The existing continuation is overwritten.";
+        }
         d->continuation = std::move(func);
         d->continuationData = continuationFutureData;
     }
@@ -847,6 +850,7 @@ void QFutureInterfaceBase::cleanContinuation()
     QMutexLocker lock(&d->continuationMutex);
     d->continuation = nullptr;
     d->continuationState = QFutureInterfaceBasePrivate::Cleaned;
+    d->continuationData = nullptr;
 }
 
 void QFutureInterfaceBase::runContinuation() const

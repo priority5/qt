@@ -1,6 +1,8 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
+#include <QtCore/qstring.h>
+
 #ifndef QSTRINGBUILDER_H
 #define QSTRINGBUILDER_H
 
@@ -11,7 +13,6 @@
 #pragma qt_sync_stop_processing
 #endif
 
-#include <QtCore/qstring.h>
 #include <QtCore/qbytearray.h>
 
 #include <string.h>
@@ -451,15 +452,6 @@ QString &operator+=(QString &a, const QStringBuilder<A, B> &b)
     a.resize(it - a.constData()); //may be smaller than len if there was conversion from utf8
     return a;
 }
-
-//
-// inline QAnyStringView members requiring QStringBuilder:
-//
-
-template <typename A, typename B>
-QAnyStringView::QAnyStringView(const QStringBuilder<A, B> &expr,
-                               typename QConcatenable<QStringBuilder<A, B>>::ConvertTo &&capacity)
-    : QAnyStringView(capacity = expr) {}
 
 QT_END_NAMESPACE
 

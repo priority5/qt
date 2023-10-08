@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(clocks LANGUAGES CXX)
 
@@ -20,11 +23,11 @@ set_target_properties(clocks PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_link_libraries(clocks PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
+target_link_libraries(clocks PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
 )
 
 # Resources:
@@ -42,7 +45,7 @@ set(clocks_resource_files
     "content/second.png"
 )
 
-qt6_add_resources(clocks "clocks"
+qt_add_resources(clocks "clocks"
     PREFIX
         "/demos/clocks"
     FILES

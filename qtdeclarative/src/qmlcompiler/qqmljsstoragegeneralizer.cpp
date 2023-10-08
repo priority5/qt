@@ -42,9 +42,9 @@ QQmlJSCompilePass::InstructionAnnotations QQmlJSStorageGeneralizer::run(
     };
 
     const auto transformRegisters
-            = [&](QFlatMap<int, QQmlJSRegisterContent> &registers) {
+            = [&](VirtualRegisters &registers) {
         for (auto j = registers.begin(), jEnd = registers.end(); j != jEnd; ++j)
-            transformRegister(j.value());
+            transformRegister(j.value().content);
     };
 
     for (QQmlJSRegisterContent &argument : function->argumentTypes) {

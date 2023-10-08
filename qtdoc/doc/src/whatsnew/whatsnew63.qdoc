@@ -330,8 +330,8 @@
 
     \list
         \li Added an API to create custom shell extensions. For instructions on usage, see
-            \l{Qt Wayland Compositor Examples - Custom Shell}{the example}.
-        \li Added a \l{Qt Wayland Compositor Examples - QtShell Compositor}{Qt Shell} which
+            \l{Custom Shell}{the example}.
+        \li Added a \l{QtShell Compositor}{Qt Shell} which
             supports all windowing system features available in Qt.
         \li Added support for the \l[QML]{PresentationTime}{presentation-time} protocol.
         \li Added support for multiple input method protocols in the same server, in order to
@@ -368,7 +368,7 @@
     \section3 Android
 
     \list
-        \li The \l{In-App purchasing demo} and \l{Qt 3D: Planets QML Example}
+        \li The \l{In-App purchasing demo} and Qt 3D: Planets QML Example
         had android specific improvements.
         \li Updated Gradle to 7.2.0 and the Android Gradle Plugin (AGP) to 7.0.2
         (requires JDK 11 or above).

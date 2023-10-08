@@ -314,6 +314,7 @@ public:
     QDockWidget *activeTabbedDockWidget() const;
 #endif
     void destroyOrHideIfEmpty();
+    bool hasVisibleDockWidgets() const;
     void adjustFlags();
     bool hasNativeDecos() const;
 
@@ -586,6 +587,7 @@ private:
 #if QT_CONFIG(tabbar)
     void updateTabBarShapes();
 #endif
+    bool isInRestoreState = false;
 };
 
 #if QT_CONFIG(dockwidget) && !defined(QT_NO_DEBUG_STREAM)

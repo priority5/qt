@@ -18,7 +18,7 @@ Item {
     Bars3D {
         id: initialized
         scene.activeCamera: Camera3D { zoomLevel: 200 }
-        scene.devicePixelRatio: 2.0
+        scene.devicePixelRatio: 2 // Will work only if actual pixel ratio is 2.0
         scene.graphPositionQuery: Qt.point(0, 0)
         scene.primarySubViewport: Qt.rect(0, 0, 50, 50)
         scene.secondarySubViewport: Qt.rect(50, 50, 100, 100)
@@ -41,7 +41,7 @@ Item {
         function test_initial() {
             verify(initial.scene.activeCamera)
             verify(initial.scene.activeLight)
-            compare(initial.scene.devicePixelRatio, 1.0)
+            compare(initial.scene.devicePixelRatio, Screen.devicePixelRatio)
             compare(initial.scene.graphPositionQuery, Qt.point(-1, -1))
             compare(initial.scene.invalidSelectionPoint, Qt.point(-1, -1))
             compare(initial.scene.primarySubViewport.x, 0)
@@ -67,7 +67,7 @@ Item {
 
         function test_initialized() {
             compare(initialized.scene.activeCamera.zoomLevel, 200)
-            compare(initialized.scene.devicePixelRatio, 2.0)
+            compare(initialized.scene.devicePixelRatio, Screen.devicePixelRatio)
             compare(initialized.scene.graphPositionQuery, Qt.point(0, 0))
             compare(initialized.scene.primarySubViewport.x, 0)
             compare(initialized.scene.primarySubViewport.y, 0)

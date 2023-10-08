@@ -31,6 +31,8 @@
 #include <QtCore/QMutexLocker>
 #include <QtCore/QMutex>
 
+#include <array>
+
 // #define QFONTCACHE_DEBUG
 #ifdef QFONTCACHE_DEBUG
 #  define FC_DEBUG qDebug
@@ -140,7 +142,7 @@ Q_GUI_EXPORT int qt_defaultDpi()
 /* Helper function to convert between legacy Qt and OpenType font weights. */
 static int convertWeights(int weight, bool inverted)
 {
-    static const QVarLengthArray<QPair<int, int>, 9> legacyToOpenTypeMap = {
+    static constexpr std::array<int, 2> legacyToOpenTypeMap[] = {
         { 0, QFont::Thin },    { 12, QFont::ExtraLight }, { 25, QFont::Light },
         { 50, QFont::Normal }, { 57, QFont::Medium },     { 63, QFont::DemiBold },
         { 75, QFont::Bold },   { 81, QFont::ExtraBold },  { 87, QFont::Black },
@@ -151,8 +153,8 @@ static int convertWeights(int weight, bool inverted)
 
     // Go through and find the closest mapped value
     for (auto mapping : legacyToOpenTypeMap) {
-        const int weightOld = inverted ? mapping.second : mapping.first;
-        const int weightNew = inverted ? mapping.first : mapping.second;
+        const int weightOld = mapping[ inverted];
+        const int weightNew = mapping[!inverted];
         const int dist = qAbs(weightOld - weight);
         if (dist < closestDist) {
             result = weightNew;
@@ -458,8 +460,6 @@ QFontEngineData::~QFontEngineData()
     The font matching algorithm works as follows:
     \list 1
     \li The specified font families (set by setFamilies()) are searched for.
-    \li If not found, then if set the specified font family exists and can be used to represent
-        the writing system in use, it will be selected.
     \li If not, a replacement font that supports the writing system is
         selected. The font matching algorithm will try to find the
         best match for all the properties set in the QFont. How this is
@@ -529,7 +529,7 @@ QFontEngineData::~QFontEngineData()
     Information on encodings can be found from the
     \l{UTR17} page.
 
-    \sa QFontMetrics, QFontInfo, QFontDatabase, {Character Map Example}
+    \sa QFontMetrics, QFontInfo, QFontDatabase
 */
 
 /*!
@@ -1011,7 +1011,8 @@ qreal QFont::pointSizeF() const
 }
 
 /*!
-    Sets the font size to \a pixelSize pixels.
+    Sets the font size to \a pixelSize pixels, with a maxiumum size
+    of an unsigned 16-bit integer.
 
     Using this function makes the font device dependent. Use
     setPointSize() or setPointSizeF() to set the size of the font
@@ -2828,7 +2829,7 @@ void QFontCache::cleanup()
         cache->setLocalData(nullptr);
 }
 
-static QBasicAtomicInt font_cache_id = Q_BASIC_ATOMIC_INITIALIZER(0);
+Q_CONSTINIT static QBasicAtomicInt font_cache_id = Q_BASIC_ATOMIC_INITIALIZER(0);
 
 QFontCache::QFontCache()
     : QObject(), total_cost(0), max_cost(min_cost),

@@ -13,7 +13,6 @@ SUBDIRS =   quick-accessibility \
             tableview \
             mousearea \
             positioners \
-            righttoleft \
             scenegraph \
             shadereffects \
             text \
@@ -26,7 +25,9 @@ SUBDIRS =   quick-accessibility \
             window \
             particles \
             delegatechooser \
-            shapes
+            shapes \
+            itemvariablerefreshrate \
+            multieffect
 
 #OpenGL Support Required
 qtConfig(opengl(es1|es2)?) {

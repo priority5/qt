@@ -1,6 +1,9 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
+#ifndef QWASMOPENGLCONTEXT_H
+#define QWASMOPENGLCONTEXT_H
+
 #include <qpa/qplatformopenglcontext.h>
 
 #include <emscripten.h>
@@ -8,11 +11,12 @@
 
 QT_BEGIN_NAMESPACE
 
+class QOpenGLContext;
 class QPlatformScreen;
 class QWasmOpenGLContext : public QPlatformOpenGLContext
 {
 public:
-    QWasmOpenGLContext(const QSurfaceFormat &format);
+    explicit QWasmOpenGLContext(QOpenGLContext *context);
     ~QWasmOpenGLContext();
 
     QSurfaceFormat format() const override;
@@ -27,12 +31,15 @@ public:
 private:
     static bool isOpenGLVersionSupported(QSurfaceFormat format);
     bool maybeCreateEmscriptenContext(QPlatformSurface *surface);
-    static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE createEmscriptenContext(const QString &canvasId, QSurfaceFormat format);
+    static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE
+    createEmscriptenContext(const std::string &canvasSelector, QSurfaceFormat format);
 
     QSurfaceFormat m_requestedFormat;
-    QPlatformScreen *m_screen = nullptr;
-    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE m_context = 0;
+    QPlatformSurface *m_surface = nullptr;
+    QOpenGLContext *m_qGlContext;
+    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE m_webGLContext = 0;
 };
 
 QT_END_NAMESPACE
 
+#endif // QWASMOPENGLCONTEXT_H

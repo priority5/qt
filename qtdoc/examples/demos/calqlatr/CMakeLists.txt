@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(calqlatr LANGUAGES CXX)
 
@@ -9,20 +12,21 @@ endif()
 
 set(INSTALL_EXAMPLEDIR "${INSTALL_EXAMPLESDIR}/demos/calqlatr")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
 
 qt_add_executable(calqlatrexample WIN32 MACOSX_BUNDLE
     main.cpp
 )
 
 target_link_libraries(calqlatrexample PRIVATE
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::QuickControls2
 )
 
-qt6_add_qml_module(calqlatrexample
+qt_add_qml_module(calqlatrexample
     URI demos.calqlatr
     VERSION 1.0
     QML_FILES
@@ -35,6 +39,7 @@ qt6_add_qml_module(calqlatrexample
         "content/images/paper-edge-left.png"
         "content/images/paper-edge-right.png"
         "content/images/paper-grip.png"
+    RESOURCE_PREFIX /
 )
 
 install(TARGETS calqlatrexample

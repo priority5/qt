@@ -28,11 +28,7 @@
 #include <QtCore/QMutexLocker>
 #include <QtCore/QPair>
 
-#ifdef QMLDOM_STANDALONE
-#    include "qmlcompiler/qqmljsscope_p.h"
-#else
-#    include <private/qqmljsscope_p.h>
-#endif
+#include <private/qqmljsscope_p.h>
 
 #include <functional>
 #include <limits>
@@ -340,11 +336,15 @@ class QMLDOM_EXPORT Pragma
 public:
     constexpr static DomType kindValue = DomType::Pragma;
 
-    Pragma(QString pragmaName = QString()) : name(pragmaName) { }
+    Pragma(QString pragmaName = QString(), QString pragmaValue = QString())
+        : name(pragmaName), value(pragmaValue)
+    {
+    }
 
     bool iterateDirectSubpaths(DomItem &self, DirectVisitor visitor)
     {
         bool cont = self.dvValueField(visitor, Fields::name, name);
+        cont = cont && self.dvValueField(visitor, Fields::value, value);
         cont = cont && self.dvWrapField(visitor, Fields::comments, comments);
         return cont;
     }
@@ -352,6 +352,7 @@ public:
     void writeOut(DomItem &self, OutWriter &ow) const;
 
     QString name;
+    QString value;
     RegionComments comments;
 };
 
@@ -455,7 +456,7 @@ public:
 protected:
     std::shared_ptr<OwningItem> doCopy(DomItem &) const override
     {
-        return std::shared_ptr<OwningItem>(new ScriptExpression(*this));
+        return std::make_shared<ScriptExpression>(*this);
     }
 
     std::function<SourceLocation(SourceLocation)> locationToGlobalF(DomItem &self) const
@@ -519,7 +520,7 @@ public:
     Binding &operator=(Binding &&) = default;
 
     bool iterateDirectSubpaths(DomItem &self, DirectVisitor);
-    DomItem valueItem(DomItem &self) const;
+    DomItem valueItem(DomItem &self) const; //  ### REVISIT: consider replacing return value with variant
     BindingValueKind valueKind() const;
     QString name() const { return m_name; }
     BindingType bindingType() const { return m_bindingType; }
@@ -643,7 +644,7 @@ public:
 class QMLDOM_EXPORT PropertyInfo
 {
 public:
-    constexpr static DomType kindValue = DomType::PropertyInfo;
+    constexpr static DomType kindValue = DomType::PropertyInfo; // used to get the correct kind in ObjectWrapper
 
     bool iterateDirectSubpaths(DomItem &self, DirectVisitor visitor);
 
@@ -686,15 +687,15 @@ public:
     }
 
     bool iterateDirectSubpaths(DomItem &self, DirectVisitor visitor);
-    QString preCode(DomItem &) const;
+    QString preCode(DomItem &) const; // ### REVISIT, might be simplified by using different toplevel production rules at usage site
     QString postCode(DomItem &) const;
     void writePre(DomItem &self, OutWriter &ow) const;
     void writeOut(DomItem &self, OutWriter &ow) const;
     void setCode(QString code)
     {
-        body = std::shared_ptr<ScriptExpression>(
-                new ScriptExpression(code, ScriptExpression::ExpressionType::FunctionBody, 0,
-                                     QLatin1String("function foo(){\n"), QLatin1String("\n}\n")));
+        body = std::make_shared<ScriptExpression>(
+                code, ScriptExpression::ExpressionType::FunctionBody, 0,
+                                     QLatin1String("function foo(){\n"), QLatin1String("\n}\n"));
     }
 
     MethodInfo() = default;

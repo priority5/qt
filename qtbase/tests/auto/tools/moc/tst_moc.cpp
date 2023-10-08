@@ -56,7 +56,11 @@
 #include "fwdclass2.h"
 #include "fwdclass3.h"
 
+#include "signal-with-default-arg.h"
+
 #include "qmlmacro.h"
+
+using namespace Qt::StringLiterals;
 
 #ifdef Q_MOC_RUN
 // check that moc can parse these constructs, they are being used in Windows winsock2.h header
@@ -76,6 +80,19 @@ namespace A::inline B {}
 Q_DECLARE_METATYPE(const QMetaObject*);
 
 #define TESTEXPORTMACRO Q_DECL_EXPORT
+
+#if !defined(Q_MOC_RUN) && !defined(Q_NOREPLY)
+# define Q_NOREPLY
+#endif
+
+struct TagTest : QObject {
+    Q_OBJECT
+
+    Q_INVOKABLE Q_NOREPLY inline int test() {return 0;}
+public slots:
+    Q_NOREPLY virtual inline void pamOpen(int){}
+};
+
 
 namespace TestNonQNamespace {
 
@@ -575,6 +592,10 @@ private slots:
 
 QT_WARNING_POP
 
+// quick test to verify that moc handles the L suffix
+// correctly in the preprocessor
+#if 2000L < 1
+#else
 class PropertyTestClass : public QObject
 {
     Q_OBJECT
@@ -584,6 +605,7 @@ public:
 
     Q_ENUM(TestEnum)
 };
+#endif
 
 class PropertyUseClass : public QObject
 {
@@ -755,6 +777,8 @@ private slots:
     void observerMetaCall();
     void setQPRopertyBinding();
     void privateQPropertyShim();
+    void readWriteThroughBindable();
+    void virtualInlineTaggedSlot();
 
 signals:
     void sigWithUnsignedArg(unsigned foo);
@@ -766,6 +790,7 @@ signals:
     void constSignal2(int arg) const;
     void member4Changed();
     void member5Changed(const QString &newVal);
+    void sigWithDefaultArg(int i = 12);
 
 private:
     bool user1() { return true; };
@@ -953,12 +978,12 @@ void tst_Moc::supportConstSignals()
     QSignalSpy spy1(this, SIGNAL(constSignal1()));
     QVERIFY(spy1.isEmpty());
     emit constSignal1();
-    QCOMPARE(spy1.count(), 1);
+    QCOMPARE(spy1.size(), 1);
 
     QSignalSpy spy2(this, SIGNAL(constSignal2(int)));
     QVERIFY(spy2.isEmpty());
     emit constSignal2(42);
-    QCOMPARE(spy2.count(), 1);
+    QCOMPARE(spy2.size(), 1);
     QCOMPARE(spy2.at(0).at(0).toInt(), 42);
 }
 
@@ -2292,6 +2317,13 @@ void tst_Moc::warnings_data()
         << QString()
         << QString("standard input:3:1: error: Parse error at \"decltype\"");
 
+    QTest::newRow("QTBUG-36367: report correct error location")
+        << "class X { \n Q_PROPERTY(Foo* foo NONSENSE foo) \n };"_ba
+        << QStringList()
+        << 1
+        << QString()
+        << u"standard input:2:1: error: Parse error at \"NONSENSE\""_s;
+
 #ifdef Q_OS_UNIX  // Limit to Unix because the error message is platform-dependent
     QTest::newRow("Q_PLUGIN_METADATA: unreadable file")
         << QByteArray("class X { \n Q_PLUGIN_METADATA(FILE \".\") \n };")
@@ -2512,7 +2544,7 @@ void tst_Moc::memberProperties()
 
     if (!signal.isEmpty())
     {
-        QCOMPARE(notifySpy.count(), 1);
+        QCOMPARE(notifySpy.size(), 1);
         if (prop.notifySignal().parameterNames().size() > 0) {
             QList<QVariant> arguments = notifySpy.takeFirst();
             QCOMPARE(arguments.size(), 1);
@@ -2522,7 +2554,7 @@ void tst_Moc::memberProperties()
         notifySpy.clear();
         // a second write with the same value should not cause the signal to be emitted again
         QCOMPARE(prop.write(pObj, writeValue), expectedWriteResult);
-        QCOMPARE(notifySpy.count(), 0);
+        QCOMPARE(notifySpy.size(), 0);
     }
 }
 
@@ -4021,7 +4053,9 @@ void tst_Moc::cxx17Namespaces()
 
 void tst_Moc::cxxAttributes()
 {
+QT_WARNING_PUSH QT_WARNING_DISABLE_DEPRECATED
     auto so = CppAttribute::staticMetaObject;
+QT_WARNING_POP
     QCOMPARE(so.className(), "CppAttribute");
     QCOMPARE(so.enumeratorCount(), 0);
     QVERIFY(so.indexOfSignal("deprecatedSignal") != 1);
@@ -4204,7 +4238,7 @@ void tst_Moc::qpropertyMembers()
 
     instance.publicProperty.setValue(100);
     QCOMPARE(prop.read(&instance).toInt(), 100);
-    QCOMPARE(publicPropertySpy.count(), 1);
+    QCOMPARE(publicPropertySpy.size(), 1);
 
     QCOMPARE(prop.metaType(), QMetaType(QMetaType::Int));
 
@@ -4343,6 +4377,95 @@ void tst_Moc::privateQPropertyShim()
     // moc generates correct code for plain QProperty in PIMPL
     testObject.setTestProperty2(42);
     QCOMPARE(testObject.priv.testProperty2.value(), 42);
+}
+
+
+class BindableOnly : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int score BINDABLE scoreBindable READ default WRITE default)
+public:
+    BindableOnly(QObject *parent = nullptr)
+        : QObject(parent)
+        , m_score(4)
+    {}
+    QBindable<int> scoreBindable() { return QBindable<int>(&m_score); }
+private:
+    QProperty<int> m_score;
+};
+
+class BindableAndNotifyable : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int score BINDABLE scoreBindable NOTIFY scoreChanged READ default WRITE default)
+public:
+    BindableAndNotifyable(QObject *parent = nullptr)
+        : QObject(parent)
+        , m_score(4)
+    {}
+    QBindable<int> scoreBindable() { return QBindable<int>(&m_score); }
+signals:
+    void scoreChanged();
+private:
+    QProperty<int> m_score;
+};
+
+void tst_Moc::readWriteThroughBindable()
+{
+    {
+        BindableOnly o;
+        QCOMPARE(o.scoreBindable().value(), 4);
+        QCOMPARE(o.property("score").toInt(), 4);
+        o.scoreBindable().setValue(5);
+        QCOMPARE(o.scoreBindable().value(), 5);
+        QCOMPARE(o.property("score").toInt(), 5);
+        const QMetaObject *mo = o.metaObject();
+        const int i = mo->indexOfProperty("score");
+        QVERIFY(i > 0);
+        QMetaProperty p = mo->property(i);
+        QCOMPARE(p.name(), "score");
+        QVERIFY(p.isValid());
+        QVERIFY(p.isWritable());
+        QCOMPARE(p.read(&o), 5);
+        QVERIFY(o.setProperty("score", 6));
+        QCOMPARE(o.property("score").toInt(), 6);
+        QVERIFY(p.write(&o, 7));
+        QCOMPARE(p.read(&o), 7);
+    }
+    {
+        BindableAndNotifyable o;
+        QCOMPARE(o.scoreBindable().value(), 4);
+        QCOMPARE(o.property("score").toInt(), 4);
+        o.scoreBindable().setValue(5);
+        QCOMPARE(o.scoreBindable().value(), 5);
+        QCOMPARE(o.property("score").toInt(), 5);
+        const QMetaObject *mo = o.metaObject();
+        const int i = mo->indexOfProperty("score");
+        QVERIFY(i > 0);
+        QMetaProperty p = mo->property(i);
+        QCOMPARE(p.name(), "score");
+        QVERIFY(p.isValid());
+        QVERIFY(p.isWritable());
+        QCOMPARE(p.read(&o), 5);
+        QVERIFY(o.setProperty("score", 6));
+        QCOMPARE(o.property("score").toInt(), 6);
+        QVERIFY(p.write(&o, 7));
+        QCOMPARE(p.read(&o), 7);
+    }
+}
+
+void tst_Moc::virtualInlineTaggedSlot()
+{
+    auto mo = TagTest::staticMetaObject;
+    auto idx = mo.indexOfMethod("pamOpen(int)");
+    auto method = mo.method(idx);
+    QVERIFY(method.isValid()); // fails!
+    QCOMPARE(method.tag(), "Q_NOREPLY");
+    idx = mo.indexOfMethod("test()");
+    method = mo.method(idx);
+    QVERIFY(method.isValid());
+    QCOMPARE(method.tag(), "Q_NOREPLY");
+    QCOMPARE(method.returnMetaType(), QMetaType::fromType<int>());
 }
 
 QTEST_MAIN(tst_Moc)

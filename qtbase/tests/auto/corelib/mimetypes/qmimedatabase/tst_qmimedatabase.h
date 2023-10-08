@@ -25,6 +25,7 @@ private slots:
     void mimeTypeForFileName();
     void mimeTypesForFileName_data();
     void mimeTypesForFileName();
+    void mimeTypesForFileName_glob_deleteall();
     void inheritance();
     void aliases();
     void listAliases_data();
@@ -37,6 +38,10 @@ private slots:
     void mimeTypeForData();
     void mimeTypeForFileAndContent_data();
     void mimeTypeForFileAndContent();
+#ifdef Q_OS_UNIX
+    void mimeTypeForUnixSpecials_data();
+    void mimeTypeForUnixSpecials();
+#endif
     void allMimeTypes();
     void suffixes_data();
     void suffixes();

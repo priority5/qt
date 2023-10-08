@@ -6,6 +6,7 @@
 <db:titleabbrev>TestCPP Reference Documentation</db:titleabbrev>
 <db:abstract>
 <db:para>A namespace.</db:para>
+<db:para>This namespace was introduced in Qt 2.0.</db:para>
 </db:abstract>
 </db:info>
 <db:variablelist>
@@ -13,6 +14,12 @@
 <db:term>Header</db:term>
 <db:listitem>
 <db:para>TestCPP</db:para>
+</db:listitem>
+</db:varlistentry>
+<db:varlistentry>
+<db:term>Since</db:term>
+<db:listitem>
+<db:para>Qt 2.0</db:para>
 </db:listitem>
 </db:varlistentry>
 <db:varlistentry>
@@ -44,7 +51,7 @@
 </db:section>
 <db:section>
 <db:title>class <db:link xlink:href="testqdoc-testderived.xml" xlink:role="class">TestDerived</db:link></db:title>
-<db:para>A derived class in a namespace.</db:para>
+<db:para>A class in a namespace, derived from <db:link xlink:href="testqdoc-test.xml">Test</db:link>.</db:para>
 </db:section>
 </db:section>
 <db:section xml:id="macro-documentation">
@@ -52,7 +59,8 @@
 <db:section xml:id="QDOCTEST_MACRO">
 <db:title>QDOCTEST_MACRO</db:title>
 <db:methodsynopsis>
-<db:methodname>QDOCTEST_MAC</db:methodname>
+<db:methodname>QDOCTEST_MACRO</db:methodname>
+<db:void/>
 <db:synopsisinfo role="meta">macrowithoutparams</db:synopsisinfo>
 <db:synopsisinfo role="signature">QDOCTEST_MACRO</db:synopsisinfo>
 <db:synopsisinfo role="access">public</db:synopsisinfo>

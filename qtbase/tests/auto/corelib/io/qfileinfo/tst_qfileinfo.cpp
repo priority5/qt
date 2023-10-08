@@ -184,6 +184,7 @@ private slots:
 
     void fileTimes_data();
     void fileTimes();
+    void setFileTimes();
     void fakeFileTimes_data();
     void fakeFileTimes();
 
@@ -1128,7 +1129,7 @@ void tst_QFileInfo::fileTimes()
     QDateTime birthTime, writeTime, metadataChangeTime, readTime;
 
     // --- Create file and write to it
-    beforeBirth = QDateTime::currentDateTime().addMSecs(-fsClockSkew);
+    beforeBirth = QDateTime::currentDateTimeUtc().addMSecs(-fsClockSkew);
     {
         QFile file(fileName);
         QVERIFY(file.open(QFile::WriteOnly | QFile::Text));
@@ -1138,7 +1139,7 @@ void tst_QFileInfo::fileTimes()
                  datePairString(birthTime, beforeBirth));
 
         QTest::qSleep(sleepTime);
-        beforeWrite = QDateTime::currentDateTime().addMSecs(-fsClockSkew);
+        beforeWrite = QDateTime::currentDateTimeUtc().addMSecs(-fsClockSkew);
         QTextStream ts(&file);
         ts << fileName << Qt::endl;
     }
@@ -1151,7 +1152,7 @@ void tst_QFileInfo::fileTimes()
 
     // --- Change the file's metadata
     QTest::qSleep(sleepTime);
-    beforeMetadataChange = QDateTime::currentDateTime().addMSecs(-fsClockSkew);
+    beforeMetadataChange = QDateTime::currentDateTimeUtc().addMSecs(-fsClockSkew);
     {
         QFile file(fileName);
         file.setPermissions(file.permissions());
@@ -1167,7 +1168,7 @@ void tst_QFileInfo::fileTimes()
 
     // --- Read the file
     QTest::qSleep(sleepTime);
-    beforeRead = QDateTime::currentDateTime().addMSecs(-fsClockSkew);
+    beforeRead = QDateTime::currentDateTimeUtc().addMSecs(-fsClockSkew);
     {
         QFile file(fileName);
         QVERIFY(file.open(QFile::ReadOnly | QFile::Text));
@@ -1201,6 +1202,21 @@ void tst_QFileInfo::fileTimes()
 
     QVERIFY2(readTime > beforeRead, datePairString(readTime, beforeRead));
     QVERIFY(writeTime < beforeRead);
+}
+
+void tst_QFileInfo::setFileTimes()
+{
+    QByteArray data("OLE\nOLE\nOLE");
+    QTemporaryFile file;
+
+    QVERIFY(file.open());
+    QCOMPARE(file.write(data), data.size());
+    QCOMPARE(file.size(), data.size());
+
+    const QDateTime before = QDateTime::currentDateTimeUtc().addMSecs(-5000);
+    QVERIFY(file.setFileTime(before, QFile::FileModificationTime));
+    const QDateTime mtime = file.fileTime(QFile::FileModificationTime).toUTC();
+    QCOMPARE(mtime, before);
 }
 
 void tst_QFileInfo::fakeFileTimes_data()
@@ -2294,13 +2310,15 @@ void tst_QFileInfo::stdfilesystem()
         // We compare using absoluteFilePath since QFileInfo::operator== ends up using
         // canonicalFilePath which evaluates to empty-string for non-existent paths causing
         // these tests to always succeed.
-#define COMPARE_CONSTRUCTION(filepath)                                                 \
-        QCOMPARE(QFileInfo(fs::path(filepath)).absoluteFilePath(),                     \
-                 QFileInfo(QString::fromLocal8Bit(filepath)).absoluteFilePath());      \
-        QCOMPARE(QFileInfo(base, fs::path(filepath)).absoluteFilePath(),               \
-                 QFileInfo(base, QString::fromLocal8Bit(filepath)).absoluteFilePath())
-
         QDir base{ "../" }; // Used for the QFileInfo(QDir, <path>) ctor
+        auto doCompare = [&base](const char *filepath) {
+            QCOMPARE(QFileInfo(fs::path(filepath)).absoluteFilePath(),
+                     QFileInfo(QString::fromLocal8Bit(filepath)).absoluteFilePath());
+            QCOMPARE(QFileInfo(base, fs::path(filepath)).absoluteFilePath(),
+                     QFileInfo(base, QString::fromLocal8Bit(filepath)).absoluteFilePath());
+        };
+#define COMPARE_CONSTRUCTION(filepath)                                                 \
+    doCompare(filepath); if (QTest::currentTestFailed()) return
 
         COMPARE_CONSTRUCTION("./file");
 
@@ -2313,7 +2331,10 @@ void tst_QFileInfo::stdfilesystem()
         COMPARE_CONSTRUCTION("/path/TO/file.txt");
         COMPARE_CONSTRUCTION("./path/TO/file.txt");
         COMPARE_CONSTRUCTION("../file.txt");
+#if !(defined(__GLIBCXX__) && defined(Q_OS_WIN32))
+        // libstdc++ bug on Windows - https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111244
         COMPARE_CONSTRUCTION("./filæ.txt");
+#endif
 
 #undef COMPARE_CONSTRUCTION
         {

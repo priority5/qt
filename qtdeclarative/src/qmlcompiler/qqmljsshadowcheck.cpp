@@ -41,26 +41,32 @@ void QQmlJSShadowCheck::run(
 
 void QQmlJSShadowCheck::generate_LoadProperty(int nameIndex)
 {
+    if (!m_state.readsRegister(Accumulator))
+        return; // enum lookup cannot be shadowed.
+
     auto accumulatorIn = m_state.registers.find(Accumulator);
     if (accumulatorIn != m_state.registers.end())
-        checkShadowing(accumulatorIn.value(), m_jsUnitGenerator->stringForIndex(nameIndex));
+        checkShadowing(accumulatorIn.value().content, m_jsUnitGenerator->stringForIndex(nameIndex));
 }
 
 void QQmlJSShadowCheck::generate_GetLookup(int index)
 {
+    if (!m_state.readsRegister(Accumulator))
+        return; // enum lookup cannot be shadowed.
+
     auto accumulatorIn = m_state.registers.find(Accumulator);
     if (accumulatorIn != m_state.registers.end())
-        checkShadowing(accumulatorIn.value(), m_jsUnitGenerator->lookupName(index));
+        checkShadowing(accumulatorIn.value().content, m_jsUnitGenerator->lookupName(index));
 }
 
 void QQmlJSShadowCheck::generate_StoreProperty(int nameIndex, int base)
 {
-    checkShadowing(m_state.registers[base], m_jsUnitGenerator->stringForIndex(nameIndex));
+    checkShadowing(m_state.registers[base].content, m_jsUnitGenerator->stringForIndex(nameIndex));
 }
 
 void QQmlJSShadowCheck::generate_SetLookup(int index, int base)
 {
-    checkShadowing(m_state.registers[base], m_jsUnitGenerator->lookupName(index));
+    checkShadowing(m_state.registers[base].content, m_jsUnitGenerator->lookupName(index));
 }
 
 QV4::Moth::ByteCodeHandler::Verdict QQmlJSShadowCheck::startInstruction(QV4::Moth::Instr::Type)

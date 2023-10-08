@@ -1,43 +1,6 @@
 #!/usr/bin/env bash
-
-#############################################################################
-##
-## Copyright (C) 2021 The Qt Company Ltd.
-## Contact: https://www.qt.io/licensing/
-##
-## This file is part of the provisioning scripts of the Qt Toolkit.
-##
-## $QT_BEGIN_LICENSE:LGPL$
-## Commercial License Usage
-## Licensees holding valid commercial Qt licenses may use this file in
-## accordance with the commercial license agreement provided with the
-## Software or, alternatively, in accordance with the terms contained in
-## a written agreement between you and The Qt Company. For licensing terms
-## and conditions see https://www.qt.io/terms-conditions. For further
-## information use the contact form at https://www.qt.io/contact-us.
-##
-## GNU Lesser General Public License Usage
-## Alternatively, this file may be used under the terms of the GNU Lesser
-## General Public License version 3 as published by the Free Software
-## Foundation and appearing in the file LICENSE.LGPL3 included in the
-## packaging of this file. Please review the following information to
-## ensure the GNU Lesser General Public License version 3 requirements
-## will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-##
-## GNU General Public License Usage
-## Alternatively, this file may be used under the terms of the GNU
-## General Public License version 2.0 or (at your option) the GNU General
-## Public license version 3 or any later version approved by the KDE Free
-## Qt Foundation. The licenses are as published by the Free Software
-## Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-## included in the packaging of this file. Please review the following
-## information to ensure the GNU General Public License requirements will
-## be met: https://www.gnu.org/licenses/gpl-2.0.html and
-## https://www.gnu.org/licenses/gpl-3.0.html.
-##
-## $QT_END_LICENSE$
-##
-#############################################################################
+# Copyright (C) 2021 The Qt Company Ltd.
+# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 set -ex
 
@@ -78,6 +41,9 @@ installPackages+=(dbus-devel)
 installPackages+=(gstreamer1-plugins-bad-free)
 installPackages+=(gstreamer1-devel)
 installPackages+=(gstreamer1-plugins-base-devel)
+# for QtMultimedia, ffmpeg
+installPackages+=(yasm)
+installPackages+=(libva-devel)
 # gtk3 style for QtGui/QStyle
 installPackages+=(gtk3-devel)
 # libusb1 for tqtc-boot2qt/qdb
@@ -86,9 +52,6 @@ installPackages+=(libusbx-devel)
 installPackages+=(speech-dispatcher-devel)
 # Python 2 devel and pip. python-pip requires the EPEL repository to be added
 installPackages+=(python2-devel python2-pip)
-# Python 3 with python-devel, pip and virtualenv
-installPackages+=(python36)
-installPackages+=(python36-devel)
 # WebEngine
 installPackages+=(bison)
 installPackages+=(flex)
@@ -131,6 +94,9 @@ installPackages+=(xcb-util-image-devel)
 installPackages+=(xcb-util-keysyms-devel)
 installPackages+=(xcb-util-wm-devel)
 installPackages+=(xcb-util-renderutil-devel)
+installPackages+=(xcb-util-cursor)
+installPackages+=(xcb-util-cursor-devel)
+
 # ODBC support
 installPackages+=(unixODBC-devel)
 installPackages+=(unixODBC)
@@ -165,12 +131,6 @@ sudo pip3 install --upgrade pip
 sudo pip3 install virtualenv wheel
 
 sudo /usr/bin/pip3 install wheel
-# Install all needed packages in a special wheel cache directory
-/usr/bin/pip3 wheel --wheel-dir "$HOME/python3-wheels" -r "${BASH_SOURCE%/*}/../common/shared/requirements.txt"
-
-# shellcheck source=../common/unix/SetEnvVar.sh
-source "${BASH_SOURCE%/*}/../common/unix/SetEnvVar.sh"
-SetEnvVar "PYTHON3_WHEEL_CACHE" "$HOME/python3-wheels"
 
 OpenSSLVersion="$(openssl version |cut -b 9-14)"
 echo "OpenSSL = $OpenSSLVersion" >> ~/versions.txt

@@ -3,9 +3,11 @@
 
 /*!
     \title Qt Quick Demo - StocQt
+    \examplecategory {Data Visualization & 3D}
     \ingroup qtquickdemos
     \example demos/stocqt
     \brief A configurable stock chart for the NASDAQ-100.
+    \meta {tag} {demo,quick,game}
     \borderedimage qtquick-demo-stocqt.png
 
     The \e{StocQt} application presents a trend chart for the first stock in

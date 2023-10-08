@@ -112,7 +112,6 @@ QT_END_NAMESPACE
 - (void)pageDone
 {
     Q_EMIT qDarwinWebViewPrivate->loadProgressChanged(qDarwinWebViewPrivate->loadProgress());
-    Q_EMIT qDarwinWebViewPrivate->titleChanged(qDarwinWebViewPrivate->title());
 }
 
 - (void)handleError:(NSError *)error
@@ -233,12 +232,82 @@ decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
     Q_UNUSED(context);
     if ([keyPath isEqualToString:@"estimatedProgress"]) {
         Q_EMIT qDarwinWebViewPrivate->loadProgressChanged(qDarwinWebViewPrivate->loadProgress());
+    } else if ([keyPath isEqualToString:@"title"]) {
+        Q_EMIT qDarwinWebViewPrivate->titleChanged(qDarwinWebViewPrivate->title());
     }
 }
 
 @end
 
 QT_BEGIN_NAMESPACE
+
+QDarwinWebViewSettingsPrivate::QDarwinWebViewSettingsPrivate(WKWebViewConfiguration *conf, QObject *p)
+    : QAbstractWebViewSettings(p)
+    , m_conf(conf)
+{
+
+}
+
+bool QDarwinWebViewSettingsPrivate::localStorageEnabled() const
+{
+    return m_conf.websiteDataStore.persistent;
+}
+
+bool QDarwinWebViewSettingsPrivate::javascriptEnabled() const
+{
+    // Deprecated
+    bool isJsEnabled = false;
+#if QT_MACOS_IOS_PLATFORM_SDK_EQUAL_OR_ABOVE(110000, 140000)
+    if (__builtin_available(macOS 11.0, iOS 14.0, *))
+        isJsEnabled = m_conf.defaultWebpagePreferences.allowsContentJavaScript;
+#else
+    isJsEnabled = m_conf.preferences.javaScriptEnabled;
+#endif
+    return isJsEnabled;
+}
+
+bool QDarwinWebViewSettingsPrivate::localContentCanAccessFileUrls() const
+{
+    return m_localContentCanAccessFileUrls;
+}
+
+bool QDarwinWebViewSettingsPrivate::allowFileAccess() const
+{
+    return m_allowFileAccess;
+}
+
+void QDarwinWebViewSettingsPrivate::setLocalContentCanAccessFileUrls(bool enabled)
+{
+    // This will be checked in QDarwinWebViewPrivate::setUrl()
+    m_localContentCanAccessFileUrls = enabled;
+}
+
+void QDarwinWebViewSettingsPrivate::setJavascriptEnabled(bool enabled)
+{
+#if QT_MACOS_IOS_PLATFORM_SDK_EQUAL_OR_ABOVE(110000, 140000)
+    if (__builtin_available(macOS 11.0, iOS 14.0, *))
+        m_conf.defaultWebpagePreferences.allowsContentJavaScript = enabled;
+#else
+    m_conf.preferences.javaScriptEnabled = enabled;
+#endif
+}
+
+void QDarwinWebViewSettingsPrivate::setLocalStorageEnabled(bool enabled)
+{
+    if (enabled == localStorageEnabled())
+        return;
+
+    if (enabled)
+        m_conf.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
+    else
+        m_conf.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
+}
+
+void QDarwinWebViewSettingsPrivate::setAllowFileAccess(bool enabled)
+{
+    // This will be checked in QDarwinWebViewPrivate::setUrl()
+    m_allowFileAccess = enabled;
+}
 
 QDarwinWebViewPrivate::QDarwinWebViewPrivate(QObject *p)
     : QAbstractWebView(p)
@@ -253,7 +322,12 @@ QDarwinWebViewPrivate::QDarwinWebViewPrivate(QObject *p)
     [wkWebView addObserver:wkWebView.navigationDelegate forKeyPath:@"estimatedProgress"
                    options:NSKeyValueObservingOptions(NSKeyValueObservingOptionNew)
                    context:nil];
+    [wkWebView addObserver:wkWebView.navigationDelegate forKeyPath:@"title"
+                   options:NSKeyValueObservingOptions(NSKeyValueObservingOptionNew)
+                   context:nil];
 
+
+    m_settings = new QDarwinWebViewSettingsPrivate(wkWebView.configuration, this);
 #ifdef Q_OS_IOS
     m_recognizer = [[QIOSNativeViewSelectedRecognizer alloc] initWithQWindowControllerItem:this];
     [wkWebView addGestureRecognizer:m_recognizer];
@@ -264,6 +338,8 @@ QDarwinWebViewPrivate::~QDarwinWebViewPrivate()
 {
     [wkWebView stopLoading];
     [wkWebView removeObserver:wkWebView.navigationDelegate forKeyPath:@"estimatedProgress"
+                      context:nil];
+    [wkWebView removeObserver:wkWebView.navigationDelegate forKeyPath:@"title"
                       context:nil];
     [wkWebView.navigationDelegate release];
     wkWebView.navigationDelegate = nil;
@@ -284,8 +360,12 @@ void QDarwinWebViewPrivate::setUrl(const QUrl &url)
         if (url.isLocalFile()) {
             // We need to pass local files via loadFileURL and the read access should cover
             // the directory that the file is in, to facilitate loading referenced images etc
-            [wkWebView loadFileURL:url.toNSURL()
-           allowingReadAccessToURL:QUrl(url.toString(QUrl::RemoveFilename)).toNSURL()];
+            if (m_settings->allowFileAccess()) {
+                if (m_settings->localContentCanAccessFileUrls())
+                    [wkWebView loadFileURL:url.toNSURL() allowingReadAccessToURL:QUrl(url.toString(QUrl::RemoveFilename)).toNSURL()];
+                else
+                    [wkWebView loadRequest:[NSURLRequest requestWithURL:url.toNSURL()]];
+            }
         } else {
             [wkWebView loadRequest:[NSURLRequest requestWithURL:url.toNSURL()]];
         }
@@ -505,7 +585,7 @@ void QDarwinWebViewPrivate::deleteCookie(const QString &domain, const QString &n
     [cookieStore getAllCookies:^(NSArray *cookies) {
         NSHTTPCookie *cookie;
         for (cookie in cookies) {
-            if (cookie.domain == cookieDomain && cookie.name == cookieName) {
+            if ([cookie.domain isEqualToString:cookieDomain] && [cookie.name isEqualToString:cookieName]) {
                 [cookieStore deleteCookie:cookie completionHandler:^{
                     Q_EMIT cookieRemoved(QString::fromNSString(cookie.domain), QString::fromNSString(cookie.name));
                 }];
@@ -539,6 +619,13 @@ void QDarwinWebViewPrivate::setHttpUserAgent(const QString &userAgent)
         wkWebView.customUserAgent = userAgent.toNSString();
     }
     Q_EMIT httpUserAgentChanged(userAgent);
+}
+
+
+
+QAbstractWebViewSettings *QDarwinWebViewPrivate::getSettings() const
+{
+    return m_settings;
 }
 
 QT_END_NAMESPACE

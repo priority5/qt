@@ -25,8 +25,7 @@
 
 QT_BEGIN_NAMESPACE
 
-class QV4L2CameraDevices : public QObject,
-                           public QPlatformVideoDevices
+class QV4L2CameraDevices : public QPlatformVideoDevices
 {
     Q_OBJECT
 public:
@@ -38,10 +37,11 @@ public Q_SLOTS:
     void checkCameras();
 
 private:
-    void doCheckCameras();
+    bool doCheckCameras();
 
-    QList<QCameraDevice> cameras;
-    QFileSystemWatcher deviceWatcher;
+private:
+    QList<QCameraDevice> m_cameras;
+    QFileSystemWatcher m_deviceWatcher;
 };
 
 struct QV4L2CameraBuffers

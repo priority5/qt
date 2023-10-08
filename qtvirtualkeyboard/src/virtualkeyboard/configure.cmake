@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 
 
 #### Inputs
@@ -33,7 +36,7 @@ qt_feature("vkb-arrow-keynavigation" PUBLIC
 )
 qt_feature("vkb-desktop" PUBLIC
     LABEL "Desktop integration"
-    CONDITION NOT cross_compile
+    CONDITION NOT ANDROID
 )
 qt_feature("vkb-layouts" PUBLIC
     LABEL "Built-in layouts"

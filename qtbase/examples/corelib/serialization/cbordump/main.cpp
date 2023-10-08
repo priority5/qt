@@ -14,87 +14,222 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+using namespace Qt::StringLiterals;
+
 /*
  * To regenerate:
  *  curl -O https://www.iana.org/assignments/cbor-tags/cbor-tags.xml
  *  xsltproc tag-transform.xslt cbor-tags.xml
+ *
+ * The XHTML URL mentioned in the comment below is a human-readable version of
+ * the same resource.
  */
+
+/* TODO (if possible): fix XSLT to replace each newline and surrounding space in
+   a semantics entry with a single space, instead of using a raw string to wrap
+   each, propagating the spacing from the XML to the output of cbordump. Also
+   auto-purge dangling spaces from the ends of generated lines.
+*/
 
 // GENERATED CODE
 struct CborTagDescription
 {
     QCborTag tag;
-    const char *description;    // with space and parentheses
+    const char *description; // with space and parentheses
 };
 
 // CBOR Tags
 static const CborTagDescription tagDescriptions[] = {
     // from https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
-    { QCborTag(0), " (Standard date/time string; see Section 2.4.1 [RFC7049])" },
-    { QCborTag(1), " (Epoch-based date/time; see Section 2.4.1 [RFC7049])" },
-    { QCborTag(2), " (Positive bignum; see Section 2.4.2 [RFC7049])" },
-    { QCborTag(3), " (Negative bignum; see Section 2.4.2 [RFC7049])" },
-    { QCborTag(4), " (Decimal fraction; see Section 2.4.3 [RFC7049])" },
-    { QCborTag(5), " (Bigfloat; see Section 2.4.3 [RFC7049])" },
-    { QCborTag(16), " (COSE Single Recipient Encrypted Data Object [RFC8152])" },
-    { QCborTag(17), " (COSE Mac w/o Recipients Object [RFC8152])" },
-    { QCborTag(18), " (COSE Single Signer Data Object [RFC8152])" },
-    { QCborTag(21), " (Expected conversion to base64url encoding; see Section 2.4.4.2 [RFC7049])" },
-    { QCborTag(22), " (Expected conversion to base64 encoding; see Section 2.4.4.2 [RFC7049])" },
-    { QCborTag(23), " (Expected conversion to base16 encoding; see Section 2.4.4.2 [RFC7049])" },
-    { QCborTag(24), " (Encoded CBOR data item; see Section 2.4.4.1 [RFC7049])" },
-    { QCborTag(25), " (reference the nth previously seen string)" },
-    { QCborTag(26), " (Serialised Perl object with classname and constructor arguments)" },
-    { QCborTag(27), " (Serialised language-independent object with type name and constructor arguments)" },
-    { QCborTag(28), " (mark value as (potentially) shared)" },
-    { QCborTag(29), " (reference nth marked value)" },
-    { QCborTag(30), " (Rational number)" },
-    { QCborTag(32), " (URI; see Section 2.4.4.3 [RFC7049])" },
-    { QCborTag(33), " (base64url; see Section 2.4.4.3 [RFC7049])" },
-    { QCborTag(34), " (base64; see Section 2.4.4.3 [RFC7049])" },
-    { QCborTag(35), " (Regular expression; see Section 2.4.4.3 [RFC7049])" },
-    { QCborTag(36), " (MIME message; see Section 2.4.4.3 [RFC7049])" },
-    { QCborTag(37), " (Binary UUID ( section 4.1.2))" },
-    { QCborTag(38), " (Language-tagged string)" },
-    { QCborTag(39), " (Identifier)" },
-    { QCborTag(61), " (CBOR Web Token (CWT))" },
-    { QCborTag(96), " (COSE Encrypted Data Object [RFC8152])" },
-    { QCborTag(97), " (COSE MACed Data Object [RFC8152])" },
-    { QCborTag(98), " (COSE Signed Data Object [RFC8152])" },
-    { QCborTag(256), " (mark value as having string references)" },
-    { QCborTag(257), " (Binary MIME message)" },
-    { QCborTag(258), " (Mathematical finite set)" },
-    { QCborTag(260), " (Network Address (IPv4 or IPv6 or MAC Address))" },
-    { QCborTag(264), " (Decimal fraction with arbitrary exponent)" },
-    { QCborTag(265), " (Bigfloat with arbitrary exponent)" },
-    { QCborTag(1001), " (extended time)" },
-    { QCborTag(1002), " (duration)" },
-    { QCborTag(1003), " (period)" },
-    { QCborTag(22098), " (hint that indicates an additional level of indirection)" },
-    { QCborTag(55799), " (Self-describe CBOR; see Section 2.4.5 [RFC7049])" },
-    { QCborTag(15309736), " (RAINS Message)" },
+    { QCborTag(0),
+      R"r( (Standard date/time string; see Section 3.4.1 [RFC8949]))r" },
+    { QCborTag(1),
+      R"r( (Epoch-based date/time; see Section 3.4.2 [RFC8949]))r" },
+    { QCborTag(2),
+      R"r( (Positive bignum; see Section 3.4.3 [RFC8949]))r" },
+    { QCborTag(3),
+      R"r( (Negative bignum; see Section 3.4.3 [RFC8949]))r" },
+    { QCborTag(4),
+      R"r( (Decimal fraction; see Section 3.4.4 [RFC8949]))r" },
+    { QCborTag(5),
+      R"r( (Bigfloat; see Section 3.4.4 [RFC8949]))r" },
+    { QCborTag(16),
+      R"r( (COSE Single Recipient Encrypted Data Object [RFC9052]))r" },
+    { QCborTag(17),
+      R"r( (COSE Mac w/o Recipients Object [RFC9052]))r" },
+    { QCborTag(18),
+      R"r( (COSE Single Signer Data Object [RFC9052]))r" },
+    { QCborTag(19),
+      R"r( (COSE standalone V2 countersignature [RFC9338]))r" },
+    { QCborTag(21),
+      R"r( (Expected conversion to base64url encoding; see Section 3.4.5.2  [RFC8949]))r" },
+    { QCborTag(22),
+      R"r( (Expected conversion to base64 encoding; see Section 3.4.5.2  [RFC8949]))r" },
+    { QCborTag(23),
+      R"r( (Expected conversion to base16 encoding; see Section 3.4.5.2 [RFC8949]))r" },
+    { QCborTag(24),
+      R"r( (Encoded CBOR data item; see Section 3.4.5.1 [RFC8949]))r" },
+    { QCborTag(25),
+      R"r( (reference the nth previously seen string))r" },
+    { QCborTag(26),
+      R"r( (Serialised Perl object with classname and constructor arguments))r" },
+    { QCborTag(27),
+      R"r( (Serialised language-independent object with type name and constructor arguments))r" },
+    { QCborTag(28),
+      R"r( (mark value as (potentially) shared))r" },
+    { QCborTag(29),
+      R"r( (reference nth marked value))r" },
+    { QCborTag(30),
+      R"r( (Rational number))r" },
+    { QCborTag(31),
+      R"r( (Absent value in a CBOR Array))r" },
+    { QCborTag(32),
+      R"r( (URI; see Section 3.4.5.3 [RFC8949]))r" },
+    { QCborTag(33),
+      R"r( (base64url; see Section 3.4.5.3 [RFC8949]))r" },
+    { QCborTag(34),
+      R"r( (base64; see Section 3.4.5.3 [RFC8949]))r" },
+    { QCborTag(35),
+      R"r( (Regular expression; see Section 2.4.4.3 [RFC7049]))r" },
+    { QCborTag(36),
+      R"r( (MIME message; see Section 3.4.5.3 [RFC8949]))r" },
+    { QCborTag(37),
+      R"r( (Binary UUID (RFC4122, Section 4.1.2)))r" },
+    { QCborTag(38),
+      R"r( (Language-tagged string [RFC9290]))r" },
+    { QCborTag(39),
+      R"r( (Identifier))r" },
+    { QCborTag(40),
+      R"r( (Multi-dimensional Array, row-major order [RFC8746]))r" },
+    { QCborTag(41),
+      R"r( (Homogeneous Array [RFC8746]))r" },
+    { QCborTag(42),
+      R"r( (IPLD content identifier))r" },
+    { QCborTag(43),
+      R"r( (YANG bits datatype; see Section 6.7. [RFC9254]))r" },
+    { QCborTag(44),
+      R"r( (YANG enumeration datatype; see Section 6.6. [RFC9254]))r" },
+    { QCborTag(45),
+      R"r( (YANG identityref datatype; see Section 6.10. [RFC9254]))r" },
+    { QCborTag(46),
+      R"r( (YANG instance-identifier datatype; see Section 6.13. [RFC9254]))r" },
+    { QCborTag(47),
+      R"r( (YANG Schema Item iDentifier (sid); see Section 3.2. [RFC9254]))r" },
+    { QCborTag(52),
+      R"r( (IPv4, [prefixlen,IPv4], [IPv4,prefixpart] [RFC9164]))r" },
+    { QCborTag(54),
+      R"r( (IPv6, [prefixlen,IPv6], [IPv6,prefixpart] [RFC9164]))r" },
+    { QCborTag(61),
+      R"r( (CBOR Web Token (CWT) [RFC8392]))r" },
+    { QCborTag(63),
+      R"r( (Encoded CBOR Sequence ))r" },
+    { QCborTag(64),
+      R"r( (uint8 Typed Array [RFC8746]))r" },
+    { QCborTag(65),
+      R"r( (uint16, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(66),
+      R"r( (uint32, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(67),
+      R"r( (uint64, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(68),
+      R"r( (uint8 Typed Array, clamped arithmetic [RFC8746]))r" },
+    { QCborTag(69),
+      R"r( (uint16, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(70),
+      R"r( (uint32, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(71),
+      R"r( (uint64, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(72),
+      R"r( (sint8 Typed Array [RFC8746]))r" },
+    { QCborTag(73),
+      R"r( (sint16, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(74),
+      R"r( (sint32, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(75),
+      R"r( (sint64, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(76),
+      R"r( ((reserved) [RFC8746]))r" },
+    { QCborTag(77),
+      R"r( (sint16, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(78),
+      R"r( (sint32, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(79),
+      R"r( (sint64, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(80),
+      R"r( (IEEE 754 binary16, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(81),
+      R"r( (IEEE 754 binary32, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(82),
+      R"r( (IEEE 754 binary64, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(83),
+      R"r( (IEEE 754 binary128, big endian, Typed Array [RFC8746]))r" },
+    { QCborTag(84),
+      R"r( (IEEE 754 binary16, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(85),
+      R"r( (IEEE 754 binary32, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(86),
+      R"r( (IEEE 754 binary64, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(87),
+      R"r( (IEEE 754 binary128, little endian, Typed Array [RFC8746]))r" },
+    { QCborTag(96),
+      R"r( (COSE Encrypted Data Object [RFC9052]))r" },
+    { QCborTag(97),
+      R"r( (COSE MACed Data Object [RFC9052]))r" },
+    { QCborTag(98),
+      R"r( (COSE Signed Data Object [RFC9052]))r" },
+    { QCborTag(100),
+      R"r( (Number of days since the epoch date 1970-01-01 [RFC8943]))r" },
+    { QCborTag(101),
+      R"r( (alternatives as given by the uint + 128; see Section 9.1))r" },
+    { QCborTag(103),
+      R"r( (Geographic Coordinates))r" },
+    { QCborTag(104),
+      R"r( (Geographic Coordinate Reference System WKT or EPSG number))r" },
+    { QCborTag(110),
+      R"r( (relative object identifier (BER encoding); SDNV  sequence [RFC9090]))r" },
+    { QCborTag(111),
+      R"r( (object identifier (BER encoding) [RFC9090]))r" },
+    { QCborTag(112),
+      R"r( (object identifier (BER encoding), relative to 1.3.6.1.4.1 [RFC9090]))r" },
+    { QCborTag(120),
+      R"r( (Internet of Things Data Point))r" },
+    { QCborTag(260),
+      R"r( (Network Address (IPv4 or IPv6 or MAC Address) (DEPRECATED in favor of 52 and 54
+        for IP addresses) [http://www.employees.oRg/~RaviR/CboR-netwoRk.txt]))r" },
+    { QCborTag(261),
+      R"r( (Network Address Prefix (IPv4 or IPv6 Address + Mask Length) (DEPRECATED in favor of 52 and 54
+        for IP addresses) [https://github.Com/toRaviR/CBOR-Tag-SpeCs/blob/masteR/netwoRkPReFix.md]))r" },
+    { QCborTag(271),
+      R"r( (DDoS Open Threat Signaling (DOTS) signal channel object,
+        as defined in  [RFC9132]))r" },
+    { QCborTag(1004),
+      R"r( ( full-date string [RFC8943]))r" },
+    { QCborTag(1040),
+      R"r( (Multi-dimensional Array, column-major order [RFC8746]))r" },
+    { QCborTag(55799),
+      R"r( (Self-described CBOR; see Section 3.4.6 [RFC8949]))r" },
+    { QCborTag(55800),
+      R"r( (indicates that the file contains CBOR Sequences [RFC9277]))r" },
+    { QCborTag(55801),
+      R"r( (indicates that the file starts with a CBOR-Labeled Non-CBOR Data label. [RFC9277]))r" },
     { QCborTag(-1), nullptr }
 };
 // END GENERATED CODE
 
 enum {
     // See RFC 7049 section 2.
-    SmallValueBitLength     = 5,
-    SmallValueMask          = (1 << SmallValueBitLength) - 1,      /* 0x1f */
-    Value8Bit               = 24,
-    Value16Bit              = 25,
-    Value32Bit              = 26,
-    Value64Bit              = 27
+    SmallValueBitLength = 5,
+    SmallValueMask = (1 << SmallValueBitLength) - 1, /* 0x1f */
+    Value8Bit = 24,
+    Value16Bit = 25,
+    Value32Bit = 26,
+    Value64Bit = 27
 };
 
 //! [0]
 struct CborDumper
 {
-    enum DumpOption {
-        ShowCompact             = 0x01,
-        ShowWidthIndicators     = 0x02,
-        ShowAnnotated           = 0x04
-    };
+    enum DumpOption { ShowCompact = 0x01, ShowWidthIndicators = 0x02, ShowAnnotated = 0x04 };
     Q_DECLARE_FLAGS(DumpOptions, DumpOption)
 
     CborDumper(QFile *f, DumpOptions opts_);
@@ -131,8 +266,7 @@ static int cborNumberSize(quint64 value)
     return normalSize;
 }
 
-CborDumper::CborDumper(QFile *f, DumpOptions opts_)
-    : opts(opts_)
+CborDumper::CborDumper(QFile *f, DumpOptions opts_) : opts(opts_)
 {
     // try to mmap the file, this is faster
     char *ptr = reinterpret_cast<char *>(f->map(0, f->size(), QFile::MapPrivateOption));
@@ -179,51 +313,54 @@ QCborError CborDumper::dump()
     return err;
 }
 
-template <typename T> static inline bool canConvertTo(double v)
+template<typename T>
+static inline bool canConvertTo(double v)
 {
+    using TypeInfo = std::numeric_limits<T>;
     // The [conv.fpint] (7.10 Floating-integral conversions) section of the
     // standard says only exact conversions are guaranteed. Converting
     // integrals to floating-point with loss of precision has implementation-
     // defined behavior whether the next higher or next lower is returned;
     // converting FP to integral is UB if it can't be represented.;
-    static_assert(std::numeric_limits<T>::is_integer);
+    static_assert(TypeInfo::is_integer);
 
-    double supremum = ldexp(1, std::numeric_limits<T>::digits);
+    double supremum = ldexp(1, TypeInfo::digits);
     if (v >= supremum)
         return false;
 
-    if (v < std::numeric_limits<T>::min()) // either zero or a power of two, so it's exact
+    if (v < TypeInfo::min()) // either zero or a power of two, so it's exact
         return false;
 
     // we're in range
     return v == floor(v);
 }
 
-static QString fpToString(double v, const char *suffix)
+static QString fpToString(double v, QLatin1StringView suffix = ""_L1)
 {
     if (qIsInf(v))
-        return v < 0 ? QStringLiteral("-inf") : QStringLiteral("inf");
+        return v < 0 ? "-inf"_L1 : "inf"_L1;
     if (qIsNaN(v))
-        return QStringLiteral("nan");
+        return "nan"_L1;
     if (canConvertTo<qint64>(v))
-        return QString::number(qint64(v)) + ".0" + suffix;
+        return QString::number(qint64(v)) + ".0"_L1 + suffix;
     if (canConvertTo<quint64>(v))
-        return QString::number(quint64(v)) + ".0" + suffix;
+        return QString::number(quint64(v)) + ".0"_L1 + suffix;
 
     QString s = QString::number(v, 'g', QLocale::FloatingPointShortest);
-    if (!s.contains('.') && !s.contains('e'))
-        s += '.';
-    s += suffix;
+    if (!s.contains(u'.') && !s.contains(u'e'))
+        s += u'.';
+    if (suffix.size())
+        s += suffix;
     return s;
 };
 
 void CborDumper::dumpOne(int nestingLevel)
 {
-    QString indent(1, QLatin1Char(' '));
+    QString indent(1, u' ');
     QString indented = indent;
     if (!opts.testFlag(ShowCompact)) {
-        indent = QLatin1Char('\n') + QString(4 * nestingLevel, QLatin1Char(' '));
-        indented = QLatin1Char('\n') + QString(4 + 4 * nestingLevel, QLatin1Char(' '));
+        indent = u'\n' + QString(4 * nestingLevel, u' ');
+        indented = u'\n' + QString(4 + 4 * nestingLevel, u' ');
     }
 
     switch (reader.type()) {
@@ -263,7 +400,7 @@ void CborDumper::dumpOne(int nestingLevel)
                 printStringWidthIndicator(r.data.size());
 
                 r = reader.readByteArray();
-                comma = QLatin1Char(',') + indented;
+                comma = u',' + indented;
             }
         } else {
             auto r = reader.readString();
@@ -272,7 +409,7 @@ void CborDumper::dumpOne(int nestingLevel)
                 printStringWidthIndicator(r.data.toUtf8().size());
 
                 r = reader.readString();
-                comma = QLatin1Char(',') + indented;
+                comma = u',' + indented;
             }
         }
 
@@ -328,7 +465,7 @@ void CborDumper::dumpOne(int nestingLevel)
         if (reader.next()) {
             printWidthIndicator(quint64(tag));
             printf("(");
-            dumpOne(nestingLevel);  // same level!
+            dumpOne(nestingLevel); // same level!
             printf(")");
         }
 
@@ -360,15 +497,15 @@ void CborDumper::dumpOne(int nestingLevel)
         break;
 
     case QCborStreamReader::Float16:
-        printf("%s", qPrintable(fpToString(reader.toFloat16(), "f16")));
+        printf("%s", qPrintable(fpToString(reader.toFloat16(), "f16"_L1)));
         reader.next();
         break;
     case QCborStreamReader::Float:
-        printf("%s", qPrintable(fpToString(reader.toFloat(), "f")));
+        printf("%s", qPrintable(fpToString(reader.toFloat(), "f"_L1)));
         reader.next();
         break;
     case QCborStreamReader::Double:
-        printf("%s", qPrintable(fpToString(reader.toDouble(), "")));
+        printf("%s", qPrintable(fpToString(reader.toDouble())));
         reader.next();
         break;
     case QCborStreamReader::Invalid:
@@ -421,13 +558,14 @@ void CborDumper::dumpOneDetailed(int nestingLevel)
     };
 
     auto printFp = [=](const char *descr, double d) {
-        QString s = fpToString(d, "");
+        QString s = fpToString(d);
         if (s.size() <= 6)
             return print(descr, "%s", qPrintable(s));
         return print(descr, "%a", d);
     };
 
     auto printString = [=](const char *descr) {
+        constexpr qsizetype ChunkSizeLimit = std::numeric_limits<int>::max();
         QByteArray indent(nestingLevel * 2, ' ');
         const char *chunkStr = (reader.isLengthKnown() ? "" : "chunk ");
         int width = 48 - indent.size();
@@ -435,8 +573,8 @@ void CborDumper::dumpOneDetailed(int nestingLevel)
 
         qsizetype size = reader.currentStringChunkSize();
         if (size < 0)
-            return;         // error
-        if (size >= std::numeric_limits<int>::max()) {
+            return; // error
+        if (size >= ChunkSizeLimit) {
             fprintf(stderr, "String length too big, %lli\n", qint64(size));
             exit(EXIT_FAILURE);
         }
@@ -480,7 +618,7 @@ void CborDumper::dumpOneDetailed(int nestingLevel)
                 printf("  %s%s", indent.constData(), section.toHex(' ').constData());
 
                 // print the decode
-                QByteArray spaces(width > 0 ? width - section.size() * 3 + 1: 0, ' ');
+                QByteArray spaces(width > 0 ? width - section.size() * 3 + 1 : 0, ' ');
                 printf("%s # \"", spaces.constData());
                 auto ptr = reinterpret_cast<const uchar *>(section.constData());
                 for (int j = 0; j < section.size(); ++j)
@@ -492,8 +630,8 @@ void CborDumper::dumpOneDetailed(int nestingLevel)
             // get the next chunk
             size = reader.currentStringChunkSize();
             if (size < 0)
-                return;         // error
-            if (size >= std::numeric_limits<int>::max()) {
+                return; // error
+            if (size >= ChunkSizeLimit) {
                 fprintf(stderr, "String length too big, %lli\n", qint64(size));
                 exit(EXIT_FAILURE);
             }
@@ -631,7 +769,9 @@ void CborDumper::printByteArray(const QByteArray &ba)
         break;
 
     case quint8(QCborKnownTags::ExpectedBase64url):
-        printf("b64'%s'", ba.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals).constData());
+        printf("b64'%s'",
+               ba.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals)
+                       .constData());
         break;
     }
 }
@@ -672,23 +812,20 @@ int main(int argc, char *argv[])
     setlocale(LC_ALL, "C");
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("CBOR Dumper tool"));
+    parser.setApplicationDescription("CBOR Dumper tool"_L1);
     parser.addHelpOption();
 
-    QCommandLineOption compact({QStringLiteral("c"), QStringLiteral("compact")},
-                               QStringLiteral("Use compact form (no line breaks)"));
+    QCommandLineOption compact({"c"_L1, "compact"_L1}, "Use compact form (no line breaks)"_L1);
     parser.addOption(compact);
 
-    QCommandLineOption showIndicators({QStringLiteral("i"), QStringLiteral("indicators")},
-                                      QStringLiteral("Show indicators for width of lengths and integrals"));
+    QCommandLineOption showIndicators({ "i"_L1, "indicators"_L1 },
+                                      "Show indicators for width of lengths and integrals"_L1);
     parser.addOption(showIndicators);
 
-    QCommandLineOption verbose({QStringLiteral("a"), QStringLiteral("annotated")},
-                               QStringLiteral("Show bytes and annotated decoding"));
+    QCommandLineOption verbose({"a"_L1, "annotated"_L1}, "Show bytes and annotated decoding"_L1);
     parser.addOption(verbose);
 
-    parser.addPositionalArgument(QStringLiteral("[source]"),
-                                 QStringLiteral("CBOR file to read from"));
+    parser.addPositionalArgument("[source]"_L1, "CBOR file to read from"_L1);
 
     parser.process(app);
 

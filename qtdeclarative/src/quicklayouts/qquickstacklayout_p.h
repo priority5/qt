@@ -45,11 +45,15 @@ public:
     void invalidate(QQuickItem *childItem = nullptr)  override;
     void updateLayoutItems() override { }
     void rearrange(const QSizeF &) override;
+    void setStretchFactor(QQuickItem *item, int stretchFactor, Qt::Orientation orient) override;
 
     // iterator
     Q_INVOKABLE QQuickItem *itemAt(int index) const override;
     int itemCount() const override;
     int indexOf(QQuickItem *item) const;
+
+    /* QQuickItemChangeListener */
+    void itemSiblingOrderChanged(QQuickItem *item) override;
 
     static QQuickStackLayoutAttached *qmlAttachedProperties(QObject *object);
 
@@ -58,9 +62,14 @@ Q_SIGNALS:
     void countChanged();
 
 private:
+    enum AdjustCurrentIndexPolicy {
+        DontAdjustCurrentIndex,
+        AdjustCurrentIndex
+    };
+
     static void collectItemSizeHints(QQuickItem *item, QSizeF *sizeHints);
     bool shouldIgnoreItem(QQuickItem *item) const;
-    void childItemsChanged();
+    void childItemsChanged(AdjustCurrentIndexPolicy adjustCurrentIndexPolicy = DontAdjustCurrentIndex);
     Q_DECLARE_PRIVATE(QQuickStackLayout)
 
     friend class QQuickStackLayoutAttached;

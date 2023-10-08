@@ -240,6 +240,26 @@ public:
     static bool isValueType(QMetaType type);
     static QQmlValueType *valueType(QMetaType metaType);
     static const QMetaObject *metaObjectForValueType(QMetaType type);
+    static const QMetaObject *metaObjectForValueType(const QQmlType &qmlType)
+    {
+        // Prefer the extension meta object, if any.
+        // Extensions allow registration of non-gadget value types.
+        if (const QMetaObject *extensionMetaObject = qmlType.extensionMetaObject()) {
+            // This may be a namespace even if the original metaType isn't.
+            // You can do such things with QML_FOREIGN declarations.
+            if (extensionMetaObject->metaType().flags() & QMetaType::IsGadget)
+                return extensionMetaObject;
+        }
+
+        if (const QMetaObject *qmlTypeMetaObject = qmlType.metaObject()) {
+            // This may be a namespace even if the original metaType isn't.
+            // You can do such things with QML_FOREIGN declarations.
+            if (qmlTypeMetaObject->metaType().flags() & QMetaType::IsGadget)
+                return qmlTypeMetaObject;
+        }
+
+        return nullptr;
+    }
 
     static QQmlPropertyCache::ConstPtr findPropertyCacheInCompositeTypes(QMetaType t);
     static void registerInternalCompositeType(QV4::ExecutableCompilationUnit *compilationUnit);
@@ -264,7 +284,7 @@ struct QQmlMetaTypeInterface : QtPrivate::QMetaTypeInterface
     const QByteArray name;
     QQmlMetaTypeInterface(const QByteArray &name)
         : QMetaTypeInterface {
-            /*.revision=*/ 0,
+            /*.revision=*/ QMetaTypeInterface::CurrentRevision,
             /*.alignment=*/ alignof(QObject *),
             /*.size=*/ sizeof(QObject *),
             /*.flags=*/ QtPrivate::QMetaTypeTypeFlags<QObject *>::Flags,
@@ -299,7 +319,7 @@ struct QQmlListMetaTypeInterface : QtPrivate::QMetaTypeInterface
     const QtPrivate::QMetaTypeInterface *valueType;
     QQmlListMetaTypeInterface(const QByteArray &name, const QtPrivate::QMetaTypeInterface *valueType)
         : QMetaTypeInterface {
-            /*.revision=*/ 0,
+            /*.revision=*/ QMetaTypeInterface::CurrentRevision,
             /*.alignment=*/ alignof(QQmlListProperty<QObject>),
             /*.size=*/ sizeof(QQmlListProperty<QObject>),
             /*.flags=*/ QtPrivate::QMetaTypeTypeFlags<QQmlListProperty<QObject>>::Flags,

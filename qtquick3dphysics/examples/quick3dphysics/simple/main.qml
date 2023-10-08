@@ -12,8 +12,8 @@ Window {
     title: qsTr("Qt Quick 3D Physics - Simple")
 
     //! [world]
-    DynamicsWorld {
-        running: true
+    PhysicsWorld {
+        scene: viewport.scene
     }
     //! [world]
 
@@ -49,7 +49,7 @@ Window {
             collisionShapes: PlaneShape {}
             Model {
                 source: "#Rectangle"
-                scale: Qt.vector3d(10, 10, 10)
+                scale: Qt.vector3d(10, 10, 1)
                 materials: DefaultMaterial {
                     diffuseColor: "green"
                 }
@@ -106,5 +106,4 @@ Window {
         //! [capsule]
     }
     //! [scene]
-
 }

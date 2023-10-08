@@ -27,6 +27,7 @@ private slots:
     void webXmlFromCpp();
     void webXmlFromQml();
     void webXmlFromCppBug80259();
+    void illformated_documentation_caused_qtbug112641();
 
     // DocBook generator
     void docBookFromQDocFile();
@@ -204,6 +205,7 @@ void tst_generatedOutput::htmlFromQDocFile()
     testAndCompare("testdata/configs/test.qdocconf",
                    "qdoctests-qdocfileoutput.html "
                    "qdoctests-qdocfileoutput-linking.html "
+                   "qdoctests-qdocmanuallikefileoutput.html "
                    "qdoctests-qdocfileoutput-exhaustive.html "
                    "toc.html");
 }
@@ -220,6 +222,7 @@ void tst_generatedOutput::htmlFromCpp()
                    "testqdoc-testderived-obsolete.html "
                    "obsolete-classes.html "
                    "autolinking.html "
+                   "cpptypes.html "
                    "testqdoc.html");
 }
 
@@ -260,6 +263,7 @@ void tst_generatedOutput::webXmlFromQDocFile()
 {
     testAndCompare("testdata/configs/webxml_test.qdocconf",
                    "html/qdoctests-qdocfileoutput.webxml "
+                   "html/qdoctests-qdocmanuallikefileoutput.webxml "
                    "html/qdoctests-qdocfileoutput-linking.webxml "
                    "html/qdoctests-qdocfileoutput-exhaustive.webxml");
 }
@@ -289,10 +293,19 @@ void tst_generatedOutput::webXmlFromCppBug80259()
                    "html/index.webxml");
 }
 
+void tst_generatedOutput::illformated_documentation_caused_qtbug112641()
+{
+    testAndCompare("testdata/illformatted_documentation/illformatted_documentation.qdocconf",
+                   "html/illformatted-examples.webxml "
+                   "html/illformatteddocumentation-someexample-example.webxml "
+                   "html/illformatteddocumentation.index");
+}
+
 void tst_generatedOutput::docBookFromQDocFile()
 {
     testAndCompare("testdata/configs/docbook_test.qdocconf",
                    "docbook/qdoctests-qdocfileoutput.xml "
+                   "docbook/qdoctests-qdocmanuallikefileoutput.xml "
                    "docbook/qdoctests-qdocfileoutput-linking.xml "
                    "docbook/qdoctests-qdocfileoutput-exhaustive.xml");
 }
@@ -303,6 +316,7 @@ void tst_generatedOutput::docBookFromCpp()
                    "docbook/testcpp-module.xml "
                    "docbook/testqdoc-test.xml "
                    "docbook/testqdoc-testderived.xml "
+                   "docbook/cpptypes.xml "
                    "docbook/testqdoc.xml");
 }
 
@@ -349,7 +363,7 @@ void tst_generatedOutput::examplesManifestXmlAndQhp()
 {
     testAndCompare("testdata/configs/examples-qhp.qdocconf",
                    "examples-manifest.xml "
-                   "demos-manifest.xml "
+                   "test-demos-demo-example.html "
                    "test.qhp");
 }
 
@@ -479,7 +493,8 @@ void tst_generatedOutput::noAutoList()
 void tst_generatedOutput::nestedMacro()
 {
     testAndCompare("testdata/configs/nestedmacro.qdocconf",
-                   "nestedmacro/testcpp-module.html");
+                   "nestedmacro/testcpp-module.html "
+                   "docbook-nestedmacro/testcpp-module.xml");
 }
 
 void tst_generatedOutput::headerFile()

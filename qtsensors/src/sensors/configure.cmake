@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 
 
 #### Inputs
@@ -42,7 +45,10 @@ if (LINUX)
     # src/plugins/sensors/CMakeLists.txt and fix any potential errors.
     qt_configure_add_summary_entry(ARGS "sensorfw")
     qt_configure_add_summary_entry(ARGS "sensorfw_enabled_with_cmake")
-    qt_configure_add_report(MESSAGE "SensorFW support currently not enabled with cmake")
+    qt_configure_add_report_entry(
+        TYPE WARNING
+        MESSAGE "SensorFW support currently not enabled with cmake"
+    )
 endif()
 
 if (WIN32)

@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(alarms LANGUAGES CXX)
 
@@ -20,10 +23,10 @@ set_target_properties(alarms PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_link_libraries(alarms PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Quick
+target_link_libraries(alarms PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
 )
 
 # Resources:
@@ -35,14 +38,14 @@ set(qml_resource_files
     "main.qml"
 )
 
-qt6_add_resources(alarms "qml"
+qt_add_resources(alarms "qml"
     PREFIX
         "/alarms/"
     FILES
         ${qml_resource_files}
 )
 
-qt6_add_resources(alarms "controls_conf"
+qt_add_resources(alarms "controls_conf"
     PREFIX
         "/"
     FILES

@@ -43,6 +43,17 @@
 
 QT_BEGIN_NAMESPACE
 
+Q_TRACE_POINT(qtcore, QObject_ctor, QObject *object);
+Q_TRACE_POINT(qtcore, QObject_dtor, QObject *object);
+Q_TRACE_POINT(qtcore, QMetaObject_activate_entry, QObject *sender, int signalIndex);
+Q_TRACE_POINT(qtcore, QMetaObject_activate_exit);
+Q_TRACE_POINT(qtcore, QMetaObject_activate_slot_entry, QObject *receiver, int slotIndex);
+Q_TRACE_POINT(qtcore, QMetaObject_activate_slot_exit);
+Q_TRACE_POINT(qtcore, QMetaObject_activate_slot_functor_entry, void *slotObject);
+Q_TRACE_POINT(qtcore, QMetaObject_activate_slot_functor_exit);
+Q_TRACE_POINT(qtcore, QMetaObject_activate_declarative_signal_entry, QObject *sender, int signalIndex);
+Q_TRACE_POINT(qtcore, QMetaObject_activate_declarative_signal_exit);
+
 static int DIRECT_CONNECTION_ONLY = 0;
 
 Q_LOGGING_CATEGORY(lcConnectSlotsByName, "qt.core.qmetaobject.connectslotsbyname")
@@ -74,6 +85,8 @@ static int *queuedConnectionTypes(const QMetaMethod &method)
             typeIds[i] = QMetaType::VoidStar;
         else
             typeIds[i] = metaType.id();
+        if (!typeIds[i] && method.parameterTypeName(i).endsWith('*'))
+            typeIds[i] = QMetaType::VoidStar;
         if (!typeIds[i]) {
             const QByteArray typeName = method.parameterTypeName(i);
             qCWarning(lcConnect,
@@ -221,7 +234,7 @@ bool QObjectPrivate::isSender(const QObject *receiver, const char *signal) const
     ConnectionData *cd = connections.loadRelaxed();
     if (signal_index < 0 || !cd)
         return false;
-    QBasicMutexLocker locker(signalSlotLock(q));
+    QMutexLocker locker(signalSlotLock(q));
     if (signal_index < cd->signalVectorCount()) {
         const QObjectPrivate::Connection *c = cd->signalVector.loadRelaxed()->at(signal_index).first.loadRelaxed();
 
@@ -261,7 +274,7 @@ QObjectList QObjectPrivate::senderList() const
     QObjectList returnValue;
     ConnectionData *cd = connections.loadRelaxed();
     if (cd) {
-        QBasicMutexLocker locker(signalSlotLock(q_func()));
+        QMutexLocker locker(signalSlotLock(q_func()));
         for (Connection *c = cd->senders; c; c = c->next)
             returnValue << c->sender;
     }
@@ -539,11 +552,26 @@ QMetaCallEvent::QMetaCallEvent(QtPrivate::QSlotObjectBase *slotO,
                                const QObject *sender, int signalId,
                                void **args, QSemaphore *semaphore)
     : QAbstractMetaCallEvent(sender, signalId, semaphore),
-      d({slotO, args, nullptr, 0, 0, ushort(-1)}),
+      d({QtPrivate::SlotObjUniquePtr{slotO}, args, nullptr, 0, 0, ushort(-1)}),
       prealloc_()
 {
     if (d.slotObj_)
         d.slotObj_->ref();
+}
+
+/*!
+    \internal
+
+    Used for blocking queued connections, just passes \a args through without
+    allocating any memory.
+ */
+QMetaCallEvent::QMetaCallEvent(QtPrivate::SlotObjUniquePtr slotO,
+                               const QObject *sender, int signalId,
+                               void **args, QSemaphore *semaphore)
+    : QAbstractMetaCallEvent(sender, signalId, semaphore),
+      d{std::move(slotO), args, nullptr, 0, 0, ushort(-1)},
+      prealloc_()
+{
 }
 
 /*!
@@ -573,11 +601,27 @@ QMetaCallEvent::QMetaCallEvent(QtPrivate::QSlotObjectBase *slotO,
                                const QObject *sender, int signalId,
                                int nargs)
     : QAbstractMetaCallEvent(sender, signalId),
-      d({slotO, nullptr, nullptr, nargs, 0, ushort(-1)}),
+      d({QtPrivate::SlotObjUniquePtr(slotO), nullptr, nullptr, nargs, 0, ushort(-1)}),
       prealloc_()
 {
     if (d.slotObj_)
         d.slotObj_->ref();
+    allocArgs();
+}
+
+/*!
+    \internal
+
+    Allocates memory for \a nargs; code creating an event needs to initialize
+    the void* and int arrays by accessing \a args() and \a types(), respectively.
+ */
+QMetaCallEvent::QMetaCallEvent(QtPrivate::SlotObjUniquePtr slotO,
+                               const QObject *sender, int signalId,
+                               int nargs)
+    : QAbstractMetaCallEvent(sender, signalId),
+      d{std::move(slotO), nullptr, nullptr, nargs, 0, ushort(-1)},
+      prealloc_()
+{
     allocArgs();
 }
 
@@ -595,8 +639,6 @@ QMetaCallEvent::~QMetaCallEvent()
         if (reinterpret_cast<void *>(d.args_) != reinterpret_cast<void *>(prealloc_))
             free(d.args_);
     }
-    if (d.slotObj_)
-        d.slotObj_->destroyIfLastRef();
 }
 
 /*!
@@ -612,6 +654,25 @@ void QMetaCallEvent::placeMetaCall(QObject *object)
         QMetaObject::metacall(object, QMetaObject::InvokeMetaMethod,
                               d.method_offset_ + d.method_relative_, d.args_);
     }
+}
+
+QMetaCallEvent* QMetaCallEvent::create_impl(QtPrivate::SlotObjUniquePtr slotObj,
+                                            const QObject *sender, int signal_index,
+                                            size_t argc, const void* const argp[],
+                                            const QMetaType metaTypes[])
+{
+    auto metaCallEvent = std::make_unique<QMetaCallEvent>(std::move(slotObj), sender,
+                                                          signal_index, int(argc));
+
+    void **args = metaCallEvent->args();
+    QMetaType *types = metaCallEvent->types();
+    for (size_t i = 0; i < argc; ++i) {
+        types[i] = metaTypes[i];
+        args[i] = types[i].create(argp[i]);
+        Q_CHECK_PTR(!i || args[i]);
+    }
+
+    return metaCallEvent.release();
 }
 
 /*!
@@ -1012,7 +1073,7 @@ QObject::~QObject()
         }
 
         QBasicMutex *signalSlotMutex = signalSlotLock(this);
-        QBasicMutexLocker locker(signalSlotMutex);
+        QMutexLocker locker(signalSlotMutex);
 
         // disconnect all receivers
         int receiverCount = cd->signalVectorCount();
@@ -1190,8 +1251,7 @@ inline QObjectPrivate::Connection::~Connection()
     \c dynamic_cast(), with the advantages that it doesn't require
     RTTI support and it works across dynamic library boundaries.
 
-    qobject_cast() can also be used in conjunction with interfaces;
-    see the \l{tools/plugandpaint/app}{Plug & Paint} example for details.
+    qobject_cast() can also be used in conjunction with interfaces.
 
     \warning If T isn't declared with the Q_OBJECT macro, this
     function's return value is undefined.
@@ -1261,7 +1321,7 @@ void QObject::doSetObjectName(const QString &name)
 
     d->extraData->objectName.removeBindingUnlessInWrapper();
 
-    if (d->extraData->objectName != name) {
+    if (d->extraData->objectName.valueBypassingBindings() != name) {
         d->extraData->objectName.setValueBypassingBindings(name);
         d->extraData->objectName.notify(); // also emits a signal
     }
@@ -1279,7 +1339,7 @@ void QObject::setObjectName(QAnyStringView name)
 
     d->extraData->objectName.removeBindingUnlessInWrapper();
 
-    if (d->extraData->objectName.value() != name) {
+    if (d->extraData->objectName.valueBypassingBindings() != name) {
         d->extraData->objectName.setValueBypassingBindings(name.toString());
         d->extraData->objectName.notify(); // also emits a signal
     }
@@ -1370,7 +1430,7 @@ bool QObject::event(QEvent *e)
             QAbstractMetaCallEvent *mce = static_cast<QAbstractMetaCallEvent*>(e);
 
             if (!d_func()->connections.loadRelaxed()) {
-                QBasicMutexLocker locker(signalSlotLock(this));
+                QMutexLocker locker(signalSlotLock(this));
                 d_func()->ensureConnectionData();
             }
             QObjectPrivate::Sender sender(this, const_cast<QObject*>(mce->sender()), mce->signalId());
@@ -2370,7 +2430,7 @@ void QObject::deleteLater()
     translated string is available.
 
     Example:
-    \snippet ../widgets/mainwindows/sdi/mainwindow.cpp implicit tr context
+    \snippet ../widgets/itemviews/spreadsheet/spreadsheet.cpp implicit tr context
     \dots
 
     If the same \a sourceText is used in different roles within the
@@ -2385,8 +2445,8 @@ void QObject::deleteLater()
 
     See \l{Writing Source Code for Translation} for a detailed description of
     Qt's translation mechanisms in general, and the
-    \l{Writing Source Code for Translation#Disambiguation}{Disambiguation}
-    section for information on disambiguation.
+    \l{Writing Source Code for Translation#Disambiguate Identical Text}
+    {Disambiguate Identical Text} section for information on disambiguation.
 
     \warning This method is reentrant only if all translators are
     installed \e before calling this method. Installing or removing
@@ -2524,7 +2584,7 @@ QObject *QObject::sender() const
 {
     Q_D(const QObject);
 
-    QBasicMutexLocker locker(signalSlotLock(this));
+    QMutexLocker locker(signalSlotLock(this));
     QObjectPrivate::ConnectionData *cd = d->connections.loadRelaxed();
     if (!cd || !cd->currentSender)
         return nullptr;
@@ -2566,7 +2626,7 @@ int QObject::senderSignalIndex() const
 {
     Q_D(const QObject);
 
-    QBasicMutexLocker locker(signalSlotLock(this));
+    QMutexLocker locker(signalSlotLock(this));
     QObjectPrivate::ConnectionData *cd = d->connections.loadRelaxed();
     if (!cd || !cd->currentSender)
         return -1;
@@ -2631,7 +2691,7 @@ int QObject::receivers(const char *signal) const
         }
 
         QObjectPrivate::ConnectionData *cd = d->connections.loadRelaxed();
-        QBasicMutexLocker locker(signalSlotLock(this));
+        QMutexLocker locker(signalSlotLock(this));
         if (cd && signal_index < cd->signalVectorCount()) {
             const QObjectPrivate::Connection *c = cd->signalVector.loadRelaxed()->at(signal_index).first.loadRelaxed();
             while (c) {
@@ -2678,7 +2738,7 @@ bool QObject::isSignalConnected(const QMetaMethod &signal) const
 
     signalIndex += QMetaObjectPrivate::signalOffset(signal.mobj);
 
-    QBasicMutexLocker locker(signalSlotLock(this));
+    QMutexLocker locker(signalSlotLock(this));
     return d->isSignalConnected(signalIndex, true);
 }
 
@@ -3584,7 +3644,7 @@ bool QMetaObjectPrivate::disconnect(const QObject *sender,
     QObject *s = const_cast<QObject *>(sender);
 
     QBasicMutex *senderMutex = signalSlotLock(sender);
-    QBasicMutexLocker locker(senderMutex);
+    QMutexLocker locker(senderMutex);
 
     QObjectPrivate::ConnectionData *scd = QObjectPrivate::get(s)->connections.loadRelaxed();
     if (!scd)
@@ -3773,17 +3833,14 @@ struct SlotObjectGuard {
     }
 
     QtPrivate::QSlotObjectBase const *operator->() const
-    { return m_slotObject; }
+    { return m_slotObject.get(); }
 
     QtPrivate::QSlotObjectBase *operator->()
-    { return m_slotObject; }
+    { return m_slotObject.get(); }
 
-    ~SlotObjectGuard() {
-        if (m_slotObject)
-            m_slotObject->destroyIfLastRef();
-    }
+    ~SlotObjectGuard() = default;
 private:
-    QtPrivate::QSlotObjectBase *m_slotObject = nullptr;
+    QtPrivate::SlotObjUniquePtr m_slotObject;
 };
 
 /*!
@@ -3811,7 +3868,7 @@ static void queued_activate(QObject *sender, int signal, QObjectPrivate::Connect
     while (argumentTypes[nargs - 1])
         ++nargs;
 
-    QBasicMutexLocker locker(signalSlotLock(c->receiver.loadRelaxed()));
+    QMutexLocker locker(signalSlotLock(c->receiver.loadRelaxed()));
     QObject *receiver = c->receiver.loadRelaxed();
     if (!receiver) {
         // the connection has been disconnected before we got the lock
@@ -3952,7 +4009,7 @@ void doActivate(QObject *sender, int signal_index, void **argv)
 
                 QSemaphore semaphore;
                 {
-                    QBasicMutexLocker locker(signalSlotLock(receiver));
+                    QMutexLocker locker(signalSlotLock(receiver));
                     if (!c->isSingleShot && !c->receiver.loadAcquire())
                         continue;
                     QMetaCallEvent *ev = c->isSlotObject ?
@@ -4257,7 +4314,7 @@ void QObject::dumpObjectInfo() const
            objectName().isEmpty() ? "unnamed" : objectName().toLocal8Bit().data());
 
     Q_D(const QObject);
-    QBasicMutexLocker locker(signalSlotLock(this));
+    QMutexLocker locker(signalSlotLock(this));
 
     // first, look for connections where this object is the sender
     qDebug("  SIGNALS OUT");
@@ -4358,15 +4415,6 @@ QDebug operator<<(QDebug dbg, const QObject *o)
 
     This macro tells Qt which interfaces the class implements. This
     is used when implementing plugins.
-
-    Example:
-
-    \snippet ../widgets/tools/plugandpaint/plugins/basictools/basictoolsplugin.h 1
-    \dots
-    \snippet ../widgets/tools/plugandpaint/plugins/basictools/basictoolsplugin.h 3
-
-    See the \l{tools/plugandpaint/plugins/basictools}{Plug & Paint
-    Basic Tools} example for details.
 
     \sa Q_DECLARE_INTERFACE(), Q_PLUGIN_METADATA(), {How to Create Qt Plugins}
 */
@@ -4583,7 +4631,7 @@ QDebug operator<<(QDebug dbg, const QObject *o)
 
     Q_GADGET makes a class member, \c{staticMetaObject}, available.
     \c{staticMetaObject} is of type QMetaObject and provides access to the
-    enums declared with Q_ENUMS.
+    enums declared with Q_ENUM.
 
     \sa Q_GADGET_EXPORT
 */
@@ -5009,13 +5057,12 @@ void qDeleteInEventHandler(QObject *o)
  */
 QMetaObject::Connection QObject::connectImpl(const QObject *sender, void **signal,
                                              const QObject *receiver, void **slot,
-                                             QtPrivate::QSlotObjectBase *slotObj, Qt::ConnectionType type,
+                                             QtPrivate::QSlotObjectBase *slotObjRaw, Qt::ConnectionType type,
                                              const int *types, const QMetaObject *senderMetaObject)
 {
+    QtPrivate::SlotObjUniquePtr slotObj(slotObjRaw);
     if (!signal) {
         qCWarning(lcConnect, "QObject::connect: invalid nullptr parameter");
-        if (slotObj)
-            slotObj->destroyIfLastRef();
         return QMetaObject::Connection();
     }
 
@@ -5028,11 +5075,10 @@ QMetaObject::Connection QObject::connectImpl(const QObject *sender, void **signa
     }
     if (!senderMetaObject) {
         qCWarning(lcConnect, "QObject::connect: signal not found in %s", sender->metaObject()->className());
-        slotObj->destroyIfLastRef();
         return QMetaObject::Connection(nullptr);
     }
     signal_index += QMetaObjectPrivate::signalOffset(senderMetaObject);
-    return QObjectPrivate::connectImpl(sender, signal_index, receiver, slot, slotObj, type, types, senderMetaObject);
+    return QObjectPrivate::connectImpl(sender, signal_index, receiver, slot, slotObj.release(), type, types, senderMetaObject);
 }
 
 static void connectWarning(const QObject *sender,
@@ -5057,14 +5103,10 @@ static void connectWarning(const QObject *sender,
  */
 QMetaObject::Connection QObjectPrivate::connectImpl(const QObject *sender, int signal_index,
                                              const QObject *receiver, void **slot,
-                                             QtPrivate::QSlotObjectBase *slotObj, int type,
+                                             QtPrivate::QSlotObjectBase *slotObjRaw, int type,
                                              const int *types, const QMetaObject *senderMetaObject)
 {
-    auto connectFailureGuard = qScopeGuard([&]()
-    {
-        if (slotObj)
-            slotObj->destroyIfLastRef();
-    });
+    QtPrivate::SlotObjUniquePtr slotObj(slotObjRaw);
 
     if (!sender || !receiver || !slotObj || !senderMetaObject) {
         connectWarning(sender, senderMetaObject, receiver, "invalid nullptr parameter");
@@ -5075,8 +5117,6 @@ QMetaObject::Connection QObjectPrivate::connectImpl(const QObject *sender, int s
         connectWarning(sender, senderMetaObject, receiver, "unique connections require a pointer to member function of a QObject subclass");
         return QMetaObject::Connection();
     }
-
-    connectFailureGuard.dismiss();
 
     QObject *s = const_cast<QObject *>(sender);
     QObject *r = const_cast<QObject *>(receiver);
@@ -5090,10 +5130,8 @@ QMetaObject::Connection QObjectPrivate::connectImpl(const QObject *sender, int s
             const QObjectPrivate::Connection *c2 = connections->signalVector.loadRelaxed()->at(signal_index).first.loadRelaxed();
 
             while (c2) {
-                if (c2->receiver.loadRelaxed() == receiver && c2->isSlotObject && c2->slotObj->compare(slot)) {
-                    slotObj->destroyIfLastRef();
+                if (c2->receiver.loadRelaxed() == receiver && c2->isSlotObject && c2->slotObj->compare(slot))
                     return QMetaObject::Connection();
-                }
                 c2 = c2->nextConnectionList.loadRelaxed();
             }
         }
@@ -5113,9 +5151,9 @@ QMetaObject::Connection QObjectPrivate::connectImpl(const QObject *sender, int s
     td->ref();
     c->receiverThreadData.storeRelaxed(td);
     c->receiver.storeRelaxed(r);
-    c->slotObj = slotObj;
     c->connectionType = type;
     c->isSlotObject = true;
+    c->slotObj = slotObj.release();
     if (types) {
         c->argumentTypes.storeRelaxed(types);
         c->ownArgumentTypes = false;
@@ -5264,20 +5302,19 @@ QMetaObject::Connection QObjectPrivate::connect(const QObject *sender, int signa
  */
 QMetaObject::Connection QObjectPrivate::connect(const QObject *sender, int signal_index,
                                                 const QObject *receiver,
-                                                QtPrivate::QSlotObjectBase *slotObj,
+                                                QtPrivate::QSlotObjectBase *slotObjRaw,
                                                 Qt::ConnectionType type)
 {
+    QtPrivate::SlotObjUniquePtr slotObj(slotObjRaw);
     if (!sender) {
         qCWarning(lcConnect, "QObject::connect: invalid nullptr parameter");
-        if (slotObj)
-            slotObj->destroyIfLastRef();
         return QMetaObject::Connection();
     }
     const QMetaObject *senderMetaObject = sender->metaObject();
     signal_index = methodIndexToSignalIndex(&senderMetaObject, signal_index);
 
-    return QObjectPrivate::connectImpl(sender, signal_index, receiver, /*slot*/ nullptr, slotObj,
-                                       type, /*types*/ nullptr, senderMetaObject);
+    return connectImpl(sender, signal_index, receiver, /*slot*/ nullptr, slotObj.release(),
+                       type, /*types*/ nullptr, senderMetaObject);
 }
 
 /*!
@@ -5356,6 +5393,33 @@ inline bool QObjectPrivate::removeConnection(QObjectPrivate::Connection *c)
     }
 
     return true;
+}
+
+/*!
+ \internal
+
+ Used by QPropertyAdaptorSlotObject to get an existing instance for a property, if available
+ */
+QtPrivate::QPropertyAdaptorSlotObject *
+QObjectPrivate::getPropertyAdaptorSlotObject(const QMetaProperty &property)
+{
+    if (auto conns = connections.loadRelaxed()) {
+        Q_Q(QObject);
+        const QMetaObject *metaObject = q->metaObject();
+        int signal_index = methodIndexToSignalIndex(&metaObject, property.notifySignalIndex());
+        if (signal_index >= conns->signalVectorCount())
+            return nullptr;
+        const auto connectionList = conns->connectionsForSignal(signal_index);
+        for (auto c = connectionList.first.loadRelaxed(); c;
+             c = c->nextConnectionList.loadRelaxed()) {
+            if (c->isSlotObject) {
+                if (auto p = QtPrivate::QPropertyAdaptorSlotObject::cast(c->slotObj,
+                                                                         property.propertyIndex()))
+                    return p;
+            }
+        }
+    }
+    return nullptr;
 }
 
 /*! \class QMetaObject::Connection

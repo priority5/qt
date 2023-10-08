@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(maroon LANGUAGES CXX)
 
@@ -20,11 +23,11 @@ set_target_properties(maroon PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_link_libraries(maroon PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
+target_link_libraries(maroon PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
 )
 
 # Resources:
@@ -98,16 +101,16 @@ set(maroon_resource_files
     "maroon.qml"
 )
 
-qt6_add_resources(maroon "maroon"
+qt_add_resources(maroon "maroon"
     PREFIX
         "/demos/maroon"
     FILES
         ${maroon_resource_files}
 )
 
-if(TARGET Qt::Multimedia)
-    target_link_libraries(maroon PUBLIC
-        Qt::Multimedia
+if(TARGET Qt6::Multimedia)
+    target_link_libraries(maroon PRIVATE
+        Qt6::Multimedia
     )
 endif()
 

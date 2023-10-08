@@ -66,6 +66,7 @@
 QT_BEGIN_NAMESPACE
 
 using namespace Qt::StringLiterals;
+using namespace QtMiscUtils;
 
 struct QConfFileCustomFormat
 {
@@ -380,9 +381,7 @@ QString QSettingsPrivate::variantToString(const QVariant &v)
 
         case QMetaType::QByteArray: {
             QByteArray a = v.toByteArray();
-            result = "@ByteArray("_L1
-                     + QLatin1StringView(a.constData(), a.size())
-                     + u')';
+            result = "@ByteArray("_L1 + QLatin1StringView(a) + u')';
             break;
         }
 
@@ -517,8 +516,7 @@ void QSettingsPrivate::iniEscapedKey(const QString &key, QByteArray &result)
 
         if (ch == '/') {
             result += '\\';
-        } else if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
-                || ch == '_' || ch == '-' || ch == '.') {
+        } else if (isAsciiLetterOrNumber(ch) || ch == '_' || ch == '-' || ch == '.') {
             result += (char)ch;
         } else if (ch <= 0xFF) {
             result += '%';
@@ -597,25 +595,20 @@ void QSettingsPrivate::iniEscapedString(const QString &str, QByteArray &result)
 {
     bool needsQuotes = false;
     bool escapeNextIfDigit = false;
-    bool useCodec = !str.startsWith("@ByteArray("_L1)
-                    && !str.startsWith("@Variant("_L1)
-                    && !str.startsWith("@DateTime("_L1);
+    const bool useCodec = !(str.startsWith("@ByteArray("_L1)
+                            || str.startsWith("@Variant("_L1)
+                            || str.startsWith("@DateTime("_L1));
+    const qsizetype startPos = result.size();
 
     QStringEncoder toUtf8(QStringEncoder::Utf8);
 
-    qsizetype startPos = result.size();
     result.reserve(startPos + str.size() * 3 / 2);
-
-    const QChar *unicode = str.unicode();
-    for (qsizetype i = 0; i < str.size(); ++i) {
-        uint ch = unicode[i].unicode();
+    for (QChar qch : str) {
+        uint ch = qch.unicode();
         if (ch == ';' || ch == ',' || ch == '=')
             needsQuotes = true;
 
-        if (escapeNextIfDigit
-                && ((ch >= '0' && ch <= '9')
-                    || (ch >= 'a' && ch <= 'f')
-                    || (ch >= 'A' && ch <= 'F'))) {
+        if (escapeNextIfDigit && isHexDigit(ch)) {
             result += "\\x" + QByteArray::number(ch, 16);
             continue;
         }
@@ -659,7 +652,7 @@ void QSettingsPrivate::iniEscapedString(const QString &str, QByteArray &result)
                 escapeNextIfDigit = true;
             } else if (useCodec) {
                 // slow
-                result += toUtf8(unicode[i]);
+                result += toUtf8(qch);
             } else {
                 result += (char)ch;
             }
@@ -758,9 +751,9 @@ StNormal:
                     goto end;
 
                 ch = str.at(i);
-                if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F') || (ch >= 'a' && ch <= 'f'))
+                if (isHexDigit(ch))
                     goto StHexEscape;
-            } else if (ch >= '0' && ch <= '7') {
+            } else if (isOctalDigit(ch)) {
                 escapeVal = ch - '0';
                 goto StOctEscape;
             } else if (ch == '\n' || ch == '\r') {
@@ -954,26 +947,43 @@ static inline int pathHashKey(QSettings::Format format, QSettings::Scope scope)
 }
 
 #ifndef Q_OS_WIN
-static QString make_user_path()
+static constexpr QChar sep = u'/';
+
+#if !defined(QSETTINGS_USE_QSTANDARDPATHS) || defined(Q_OS_ANDROID)
+static QString make_user_path_without_qstandard_paths()
 {
-    static constexpr QChar sep = u'/';
-#ifndef QSETTINGS_USE_QSTANDARDPATHS
-    // Non XDG platforms (OS X, iOS, Android...) have used this code path erroneously
-    // for some time now. Moving away from that would require migrating existing settings.
     QByteArray env = qgetenv("XDG_CONFIG_HOME");
     if (env.isEmpty()) {
         return QDir::homePath() + "/.config/"_L1;
     } else if (env.startsWith('/')) {
         return QFile::decodeName(env) + sep;
-    } else {
-        return QDir::homePath() + sep + QFile::decodeName(env) + sep;
     }
+
+    return QDir::homePath() + sep + QFile::decodeName(env) + sep;
+}
+#endif // !QSETTINGS_USE_QSTANDARDPATHS || Q_OS_ANDROID
+
+static QString make_user_path()
+{
+#ifndef QSETTINGS_USE_QSTANDARDPATHS
+    // Non XDG platforms (OS X, iOS, Android...) have used this code path erroneously
+    // for some time now. Moving away from that would require migrating existing settings.
+    // The migration has already been done for Android.
+    return make_user_path_without_qstandard_paths();
 #else
-    // When using a proper XDG platform, use QStandardPaths rather than the above hand-written code;
-    // it makes the use of test mode from unit tests possible.
+
+#ifdef Q_OS_ANDROID
+    // If an old settings path exists, use it instead of creating a new one
+    QString ret = make_user_path_without_qstandard_paths();
+    if (QFile(ret).exists())
+        return ret;
+#endif // Q_OS_ANDROID
+
+    // When using a proper XDG platform or Android platform, use QStandardPaths rather than the
+    // above hand-written code. It makes the use of test mode from unit tests possible.
     // Ideally all platforms should use this, but see above for the migration issue.
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + sep;
-#endif
+#endif // !QSETTINGS_USE_QSTANDARDPATHS
 }
 #endif // !Q_OS_WIN
 
@@ -1338,8 +1348,7 @@ void QConfFileSettingsPrivate::syncConfFile(QConfFile *confFile)
     // On android and if it is a content URL put the lock file in a
     // writable location to prevent permissions issues and invalid paths.
     if (confFile->name.startsWith("content:"_L1))
-        lockFileName = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                + QFileInfo(lockFileName).fileName();
+        lockFileName = make_user_path() + QFileInfo(lockFileName).fileName();
 #    endif
     /*
         Use a lockfile in order to protect us against other QSettings instances
@@ -1607,10 +1616,9 @@ bool QConfFileSettingsPrivate::readIniFile(QByteArrayView data,
     qsizetype sectionPosition = 0;
     bool ok = true;
 
-    // skip potential utf8 BOM
-    const uchar *dd = (const uchar *)data.constData();
-    if (data.size() >= 3 && dd[0] == 0xef && dd[1] == 0xbb && dd[2] == 0xbf)
-        dataPos = 3;
+    // Skip possible UTF-8 BOM:
+    if (data.startsWith("\xef\xbb\xbf"))
+        data = data.sliced(3);
 
     while (readIniLine(data, dataPos, lineStart, lineLen, equalsPos)) {
         QByteArrayView line = data.sliced(lineStart, lineLen);
@@ -1682,27 +1690,22 @@ bool QConfFileSettingsPrivate::readIniSection(const QSettingsKey &section, QByte
         QByteArrayView value = line.sliced(equalsPos + 1);
 
         QString strKey = section.originalCaseKey();
-        bool keyIsLowercase = iniUnescapedKey(key, strKey) && sectionIsLowercase;
+        const Qt::CaseSensitivity casing = iniUnescapedKey(key, strKey) && sectionIsLowercase
+                                           ? Qt::CaseSensitive
+                                           : IniCaseSensitivity;
 
         QString strValue;
         strValue.reserve(value.size());
-        bool isStringList = iniUnescapedStringList(value, strValue, strListValue);
-        QVariant variant;
-        if (isStringList) {
-            variant = stringListToVariantList(strListValue);
-        } else {
-            variant = stringToVariant(strValue);
-        }
+        QVariant variant = iniUnescapedStringList(value, strValue, strListValue)
+                           ? stringListToVariantList(strListValue)
+                           : stringToVariant(strValue);
 
         /*
             We try to avoid the expensive toLower() call in
             QSettingsKey by passing Qt::CaseSensitive when the
             key is already in lowercase.
         */
-        settingsMap->insert(QSettingsKey(strKey, keyIsLowercase ? Qt::CaseSensitive
-                                                                : IniCaseSensitivity,
-                                         position),
-                            variant);
+        settingsMap->insert(QSettingsKey(strKey, casing, position), std::move(variant));
         ++position;
     }
 
@@ -2167,8 +2170,8 @@ void QConfFileSettingsPrivate::ensureSectionParsed(QConfFile *confFile,
     following files are used by default:
 
     \list 1
-    \li \c{$HOME/.config/MySoft/Star Runner.conf} (Qt for Embedded Linux: \c{$HOME/Settings/MySoft/Star Runner.conf})
-    \li \c{$HOME/.config/MySoft.conf} (Qt for Embedded Linux: \c{$HOME/Settings/MySoft.conf})
+    \li \c{$HOME/.config/MySoft/Star Runner.conf}
+    \li \c{$HOME/.config/MySoft.conf}
     \li for each directory <dir> in $XDG_CONFIG_DIRS: \c{<dir>/MySoft/Star Runner.conf}
     \li for each directory <dir> in $XDG_CONFIG_DIRS: \c{<dir>/MySoft.conf}
     \endlist
@@ -2205,8 +2208,8 @@ void QConfFileSettingsPrivate::ensureSectionParsed(QConfFile *confFile,
     used on Unix, \macos, and iOS:
 
     \list 1
-    \li \c{$HOME/.config/MySoft/Star Runner.ini} (Qt for Embedded Linux: \c{$HOME/Settings/MySoft/Star Runner.ini})
-    \li \c{$HOME/.config/MySoft.ini} (Qt for Embedded Linux: \c{$HOME/Settings/MySoft.ini})
+    \li \c{$HOME/.config/MySoft/Star Runner.ini}
+    \li \c{$HOME/.config/MySoft.ini}
     \li for each directory <dir> in $XDG_CONFIG_DIRS: \c{<dir>/MySoft/Star Runner.ini}
     \li for each directory <dir> in $XDG_CONFIG_DIRS: \c{<dir>/MySoft.ini}
     \endlist
@@ -3376,8 +3379,6 @@ QSettings::Format QSettings::defaultFormat()
     \row    \li{1,2} Windows     \li{1,2} IniFormat               \li UserScope   \li \c FOLDERID_RoamingAppData
     \row                                                        \li SystemScope \li \c FOLDERID_ProgramData
     \row    \li{1,2} Unix        \li{1,2} NativeFormat, IniFormat \li UserScope   \li \c $HOME/.config
-    \row                                                        \li SystemScope \li \c /etc/xdg
-    \row    \li{1,2} Qt for Embedded Linux \li{1,2} NativeFormat, IniFormat \li UserScope   \li \c $HOME/Settings
     \row                                                        \li SystemScope \li \c /etc/xdg
     \row    \li{1,2} \macos and iOS   \li{1,2} IniFormat               \li UserScope   \li \c $HOME/.config
     \row                                                        \li SystemScope \li \c /etc/xdg

@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(rssnews LANGUAGES CXX)
 
@@ -20,12 +23,12 @@ set_target_properties(rssnews PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_link_libraries(rssnews PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
-    Qt::QmlXmlListModel
+target_link_libraries(rssnews PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::QmlXmlListModel
 )
 
 # Resources:
@@ -53,7 +56,7 @@ set(rssnews_resource_files
     "rssnews.qml"
 )
 
-qt6_add_resources(rssnews "rssnews"
+qt_add_resources(rssnews "rssnews"
     PREFIX
         "/demos/rssnews"
     FILES

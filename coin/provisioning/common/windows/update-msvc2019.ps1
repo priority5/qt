@@ -1,41 +1,5 @@
-############################################################################
-##
-## Copyright (C) 2021 The Qt Company Ltd.
-## Contact: https://www.qt.io/licensing/
-##
-## This file is part of the provisioning scripts of the Qt Toolkit.
-##
-## $QT_BEGIN_LICENSE:LGPL$
-## Commercial License Usage
-## Licensees holding valid commercial Qt licenses may use this file in
-## accordance with the commercial license agreement provided with the
-## Software or, alternatively, in accordance with the terms contained in
-## a written agreement between you and The Qt Company. For licensing terms
-## and conditions see https://www.qt.io/terms-conditions. For further
-## information use the contact form at https://www.qt.io/contact-us.
-##
-## GNU Lesser General Public License Usage
-## Alternatively, this file may be used under the terms of the GNU Lesser
-## General Public License version 3 as published by the Free Software
-## Foundation and appearing in the file LICENSE.LGPL3 included in the
-## packaging of this file. Please review the following information to
-## ensure the GNU Lesser General Public License version 3 requirements
-## will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-##
-## GNU General Public License Usage
-## Alternatively, this file may be used under the terms of the GNU
-## General Public License version 2.0 or (at your option) the GNU General
-## Public license version 3 or any later version approved by the KDE Free
-## Qt Foundation. The licenses are as published by the Free Software
-## Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-## included in the packaging of this file. Please review the following
-## information to ensure the GNU General Public License requirements will
-## be met: https://www.gnu.org/licenses/gpl-2.0.html and
-## https://www.gnu.org/licenses/gpl-3.0.html.
-##
-## $QT_END_LICENSE$
-##
-#############################################################################
+# Copyright (C) 2021 The Qt Company Ltd.
+# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 . "$PSScriptRoot\helpers.ps1"
 
@@ -73,10 +37,63 @@ function Install {
     Remove-Item -Force -Path $installerPath
 }
 
+function Get-Vswhere-Property {
+    Param (
+        [ValidateSet(2017, 2019, 2022)]
+        [int] $vsYear = $(BadParam("Visual Studio Year")),
+
+        [ValidatePattern("Professional|Build *Tools|Community|Enterprise")]
+        [string] $vsEdition = $(BadParam("Visual Studio Edition")),
+
+        [string] $property = $(BadParam("vswhere property"))
+    )
+
+    $range = switch ($vsYear)
+    {
+        2017 { "[15.0,16`)" }
+        2019 { "[16.0,17`)" }
+        2022 { "[17.0,18`)" }
+    }
+
+    $vsEdition = $vsEdition -replace " ",""
+
+    $vswhereInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $vswhereInfo.FileName = "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    $vswhereInfo.RedirectStandardError = $true
+    $vswhereInfo.RedirectStandardOutput = $true
+    $vswhereInfo.UseShellExecute = $false
+    $vswhereInfo.Arguments = "-version $range", "-latest", `
+    "-products Microsoft.VisualStudio.Product.$vsEdition", "-property $property"
+    $vswhereProcess = New-Object System.Diagnostics.Process
+    $vswhereProcess.StartInfo = $vswhereInfo
+    $vswhereProcess.Start() | Out-Null
+    $vswhereProcess.WaitForExit()
+    $stdout = $vswhereProcess.StandardOutput.ReadToEnd()
+    if ([string]::IsNullOrEmpty($stdout))
+    {
+        throw "VS edition or property $property not found by vswhere"
+    }
+    $stderr = $vswhereProcess.StandardError.ReadToEnd()
+    $vsExit = $vswhereProcess.ExitCode
+    if ($vsExit -ne 0)
+    {
+        throw "vswhere failed with exit code $vsExit. stderr: $stderr"
+    }
+    return $stdout
+}
+
 Install $urlOfficial_vsInstaller $urlCache_vsInstaller $sha1_vsInstaller
 # Install $urlOfficial_buildToolsInstaller $urlCache_buildToolsInstaller $sha1_buildToolsInstaller
 
-$msvc2019Version = (cmd /c "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property catalog_productDisplayVersion 2`>`&1)
+$msvc2019Version = Get-Vswhere-Property 2019 "Professional" catalog_productDisplayVersion
+$msvc2019Complete = Get-Vswhere-Property 2019 "Professional" isComplete
+$msvc2019Launchable = Get-Vswhere-Property 2019 "Professional" isLaunchable
+
+if($msvc2019Version -ne $version -or [int]$msvc2019Complete -ne 1 `
+    -or [int]$msvc2019Launchable -ne 1) {
+    throw "MSVC 2019 update failed. msvc2019Version: $($msvc2019Version) `
+        msvc2019Complete: $($msvc2019Complete) msvc2019Launchable: $($msvc2019Launchable)"
+}
 
 Write-Output "Visual Studio 2019 = $msvc2019Version" >> ~\versions.txt
 Write-Output "Visual Studio 2019 Build Tools = $version" >> ~\versions.txt

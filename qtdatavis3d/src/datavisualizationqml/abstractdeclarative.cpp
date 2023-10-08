@@ -8,7 +8,7 @@
 #if defined(Q_OS_IOS)
 #include <QtCore/QTimer>
 #endif
-#if defined(Q_OS_OSX)
+#if defined(Q_OS_MACOS)
 #include <qpa/qplatformnativeinterface.h>
 #endif
 
@@ -64,8 +64,11 @@ AbstractDeclarative::~AbstractDeclarative()
 
 void AbstractDeclarative::setRenderingMode(AbstractDeclarative::RenderingMode mode)
 {
-    if (mode == m_renderMode)
+    if (mode == m_renderMode
+        || mode <= AbstractDeclarative::RenderingMode::RenderDirectToBackground
+        || mode >= AbstractDeclarative::RenderingMode::RenderIndirect) {
         return;
+    }
 
     RenderingMode previousMode = m_renderMode;
 
@@ -425,7 +428,7 @@ void AbstractDeclarative::handleWindowChanged(QQuickWindow *window)
     if (!window)
         return;
 
-#if defined(Q_OS_OSX)
+#if defined(Q_OS_MACOS)
     bool previousVisibility = window->isVisible();
     // Enable touch events for Mac touchpads
     window->setVisible(true);

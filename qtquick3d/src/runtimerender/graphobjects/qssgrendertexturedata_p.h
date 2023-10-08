@@ -28,6 +28,8 @@ class Q_QUICK3DRUNTIMERENDER_EXPORT QSSGRenderTextureData : public QSSGRenderGra
 {
 public:
     explicit QSSGRenderTextureData();
+    // it's specially used for Type::Skin
+    explicit QSSGRenderTextureData(QSSGRenderGraphObject::Type inType);
     virtual ~QSSGRenderTextureData();
 
     const QByteArray &textureData() const;
@@ -43,6 +45,8 @@ public:
     void setHasTransparency(bool hasTransparency);
 
     uint32_t generationId() const;
+
+    QString debugObjectName;
 
 protected:
     Q_DISABLE_COPY(QSSGRenderTextureData)

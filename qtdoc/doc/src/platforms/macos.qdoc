@@ -92,18 +92,22 @@
     Qt expresses the deployment target via the \l
     {https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_DEPLOYMENT_TARGET.html}
     {\c CMAKE_OSX_DEPLOYMENT_TARGET} or \c QMAKE_MACOSX_DEPLOYMENT_TARGET variables,
-    which has a default value set by Qt. You only need to change this default if you
-    know that your own code uses \macos APIs that are only available in a particular
-    version higher than what Qt defaults to. For example, with CMake:
+    which by default is set to the minimum supported deployment target for Qt.
+
+    You only need to raise the deployment target if your own code uses APIs
+    that were added in a \macos version higher than what Qt defaults to,
+    and you are not using \c @available checks to guard their use at runtime.
+
+    To raise the deployment target with CMake:
 
     \code
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0")
     \endcode
 
     or with qmake:
 
     \code
-    QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.15
+    QMAKE_MACOSX_DEPLOYMENT_TARGET = 13.0
     \endcode
 
     \note You should not lower the deployment target beyond the default value set by Qt.
@@ -132,7 +136,8 @@
     \section2 Architectures
 
     By default, Qt will build for the architecture of your development machine -
-    either \c x86_64, or \c arm64 if you are on an Apple Silicon Mac.
+    either \c x86_64 if you're on an Intel Mac, or \c arm64 if you are on an
+    Apple Silicon Mac.
 
     To build for other architectures you can use the \l
     {https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_ARCHITECTURES.html}
@@ -158,6 +163,12 @@
     SOURCES = main.cpp
     QMAKE_APPLE_DEVICE_ARCHS = x86_64 arm64
     \endcode
+
+    \section3 Sub-architecture support on Intel Macs
+
+    In addition to the baseline \c x86_64 architecture, Qt also supports the
+    \c x86_64h ("Haswell") sub-architecture, which improves performance on Intel
+    Macs.
 
     \section1 Generating Xcode Project Files
 
@@ -256,8 +267,8 @@
         \include system-requirements-building-from-source.qdocinc minimal
     \endlist
 
-    If you want to build Qt WebEngine or Qt PDF, you will need the following
-    additional dependencies:
+    If you want to build \l {Qt WebEngine} or \l {Qt PDF}, you will need the
+    following additional dependencies:
 
     \list
         \include system-requirements-building-from-source.qdocinc
@@ -280,23 +291,26 @@
     \section2 Step 1: Unpack the Archive
 
         Unpack the archive if you have not done so already. For example,
-        if you have the \c{qt-everywhere-opensource-src-%VERSION%.tar.gz}
-        package, type the following commands at a command line prompt:
+        if you have the \tt{qt-everywhere-src-\QtVersion.tar.xz} package, type
+        the following commands at a command line prompt:
 
-    \snippet snippets/code/doc_src_installation.qdoc 11
+    \include snippets/code/doc_src_installation.qdoc 11
 
-        This creates the directory \c{/tmp/qt-everywhere-opensource-src-%VERSION%}
+        This creates the directory \tt{/tmp/qt-everywhere-src-\QtVersion}
         containing the files from the archive.
 
     \section2 Step 2: Build the Qt Library
 
-        To configure the Qt library for your machine type, run the
-        \c{./configure} script in the package directory.
+        To configure the Qt library for your machine type, create a build
+        directory and change to it. Run the
+        \c{./configure} script in this directory.
 
-        \snippet snippets/code/doc_src_installation.qdoc 12
+        \include snippets/code/doc_src_installation.qdoc 12
+
+        \include use-ninja-note.qdocinc ninja-note
 
         By default, Qt is configured for installation in the
-        \c{/usr/local/Qt-%VERSION%} directory, but this can be
+        \tt{/usr/local/\QtVersion} directory, but this can be
         changed by using the \c{-prefix} option.
 
         By default, Qt is built as a framework, but you can built
@@ -306,11 +320,18 @@
         As described in \l {Qt for \macos#Architectures}, Qt will
         build for the architecture of your development machine by
         default. To configure a universal build of Qt with support
-        for both \c x86_64 and \c arm64, add the following argument:
+        for both Intel and Apple Silicon Macs, add the following argument:
 
         \code
         ./configure -- -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
         \endcode
+
+        \note A universal build always needs to include the architecture of
+        your development machine, as the process relies on tools that are built
+        and run on your machine as part of the overall build.
+
+        Be careful to specify the Intel architecture ("x86_64") first,
+        otherwise Qt may not enable all the x86 functionality.
 
         Qt can also be configured to be built with debugging symbols. This
         process is described in detail in the \l{Debugging Techniques}
@@ -375,7 +396,7 @@
     The \l{Qt Widget Gallery} page contains sample images of applications using
     the \macos platform theme.
 
-    \section2 Qt Attributes for \macos
+    \section1 Qt Attributes for \macos
 
     The following lists a set of useful attributes that can be used to tweak
     applications on \macos:
@@ -389,7 +410,6 @@
     \li Qt::WA_MacNormalSize
     \li Qt::WA_MacSmallSize
     \li Qt::WA_MacMiniSize
-    \li Qt::WA_MacVariableSize
     \li Qt::WA_MacAlwaysShowToolWindow
     \li Qt::Sheet
     \li Qt::Drawer
@@ -402,7 +422,7 @@
     outside of a paint event so Qt::WA_PaintOutsidePaintEvent has no effect
     either.
 
-    \section2 Right Mouse Clicks
+    \section1 Right Mouse Clicks
 
     The QContextMenuEvent class provides right mouse click support for \macos
     applications. This will map to a context menu event, for example, a menu
@@ -410,7 +430,28 @@
     mouse clicks, and maps to a control-click with the \macos one-button mouse
     support.
 
-    \section2 Menu Bar
+    \section1 Internationalization
+
+    Applications on \macos declare their supported languages as part of the
+    \c Info.plist of the application. The system will then match the application's
+    supported languages with the user's language preferences to determine the locale
+    the application is launched in. This in turn determines the ordered languages
+    reflected through QLocale::uiLanguages(), and how system frameworks such as
+    AppKit pick up their localized resources, such as menu titles and strings.
+
+    As Qt apps are not translated out of the box, the default generated \c Info.plist
+    for \c CMake and \c qmake projects sets
+    \l{https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleallowmixedlocalizations?language=objc}
+    {\c CFBundleAllowMixedLocalizations} to \c YES, to allow system frameworks to pick
+    the localization that best matches the user's language preferences, even if that
+    localization is not available for the application itself. Once you add translations
+    to your application, via e.g. \l qt_add_translations, you should remove
+    \l{https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleallowmixedlocalizations?language=objc}
+    {\c CFBundleAllowMixedLocalizations}
+    and replace it with \l{https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundlelocalizations?language=objc}
+    {\c CFBundleLocalizations}, listing all the languages you support.
+
+    \section1 Menu Bar
 
     Qt detects menu bars and turns them into Mac native menu bars. Fitting this
     into existing Qt applications is normally automatic. However, if you
@@ -461,7 +502,7 @@
     just like the application menu items when the \c QAction has the default
     \l{QAction::TextHeuristicRole}{TextHeuristicRole}.
 
-    \section2 Special Keys
+    \section1 Special Keys
 
     To provide the expected behavior for Qt applications on \macos,
     the Qt::Key_Meta, Qt::MetaModifier, and Qt::META enum values
@@ -469,14 +510,14 @@
     and the Qt::Key_Control, Qt::ControlModifier, and Qt::CTRL enum values
     correspond to the Command keys.
 
-    \section2 Dock
+    \section1 Dock
 
     Interaction with the dock is possible. The icon can be set by calling
     QWindow::setWindowIcon() from the main window in your application. The
     setWindowIcon() call can be made as often as necessary, providing an
     icon that can be easily updated.
 
-    \section2 Accessiblity
+    \section1 Accessiblity
 
     Many users interact with \macos with assistive devices. With Qt the aim is
     to make this automatic in your application so that it conforms to accepted
@@ -590,12 +631,8 @@
 
     \snippet snippets/code/doc_src_mac-differences.cpp 1
 
-    \note When \macos is set to use Japanese, a bug causes this sequence
-    to fail and return an empty string. Therefore, always test the
-    returned string.
-
-    For more information about using the CFBundle API, visit
-    \l{http://developer.apple.com/documentation/CoreFoundation/Reference/CFBundleRef/index.html}
+    For more information about using the NSBundle API, visit
+    \l{https://developer.apple.com/documentation/foundation/nsbundle?language=objc}
     {Apple's Developer Website}.
 
     QCoreApplication::applicationDirPath() can be used to determine

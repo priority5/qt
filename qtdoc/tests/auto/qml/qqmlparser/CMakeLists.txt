@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Generated from qqmlparser.pro.
 
 #####################################################################
@@ -8,10 +11,10 @@ qt_internal_add_test(tst_qqmlparser_doc # special case
     SOURCES
         tst_qqmlparser.cpp
     DEFINES
-        SRCDIR=\\\"${CMAKE_CURRENT_SOURCE_DIR}\\\"
-    PUBLIC_LIBRARIES
-        Qt::Gui
-        Qt::QmlPrivate
+        SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    LIBRARIES
+        Qt6::Gui
+        Qt6::QmlPrivate
 )
 
 ## Scopes:

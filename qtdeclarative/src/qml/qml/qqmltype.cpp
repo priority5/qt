@@ -483,6 +483,24 @@ QObject *QQmlType::create(void **memory, size_t additionalMemory) const
     return rv;
 }
 
+/*!
+    \internal
+    Like create, but also allocates memory behind the object, constructs a QQmlData there
+    and lets the objects declarativeData point to the newly created QQmlData.
+ */
+QObject *QQmlType::createWithQQmlData() const
+{
+    void *ddataMemory = nullptr;
+    auto instance = create(&ddataMemory, sizeof(QQmlData));
+    if (!instance)
+        return nullptr;
+    QObjectPrivate* p = QObjectPrivate::get(instance);
+    Q_ASSERT(!p->isDeletingChildren);
+    if (!p->declarativeData)
+        p->declarativeData = new (ddataMemory) QQmlData(QQmlData::DoesNotOwnMemory);
+    return instance;
+}
+
 QQmlType::SingletonInstanceInfo *QQmlType::singletonInstanceInfo() const
 {
     if (!d)
@@ -506,6 +524,20 @@ QQmlType::CreateValueTypeFunc QQmlType::createValueTypeFunction() const
     if (!d || d->regType != CppType)
         return nullptr;
     return d->extraData.cd->createValueTypeFunc;
+}
+
+bool QQmlType::canConstructValueType() const
+{
+    if (!d || d->regType != CppType)
+        return false;
+    return d->extraData.cd->constructValueType;
+}
+
+bool QQmlType::canPopulateValueType() const
+{
+    if (!d || d->regType != CppType)
+        return false;
+    return d->extraData.cd->populateValueType;
 }
 
 QQmlType::CreateFunc QQmlType::createFunction() const

@@ -10,8 +10,6 @@
 
 QT_BEGIN_NAMESPACE
 
-Q_LOGGING_CATEGORY(qLcMediaVideoSink, "qt.multimedia.videosink")
-
 QAndroidVideoSink::QAndroidVideoSink(QVideoSink *parent)
     : QPlatformVideoSink(parent)
 {
@@ -29,6 +27,9 @@ void QAndroidVideoSink::setRhi(QRhi *rhi)
         return;
 
     m_rhi = rhi;
+    emit rhiChanged(rhi);
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qandroidvideosink_p.cpp"

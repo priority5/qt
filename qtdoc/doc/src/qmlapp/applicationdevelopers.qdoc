@@ -5,6 +5,7 @@
 \page qmlapplications.html
 \title QML Applications
 \brief Essential documentation for QML application developers
+\ingroup explanations-programminglanguages
 
 QML is a declarative language that allows user interfaces to be described in
 terms of their visual components and how they interact and relate with one
@@ -105,9 +106,10 @@ QML code is used in applications.
 \list
 \li \l{Overview - QML and C++ Integration}
 \li \l{qtquick-deployment.html}{Deploying QML Applications}
+\li \l{Qt Quick Compiler}
 \li \l{qtquick-bestpractices.html}{Best Practices for QML and Qt Quick}
 \li \l{qtquick-performance.html}{QML Performance Considerations and Suggestions}
-\li \l{qtquick-internationalization.html}{Internationalization and Localization}
+\li \l{Internationalization with Qt}{Internationalization and Localization}
 \li Testing and Debugging
     \list
     \li \l{qml_runtime_tool}{Prototyping with the QML Runtime Tool}

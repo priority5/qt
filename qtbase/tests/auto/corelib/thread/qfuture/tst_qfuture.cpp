@@ -220,7 +220,9 @@ private slots:
     void whenAnyDifferentTypesWithCanceled();
     void whenAnyDifferentTypesWithFailed();
 
+    void continuationOverride();
     void continuationsDontLeak();
+    void cancelAfterFinishWithContinuations();
 
     void unwrap();
 
@@ -3187,6 +3189,15 @@ void tst_QFuture::cancelContinuations()
         QVERIFY(watcher2.isFinished());
         QVERIFY(watcher2.isCanceled());
     }
+
+    // Cancel continuations with context (QTBUG-108790)
+    {
+        // This test should pass with ASan
+        auto future = QtConcurrent::run([] {});
+        future.then(this, [] {});
+        future.waitForFinished();
+        future.cancel();
+    }
 }
 
 void tst_QFuture::continuationsWithContext()
@@ -3366,17 +3377,6 @@ void tst_QFuture::testFutureTaken(QFuture<T> &noMoreFuture)
 {
     QCOMPARE(noMoreFuture.isValid(), false);
     QCOMPARE(noMoreFuture.resultCount(), 0);
-    QCOMPARE(noMoreFuture.isStarted(), false);
-    QCOMPARE(noMoreFuture.isRunning(), false);
-    QCOMPARE(noMoreFuture.isSuspending(), false);
-    QCOMPARE(noMoreFuture.isSuspended(), false);
-#if QT_DEPRECATED_SINCE(6, 0)
-QT_WARNING_PUSH
-QT_WARNING_DISABLE_DEPRECATED
-    QCOMPARE(noMoreFuture.isPaused(), false);
-QT_WARNING_POP
-#endif
-    QCOMPARE(noMoreFuture.isFinished(), false);
     QCOMPARE(noMoreFuture.progressValue(), 0);
 }
 
@@ -3555,7 +3555,7 @@ void tst_QFuture::resultsReadyAt()
 
     QCOMPARE(reported, nExpectedResults);
     QCOMPARE(nExpectedResults, iface.future().resultCount());
-    QCOMPARE(readyCounter.count(), 3);
+    QCOMPARE(readyCounter.size(), 3);
     QCOMPARE(taken, 0b1111);
 }
 
@@ -3795,8 +3795,6 @@ void tst_QFuture::signalConnect()
         QSignalSpy spy(sender, &QObject::destroyed);
         sender->deleteLater();
 
-        // emit the signal when sender is being destroyed
-        QObject::connect(sender, &QObject::destroyed, [sender] { sender->emitIntArg(42); });
         spy.wait();
 
         QVERIFY(future.isCanceled());
@@ -3925,7 +3923,7 @@ void tst_QFuture::rejectResultOverwrite()
     // in QFutureInterface:
     eventProcessor.enterLoopMSecs(2000);
     QVERIFY(!eventProcessor.timeout());
-    QCOMPARE(resultCounter.count(), 1);
+    QCOMPARE(resultCounter.size(), 1);
     f.resume();
 
     // overwrite with lvalue
@@ -3964,7 +3962,7 @@ void tst_QFuture::rejectResultOverwrite()
     });
     eventProcessor.enterLoopMSecs(2000);
     QVERIFY(!eventProcessor.timeout());
-    QCOMPARE(resultCounter.count(), 1);
+    QCOMPARE(resultCounter.size(), 1);
     f.resume();
     QCOMPARE(f.results(), initResults);
 }
@@ -4003,7 +4001,7 @@ void tst_QFuture::rejectPendingResultOverwrite()
         // in QFutureInterface:
         eventProcessor.enterLoopMSecs(2000);
         QVERIFY(!eventProcessor.timeout());
-        QCOMPARE(resultCounter.count(), 1);
+        QCOMPARE(resultCounter.size(), 1);
         f.resume();
     }
 
@@ -4047,7 +4045,7 @@ void tst_QFuture::rejectPendingResultOverwrite()
         });
         eventProcessor.enterLoopMSecs(2000);
         QVERIFY(!eventProcessor.timeout());
-        QCOMPARE(resultCounter.count(), 1);
+        QCOMPARE(resultCounter.size(), 1);
         f.resume();
     }
 
@@ -4652,6 +4650,35 @@ void tst_QFuture::whenAnyDifferentTypesWithFailed()
 #endif
 }
 
+void tst_QFuture::continuationOverride()
+{
+    QPromise<int> p;
+    bool firstExecuted = false;
+    bool secondExecuted = false;
+
+    QTest::ignoreMessage(QtWarningMsg,
+                         "Adding a continuation to a future which already has a continuation. "
+                         "The existing continuation is overwritten.");
+
+    QFuture<int> f1 = p.future();
+    f1.then([&firstExecuted](int) {
+        firstExecuted = true;
+    });
+
+    QFuture<int> f2 = p.future();
+    f2.then([&secondExecuted](int) {
+        secondExecuted = true;
+    });
+
+    p.start();
+    p.addResult(42);
+    p.finish();
+
+    QVERIFY(p.future().isFinished());
+    QVERIFY(!firstExecuted);
+    QVERIFY(secondExecuted);
+}
+
 struct InstanceCounter
 {
     InstanceCounter() { ++count; }
@@ -4710,6 +4737,31 @@ void tst_QFuture::continuationsDontLeak()
         QVERIFY(continuationIsRun);
     }
     QCOMPARE(InstanceCounter::count, 0);
+}
+
+// This test checks that we do not get use-after-free
+void tst_QFuture::cancelAfterFinishWithContinuations()
+{
+    QFuture<void> future;
+    bool continuationIsRun = false;
+    bool cancelCalled = false;
+    {
+        QPromise<void> promise;
+        future = promise.future();
+
+        future.then([&continuationIsRun]() {
+            continuationIsRun = true;
+        }).onCanceled([&cancelCalled]() {
+            cancelCalled = true;
+        });
+
+        promise.start();
+        promise.finish();
+    }
+
+    QVERIFY(continuationIsRun);
+    future.cancel();
+    QVERIFY(!cancelCalled);
 }
 
 void tst_QFuture::unwrap()

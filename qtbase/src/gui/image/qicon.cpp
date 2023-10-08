@@ -67,7 +67,7 @@ using namespace Qt::StringLiterals;
 
 static int nextSerialNumCounter()
 {
-    static QBasicAtomicInt serial = Q_BASIC_ATOMIC_INITIALIZER(0);
+    Q_CONSTINIT static QBasicAtomicInt serial = Q_BASIC_ATOMIC_INITIALIZER(0);
     return 1 + serial.fetchAndAddRelaxed(1);
 }
 
@@ -96,6 +96,11 @@ QIconPrivate::QIconPrivate(QIconEngine *e)
     detach_no(0),
     is_mask(false)
 {
+}
+
+void QIconPrivate::clearIconCache()
+{
+    qt_cleanup_icon_cache();
 }
 
 /*! \internal
@@ -515,12 +520,12 @@ bool QPixmapIconEngine::write(QDataStream &out) const
     return true;
 }
 
-Q_GLOBAL_STATIC_WITH_ARGS(QFactoryLoader, loader,
+Q_GLOBAL_STATIC_WITH_ARGS(QFactoryLoader, iceLoader,
     (QIconEngineFactoryInterface_iid, "/iconengines"_L1, Qt::CaseInsensitive))
 
 QFactoryLoader *qt_iconEngineFactoryLoader()
 {
-    return loader();
+    return iceLoader();
 }
 
 
@@ -632,8 +637,6 @@ QFactoryLoader *qt_iconEngineFactoryLoader()
     │       └── appointment-new.png
     └── index.theme
   \endcode
-
-  \sa {Icons Example}
 */
 
 
@@ -1019,9 +1022,9 @@ void QIcon::addPixmap(const QPixmap &pixmap, Mode mode, State state)
 static QIconEngine *iconEngineFromSuffix(const QString &fileName, const QString &suffix)
 {
     if (!suffix.isEmpty()) {
-        const int index = loader()->indexOf(suffix);
+        const int index = iceLoader()->indexOf(suffix);
         if (index != -1) {
-            if (QIconEnginePlugin *factory = qobject_cast<QIconEnginePlugin*>(loader()->instance(index))) {
+            if (QIconEnginePlugin *factory = qobject_cast<QIconEnginePlugin*>(iceLoader()->instance(index))) {
                 return factory->create(fileName);
             }
         }
@@ -1151,6 +1154,11 @@ QStringList QIcon::themeSearchPaths()
 
     Returns the fallback search paths for icons.
 
+    The fallback search paths are used to look for standalone
+    icon files if the \l{themeName()}{current icon theme}
+    or \l{fallbackIconTheme()}{fallback icon theme} do
+    not provide results for an icon lookup.
+
     The default value will depend on the platform.
 
     \sa setFallbackSearchPaths(), themeSearchPaths()
@@ -1164,6 +1172,11 @@ QStringList QIcon::fallbackSearchPaths()
     \since 5.11
 
     Sets the fallback search paths for icons to \a paths.
+
+    The fallback search paths are used to look for standalone
+    icon files if the \l{themeName()}{current icon theme}
+    or \l{fallbackIconTheme()}{fallback icon theme} do
+    not provide results for an icon lookup.
 
     \note To add some path without replacing existing ones:
 
@@ -1228,6 +1241,10 @@ QString QIcon::fallbackThemeName()
 
     Sets the fallback icon theme to \a name.
 
+    The fallback icon theme is used for last resort lookup of icons
+    not provided by the \l{themeName()}{current icon theme},
+    or if the \l{themeName()}{current icon theme} does not exist.
+
     The \a name should correspond to a directory name in the
     themeSearchPath() containing an index.theme
     file describing its contents.
@@ -1277,11 +1294,8 @@ void QIcon::setFallbackThemeName(const QString &name)
 QIcon QIcon::fromTheme(const QString &name)
 {
 
-    if (QIcon *cachedIcon = qtIconCache()->object(name)) {
-        if (!cachedIcon->isNull())
-            return *cachedIcon;
-        qtIconCache()->remove(name);
-    }
+    if (QIcon *cachedIcon = qtIconCache()->object(name))
+        return *cachedIcon;
 
     QIcon icon;
     if (QDir::isAbsolutePath(name)) {
@@ -1292,8 +1306,7 @@ QIcon QIcon::fromTheme(const QString &name)
         QIconEngine * const engine = (platformTheme && !hasUserTheme) ? platformTheme->createIconEngine(name)
                                                    : new QIconLoaderEngine(name);
         icon = QIcon(engine);
-        if (!icon.isNull())
-            qtIconCache()->insert(name, new QIcon(icon));
+        qtIconCache()->insert(name, new QIcon(icon));
     }
 
     return icon;
@@ -1434,9 +1447,9 @@ QDataStream &operator>>(QDataStream &s, QIcon &icon)
             icon.d = new QIconPrivate(new QIconLoaderEngine());
             icon.d->engine->read(s);
         } else {
-            const int index = loader()->indexOf(key);
+            const int index = iceLoader()->indexOf(key);
             if (index != -1) {
-                if (QIconEnginePlugin *factory = qobject_cast<QIconEnginePlugin*>(loader()->instance(index))) {
+                if (QIconEnginePlugin *factory = qobject_cast<QIconEnginePlugin*>(iceLoader()->instance(index))) {
                     if (QIconEngine *engine= factory->create()) {
                         icon.d = new QIconPrivate(engine);
                         engine->read(s);
