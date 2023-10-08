@@ -50,7 +50,6 @@ void TagFileWriter::generateTagFileCompounds(QXmlStreamWriter &writer, const Agg
         case Node::Struct:
         case Node::Union:
         case Node::QmlType:
-        case Node::JsType:
             kind = "class";
             break;
         default:
@@ -206,7 +205,7 @@ void TagFileWriter::generateTagFileMembers(QXmlStreamWriter &writer, const Aggre
                     m_generator->fullDocumentLocation(node, false).split(QLatin1Char('#'));
             writer.writeTextElement("anchorfile", pieces[0]);
             writer.writeTextElement("anchor", pieces[1]);
-            QString signature = functionNode->signature(false, false);
+            QString signature = functionNode->signature(Node::SignatureReturnType);
             signature = signature.mid(signature.indexOf(QChar('('))).trimmed();
             if (functionNode->isConst())
                 signature += " const";

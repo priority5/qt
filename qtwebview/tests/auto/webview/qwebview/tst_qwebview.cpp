@@ -47,6 +47,8 @@ private:
 
 void tst_QWebView::initTestCase()
 {
+    if (!qEnvironmentVariableIsEmpty("QEMU_LD_PREFIX"))
+        QSKIP("This test is unstable on QEMU, so it will be skipped.");
 #ifdef QT_WEBVIEW_WEBENGINE_BACKEND
     QtWebEngineQuick::initialize();
 #endif // QT_WEBVIEW_WEBENGINE_BACKEND
@@ -74,6 +76,8 @@ void tst_QWebView::load()
     QWebView &view = qview.webView();
 #else
     QWebView view;
+    view.getSettings()->setAllowFileAccess(true);
+    view.getSettings()->setLocalContentCanAccessFileUrls(true);
 #endif
     QCOMPARE(view.loadProgress(), 0);
     const QUrl url = QUrl::fromLocalFile(fileName);
@@ -151,6 +155,8 @@ void tst_QWebView::loadRequest()
         QWebView &view = qview.webView();
 #else
         QWebView view;
+        view.getSettings()->setAllowFileAccess(true);
+        view.getSettings()->setLocalContentCanAccessFileUrls(true);
 #endif
         QCOMPARE(view.loadProgress(), 0);
         const QUrl url = QUrl::fromLocalFile(fileName);
@@ -183,6 +189,8 @@ void tst_QWebView::loadRequest()
         QWebView &view = qview.webView();
 #else
         QWebView view;
+        view.getSettings()->setAllowFileAccess(true);
+        view.getSettings()->setLocalContentCanAccessFileUrls(true);
 #endif
         QCOMPARE(view.loadProgress(), 0);
         QSignalSpy loadChangedSingalSpy(&view, SIGNAL(loadingChanged(const QWebViewLoadRequestPrivate &)));
@@ -215,6 +223,9 @@ void tst_QWebView::setAndDeleteCookie()
     QWebView & view = qview.webView();
 #else
     QWebView view;
+    view.getSettings()->setLocalStorageEnabled(true);
+    view.getSettings()->setAllowFileAccess(true);
+    view.getSettings()->setLocalContentCanAccessFileUrls(true);
 #endif
 
     QSignalSpy cookieAddedSpy(&view, SIGNAL(cookieAdded(const QString &, const QString &)));

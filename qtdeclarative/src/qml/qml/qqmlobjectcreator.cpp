@@ -25,6 +25,8 @@
 #include <private/qv4generatorobject_p.h>
 #include <private/qv4resolvedtypereference_p.h>
 #include <private/qqmlpropertybinding_p.h>
+#include <private/qqmlanybinding_p.h>
+#include <QtQml/private/qqmlvme_p.h>
 
 #include <QScopedValueRollback>
 
@@ -35,6 +37,19 @@
 Q_LOGGING_CATEGORY(lcQmlDefaultMethod, "qt.qml.defaultmethod")
 
 QT_USE_NAMESPACE
+
+Q_TRACE_PREFIX(qtqml,
+"namespace QV4 {" \
+"struct ExecutionEngine;" \
+"namespace CompiledData {" \
+"struct CompilationUnit;" \
+"struct Object;" \
+"}}" \
+"class QQmlEngine;"
+)
+
+Q_TRACE_POINT(qtqml, QQmlObjectCreator_createInstance_entry, const QV4::CompiledData::CompilationUnit *compilationUnit, const QV4::CompiledData::Object *object, const QUrl &url)
+Q_TRACE_POINT(qtqml, QQmlObjectCreator_createInstance_exit, const QString &typeName)
 
 QQmlObjectCreator::QQmlObjectCreator(
         QQmlRefPointer<QQmlContextData> parentContext,
@@ -275,6 +290,16 @@ void QQmlObjectCreator::populateDeferredBinding(const QQmlProperty &qmlProperty,
     }
 }
 
+void QQmlObjectCreator::populateDeferredInstance(
+        QObject *outerObject, int deferredIndex, int index, QObject *instance,
+        QObject *bindingTarget, const QQmlPropertyData *valueTypeProperty,
+        const QV4::CompiledData::Binding *binding)
+{
+    doPopulateDeferred(outerObject, deferredIndex, [&]() {
+        populateInstance(index, instance, bindingTarget, valueTypeProperty, binding);
+    });
+}
+
 void QQmlObjectCreator::finalizePopulateDeferred()
 {
     phase = ObjectsCreated;
@@ -424,9 +449,9 @@ void QQmlObjectCreator::setPropertyValue(const QQmlPropertyData *property, const
     }
     break;
     case QMetaType::QColor: {
-        QVariant data;
-        if (QQml_valueTypeProvider()->createValueType(
-                    propertyType, compilationUnit->bindingValueAsString(binding), data)) {
+        QVariant data(propertyType);
+        if (QQmlValueTypeProvider::createValueType(
+                    compilationUnit->bindingValueAsString(binding), propertyType, data.data())) {
             property->writeProperty(_qobject, data.data(), propertyWriteFlags);
         }
     }
@@ -507,9 +532,10 @@ void QQmlObjectCreator::setPropertyValue(const QQmlPropertyData *property, const
     case QMetaType::QVector3D:
     case QMetaType::QVector4D:
     case QMetaType::QQuaternion: {
-        QVariant result;
-        bool ok = QQml_valueTypeProvider()->createValueType(
-                    propertyType, compilationUnit->bindingValueAsString(binding), result);
+        QVariant result(propertyType);
+        bool ok = QQmlValueTypeProvider::createValueType(
+                    compilationUnit->bindingValueAsString(binding),
+                    result.metaType(), result.data());
         assertOrNull(ok);
         Q_UNUSED(ok);
         property->writeProperty(_qobject, result.data(), propertyWriteFlags);
@@ -575,6 +601,36 @@ void QQmlObjectCreator::setPropertyValue(const QQmlPropertyData *property, const
             }
             property->writeProperty(_qobject, &value, propertyWriteFlags);
             break;
+        } else {
+            QVariant source;
+            switch (binding->type()) {
+            case QV4::CompiledData::Binding::Type_Boolean:
+                source = binding->valueAsBoolean();
+                break;
+            case QV4::CompiledData::Binding::Type_Number: {
+                const double n = compilationUnit->bindingValueAsNumber(binding);
+                if (double(int(n)) == n)
+                    source = int(n);
+                else
+                    source = n;
+                break;
+            }
+            case QV4::CompiledData::Binding::Type_Null:
+                source = QVariant::fromValue<std::nullptr_t>(nullptr);
+                break;
+            case QV4::CompiledData::Binding::Type_Invalid:
+                break;
+            default:
+                source = compilationUnit->bindingValueAsString(binding);
+                break;
+            }
+
+            QVariant target(propertyType);
+            if (QQmlValueTypeProvider::createValueType(
+                    source.metaType(), source.data(), propertyType, target.data())) {
+                property->writeProperty(_qobject, target.data(), propertyWriteFlags);
+                break;
+            }
         }
 
         // string converters are not exposed, so ending up here indicates an error
@@ -663,8 +719,9 @@ void QQmlObjectCreator::setupBindings(BindingSetupFlags mode)
                 QQmlData *data = QQmlData::get(targetObject);
                 Q_ASSERT(data && data->propertyCache);
                 targetProperty = data->propertyCache->property(targetIndex.coreIndex());
+                sharedState->requiredProperties.remove({targetObject, targetProperty});
             }
-            sharedState->requiredProperties.remove(targetProperty);
+            sharedState->requiredProperties.remove({_bindingTarget, property});
         }
 
 
@@ -817,8 +874,18 @@ bool QQmlObjectCreator::setPropertyBinding(const QQmlPropertyData *bindingProper
                 void *argv[1] = { &groupObject };
                 QMetaObject::metacall(_qobject, QMetaObject::ReadProperty, bindingProperty->coreIndex(), argv);
                 if (!groupObject) {
-                    recordError(binding->location, tr("Cannot set properties on %1 as it is null").arg(stringAt(binding->propertyNameIndex)));
-                    return false;
+                    QQmlPropertyIndex index(bindingProperty->coreIndex());
+                    auto anyBinding = QQmlAnyBinding::ofProperty(_qobject, index);
+                    if (anyBinding) {
+                        // if there is a binding, try to force-evaluate it now
+                        // this might instantiate a necessary part of a grouped property
+                        anyBinding.refresh();
+                        QMetaObject::metacall(_qobject, QMetaObject::ReadProperty, bindingProperty->coreIndex(), argv);
+                    }
+                    if (!groupObject) {
+                        recordError(binding->location, tr("Cannot set properties on %1 as it is null").arg(stringAt(binding->propertyNameIndex)));
+                        return false;
+                    }
                 }
 
                 bindingTarget = groupObject;
@@ -849,11 +916,7 @@ bool QQmlObjectCreator::setPropertyBinding(const QQmlPropertyData *bindingProper
     if (_ddata->hasBindingBit(bindingProperty->coreIndex()) && allowedToRemoveBinding) {
         QQmlPropertyPrivate::removeBinding(_bindingTarget, QQmlPropertyIndex(bindingProperty->coreIndex()));
     } else if (bindingProperty->isBindable() && allowedToRemoveBinding) {
-        QList<DeferredQPropertyBinding> &pendingBindings = sharedState.data()->allQPropertyBindings;
-        auto it = std::remove_if(pendingBindings.begin(), pendingBindings.end(), [&](const DeferredQPropertyBinding &deferred) {
-            return deferred.properyIndex == bindingProperty->coreIndex() && deferred.target == _bindingTarget;
-        });
-        pendingBindings.erase(it, pendingBindings.end());
+        removePendingBinding(_bindingTarget, bindingProperty->coreIndex());
     }
 
     if (bindingType == QV4::CompiledData::Binding::Type_Script || binding->isTranslationBinding()) {
@@ -1182,19 +1245,10 @@ QObject *QQmlObjectCreator::createInstance(int index, QObject *parent, bool isCo
         if (type.isValid() && !type.isInlineComponentType()) {
             typeName = type.qmlTypeName();
 
-            void *ddataMemory = nullptr;
-            instance = type.create(&ddataMemory, sizeof(QQmlData));
+            instance = type.createWithQQmlData();
             if (!instance) {
                 recordError(obj->location, tr("Unable to create object of type %1").arg(stringAt(obj->inheritedTypeNameIndex)));
                 return nullptr;
-            }
-
-            {
-                QQmlData *ddata = new (ddataMemory) QQmlData;
-                ddata->ownMemory = false;
-                QObjectPrivate* p = QObjectPrivate::get(instance);
-                Q_ASSERT(!p->isDeletingChildren);
-                p->declarativeData = ddata;
             }
 
             const int finalizerCast = type.finalizerCast();
@@ -1408,16 +1462,24 @@ bool QQmlObjectCreator::finalize(QQmlInstantiationInterrupt &interrupt)
         void *argv[] = { &bindable };
         // allow interception
         target->metaObject()->metacall(target, QMetaObject::BindableProperty, index, argv);
-        bindable.setBinding(qmlBinding);
+        const bool success = bindable.setBinding(qmlBinding);
+
+        // Only pop_front after setting the binding as the bindings are refcounted.
         sharedState->allQPropertyBindings.pop_front();
-        if (auto priv = QPropertyBindingPrivate::get(qmlBinding); priv->hasCustomVTable()) {
-            auto qmlBindingPriv = static_cast<QQmlPropertyBinding *>(priv);
-            auto jsExpression = qmlBindingPriv->jsExpression();
-            const bool canRemove = !qmlBinding.error().hasError() && !qmlBindingPriv->hasDependencies()
-                    && !jsExpression->hasUnresolvedNames();
-            if (canRemove)
-                bindable.takeBinding();
+
+        // If the binding was actually not set, it's deleted now.
+        if (success) {
+            if (auto priv = QPropertyBindingPrivate::get(qmlBinding); priv->hasCustomVTable()) {
+                auto qmlBindingPriv = static_cast<QQmlPropertyBinding *>(priv);
+                auto jsExpression = qmlBindingPriv->jsExpression();
+                const bool canRemove = !qmlBinding.error().hasError()
+                        && !qmlBindingPriv->hasDependencies()
+                        && !jsExpression->hasUnresolvedNames();
+                if (canRemove)
+                    bindable.takeBinding();
+            }
         }
+
         if (watcher.hasRecursed() || interrupt.shouldInterrupt())
             return false;
     }
@@ -1541,7 +1603,7 @@ bool QQmlObjectCreator::populateInstance(int index, QObject *instance, QObject *
             postHocRequired.erase(postHocIt);
         if (isContextObject)
             sharedState->hadTopLevelRequiredProperties = true;
-        sharedState->requiredProperties.insert(propertyData,
+        sharedState->requiredProperties.insert({_qobject, propertyData},
                                                RequiredPropertyInfo {compilationUnit->stringAt(property->nameIndex), compilationUnit->finalUrl(), property->location, {}});
 
     }
@@ -1601,7 +1663,7 @@ bool QQmlObjectCreator::populateInstance(int index, QObject *instance, QObject *
         if (isContextObject)
             sharedState->hadTopLevelRequiredProperties = true;
         sharedState->requiredProperties.insert(
-                propertyData,
+                {_qobject, propertyData},
                 RequiredPropertyInfo {
                         name, compilationUnit->finalUrl(), _compiledObject->location, {} });
     }
@@ -1632,7 +1694,7 @@ bool QQmlObjectCreator::populateInstance(int index, QObject *instance, QObject *
             if (isContextObject)
                 sharedState->hadTopLevelRequiredProperties = true;
             sharedState->requiredProperties.insert(
-                    propertyData,
+                    {_qobject, propertyData},
                     RequiredPropertyInfo {
                             name, compilationUnit->finalUrl(), _compiledObject->location, {} });
         }
@@ -1665,7 +1727,7 @@ bool QQmlObjectCreator::populateInstance(int index, QObject *instance, QObject *
         const QQmlPropertyData *const targetProperty = targetDData->propertyCache->property(coreIndex);
         if (!targetProperty)
             continue;
-        auto it = sharedState->requiredProperties.find(targetProperty);
+        auto it = sharedState->requiredProperties.find({target, targetProperty});
         if (it != sharedState->requiredProperties.end())
             it->aliasesToRequired.push_back(
                     AliasToRequiredInfo {

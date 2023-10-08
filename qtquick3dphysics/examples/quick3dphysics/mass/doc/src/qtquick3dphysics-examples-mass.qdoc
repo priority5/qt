@@ -5,6 +5,7 @@
     \example mass
     \ingroup quick3dphysics-examples
     \title Qt Quick 3D Physics - Mass Example
+    \examplecategory {Data Visualization & 3D}
     \brief Demonstrates different ways of setting mass and inertia of a body.
     \image mass-example.jpg
 
@@ -12,7 +13,7 @@
 
     \section1 Setup
 
-    We first add our DynamicsWorld:
+    We first add our PhysicsWorld:
 
     \snippet mass/main.qml world
 

@@ -15,14 +15,19 @@
 #include <qscopeguard.h>
 #include <qcoreapplication.h>
 
+#include <private/qoffsetstringarray_p.h>
+#include <private/qtools_p.h>
+
 #include <iterator>
 #include "qxmlstream_p.h"
 #include "qxmlstreamparser_p.h"
+#include <private/qstringconverter_p.h>
 
 QT_BEGIN_NAMESPACE
 
 using namespace QtPrivate;
 using namespace Qt::StringLiterals;
+using namespace QtMiscUtils;
 
 enum { StreamEOF = ~0U };
 
@@ -41,7 +46,61 @@ auto reversed(Range &r)
 
 template <typename Range>
 void reversed(const Range &&) = delete;
+
+// implementation of missing QUtf8StringView methods for ASCII-only needles:
+auto transform(QLatin1StringView haystack, char needle)
+{
+    struct R { QLatin1StringView haystack; char16_t needle; };
+    return R{haystack, uchar(needle)};
 }
+
+auto transform(QStringView haystack, char needle)
+{
+    struct R { QStringView haystack; char16_t needle; };
+    return R{haystack, uchar(needle)};
+}
+
+auto transform(QUtf8StringView haystack, char needle)
+{
+    struct R { QByteArrayView haystack; char needle; };
+    return R{haystack, needle};
+}
+
+auto transform(QLatin1StringView haystack, QLatin1StringView needle)
+{
+    struct R { QLatin1StringView haystack; QLatin1StringView needle; };
+    return R{haystack, needle};
+}
+
+auto transform(QStringView haystack, QLatin1StringView needle)
+{
+    struct R { QStringView haystack; QLatin1StringView needle; };
+    return R{haystack, needle};
+}
+
+auto transform(QUtf8StringView haystack, QLatin1StringView needle)
+{
+    struct R { QLatin1StringView haystack; QLatin1StringView needle; };
+    return R{QLatin1StringView{QByteArrayView{haystack}}, needle};
+}
+
+#define WRAP(method, Needle)                               \
+    auto method (QAnyStringView s, Needle needle) noexcept \
+    {                                                      \
+        return s.visit([needle](auto s) {                  \
+            auto r = transform(s, needle);                 \
+            return r.haystack. method (r.needle);          \
+        });                                                \
+    }                                                      \
+    /*end*/
+
+WRAP(count, char)
+WRAP(contains, char)
+WRAP(contains, QLatin1StringView)
+WRAP(endsWith, char)
+WRAP(indexOf, QLatin1StringView)
+
+} // unnamed namespace
 
 /*!
     \enum QXmlStreamReader::TokenType
@@ -126,7 +185,7 @@ void reversed(const Range &&) = delete;
     addData() or by waiting for it to arrive on the device().
 
     \value UnexpectedElementError The parser encountered an element
-    that was different to those it expected.
+    or token that was different to those it expected.
 
 */
 
@@ -229,6 +288,8 @@ QXmlStreamEntityResolver *QXmlStreamReader::entityResolver() const
 
   \ingroup xml-tools
 
+  \ingroup qtserialization
+
   QXmlStreamReader provides a simple streaming API to parse well-formed
   XML. It is an alternative to first loading the complete XML into a
   DOM tree (see \l QDomDocument). QXmlStreamReader reads data either
@@ -261,13 +322,34 @@ QXmlStreamEntityResolver *QXmlStreamReader::entityResolver() const
 
   QXmlStreamReader is a well-formed XML 1.0 parser that does \e not
   include external parsed entities. As long as no error occurs, the
-  application code can thus be assured that the data provided by the
-  stream reader satisfies the W3C's criteria for well-formed XML. For
-  example, you can be certain that all tags are indeed nested and
-  closed properly, that references to internal entities have been
-  replaced with the correct replacement text, and that attributes have
-  been normalized or added according to the internal subset of the
-  DTD.
+  application code can thus be assured, that
+  \list
+  \li the data provided by the stream reader satisfies the W3C's
+      criteria for well-formed XML,
+  \li tokens are provided in a valid order.
+  \endlist
+
+  Unless QXmlStreamReader raises an error, it guarantees the following:
+  \list
+  \li All tags are nested and closed properly.
+  \li References to internal entities have been replaced with the
+      correct replacement text.
+  \li Attributes have been normalized or added according to the
+      internal subset of the \l DTD.
+  \li Tokens of type \l StartDocument happen before all others,
+      aside from comments and processing instructions.
+  \li At most one DOCTYPE element (a token of type \l DTD) is present.
+  \li If present, the DOCTYPE appears before all other elements,
+      aside from StartDocument, comments and processing instructions.
+  \endlist
+
+  In particular, once any token of type \l StartElement, \l EndElement,
+  \l Characters, \l EntityReference or \l EndDocument is seen, no
+  tokens of type StartDocument or DTD will be seen. If one is present in
+  the input stream, out of order, an error is raised.
+
+  \note The token types \l Comment and \l ProcessingInstruction may appear
+  anywhere in the stream.
 
   If an error occurs while parsing, atEnd() and hasError() return
   true, and error() returns the error that occurred. The functions
@@ -360,41 +442,55 @@ QXmlStreamReader::QXmlStreamReader(QIODevice *device)
 }
 
 /*!
-  Creates a new stream reader that reads from \a data.
+    \overload
 
-  \sa addData(), clear(), setDevice()
- */
-QXmlStreamReader::QXmlStreamReader(const QByteArray &data)
+    \fn QXmlStreamReader::QXmlStreamReader(const QByteArray &data)
+
+    Creates a new stream reader that reads from \a data.
+
+    \sa addData(), clear(), setDevice()
+*/
+
+/*!
+    Creates a new stream reader that reads from \a data.
+
+    \note In Qt versions prior to 6.5, this constructor was overloaded
+    for QString and \c {const char*}.
+
+    \sa addData(), clear(), setDevice()
+*/
+QXmlStreamReader::QXmlStreamReader(QAnyStringView data)
+    : d_ptr(new QXmlStreamReaderPrivate(this))
+{
+    Q_D(QXmlStreamReader);
+    data.visit([d](auto data) {
+        if constexpr (std::is_same_v<decltype(data), QStringView>) {
+            d->dataBuffer = data.toUtf8();
+            d->decoder = QStringDecoder(QStringDecoder::Utf8);
+            d->lockEncoding = true;
+        } else if constexpr (std::is_same_v<decltype(data), QLatin1StringView>) {
+            // Conversion to a QString is required, to avoid breaking
+            // pre-existing (before porting to QAnyStringView) behavior.
+            d->dataBuffer = QString::fromLatin1(data).toUtf8();
+            d->decoder = QStringDecoder(QStringDecoder::Utf8);
+            d->lockEncoding = true;
+        } else {
+            d->dataBuffer = QByteArray(data.data(), data.size());
+        }
+    });
+}
+
+/*!
+    \internal
+
+    Creates a new stream reader that reads from \a data.
+    Used by the weak constructor taking a QByteArray.
+*/
+QXmlStreamReader::QXmlStreamReader(const QByteArray &data, PrivateConstructorTag)
     : d_ptr(new QXmlStreamReaderPrivate(this))
 {
     Q_D(QXmlStreamReader);
     d->dataBuffer = data;
-}
-
-/*!
-  Creates a new stream reader that reads from \a data.
-
-  \sa addData(), clear(), setDevice()
- */
-QXmlStreamReader::QXmlStreamReader(const QString &data)
-    : d_ptr(new QXmlStreamReaderPrivate(this))
-{
-    Q_D(QXmlStreamReader);
-    d->dataBuffer = data.toUtf8();
-    d->decoder = QStringDecoder(QStringDecoder::Utf8);
-    d->lockEncoding = true;
-}
-
-/*!
-  Creates a new stream reader that reads from \a data.
-
-  \sa addData(), clear(), setDevice()
- */
-QXmlStreamReader::QXmlStreamReader(const char *data)
-    : d_ptr(new QXmlStreamReaderPrivate(this))
-{
-    Q_D(QXmlStreamReader);
-    d->dataBuffer = QByteArray(data);
 }
 
 /*!
@@ -443,14 +539,54 @@ QIODevice *QXmlStreamReader::device() const
     return d->device;
 }
 
+/*!
+    \overload
+
+    \fn void QXmlStreamReader::addData(const QByteArray &data)
+
+    Adds more \a data for the reader to read. This function does
+    nothing if the reader has a device().
+
+    \sa readNext(), clear()
+*/
 
 /*!
-  Adds more \a data for the reader to read. This function does
-  nothing if the reader has a device().
+    Adds more \a data for the reader to read. This function does
+    nothing if the reader has a device().
 
-  \sa readNext(), clear()
- */
-void QXmlStreamReader::addData(const QByteArray &data)
+    \note In Qt versions prior to 6.5, this function was overloaded
+    for QString and \c {const char*}.
+
+    \sa readNext(), clear()
+*/
+void QXmlStreamReader::addData(QAnyStringView data)
+{
+    Q_D(QXmlStreamReader);
+    data.visit([this, d](auto data) {
+        if constexpr (std::is_same_v<decltype(data), QStringView>) {
+            d->lockEncoding = true;
+            if (!d->decoder.isValid())
+                d->decoder = QStringDecoder(QStringDecoder::Utf8);
+            addDataImpl(data.toUtf8());
+        } else if constexpr (std::is_same_v<decltype(data), QLatin1StringView>) {
+            // Conversion to a QString is required, to avoid breaking
+            // pre-existing (before porting to QAnyStringView) behavior.
+            if (!d->decoder.isValid())
+                d->decoder = QStringDecoder(QStringDecoder::Utf8);
+            addDataImpl(QString::fromLatin1(data).toUtf8());
+        } else {
+            addDataImpl(QByteArray(data.data(), data.size()));
+        }
+    });
+}
+
+/*!
+    \internal
+
+    Adds more \a data for the reader to read. This function does
+    nothing if the reader has a device().
+*/
+void QXmlStreamReader::addDataImpl(const QByteArray &data)
 {
     Q_D(QXmlStreamReader);
     if (d->device) {
@@ -458,32 +594,6 @@ void QXmlStreamReader::addData(const QByteArray &data)
         return;
     }
     d->dataBuffer += data;
-}
-
-/*!
-  Adds more \a data for the reader to read. This function does
-  nothing if the reader has a device().
-
-  \sa readNext(), clear()
- */
-void QXmlStreamReader::addData(const QString &data)
-{
-    Q_D(QXmlStreamReader);
-    d->lockEncoding = true;
-    if (!d->decoder.isValid())
-        d->decoder = QStringDecoder(QStringDecoder::Utf8);
-    addData(data.toUtf8());
-}
-
-/*!
-  Adds more \a data for the reader to read. This function does
-  nothing if the reader has a device().
-
-  \sa readNext(), clear()
- */
-void QXmlStreamReader::addData(const char *data)
-{
-    addData(QByteArray(data));
 }
 
 /*!
@@ -570,6 +680,7 @@ QXmlStreamReader::TokenType QXmlStreamReader::readNext()
         d->token = -1;
         return readNext();
     }
+    d->checkToken();
     return d->type;
 }
 
@@ -610,7 +721,7 @@ QXmlStreamReader::TokenType QXmlStreamReader::tokenType() const
 bool QXmlStreamReader::readNextStartElement()
 {
     while (readNext() != Invalid) {
-        if (isEndElement())
+        if (isEndElement() || isEndDocument())
             return false;
         else if (isStartElement())
             return true;
@@ -640,55 +751,24 @@ void QXmlStreamReader::skipCurrentElement()
     }
 }
 
-/*
- * Use the following Perl script to generate the error string index list:
-===== PERL SCRIPT ====
-print "static const char QXmlStreamReader_tokenTypeString_string[] =\n";
-$counter = 0;
-$i = 0;
-while (<STDIN>) {
-    chomp;
-    print "    \"$_\\0\"\n";
-    $sizes[$i++] = $counter;
-    $counter += length 1 + $_;
-}
-print "    \"\\0\";\n\nstatic const short QXmlStreamReader_tokenTypeString_indices[] = {\n    ";
-for ($j = 0; $j < $i; ++$j) {
-    printf "$sizes[$j], ";
-}
-print "0\n};\n";
-===== PERL SCRIPT ====
+static constexpr auto QXmlStreamReader_tokenTypeString = qOffsetStringArray(
+    "NoToken",
+    "Invalid",
+    "StartDocument",
+    "EndDocument",
+    "StartElement",
+    "EndElement",
+    "Characters",
+    "Comment",
+    "DTD",
+    "EntityReference",
+    "ProcessingInstruction"
+);
 
- * The input data is as follows (copied from qxmlstream.h):
-NoToken
-Invalid
-StartDocument
-EndDocument
-StartElement
-EndElement
-Characters
-Comment
-DTD
-EntityReference
-ProcessingInstruction
-*/
-static const char QXmlStreamReader_tokenTypeString_string[] =
-    "NoToken\0"
-    "Invalid\0"
-    "StartDocument\0"
-    "EndDocument\0"
-    "StartElement\0"
-    "EndElement\0"
-    "Characters\0"
-    "Comment\0"
-    "DTD\0"
-    "EntityReference\0"
-    "ProcessingInstruction\0";
-
-static const short QXmlStreamReader_tokenTypeString_indices[] = {
-    0, 8, 16, 30, 42, 55, 66, 77, 85, 89, 105, 0
-};
-
+static constexpr auto QXmlStreamReader_XmlContextString = qOffsetStringArray(
+    "Prolog",
+    "Body"
+);
 
 /*!
     \property  QXmlStreamReader::namespaceProcessing
@@ -721,8 +801,16 @@ bool QXmlStreamReader::namespaceProcessing() const
 QString QXmlStreamReader::tokenString() const
 {
     Q_D(const QXmlStreamReader);
-    return QLatin1StringView(QXmlStreamReader_tokenTypeString_string +
-                             QXmlStreamReader_tokenTypeString_indices[d->type]);
+    return QLatin1StringView(QXmlStreamReader_tokenTypeString.at(d->type));
+}
+
+/*!
+   \internal
+   \return \param ctxt (Prolog/Body) as a string.
+ */
+static constexpr QLatin1StringView contextString(QXmlStreamReaderPrivate::XmlContext ctxt)
+{
+    return QLatin1StringView(QXmlStreamReader_XmlContextString.at(static_cast<int>(ctxt)));
 }
 
 #endif // QT_NO_XMLSTREAMREADER
@@ -775,6 +863,7 @@ void QXmlStreamReaderPrivate::init()
     isWhitespace = true;
     isCDATA = false;
     standalone = false;
+    hasStandalone = false;
     tos = 0;
     resumeReduction = 0;
     state_stack[tos++] = 0;
@@ -811,6 +900,8 @@ void QXmlStreamReaderPrivate::init()
 
     type = QXmlStreamReader::NoToken;
     error = QXmlStreamReader::NoError;
+    currentContext = XmlContext::Prolog;
+    foundDTD = false;
 }
 
 /*
@@ -1243,7 +1334,8 @@ inline qsizetype QXmlStreamReaderPrivate::fastScanContentCharList()
     return n;
 }
 
-inline qsizetype QXmlStreamReaderPrivate::fastScanName(qint16 *prefix)
+// Fast scan an XML attribute name (e.g. "xml:lang").
+inline std::optional<qsizetype> QXmlStreamReaderPrivate::fastScanName(Value *val)
 {
     qsizetype n = 0;
     uint c;
@@ -1251,7 +1343,8 @@ inline qsizetype QXmlStreamReaderPrivate::fastScanName(qint16 *prefix)
         if (n >= 4096) {
             // This is too long to be a sensible name, and
             // can exhaust memory, or the range of decltype(*prefix)
-            return 0;
+            raiseNamePrefixTooLongError();
+            return std::nullopt;
         }
         switch (c) {
         case '\n':
@@ -1280,16 +1373,16 @@ inline qsizetype QXmlStreamReaderPrivate::fastScanName(qint16 *prefix)
         case '+':
         case '*':
             putChar(c);
-            if (prefix && *prefix == n+1) {
-                *prefix = 0;
+            if (val && val->prefix == n + 1) {
+                val->prefix = 0;
                 putChar(':');
                 --n;
             }
             return n;
         case ':':
-            if (prefix) {
-                if (*prefix == 0) {
-                    *prefix = qint16(n + 2);
+            if (val) {
+                if (val->prefix == 0) {
+                    val->prefix = qint16(n + 2);
                 } else { // only one colon allowed according to the namespace spec.
                     putChar(c);
                     return n;
@@ -1305,8 +1398,8 @@ inline qsizetype QXmlStreamReaderPrivate::fastScanName(qint16 *prefix)
         }
     }
 
-    if (prefix)
-        *prefix = 0;
+    if (val)
+        val->prefix = 0;
     qsizetype pos = textBuffer.size() - n;
     putString(textBuffer, pos);
     textBuffer.resize(pos);
@@ -1669,7 +1762,7 @@ void QXmlStreamReaderPrivate::checkPublicLiteral(QStringView publicId)
 {
 //#x20 | #xD | #xA | [a-zA-Z0-9] | [-'()+,./:=?;!*#@$_%]
 
-    const ushort *data = reinterpret_cast<const ushort *>(publicId.constData());
+    const char16_t *data = publicId.utf16();
     uchar c = 0;
     qsizetype i;
     for (i = publicId.size() - 1; i >= 0; --i) {
@@ -1681,9 +1774,7 @@ void QXmlStreamReaderPrivate::checkPublicLiteral(QStringView publicId)
             case '$': case '_': case '%': case '\'': case '\"':
                 continue;
             default:
-                if ((c >= 'a' && c <= 'z')
-                    || (c >= 'A' && c <= 'Z')
-                    || (c >= '0' && c <= '9'))
+                if (isAsciiLetterOrNumber(c))
                     continue;
             }
         break;
@@ -1727,7 +1818,6 @@ void QXmlStreamReaderPrivate::startDocument()
      * proper order:
      *
      * [23]     XMLDecl     ::=     '<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>' */
-    bool hasStandalone = false;
 
     for (qsizetype i = 0; err.isNull() && i < n; ++i) {
         Attribute &attrib = attributeStack[i];
@@ -1762,7 +1852,7 @@ void QXmlStreamReaderPrivate::startDocument()
             else
                 err = QXmlStream::tr("Standalone accepts only yes or no.");
         } else {
-            err = QXmlStream::tr("Invalid attribute in XML declaration.");
+            err = QXmlStream::tr("Invalid attribute in XML declaration: %1 = %2").arg(key).arg(value);
         }
     }
 
@@ -1791,6 +1881,14 @@ void QXmlStreamReaderPrivate::raiseWellFormedError(const QString &message)
     raiseError(QXmlStreamReader::NotWellFormedError, message);
 }
 
+void QXmlStreamReaderPrivate::raiseNamePrefixTooLongError()
+{
+    // TODO: add a ImplementationLimitsExceededError and use it instead
+    raiseError(QXmlStreamReader::NotWellFormedError,
+               QXmlStream::tr("Length of XML attribute name exceeds implementation limits (4KiB "
+                              "characters)."));
+}
+
 void QXmlStreamReaderPrivate::parseError()
 {
 
@@ -1803,7 +1901,7 @@ void QXmlStreamReaderPrivate::parseError()
     int ers = state_stack[tos];
     int nexpected = 0;
     int expected[nmax];
-    if (token != ERROR)
+    if (token != XML_ERROR)
         for (int tk = 0; tk < TERMINAL_COUNT; ++tk) {
             int k = t_action(ers, tk);
             if (k <= 0)
@@ -2735,6 +2833,7 @@ QStringView QXmlStreamReader::documentEncoding() const
   simple streaming API.
 
   \ingroup xml-tools
+  \ingroup qtserialization
 
   QXmlStreamWriter is the counterpart to QXmlStreamReader for writing
   XML. Like its related class, it operates on a QIODevice specified
@@ -2811,13 +2910,10 @@ public:
             delete device;
     }
 
-    void write(const XmlStringRef &);
-    void write(const QString &);
-    void writeEscaped(const QString &, bool escapeWhitespace = false);
-    void write(const char *s, qsizetype len);
-    template <int N> void write(const char (&s)[N]) { write(s, N - 1); }
+    void write(QAnyStringView s);
+    void writeEscaped(QAnyStringView, bool escapeWhitespace = false);
     bool finishStartElement(bool contents = true);
-    void writeStartElement(const QString &namespaceUri, const QString &name);
+    void writeStartElement(QAnyStringView namespaceUri, QAnyStringView name);
     QIODevice *device;
     QString *stringDevice;
     uint deleteDevice :1;
@@ -2831,20 +2927,22 @@ public:
     QByteArray autoFormattingIndent;
     NamespaceDeclaration emptyNamespace;
     qsizetype lastNamespaceDeclaration;
-    QStringEncoder toUtf8;
 
-    NamespaceDeclaration &findNamespace(const QString &namespaceUri, bool writeDeclaration = false, bool noDefault = false);
+    NamespaceDeclaration &findNamespace(QAnyStringView namespaceUri, bool writeDeclaration = false, bool noDefault = false);
     void writeNamespaceDeclaration(const NamespaceDeclaration &namespaceDeclaration);
 
     int namespacePrefixCount;
 
     void indent(int level);
+private:
+    void doWriteToDevice(QStringView s);
+    void doWriteToDevice(QUtf8StringView s);
+    void doWriteToDevice(QLatin1StringView s);
 };
 
 
 QXmlStreamWriterPrivate::QXmlStreamWriterPrivate(QXmlStreamWriter *q)
-    : autoFormattingIndent(4, ' '),
-      toUtf8(QStringEncoder::Utf8, QStringEncoder::Flag::Stateless)
+    : autoFormattingIndent(4, ' ')
 {
     q_ptr = q;
     device = nullptr;
@@ -2860,107 +2958,80 @@ QXmlStreamWriterPrivate::QXmlStreamWriterPrivate(QXmlStreamWriter *q)
     namespacePrefixCount = 0;
 }
 
-void QXmlStreamWriterPrivate::write(const XmlStringRef &s)
+void QXmlStreamWriterPrivate::write(QAnyStringView s)
 {
     if (device) {
         if (hasIoError)
             return;
-        QByteArray bytes = toUtf8(s);
-        if (toUtf8.hasError()) {
-            hasEncodingError = true;
-            return;
-        }
-        if (device->write(bytes) != bytes.size())
-            hasIoError = true;
-    }
-    else if (stringDevice)
-        stringDevice->append(s);
-    else
+
+        s.visit([&] (auto s) { doWriteToDevice(s); });
+    } else if (stringDevice) {
+        s.visit([&] (auto s) { stringDevice->append(s); });
+    } else {
         qWarning("QXmlStreamWriter: No device");
+    }
 }
 
-void QXmlStreamWriterPrivate::write(const QString &s)
-{
-    if (device) {
-        if (hasIoError)
-            return;
-        QByteArray bytes = toUtf8(s);
-        if (toUtf8.hasError()) {
-            hasEncodingError = true;
-            return;
-        }
-        if (device->write(bytes) != bytes.size())
-            hasIoError = true;
-    }
-    else if (stringDevice)
-        stringDevice->append(s);
-    else
-        qWarning("QXmlStreamWriter: No device");
-}
-
-void QXmlStreamWriterPrivate::writeEscaped(const QString &s, bool escapeWhitespace)
+void QXmlStreamWriterPrivate::writeEscaped(QAnyStringView s, bool escapeWhitespace)
 {
     QString escaped;
     escaped.reserve(s.size());
-    for (QChar c : s) {
-        switch (c.unicode()) {
-        case '<':
-            escaped.append("&lt;"_L1);
-            break;
-        case '>':
-            escaped.append("&gt;"_L1);
-            break;
-        case '&':
-            escaped.append("&amp;"_L1);
-            break;
-        case '\"':
-            escaped.append("&quot;"_L1);
-            break;
-        case '\t':
-            if (escapeWhitespace)
-                escaped.append("&#9;"_L1);
-            else
-                escaped += c;
-            break;
-        case '\n':
-            if (escapeWhitespace)
-                escaped.append("&#10;"_L1);
-            else
-                escaped += c;
-            break;
-        case '\v':
-        case '\f':
-            hasEncodingError = true;
-            break;
-        case '\r':
-            if (escapeWhitespace)
-                escaped.append("&#13;"_L1);
-            else
-                escaped += c;
-            break;
-        default:
-            if (c.unicode() > 0x1f && c.unicode() < 0xfffe)
-                escaped += c;
-            else
-                hasEncodingError = true;
-            break;
+    s.visit([&] (auto s) {
+        using View = decltype(s);
+
+        auto it = s.begin();
+        const auto end = s.end();
+
+        while (it != end) {
+            QLatin1StringView replacement;
+            auto mark = it;
+
+            while (it != end) {
+                if (*it == u'<') {
+                    replacement = "&lt;"_L1;
+                    break;
+                } else if (*it == u'>') {
+                    replacement = "&gt;"_L1;
+                    break;
+                } else if (*it == u'&') {
+                    replacement = "&amp;"_L1;
+                    break;
+                } else if (*it == u'\"') {
+                    replacement = "&quot;"_L1;
+                    break;
+                } else if (*it == u'\t') {
+                    if (escapeWhitespace) {
+                        replacement = "&#9;"_L1;
+                        break;
+                    }
+                } else if (*it == u'\n') {
+                    if (escapeWhitespace) {
+                        replacement = "&#10;"_L1;
+                        break;
+                    }
+                } else if (*it == u'\v' || *it == u'\f') {
+                    hasEncodingError = true;
+                    break;
+                } else if (*it == u'\r') {
+                    if (escapeWhitespace) {
+                        replacement = "&#13;"_L1;
+                        break;
+                    }
+                } else if (*it <= u'\x1F' || *it >= u'\uFFFE') {
+                    hasEncodingError = true;
+                    break;
+                }
+                ++it;
+            }
+
+            escaped.append(View{mark, it});
+            escaped.append(replacement);
+            if (it != end)
+                ++it;
         }
-    }
+    } );
+
     write(escaped);
-}
-
-// Writes utf8
-void QXmlStreamWriterPrivate::write(const char *s, qsizetype len)
-{
-    if (device) {
-        if (hasIoError)
-            return;
-        if (device->write(s, len) != len)
-            hasIoError = true;
-        return;
-    }
-
-    write(QString::fromUtf8(s, len));
 }
 
 void QXmlStreamWriterPrivate::writeNamespaceDeclaration(const NamespaceDeclaration &namespaceDeclaration) {
@@ -2997,7 +3068,7 @@ bool QXmlStreamWriterPrivate::finishStartElement(bool contents)
     return hadSomethingWritten;
 }
 
-QXmlStreamPrivateTagStack::NamespaceDeclaration &QXmlStreamWriterPrivate::findNamespace(const QString &namespaceUri, bool writeDeclaration, bool noDefault)
+QXmlStreamPrivateTagStack::NamespaceDeclaration &QXmlStreamWriterPrivate::findNamespace(QAnyStringView namespaceUri, bool writeDeclaration, bool noDefault)
 {
     for (NamespaceDeclaration &namespaceDeclaration : reversed(namespaceDeclarations)) {
         if (namespaceDeclaration.namespaceUri == namespaceUri) {
@@ -3034,10 +3105,43 @@ QXmlStreamPrivateTagStack::NamespaceDeclaration &QXmlStreamWriterPrivate::findNa
 void QXmlStreamWriterPrivate::indent(int level)
 {
     write("\n");
-    for (int i = level; i > 0; --i)
-        write(autoFormattingIndent.constData(), autoFormattingIndent.size());
+    for (int i = 0; i < level; ++i)
+        write(autoFormattingIndent);
 }
 
+void QXmlStreamWriterPrivate::doWriteToDevice(QStringView s)
+{
+    constexpr qsizetype MaxChunkSize = 512;
+    char buffer [3 * MaxChunkSize];
+    QStringEncoder::State state;
+    while (!s.isEmpty()) {
+        const qsizetype chunkSize = std::min(s.size(), MaxChunkSize);
+        char *end = QUtf8::convertFromUnicode(buffer, s.first(chunkSize), &state);
+        doWriteToDevice(QUtf8StringView{buffer, end});
+        s = s.sliced(chunkSize);
+    }
+    if (state.remainingChars > 0)
+        hasEncodingError = true;
+}
+
+void QXmlStreamWriterPrivate::doWriteToDevice(QUtf8StringView s)
+{
+    QByteArrayView bytes = s;
+    if (device->write(bytes.data(), bytes.size()) != bytes.size())
+        hasIoError = true;
+}
+
+void QXmlStreamWriterPrivate::doWriteToDevice(QLatin1StringView s)
+{
+    constexpr qsizetype MaxChunkSize = 512;
+    char buffer [2 * MaxChunkSize];
+    while (!s.isEmpty()) {
+        const qsizetype chunkSize = std::min(s.size(), MaxChunkSize);
+        char *end = QUtf8::convertFromLatin1(buffer, s.first(chunkSize));
+        doWriteToDevice(QUtf8StringView{buffer, end});
+        s = s.sliced(chunkSize);
+    }
+}
 
 /*!
   Constructs a stream writer.
@@ -3211,12 +3315,15 @@ bool QXmlStreamWriter::hasError() const
 
   This function can only be called after writeStartElement() before
   any content is written, or after writeEmptyElement().
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeAttribute(const QString &qualifiedName, const QString &value)
+void QXmlStreamWriter::writeAttribute(QAnyStringView qualifiedName, QAnyStringView value)
 {
     Q_D(QXmlStreamWriter);
     Q_ASSERT(d->inStartElement);
-    Q_ASSERT(qualifiedName.count(u':') <= 1);
+    Q_ASSERT(count(qualifiedName, ':') <= 1);
     d->write(" ");
     d->write(qualifiedName);
     d->write("=\"");
@@ -3231,12 +3338,15 @@ void QXmlStreamWriter::writeAttribute(const QString &qualifiedName, const QStrin
 
   This function can only be called after writeStartElement() before
   any content is written, or after writeEmptyElement().
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeAttribute(const QString &namespaceUri, const QString &name, const QString &value)
+void QXmlStreamWriter::writeAttribute(QAnyStringView namespaceUri, QAnyStringView name, QAnyStringView value)
 {
     Q_D(QXmlStreamWriter);
     Q_ASSERT(d->inStartElement);
-    Q_ASSERT(!name.contains(u':'));
+    Q_ASSERT(!contains(name, ':'));
     QXmlStreamWriterPrivate::NamespaceDeclaration &namespaceDeclaration = d->findNamespace(namespaceUri, true, true);
     d->write(" ");
     if (!namespaceDeclaration.prefix.isEmpty()) {
@@ -3260,12 +3370,9 @@ void QXmlStreamWriter::writeAttribute(const QString &namespaceUri, const QString
 void QXmlStreamWriter::writeAttribute(const QXmlStreamAttribute& attribute)
 {
     if (attribute.namespaceUri().isEmpty())
-        writeAttribute(attribute.qualifiedName().toString(),
-                       attribute.value().toString());
+        writeAttribute(attribute.qualifiedName(), attribute.value());
     else
-        writeAttribute(attribute.namespaceUri().toString(),
-                       attribute.name().toString(),
-                       attribute.value().toString());
+        writeAttribute(attribute.namespaceUri(), attribute.name(), attribute.value());
 }
 
 
@@ -3295,15 +3402,26 @@ void QXmlStreamWriter::writeAttributes(const QXmlStreamAttributes& attributes)
   This function mainly exists for completeness. Normally you should
   not need use it, because writeCharacters() automatically escapes all
   non-content characters.
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeCDATA(const QString &text)
+void QXmlStreamWriter::writeCDATA(QAnyStringView text)
 {
     Q_D(QXmlStreamWriter);
     d->finishStartElement();
-    QString copy(text);
-    copy.replace("]]>"_L1, "]]]]><![CDATA[>"_L1);
     d->write("<![CDATA[");
-    d->write(copy);
+    while (!text.isEmpty()) {
+        const auto idx = indexOf(text, "]]>"_L1);
+        if (idx < 0)
+            break;                   // no forbidden sequence found
+        d->write(text.first(idx));
+        d->write("]]"                // text[idx, idx + 2)
+                 "]]><![CDATA["      // escape sequence to separate ]] and >
+                 ">");               // text[idx + 2, idx + 3)
+        text = text.sliced(idx + 3); // skip over "]]>"
+    }
+    d->write(text); // write remainder
     d->write("]]>");
 }
 
@@ -3313,8 +3431,11 @@ void QXmlStreamWriter::writeCDATA(const QString &text)
   "]]>", ">" is also escaped as "&gt;".
 
   \sa writeEntityReference()
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeCharacters(const QString &text)
+void QXmlStreamWriter::writeCharacters(QAnyStringView text)
 {
     Q_D(QXmlStreamWriter);
     d->finishStartElement();
@@ -3323,13 +3444,16 @@ void QXmlStreamWriter::writeCharacters(const QString &text)
 
 
 /*!  Writes \a text as XML comment, where \a text must not contain the
-     forbidden sequence "--" or end with "-". Note that XML does not
-     provide any way to escape "-" in a comment.
+     forbidden sequence \c{--} or end with \c{-}. Note that XML does not
+     provide any way to escape \c{-} in a comment.
+
+     \note In Qt versions prior to 6.5, this function took QString, not
+     QAnyStringView.
  */
-void QXmlStreamWriter::writeComment(const QString &text)
+void QXmlStreamWriter::writeComment(QAnyStringView text)
 {
     Q_D(QXmlStreamWriter);
-    Q_ASSERT(!text.contains("--"_L1) && !text.endsWith(u'-'));
+    Q_ASSERT(!contains(text, "--"_L1) && !endsWith(text, '-'));
     if (!d->finishStartElement(false) && d->autoFormatting)
         d->indent(d->tagStack.size());
     d->write("<!--");
@@ -3341,8 +3465,11 @@ void QXmlStreamWriter::writeComment(const QString &text)
 
 /*!  Writes a DTD section. The \a dtd represents the entire
   doctypedecl production from the XML 1.0 specification.
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeDTD(const QString &dtd)
+void QXmlStreamWriter::writeDTD(QAnyStringView dtd)
 {
     Q_D(QXmlStreamWriter);
     d->finishStartElement();
@@ -3358,12 +3485,15 @@ void QXmlStreamWriter::writeDTD(const QString &dtd)
 /*!  \overload
   Writes an empty element with qualified name \a qualifiedName.
   Subsequent calls to writeAttribute() will add attributes to this element.
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
 */
-void QXmlStreamWriter::writeEmptyElement(const QString &qualifiedName)
+void QXmlStreamWriter::writeEmptyElement(QAnyStringView qualifiedName)
 {
     Q_D(QXmlStreamWriter);
-    Q_ASSERT(qualifiedName.count(u':') <= 1);
-    d->writeStartElement(QString(), qualifiedName);
+    Q_ASSERT(count(qualifiedName, ':') <= 1);
+    d->writeStartElement({}, qualifiedName);
     d->inEmptyElement = true;
 }
 
@@ -3374,11 +3504,14 @@ void QXmlStreamWriter::writeEmptyElement(const QString &qualifiedName)
   Subsequent calls to writeAttribute() will add attributes to this element.
 
   \sa writeNamespace()
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeEmptyElement(const QString &namespaceUri, const QString &name)
+void QXmlStreamWriter::writeEmptyElement(QAnyStringView namespaceUri, QAnyStringView name)
 {
     Q_D(QXmlStreamWriter);
-    Q_ASSERT(!name.contains(u':'));
+    Q_ASSERT(!contains(name, ':'));
     d->writeStartElement(namespaceUri, name);
     d->inEmptyElement = true;
 }
@@ -3391,8 +3524,10 @@ void QXmlStreamWriter::writeEmptyElement(const QString &namespaceUri, const QStr
   This is a convenience function equivalent to:
   \snippet code/src_corelib_xml_qxmlstream.cpp 1
 
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
 */
-void QXmlStreamWriter::writeTextElement(const QString &qualifiedName, const QString &text)
+void QXmlStreamWriter::writeTextElement(QAnyStringView qualifiedName, QAnyStringView text)
 {
     writeStartElement(qualifiedName);
     writeCharacters(text);
@@ -3408,8 +3543,10 @@ void QXmlStreamWriter::writeTextElement(const QString &qualifiedName, const QStr
   This is a convenience function equivalent to:
   \snippet code/src_corelib_xml_qxmlstream.cpp 2
 
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
 */
-void QXmlStreamWriter::writeTextElement(const QString &namespaceUri, const QString &name, const QString &text)
+void QXmlStreamWriter::writeTextElement(QAnyStringView namespaceUri, QAnyStringView name, QAnyStringView text)
 {
     writeStartElement(namespaceUri, name);
     writeCharacters(text);
@@ -3470,8 +3607,11 @@ void QXmlStreamWriter::writeEndElement()
 
 /*!
   Writes the entity reference \a name to the stream, as "&\a{name};".
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeEntityReference(const QString &name)
+void QXmlStreamWriter::writeEntityReference(QAnyStringView name)
 {
     Q_D(QXmlStreamWriter);
     d->finishStartElement();
@@ -3495,8 +3635,10 @@ void QXmlStreamWriter::writeEntityReference(const QString &name)
   \e http://www.w3.org/2000/xmlns/ are used for the namespace mechanism
   itself and thus completely forbidden in declarations.
 
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeNamespace(const QString &namespaceUri, const QString &prefix)
+void QXmlStreamWriter::writeNamespace(QAnyStringView namespaceUri, QAnyStringView prefix)
 {
     Q_D(QXmlStreamWriter);
     Q_ASSERT(prefix != "xmlns"_L1);
@@ -3523,8 +3665,11 @@ void QXmlStreamWriter::writeNamespace(const QString &namespaceUri, const QString
   Note that the namespaces \e http://www.w3.org/XML/1998/namespace
   (bound to \e xmlns) and \e http://www.w3.org/2000/xmlns/ (bound to
   \e xml) by definition cannot be declared as default.
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeDefaultNamespace(const QString &namespaceUri)
+void QXmlStreamWriter::writeDefaultNamespace(QAnyStringView namespaceUri)
 {
     Q_D(QXmlStreamWriter);
     Q_ASSERT(namespaceUri != "http://www.w3.org/XML/1998/namespace"_L1);
@@ -3540,11 +3685,14 @@ void QXmlStreamWriter::writeDefaultNamespace(const QString &namespaceUri)
 /*!
   Writes an XML processing instruction with \a target and \a data,
   where \a data must not contain the sequence "?>".
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeProcessingInstruction(const QString &target, const QString &data)
+void QXmlStreamWriter::writeProcessingInstruction(QAnyStringView target, QAnyStringView data)
 {
     Q_D(QXmlStreamWriter);
-    Q_ASSERT(!data.contains("?>"_L1));
+    Q_ASSERT(!contains(data, "?>"_L1));
     if (!d->finishStartElement(false) && d->autoFormatting)
         d->indent(d->tagStack.size());
     d->write("<?");
@@ -3575,8 +3723,11 @@ void QXmlStreamWriter::writeStartDocument()
   Writes a document start with the XML version number \a version.
 
   \sa writeEndDocument()
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeStartDocument(const QString &version)
+void QXmlStreamWriter::writeStartDocument(QAnyStringView version)
 {
     Q_D(QXmlStreamWriter);
     d->finishStartElement(false);
@@ -3592,8 +3743,11 @@ void QXmlStreamWriter::writeStartDocument(const QString &version)
 
   \sa writeEndDocument()
   \since 4.5
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeStartDocument(const QString &version, bool standalone)
+void QXmlStreamWriter::writeStartDocument(QAnyStringView version, bool standalone)
 {
     Q_D(QXmlStreamWriter);
     d->finishStartElement(false);
@@ -3614,12 +3768,15 @@ void QXmlStreamWriter::writeStartDocument(const QString &version, bool standalon
    writeAttribute() will add attributes to this element.
 
    \sa writeEndElement(), writeEmptyElement()
+
+   \note In Qt versions prior to 6.5, this function took QString, not
+   QAnyStringView.
  */
-void QXmlStreamWriter::writeStartElement(const QString &qualifiedName)
+void QXmlStreamWriter::writeStartElement(QAnyStringView qualifiedName)
 {
     Q_D(QXmlStreamWriter);
-    Q_ASSERT(qualifiedName.count(u':') <= 1);
-    d->writeStartElement(QString(), qualifiedName);
+    Q_ASSERT(count(qualifiedName, ':') <= 1);
+    d->writeStartElement({}, qualifiedName);
 }
 
 
@@ -3630,15 +3787,18 @@ void QXmlStreamWriter::writeStartElement(const QString &qualifiedName)
   element.
 
   \sa writeNamespace(), writeEndElement(), writeEmptyElement()
+
+  \note In Qt versions prior to 6.5, this function took QString, not
+  QAnyStringView.
  */
-void QXmlStreamWriter::writeStartElement(const QString &namespaceUri, const QString &name)
+void QXmlStreamWriter::writeStartElement(QAnyStringView namespaceUri, QAnyStringView name)
 {
     Q_D(QXmlStreamWriter);
-    Q_ASSERT(!name.contains(u':'));
+    Q_ASSERT(!contains(name, ':'));
     d->writeStartElement(namespaceUri, name);
 }
 
-void QXmlStreamWriterPrivate::writeStartElement(const QString &namespaceUri, const QString &name)
+void QXmlStreamWriterPrivate::writeStartElement(QAnyStringView namespaceUri, QAnyStringView name)
 {
     if (!finishStartElement(false) && autoFormatting)
         indent(tagStack.size());
@@ -3679,11 +3839,11 @@ void QXmlStreamWriter::writeCurrentToken(const QXmlStreamReader &reader)
         writeEndDocument();
         break;
     case QXmlStreamReader::StartElement: {
-        writeStartElement(reader.namespaceUri().toString(), reader.name().toString());
+        writeStartElement(reader.namespaceUri(), reader.name());
         const QXmlStreamNamespaceDeclarations decls = reader.namespaceDeclarations();
         for (const auto &namespaceDeclaration : decls) {
-            writeNamespace(namespaceDeclaration.namespaceUri().toString(),
-                           namespaceDeclaration.prefix().toString());
+            writeNamespace(namespaceDeclaration.namespaceUri(),
+                           namespaceDeclaration.prefix());
         }
         writeAttributes(reader.attributes());
              } break;
@@ -3692,22 +3852,22 @@ void QXmlStreamWriter::writeCurrentToken(const QXmlStreamReader &reader)
         break;
     case QXmlStreamReader::Characters:
         if (reader.isCDATA())
-            writeCDATA(reader.text().toString());
+            writeCDATA(reader.text());
         else
-            writeCharacters(reader.text().toString());
+            writeCharacters(reader.text());
         break;
     case QXmlStreamReader::Comment:
-        writeComment(reader.text().toString());
+        writeComment(reader.text());
         break;
     case QXmlStreamReader::DTD:
-        writeDTD(reader.text().toString());
+        writeDTD(reader.text());
         break;
     case QXmlStreamReader::EntityReference:
-        writeEntityReference(reader.name().toString());
+        writeEntityReference(reader.name());
         break;
     case QXmlStreamReader::ProcessingInstruction:
-        writeProcessingInstruction(reader.processingInstructionTarget().toString(),
-                                   reader.processingInstructionData().toString());
+        writeProcessingInstruction(reader.processingInstructionTarget(),
+                                   reader.processingInstructionData());
         break;
     default:
         Q_ASSERT(reader.tokenType() != QXmlStreamReader::Invalid);
@@ -3716,9 +3876,99 @@ void QXmlStreamWriter::writeCurrentToken(const QXmlStreamReader &reader)
     }
 }
 
+static constexpr bool isTokenAllowedInContext(QXmlStreamReader::TokenType type,
+                                              QXmlStreamReaderPrivate::XmlContext ctxt)
+{
+    switch (type) {
+    case QXmlStreamReader::StartDocument:
+    case QXmlStreamReader::DTD:
+        return ctxt == QXmlStreamReaderPrivate::XmlContext::Prolog;
+
+    case QXmlStreamReader::StartElement:
+    case QXmlStreamReader::EndElement:
+    case QXmlStreamReader::Characters:
+    case QXmlStreamReader::EntityReference:
+    case QXmlStreamReader::EndDocument:
+        return ctxt == QXmlStreamReaderPrivate::XmlContext::Body;
+
+    case QXmlStreamReader::Comment:
+    case QXmlStreamReader::ProcessingInstruction:
+        return true;
+
+    case QXmlStreamReader::NoToken:
+    case QXmlStreamReader::Invalid:
+        return false;
+    }
+
+    // GCC 8.x does not treat __builtin_unreachable() as constexpr
+#if !defined(Q_CC_GNU_ONLY) || (Q_CC_GNU >= 900)
+    Q_UNREACHABLE_RETURN(false);
+#else
+    return false;
+#endif
+}
+
 /*!
- \fn bool QXmlStreamAttributes::hasAttribute(const QString &qualifiedName) const
- \since 4.5
+   \internal
+   \brief QXmlStreamReader::isValidToken
+   \return \c true if \param type is a valid token type.
+   \return \c false if \param type is an unexpected token,
+   which indicates a non-well-formed or invalid XML stream.
+ */
+bool QXmlStreamReaderPrivate::isValidToken(QXmlStreamReader::TokenType type)
+{
+    // Don't change currentContext, if Invalid or NoToken occur in the prolog
+    if (type == QXmlStreamReader::Invalid || type == QXmlStreamReader::NoToken)
+        return false;
+
+    // If a token type gets rejected in the body, there is no recovery
+    const bool result = isTokenAllowedInContext(type, currentContext);
+    if (result || currentContext == XmlContext::Body)
+        return result;
+
+    // First non-Prolog token observed => switch context to body and check again.
+    currentContext = XmlContext::Body;
+    return isTokenAllowedInContext(type, currentContext);
+}
+
+/*!
+   \internal
+   Checks token type and raises an error, if it is invalid
+   in the current context (prolog/body).
+ */
+void QXmlStreamReaderPrivate::checkToken()
+{
+    Q_Q(QXmlStreamReader);
+
+    // The token type must be consumed, to keep track if the body has been reached.
+    const XmlContext context = currentContext;
+    const bool ok = isValidToken(type);
+
+    // Do nothing if an error has been raised already (going along with an unexpected token)
+    if (error != QXmlStreamReader::Error::NoError)
+        return;
+
+    if (!ok) {
+        raiseError(QXmlStreamReader::UnexpectedElementError,
+                   QXmlStream::tr("Unexpected token type %1 in %2.")
+                   .arg(q->tokenString(), contextString(context)));
+        return;
+    }
+
+    if (type != QXmlStreamReader::DTD)
+        return;
+
+    // Raise error on multiple DTD tokens
+    if (foundDTD) {
+        raiseError(QXmlStreamReader::UnexpectedElementError,
+                   QXmlStream::tr("Found second DTD token in %1.").arg(contextString(context)));
+    } else {
+        foundDTD = true;
+    }
+}
+
+/*!
+ \fn bool QXmlStreamAttributes::hasAttribute(QAnyStringView qualifiedName) const
 
  Returns \c true if this QXmlStreamAttributes has an attribute whose
  qualified name is \a qualifiedName; otherwise returns \c false.
@@ -3732,16 +3982,9 @@ void QXmlStreamWriter::writeCurrentToken(const QXmlStreamReader &reader)
 */
 
 /*!
- \fn bool QXmlStreamAttributes::hasAttribute(QLatin1StringView qualifiedName) const
+ \fn bool QXmlStreamAttributes::hasAttribute(QAnyStringView namespaceUri,
+                                             QAnyStringView name) const
  \overload
- \since 4.5
-*/
-
-/*!
- \fn bool QXmlStreamAttributes::hasAttribute(const QString &namespaceUri,
-                                             const QString &name) const
- \overload
- \since 4.5
 
  Returns \c true if this QXmlStreamAttributes has an attribute whose
  namespace URI and name correspond to \a namespaceUri and \a name;

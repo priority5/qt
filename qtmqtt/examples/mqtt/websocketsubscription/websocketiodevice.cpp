@@ -14,10 +14,20 @@ WebSocketIODevice::WebSocketIODevice(QObject *parent)
     connect(&m_socket, &QWebSocket::binaryMessageReceived, this, &WebSocketIODevice::handleBinaryMessage);
 }
 
+bool WebSocketIODevice::isSequential() const
+{
+    return true;
+}
+
+qint64 WebSocketIODevice::bytesAvailable() const
+{
+    return static_cast<qint64>(m_buffer.size()) + QIODevice::bytesAvailable();
+}
+
 bool WebSocketIODevice::open(QIODevice::OpenMode mode)
 {
     QWebSocketHandshakeOptions options;
-    options.setSubprotocols({m_protocol});
+    options.setSubprotocols(QStringList{ QString::fromUtf8(m_protocol) });
 
     m_socket.open(m_url, options);
 
@@ -33,7 +43,7 @@ void WebSocketIODevice::close()
 qint64 WebSocketIODevice::readData(char *data, qint64 maxlen)
 {
     qint64 bytesToRead = qMin(maxlen, (qint64)m_buffer.size());
-    memcpy(data, m_buffer.constData(), bytesToRead);
+    memcpy(data, m_buffer.constData(), static_cast<size_t>(bytesToRead));
     m_buffer = m_buffer.right(m_buffer.size() - bytesToRead);
     return bytesToRead;
 }

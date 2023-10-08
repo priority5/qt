@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(stocqt LANGUAGES CXX)
 
@@ -20,11 +23,11 @@ set_target_properties(stocqt PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_link_libraries(stocqt PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
+target_link_libraries(stocqt PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
 )
 
 # Resources:
@@ -69,7 +72,7 @@ set(stocqt_resource_files
     "stocqt.qml"
 )
 
-qt6_add_resources(stocqt "stocqt"
+qt_add_resources(stocqt "stocqt"
     PREFIX
         "/demos/stocqt"
     FILES

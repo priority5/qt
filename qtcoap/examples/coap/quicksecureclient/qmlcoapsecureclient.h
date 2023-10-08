@@ -4,12 +4,20 @@
 #ifndef QMLCOAPSECURECLIENT_H
 #define QMLCOAPSECURECLIENT_H
 
-#include <QCoapClient>
+#include <QtCoap/qcoapnamespace.h>
 #include <QCoapSecurityConfiguration>
 
+#include <QtQml/qqmlregistration.h>
+
+QT_BEGIN_NAMESPACE
+class QCoapClient;
+QT_END_NAMESPACE
+
+//! [coap_client]
 class QmlCoapSecureClient : public QObject
 {
     Q_OBJECT
+    QML_NAMED_ELEMENT(CoapSecureClient)
 
 public:
     QmlCoapSecureClient(QObject *parent = nullptr);
@@ -31,5 +39,15 @@ private:
     QCoapSecurityConfiguration m_configuration;
     QtCoap::SecurityMode m_securityMode;
 };
+//! [coap_client]
+
+//! [coap_namespace]
+namespace QCoapForeignNamespace
+{
+    Q_NAMESPACE
+    QML_FOREIGN_NAMESPACE(QtCoap)
+    QML_NAMED_ELEMENT(QtCoap)
+}
+//! [coap_namespace]
 
 #endif // QMLCOAPSECURECLIENT_H

@@ -1,10 +1,6 @@
 // Copyright (C) 2015 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
-#ifndef NOMINMAX
-#  define NOMINMAX
-#endif
-
 #include <ocidl.h>
 #include <olectl.h>
 
@@ -15,6 +11,7 @@
 #include <qcursor.h>
 #include <qpixmap.h>
 #include <qpainter.h>
+#include <private/qpixmap_win_p.h>
 #include <qobject.h>
 #include <qdebug.h>
 #ifdef QAX_SERVER
@@ -93,9 +90,6 @@ static QFont IFontToQFont(IFont *f)
 
     return font;
 }
-
-Q_GUI_EXPORT HBITMAP qt_pixmapToWinHBITMAP(const QPixmap &p, int hbitmapFormat = 0);
-Q_GUI_EXPORT QPixmap qt_pixmapFromWinHBITMAP(HBITMAP bitmap, int hbitmapFormat = 0);
 
 static IPictureDisp *QPixmapToIPicture(const QPixmap &pixmap)
 {
@@ -240,7 +234,7 @@ bool QVariantToVARIANT(const QVariant &var, VARIANT &arg, const QByteArray &type
         return QVariantToVARIANT(var, *arg.pvarVal, typeName, false);
     }
 
-    if (out && proptype == QMetaType::User && typeName == "QVariant") {
+    if (out && proptype == QMetaType::QVariant) {
         VARIANT *pVariant = new VARIANT;
         QVariantToVARIANT(var, *pVariant, QByteArray(), false);
         arg.vt = VT_VARIANT|VT_BYREF;
@@ -724,7 +718,10 @@ static QVariant axServer(IUnknown *unknown, const QByteArray &typeName)
 #undef QVARIANT_TO_VARIANT_POD
 
 /*
-    Returns \a arg as a QVariant of type \a type.
+    Returns \a arg as a QVariant of type \a typeName or \a type.
+
+    NOTE: If a \a typeName is specified, value type is assumed. to
+    get/create a pointer type, provide the type id in the \a type argument.
 
     Used by
 
@@ -939,24 +936,43 @@ QVariant VARIANTToQVariant(const VARIANT &arg, const QByteArray &typeName, int t
                 {
                     if (!typeName.isEmpty()) {
                         if (arg.vt & VT_BYREF) {
+                            // When the dispinterface is a return value, just assign it to a QVariant
                             static const int dispatchId = qRegisterMetaType<IDispatch**>("IDispatch**");
                             var = QVariant(QMetaType(dispatchId), &arg.ppdispVal);
                         } else {
 #ifndef QAX_SERVER
                             if (typeName == "QVariant") {
+                                // If a QVariant is requested, wrap the dispinterface in a QAxObject
                                 QAxObject *object = new QAxObject(disp);
                                 var = QVariant::fromValue<QAxObject*>(object);
                             } else if (typeName != "IDispatch*" &&  QMetaType::fromName(typeName).id() != QMetaType::UnknownType) {
-                                QByteArray typeNameStr = QByteArray(typeName);
+                                // Conversion from IDispatch* to a wrapper type is requested. Here, the requested
+                                // wrapper type is constructed around the dispinterface, and then returned as
+                                // a QVariant containing a pointer to the wrapper type.
+
+                                // Calculate the value type from a potential pointer type
+                                QByteArray valueTypeStr = QByteArray(typeName);
                                 int pIndex = typeName.lastIndexOf('*');
                                 if (pIndex != -1)
-                                    typeNameStr = typeName.left(pIndex);
-                                const QMetaType metaType = QMetaType::fromName(typeNameStr);
-                                Q_ASSERT(metaType.id() != QMetaType::UnknownType);
-                                auto object = static_cast<QAxObject*>(qax_createObjectWrapper(metaType.id(), disp));
-                                var = QVariant(metaType, &object);
+                                    valueTypeStr = typeName.left(pIndex);
+
+                                const QMetaType metaValueType = QMetaType::fromName(valueTypeStr);
+                                Q_ASSERT(metaValueType.id() != QMetaType::UnknownType);
+
+                                auto object = static_cast<QAxObject*>(qax_createObjectWrapper(metaValueType.id(), disp));
+
+                                // Return object as the original type
+                                const QMetaType returnType = QMetaType::fromName(typeName);
+                                Q_ASSERT(metaValueType.id() != QMetaType::UnknownType);
+
+                                var = QVariant(returnType, &object);
+
+                                // The result must be a pointer to an instance derived from QObject
+                                Q_ASSERT((var.metaType().flags() & QMetaType::PointerToQObject) != 0);
                             } else {
 #endif
+                                // An IDispatch pointer is requested, no conversion required, just return as QVariant
+                                // containing the pointer.
                                 static const int dispatchId = qRegisterMetaType<IDispatch*>(typeName.constData());
                                 var = QVariant(QMetaType(dispatchId), &disp);
 #ifndef QAX_SERVER

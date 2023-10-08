@@ -1,7 +1,8 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(quicksecureclient LANGUAGES CXX)
-
-set(CMAKE_AUTOMOC ON)
 
 if(NOT DEFINED INSTALL_EXAMPLESDIR)
     set(INSTALL_EXAMPLESDIR "examples")
@@ -11,9 +12,10 @@ set(INSTALL_EXAMPLEDIR "${INSTALL_EXAMPLESDIR}/coap/quicksecureclient")
 
 find_package(Qt6 REQUIRED COMPONENTS Coap Core Gui Qml Quick)
 
+qt_standard_project_setup(REQUIRES 6.5)
+
 qt_add_executable(quicksecureclient
     main.cpp
-    qmlcoapsecureclient.cpp qmlcoapsecureclient.h
 )
 
 set_target_properties(quicksecureclient PROPERTIES
@@ -21,29 +23,21 @@ set_target_properties(quicksecureclient PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_compile_definitions(quicksecureclient PUBLIC
-    QT_DEPRECATED_WARNINGS
+target_link_libraries(quicksecureclient PRIVATE
+    Qt6::Coap
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
 )
 
-target_link_libraries(quicksecureclient PUBLIC
-    Qt::Coap
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
-)
-
-# Resources:
-set(qml_resource_files
-    "FilePicker.qml"
-    "main.qml"
-)
-
-qt6_add_resources(quicksecureclient "qml"
-    PREFIX
-        "/"
-    FILES
-        ${qml_resource_files}
+qt_add_qml_module(quicksecureclient
+    URI CoapSecureClientModule
+    SOURCES
+        qmlcoapsecureclient.cpp qmlcoapsecureclient.h
+    QML_FILES
+        FilePicker.qml
+        Main.qml
 )
 
 install(TARGETS quicksecureclient

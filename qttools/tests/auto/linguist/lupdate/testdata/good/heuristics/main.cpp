@@ -36,9 +36,6 @@ class A: public QObject {
     Q_OBJECT
     void foo()
     {
-        // number Heuristics
-        tr("version 2.0 now");
-
         // same text match
         tr("this is the matched same text");
 

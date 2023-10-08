@@ -44,7 +44,7 @@ struct QSSGMaterialVertexPipeline
     typedef TStrTableStrMap::const_iterator TParamIter;
     typedef QFlags<GenerationFlag> GenerationFlags;
 
-    QSSGRef<QSSGProgramGenerator> m_programGenerator;
+    QSSGProgramGenerator *m_programGenerator = nullptr;
     QString m_tempString;
 
     GenerationFlags m_generationFlags;
@@ -60,7 +60,7 @@ struct QSSGMaterialVertexPipeline
     bool usesInstancing;
     bool skipCustomFragmentSnippet;
 
-    QSSGMaterialVertexPipeline(const QSSGRef<QSSGProgramGenerator> &inProgram,
+    QSSGMaterialVertexPipeline(QSSGProgramGenerator &inProgram,
                                const QSSGShaderDefaultMaterialKeyProperties &materialProperties,
                                QSSGShaderMaterialAdapter *materialAdapter);
 
@@ -75,7 +75,7 @@ struct QSSGMaterialVertexPipeline
         return false;
     }
     bool hasCode(GenerationFlag inCode) { return (m_generationFlags & inCode); }
-    const QSSGRef<QSSGProgramGenerator> &programGenerator() const { return m_programGenerator; }
+    QSSGProgramGenerator *programGenerator() const { return m_programGenerator; }
 
     QSSGStageGeneratorBase &vertex()
     {
@@ -285,10 +285,11 @@ struct QSSGMaterialVertexPipeline
 
         const bool meshHasColor = hasAttributeInKey(QSSGShaderKeyVertexAttribute::Color, inKey);
 
+        const bool vColorEnabled = defaultMaterialShaderKeyProperties.m_vertexColorsEnabled.getValue(inKey);
         const bool usesVarColor = defaultMaterialShaderKeyProperties.m_usesVarColor.getValue(inKey);
         const bool usesInstancing = defaultMaterialShaderKeyProperties.m_usesInstancing.getValue(inKey);
         const bool usesBlendParticles = defaultMaterialShaderKeyProperties.m_blendParticles.getValue(inKey);
-        if (hasCustomShadedMain || usesVarColor || meshHasColor || usesInstancing || usesBlendParticles) {
+        if ((vColorEnabled && meshHasColor) || usesInstancing || usesBlendParticles || usesVarColor) {
             addInterpolationParameter("qt_varColor", "vec4");
             vertex().append("    qt_varColor = qt_vertColor;");
             fragment().append("    vec4 qt_vertColor = qt_varColor;\n");
@@ -347,10 +348,10 @@ struct QSSGMaterialVertexPipeline
     // Responsible for beginning all vertex and fragment generation (void main() { etc).
     void beginVertexGeneration(const QSSGShaderDefaultMaterialKey &inKey,
                                const QSSGShaderFeatures &inFeatureSet,
-                               const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager);
+                               QSSGShaderLibraryManager &shaderLibraryManager);
     // The fragment shader expects a floating point constant, qt_objectOpacity to be defined
     // post this method.
-    void beginFragmentGeneration(const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager);
+    void beginFragmentGeneration(QSSGShaderLibraryManager &shaderLibraryManager);
     // Output variables may be mangled in some circumstances so the shader generation system
     // needs an abstraction
     // mechanism around this.

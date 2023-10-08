@@ -901,6 +901,61 @@ Item {
             layout.destroy();
         }
 
+        function test_distribution_data()
+        {
+            return [
+                {
+                  tag: "one",
+                  layout: {
+                    type: "RowLayout",
+                    items: [
+                        {minimumWidth:  1, preferredWidth: 10, maximumWidth: 20, fillWidth: true},
+                        {minimumWidth:  1, preferredWidth:  4, maximumWidth: 10, fillWidth: true},
+                    ]
+                  },
+                  layoutWidth:     28,
+                  expectedWidths: [20, 8]
+                },{
+                  tag: "two",
+                  layout: {
+                    type: "RowLayout",
+                    items: [
+                        {minimumWidth:  1, preferredWidth: 10, horizontalStretchFactor: 4, fillWidth: true},
+                        {minimumWidth:  1, preferredWidth: 4,  horizontalStretchFactor: 1, fillWidth: true},
+                      ]
+                  },
+                  layoutWidth:     28,
+                  expectedWidths: [22, 6]
+                },{
+                    tag: "resize_to_0_width",
+                    layout: {
+                      type: "RowLayout",
+                      items: [
+                          {preferredWidth: 10, fillWidth: true},
+                        ]
+                    },
+                    layoutWidth:     0,
+                    expectedWidths: [0]
+                  }
+            ];
+        }
+
+        function test_distribution(data)
+        {
+            var layout = layout_rowLayout_Component.createObject(container)
+            layout.spacing = 0
+            buildLayout(layout, data.layout.items)
+            waitForPolish(layout)
+            layout.width = data.layoutWidth
+
+            let actualWidths = []
+            for (let i = 0; i < layout.children.length; i++) {
+                actualWidths.push(layout.children[i].width)
+            }
+            compare(actualWidths, data.expectedWidths)
+            layout.destroy();
+        }
+
         Component {
             id: layout_alignToPixelGrid_Component
             RowLayout {
@@ -1425,6 +1480,43 @@ Item {
             verify(!BindingLoopDetector.bindingLoopDetected, "Detected binding loop")
             BindingLoopDetector.reset()
         }
-    }
 
+
+        //---------------------------
+        // QTBUG-111792
+        Component {
+            id: rowlayoutCrashes_Component
+            RowLayout {
+                spacing: 5
+                Rectangle {
+                    color: "red"
+                    implicitWidth: 10
+                    implicitHeight: 10
+                }
+                Rectangle {
+                    color: "green"
+                    implicitWidth: 10
+                    implicitHeight: 10
+                }
+            }
+        }
+
+        function test_dontCrashAfterDestroyingChildren_data() {
+            return [
+                        { tag: "setWidth", func: function (layout) { layout.width = 42 } },
+                        { tag: "setHeight", func: function (layout) { layout.height = 42 } },
+                        { tag: "getImplicitWidth", func: function (layout) { let x = layout.implicitWidth } },
+                        { tag: "getImplicitHeight", func: function (layout) { let x = layout.implicitHeight } },
+                    ]
+        }
+
+        function test_dontCrashAfterDestroyingChildren(data) {
+            var layout = createTemporaryObject(rowlayoutCrashes_Component, container)
+            waitForRendering(layout)
+            compare(layout.implicitWidth, 25)
+            layout.children[0].destroy()    // deleteLater()
+            wait(0)                         // process the scheduled delete and actually invoke the dtor
+            data.func(layout)               // call a function that might ultimately access the deleted item (but shouldn't)
+        }
+    }
 }

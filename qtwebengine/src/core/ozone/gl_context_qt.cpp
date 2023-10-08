@@ -27,7 +27,8 @@ inline void *resourceForContext(const QByteArray &resource)
 #if QT_CONFIG(opengl)
     QOpenGLContext *shareContext = qt_gl_global_share_context();
     if (!shareContext) {
-        qFatal("QWebEngine: OpenGL resource sharing is not set up in QtQuick. Please make sure to call QtWebEngineCore::initialize() in your main() function.");
+        qFatal("QWebEngine: OpenGL resource sharing is not set up in QtQuick. Please make sure to "
+               "call QtWebEngineQuick::initialize() in your main() function.");
     }
     return qApp->platformNativeInterface()->nativeResourceForContext(resource, shareContext);
 #else
@@ -173,20 +174,15 @@ scoped_refptr<GLContext> CreateGLContext(GLShareGroup* share_group,
                                          GLSurface* compatible_surface,
                                          const GLContextAttribs& attribs)
 {
-    scoped_refptr<GLContext> context;
     if (GetGLImplementation() == kGLImplementationDesktopGL) {
-        context = new GLContextWGL(share_group);
+        scoped_refptr<GLContext> context = new GLContextWGL(share_group);
         if (!context->Initialize(compatible_surface, attribs))
             return nullptr;
         return context;
-    } else {
-        context = new GLContextEGL(share_group);
     }
 
-    if (!GLContextHelper::initializeContext(context.get(), compatible_surface, attribs))
-        return nullptr;
-
-    return context;
+    return InitializeGLContext(new GLContextEGL(share_group),
+                               compatible_surface, attribs);
 }
 
 }  // namespace init

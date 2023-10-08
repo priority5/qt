@@ -4,14 +4,19 @@
 #include "gl_share_context_qt.h"
 #include <QtGui/qtgui-config.h>
 #include <qpa/qplatformnativeinterface.h>
-#include <QtGui/qopenglcontext_platform.h>
-#if defined(Q_OS_MACOS)
-#include "macos_context_type_helper.h"
-#endif
+
+#include "ui/gl/gl_context_egl.h"
+#include "ui/gl/gl_implementation.h"
+
 #if QT_CONFIG(opengl)
+#include <QtGui/qopenglcontext_platform.h>
 #include <QOpenGLContext>
 #include <QOpenGLExtraFunctions>
-#endif
+
+#if defined(Q_OS_MACOS)
+#include "macos_context_type_helper.h"
+#endif // defined(Q_OS_MACOS)
+#endif // QT_CONFIG(opengl)
 
 namespace QtWebEngineCore {
 
@@ -40,7 +45,7 @@ QtShareGLContext::QtShareGLContext(QOpenGLContext *context)
         m_handle = (void *)egl_ctx->nativeContext();
 #endif
     if (!m_handle)
-        qFatal("Could not get handle for shared contex");
+        qFatal("Could not get handle for shared context.");
 #endif // QT_CONFIG(opengl)
 }
 
@@ -57,17 +62,22 @@ unsigned int QtShareGLContext::CheckStickyGraphicsResetStatusImpl()
 
 void ShareGroupQt::AboutToAddFirstContext()
 {
+    if (gl::GetGLImplementation() == gl::kGLImplementationEGLANGLE) {
+        m_shareContextQt = new gl::GLContextEGL(nullptr);
+        return;
+    }
+
 #if QT_CONFIG(opengl)
     // This currently has to be setup by ::main in all applications using QQuickWebEngineView with
     // delegated rendering.
     QOpenGLContext *shareContext = QOpenGLContext::globalShareContext();
     if (!shareContext) {
         qFatal("QWebEngine: OpenGL resource sharing is not set up in QtQuick. Please make sure to "
-               "call QtWebEngineCore::initialize() in your main() function before QCoreApplication is "
-               "created.");
+               "call QtWebEngineQuick::initialize() in your main() function before "
+               "QCoreApplication is created.");
     }
     m_shareContextQt = new QtShareGLContext(shareContext);
-#endif
+#endif // QT_CONFIG(opengl)
 }
 
 } // namespace

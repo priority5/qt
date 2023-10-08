@@ -183,6 +183,7 @@ private Q_SLOTS:
     void navigateOnDrop_data();
     void navigateOnDrop();
     void datalist();
+    void longKeyEventText();
 };
 
 // This will be called before the first test function is executed.
@@ -2959,6 +2960,7 @@ void tst_QWebEngineView::imeCompositionQueryEvent()
     }
 
     QInputMethodQueryEvent srrndTextQuery(Qt::ImSurroundingText);
+    QInputMethodQueryEvent absolutePosQuery(Qt::ImAbsolutePosition);
     QInputMethodQueryEvent cursorPosQuery(Qt::ImCursorPosition);
     QInputMethodQueryEvent anchorPosQuery(Qt::ImAnchorPosition);
 
@@ -2973,11 +2975,13 @@ void tst_QWebEngineView::imeCompositionQueryEvent()
     QTRY_COMPARE(view.focusProxy()->inputMethodQuery(Qt::ImCursorPosition).toInt(), 11);
 
     QApplication::sendEvent(input, &srrndTextQuery);
+    QApplication::sendEvent(input, &absolutePosQuery);
     QApplication::sendEvent(input, &cursorPosQuery);
     QApplication::sendEvent(input, &anchorPosQuery);
     qApp->processEvents();
 
     QTRY_COMPARE(srrndTextQuery.value(Qt::ImSurroundingText).toString(), QString(""));
+    QTRY_COMPARE(absolutePosQuery.value(Qt::ImAbsolutePosition).toInt(), 11);
     QTRY_COMPARE(cursorPosQuery.value(Qt::ImCursorPosition).toInt(), 11);
     QTRY_COMPARE(anchorPosQuery.value(Qt::ImAnchorPosition).toInt(), 11);
 
@@ -2993,11 +2997,13 @@ void tst_QWebEngineView::imeCompositionQueryEvent()
     QTRY_COMPARE(view.focusProxy()->inputMethodQuery(Qt::ImSurroundingText).toString(), QString("composition"));
 
     QApplication::sendEvent(input, &srrndTextQuery);
+    QApplication::sendEvent(input, &absolutePosQuery);
     QApplication::sendEvent(input, &cursorPosQuery);
     QApplication::sendEvent(input, &anchorPosQuery);
     qApp->processEvents();
 
     QTRY_COMPARE(srrndTextQuery.value(Qt::ImSurroundingText).toString(), QString("composition"));
+    QTRY_COMPARE(absolutePosQuery.value(Qt::ImAbsolutePosition).toInt(), 11);
     QTRY_COMPARE(cursorPosQuery.value(Qt::ImCursorPosition).toInt(), 11);
     QTRY_COMPARE(anchorPosQuery.value(Qt::ImAnchorPosition).toInt(), 11);
 }
@@ -3231,7 +3237,7 @@ void tst_QWebEngineView::webUIURLs_data()
     QTest::newRow("process-internals") << QUrl("chrome://process-internals") << true;
     QTest::newRow("quota-internals") << QUrl("chrome://quota-internals") << true;
     QTest::newRow("safe-browsing") << QUrl("chrome://safe-browsing") << false;
-#ifdef Q_OS_LINUX
+#if defined(Q_OS_LINUX) || defined(Q_OS_WIN)
     QTest::newRow("sandbox") << QUrl("chrome://sandbox") << true;
 #else
     QTest::newRow("sandbox") << QUrl("chrome://sandbox") << false;
@@ -3783,6 +3789,50 @@ void tst_QWebEngineView::datalist()
             evaluateJavaScriptSync(view.page(), "document.getElementById('browserInput').value")
                     .toString(),
             QStringLiteral("fil"));
+}
+
+class ConsolePage : public QWebEnginePage
+{
+    Q_OBJECT
+public:
+    ConsolePage(QObject *parent = nullptr) : QWebEnginePage(parent) { }
+    void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString &message,
+                                  int lineNumber, const QString &sourceID) override
+    {
+        Q_UNUSED(level)
+        Q_UNUSED(lineNumber)
+        Q_UNUSED(sourceID)
+        if (message.contains("TEST_KEY:Shift"))
+            emit done();
+    }
+signals:
+    void done();
+};
+
+//qtbug_113704
+void tst_QWebEngineView::longKeyEventText()
+{
+    const QString html(QStringLiteral("<html><body><p>TEST</p>"
+                                      "<script>"
+                                      "document.addEventListener('keydown', (event)=> {"
+                                      "console.log('TEST_KEY:' + event.key);"
+                                      "});"
+                                      "</script>"
+                                      "</body></html>"));
+
+    QWebEngineView view;
+    ConsolePage page;
+    view.setPage(&page);
+    QSignalSpy loadFinishedSpy(view.page(), &QWebEnginePage::loadFinished);
+    view.resize(200, 400);
+    view.show();
+    view.setHtml(html);
+    QTRY_VERIFY(loadFinishedSpy.size());
+    QSignalSpy consoleMessageSpy(&page, &ConsolePage::done);
+    Qt::Key key(Qt::Key_Shift);
+    QKeyEvent event(QKeyEvent::KeyPress, key, Qt::NoModifier, QKeySequence(key).toString());
+    QApplication::sendEvent(view.focusProxy(), &event);
+    QTRY_VERIFY(consoleMessageSpy.size());
 }
 
 QTEST_MAIN(tst_QWebEngineView)

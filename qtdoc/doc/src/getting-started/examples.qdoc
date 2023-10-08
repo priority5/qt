@@ -2,14 +2,7 @@
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GFDL-1.3-no-invariants-only
 
 /*!
-   \group all-examples
-   \title List of Qt Examples
-   \brief Alphabetical listing of Qt Examples
-*/
-
-/*!
     \page examples-layouts.html
-    \ingroup all-examples
     \title Layout Examples
     \brief Using Qt's layout-based approach to widget management.
 
@@ -25,8 +18,6 @@
 
     \list
     \li \l{Basic Layouts Example}{Basic Layouts}
-    \li \l{Border Layout Example}{Border Layout}
-    \li \l{Dynamic Layouts Example}{Dynamic Layouts}
     \li \l{Flow Layout Example}{Flow Layout}
     \endlist
 
@@ -35,11 +26,8 @@
 
 /*!
     \page examples-draganddrop.html
-    \ingroup all-examples
     \title Drag and Drop Examples
     \brief How to access your platform's native drag and drop functionality.
-
-    \image draganddrop-examples.png
 
     Qt supports native drag and drop on all platforms via an extensible
     MIME-based system that enables applications to send data to each other in the
@@ -50,17 +38,13 @@
     \list
     \li \l{draganddrop/draggableicons}{Draggable Icons}
     \li \l{draganddrop/draggabletext}{Draggable Text}
-    \li \l{draganddrop/dropsite}{Drop Site}\raisedaster
-    \li \l{draganddrop/fridgemagnets}{Fridge Magnets}\raisedaster
-    \li \l{draganddrop/puzzle}{Drag and Drop Puzzle}
+    \li \l{draganddrop/dropsite}{Drop Site}
     \endlist
 
-    Examples marked with an asterisk (*) are fully documented.
 */
 
 /*!
     \page examples-threadandconcurrent.html
-    \ingroup all-examples
     \title Threading and Concurrent Programming Examples
     \brief Threading and concurrent programming in Qt.
 
@@ -102,7 +86,6 @@
 */
 
 /*!
-    \ingroup all-examples
     \title Tools Examples
     \brief Using Qt's containers, iterators, and other tool classes.
     \group examples-widgets-tools
@@ -119,14 +102,12 @@
 
 /*!
     \group examples-ipc
-    \ingroup all-examples
     \title IPC Examples
-    \brief Inter-Process Communication with Qt.
+    \brief Inter-process communication with Qt.
 */
 
 /*!
     \page examples-sql.html
-    \ingroup all-examples
     \title SQL Examples
     \brief Accessing your SQL database from Qt.
 
@@ -137,19 +118,6 @@
 
     SQL support is integrated with Qt's model/view architecture, making it easier
     to provide GUI integration for your database applications.
-    \omit
-    ###Add this list back if \annotatedlist fails
-    \list
-     \li \l {Cached Table Example}{Caches Table}
-     \li \l {Drill Down Example}{Drill Down}
-     \li \l {Master Detail Example}{Master Detail}
-     \li \l {Query Model Example}{Query Model}
-     \li \l {Relational Table Model Example}{Relational Table}
-     \li \l {SQL Browser}
-     \li \l {SQL Widget Mapper Example}{SQL Widget Mapper}
-     \li \l {Table Model Example}{Table Model}
-    \endlist
-    \endomit
 
     \annotatedlist sql_examples
 
@@ -159,7 +127,6 @@
 
 /*!
     \page examples-xml.html
-    \ingroup all-examples
     \title XML Examples
     \brief Using XML with Qt.
 
@@ -198,7 +165,6 @@
 
 /*!
     \page examples-animation.html
-    \ingroup all-examples
     \title Animation Framework Examples
     \brief Doing animations with Qt.
 
@@ -211,12 +177,15 @@
 
 /*!
     \group touchinputexamples
-    \ingroup all-examples
     \title Touch Input Examples
-    \brief Using Qt's touch input capability.
+    \brief Using Qt's touch input capability in widget-based applications.
 
-    Support for touch input makes it possible for developers to create
-    extensible and intuitive user interfaces.
+    Qt Widgets have legacy support for touch input.
+
+    Applications intended for use on touchscreens often have "fluid" UI
+    designs, because touch input feels better with quick animated feedback.
+    You should consider using \l {Qt Quick} to benefit from GPU acceleration,
+    rather than attempting to develop a fluid UI with Widgets.
 */
 
 /*!

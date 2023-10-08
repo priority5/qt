@@ -1,5 +1,12 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(sslechoclient LANGUAGES CXX)
+
+if (ANDROID)
+    message(FATAL_ERROR "This project cannot be built on Android.")
+endif()
 
 set(CMAKE_AUTOMOC ON)
 
@@ -14,6 +21,11 @@ find_package(Qt6 REQUIRED COMPONENTS WebSockets)
 qt_add_executable(sslechoclient
     main.cpp
     sslechoclient.cpp sslechoclient.h
+)
+
+qt_add_resources(sslechoclient "cert"
+    BASE ../sslechoserver
+    FILES ../sslechoserver/localhost.cert
 )
 
 set_target_properties(sslechoclient PROPERTIES

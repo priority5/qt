@@ -4,11 +4,11 @@
 #ifndef QVIRTUALKEYBOARDINPUTCONTEXT_H
 #define QVIRTUALKEYBOARDINPUTCONTEXT_H
 
-#include <QObject>
-#include <QRectF>
-#include <QLocale>
-#include <QInputMethodEvent>
-#include <QInputMethod>
+#include <QtCore/QObject>
+#include <QtCore/QRectF>
+#include <QtCore/QLocale>
+#include <QtGui/QInputMethodEvent>
+#include <QtGui/QInputMethod>
 #include <QtQml/qqml.h>
 #include <QtVirtualKeyboard/qvirtualkeyboard_global.h>
 
@@ -50,7 +50,9 @@ class Q_VIRTUALKEYBOARD_EXPORT QVirtualKeyboardInputContext : public QObject
     Q_PROPERTY(QVirtualKeyboardObserver *keyboardObserver READ keyboardObserver CONSTANT REVISION(6, 1))
     Q_MOC_INCLUDE("qvirtualkeyboardinputengine.h")
     Q_MOC_INCLUDE("qvirtualkeyboardinputcontext_p.h")
-    QML_NAMED_ELEMENT(InputContext)
+
+    // The QML macros are unused for now, until we can move the QML_NAMED_ELEMENT back here.
+    // QML_SINGLETON generates some code that might or might not emit symbols on some platforms.
     QML_SINGLETON
     QML_ADDED_IN_VERSION(1, 0)
     QML_EXTRA_VERSION(2, 0)

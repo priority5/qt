@@ -22,28 +22,42 @@
 
 #include <linux/videodev2.h>
 
+#include <qloggingcategory.h>
+
 QT_BEGIN_NAMESPACE
+
+static Q_LOGGING_CATEGORY(qLV4L2Camera, "qt.multimedia.ffmpeg.v4l2camera");
+
+static bool areCamerasEqual(QList<QCameraDevice> a, QList<QCameraDevice> b) {
+    auto areCamerasDataEqual = [](const QCameraDevice& a, const QCameraDevice& b) {
+        Q_ASSERT(QCameraDevicePrivate::handle(a));
+        Q_ASSERT(QCameraDevicePrivate::handle(b));
+        return *QCameraDevicePrivate::handle(a) == *QCameraDevicePrivate::handle(b);
+    };
+
+    return std::equal(a.cbegin(), a.cend(), b.cbegin(), b.cend(), areCamerasDataEqual);
+}
 
 QV4L2CameraDevices::QV4L2CameraDevices(QPlatformMediaIntegration *integration)
     : QPlatformVideoDevices(integration)
 {
-    deviceWatcher.addPath(QLatin1String("/dev"));
-    connect(&deviceWatcher, &QFileSystemWatcher::directoryChanged, this, &QV4L2CameraDevices::checkCameras);
+    m_deviceWatcher.addPath(QLatin1String("/dev"));
+    connect(&m_deviceWatcher, &QFileSystemWatcher::directoryChanged, this, &QV4L2CameraDevices::checkCameras);
     doCheckCameras();
 }
 
 QList<QCameraDevice> QV4L2CameraDevices::videoDevices() const
 {
-    return cameras;
+    return m_cameras;
 }
 
 void QV4L2CameraDevices::checkCameras()
 {
-    doCheckCameras();
-    videoInputsChanged();
+    if (doCheckCameras())
+        emit videoInputsChanged();
 }
 
-const struct {
+static const struct {
     QVideoFrameFormat::PixelFormat fmt;
     uint32_t v4l2Format;
 } formatMap[] = {
@@ -92,9 +106,9 @@ static uint32_t v4l2FormatForPixelFormat(QVideoFrameFormat::PixelFormat format)
 }
 
 
-void QV4L2CameraDevices::doCheckCameras()
+bool QV4L2CameraDevices::doCheckCameras()
 {
-    cameras.clear();
+    QList<QCameraDevice> newCameras;
 
     QDir dir(QLatin1String("/dev"));
     const auto devices = dir.entryList(QDir::System);
@@ -102,50 +116,53 @@ void QV4L2CameraDevices::doCheckCameras()
     bool first = true;
 
     for (auto device : devices) {
-//        qDebug() << "device:" << device;
+//        qCDebug(qLV4L2Camera) << "device:" << device;
         if (!device.startsWith(QLatin1String("video")))
             continue;
 
         QByteArray file = QFile::encodeName(dir.filePath(device));
-        int fd = open(file.constData(), O_RDONLY);
+        const int fd = open(file.constData(), O_RDONLY);
         if (fd < 0)
             continue;
 
-        QCameraDevicePrivate *camera = nullptr;
+        auto fileCloseGuard = qScopeGuard([fd](){ close(fd); });
+
         v4l2_fmtdesc formatDesc = {};
 
         struct v4l2_capability cap;
         if (ioctl(fd, VIDIOC_QUERYCAP, &cap) < 0)
-            goto fail;
+            continue;
 
         if (cap.device_caps & V4L2_CAP_META_CAPTURE)
-            goto fail;
+            continue;
         if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE))
-            goto fail;
+            continue;
         if (!(cap.capabilities & V4L2_CAP_STREAMING))
-            goto fail;
+            continue;
 
-        camera = new QCameraDevicePrivate;
+        auto camera = std::make_unique<QCameraDevicePrivate>();
+
         camera->id = file;
         camera->description = QString::fromUtf8((const char *)cap.card);
-//        qDebug() << "found camera" << camera->id << camera->description;
+//        qCDebug(qLV4L2Camera) << "found camera" << camera->id << camera->description;
 
         formatDesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
         while (!ioctl(fd, VIDIOC_ENUM_FMT, &formatDesc)) {
             auto pixelFmt = formatForV4L2Format(formatDesc.pixelformat);
-            qDebug() << "    " << pixelFmt;
+            qCDebug(qLV4L2Camera) << "    " << pixelFmt;
 
             if (pixelFmt == QVideoFrameFormat::Format_Invalid) {
                 ++formatDesc.index;
                 continue;
             }
 
-//            qDebug() << "frame sizes:";
+//            qCDebug(qLV4L2Camera) << "frame sizes:";
             v4l2_frmsizeenum frameSize = {};
             frameSize.pixel_format = formatDesc.pixelformat;
 
             while (!ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frameSize)) {
+                ++frameSize.index;
                 if (frameSize.type != V4L2_FRMSIZE_TYPE_DISCRETE)
                     continue;
 
@@ -159,9 +176,9 @@ void QV4L2CameraDevices::doCheckCameras()
                 frameInterval.height = frameSize.discrete.height;
 
                 while (!ioctl(fd, VIDIOC_ENUM_FRAMEINTERVALS, &frameInterval)) {
+                    ++frameInterval.index;
                     if (frameInterval.type != V4L2_FRMIVAL_TYPE_DISCRETE)
                         continue;
-                    ++frameInterval.index;
                     float rate = float(frameInterval.discrete.denominator)/float(frameInterval.discrete.numerator);
                     if (rate > max)
                         max = rate;
@@ -169,16 +186,15 @@ void QV4L2CameraDevices::doCheckCameras()
                         min = rate;
                 }
 
-//                qDebug() << "    " << resolution << min << max;
-                ++frameSize.index;
+//                qCDebug(qLV4L2Camera) << "    " << resolution << min << max;
 
                 if (min <= max) {
-                    QCameraFormatPrivate *fmt = new QCameraFormatPrivate;
+                    auto fmt = std::make_unique<QCameraFormatPrivate>();
                     fmt->pixelFormat = pixelFmt;
                     fmt->resolution = resolution;
                     fmt->minFrameRate = min;
                     fmt->maxFrameRate = max;
-                    camera->videoFormats.append(fmt->create());
+                    camera->videoFormats.append(fmt.release()->create());
                     camera->photoResolutions.append(resolution);
                 }
             }
@@ -187,19 +203,16 @@ void QV4L2CameraDevices::doCheckCameras()
         }
 
         // first camera is default
-        camera->isDefault = first;
-        first = false;
+        camera->isDefault = std::exchange(first, false);
 
-        cameras.append(camera->create());
-
-        close(fd);
-        continue;
-
-      fail:
-        if (camera)
-              delete camera;
-        close(fd);
+        newCameras.append(camera.release()->create());
     }
+
+    if (areCamerasEqual(m_cameras, newCameras))
+        return false;
+
+    m_cameras = std::move(newCameras);
+    return true;
 }
 
 class QV4L2VideoBuffer : public QAbstractVideoBuffer
@@ -594,7 +607,7 @@ void QV4L2Camera::readFrame()
     buffer->data.size[0] = d->mappedBuffers.at(i).size;
     QVideoFrameFormat fmt(m_cameraFormat.resolution(), m_cameraFormat.pixelFormat());
     fmt.setColorSpace(colorSpace);
-//    qDebug() << "got a frame" << d->mappedBuffers.at(i).data << d->mappedBuffers.at(i).size << fmt << i;
+//    qCDebug(qLV4L2Camera) << "got a frame" << d->mappedBuffers.at(i).data << d->mappedBuffers.at(i).size << fmt << i;
     QVideoFrame frame(buffer, fmt);
 
     if (firstFrameTime.tv_sec == -1)
@@ -637,7 +650,7 @@ void QV4L2Camera::initV4L2Controls()
                    << "for read to query the parameter info:" << qt_error_string(errno);
         return;
     }
-    qDebug() << "FD=" << d->v4l2FileDescriptor;
+    qCDebug(qLV4L2Camera) << "FD=" << d->v4l2FileDescriptor;
 
     struct v4l2_queryctrl queryControl;
     ::memset(&queryControl, 0, sizeof(queryControl));
@@ -784,7 +797,7 @@ int QV4L2Camera::getV4L2Parameter(quint32 id) const
 void QV4L2Camera::setV4L2CameraFormat()
 {
     Q_ASSERT(!m_cameraFormat.isNull());
-    qDebug() << "XXXXX" << this << m_cameraDevice.id() << m_cameraFormat.pixelFormat() << m_cameraFormat.resolution();
+    qCDebug(qLV4L2Camera) << "XXXXX" << this << m_cameraDevice.id() << m_cameraFormat.pixelFormat() << m_cameraFormat.resolution();
 
     v4l2_format fmt = {};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -795,7 +808,7 @@ void QV4L2Camera::setV4L2CameraFormat()
     fmt.fmt.pix.pixelformat = v4l2FormatForPixelFormat(m_cameraFormat.pixelFormat());
     fmt.fmt.pix.field = V4L2_FIELD_ANY;
 
-    qDebug() << "setting camera format to" << size;
+    qCDebug(qLV4L2Camera) << "setting camera format to" << size;
 
     if (ioctl(d->v4l2FileDescriptor, VIDIOC_S_FMT, &fmt) < 0) {
         if (errno == EBUSY) {

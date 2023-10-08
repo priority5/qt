@@ -55,17 +55,16 @@ void writeUInt32(QIODevice &device, quint32 value)
 
 void appendBinaryVector(QVector<char> &dest, const quint32 src)
 {
-    dest.reserve(dest.size() + sizeof(src));
-    for (size_t i = 0; i < sizeof(src); i++)
-        dest.push_back(reinterpret_cast<const char *>(&src)[i]);
+    qsizetype oldsize = dest.size();
+    dest.resize(dest.size() + sizeof(src));
+    memcpy(dest.data() + oldsize, &src, sizeof(src));
 }
 
 void appendBinaryVector(QVector<char> &dest, const std::string &src)
 {
-    dest.reserve(dest.size() + src.size() + 1);
-    for (auto c : src)
-        dest.push_back(c);
-    dest.push_back('\0');
+    qsizetype oldsize = dest.size();
+    dest.resize(dest.size() + src.size() + 1);
+    memcpy(dest.data() + oldsize, src.c_str(), src.size() + 1);
 }
 }
 
@@ -127,7 +126,7 @@ QString renderToKTXFileInternal(const char *name, const QString &inPath, const Q
     QRhiCommandBuffer *cb;
     rhi->beginOffscreenFrame(&cb);
 
-    const auto rhiContext = QSSGRef<QSSGRhiContext>(new QSSGRhiContext);
+    const auto rhiContext = std::make_unique<QSSGRhiContext>();
     rhiContext->initialize(rhi.get());
     rhiContext->setCommandBuffer(cb);
 
@@ -135,7 +134,7 @@ QString renderToKTXFileInternal(const char *name, const QString &inPath, const Q
     if (!inImage)
         return QStringLiteral("Failed to load hdr file");
 
-    auto shaderCache = std::make_unique<QSSGShaderCache>(rhiContext);
+    auto shaderCache = std::make_unique<QSSGShaderCache>(*rhiContext);
 
     // The objective of this method is to take the equirectangular texture
     // provided by inImage and create a cubeMap that contains both pre-filtered
@@ -221,9 +220,9 @@ QString renderToKTXFileInternal(const char *name, const QString &inPath, const Q
         desc = { { 0,
                    0,
                    { inImage->textureFileData.data().constData() + inImage->textureFileData.dataOffset(0),
-                     int(inImage->textureFileData.dataLength(0)) } } };
+                     quint32(inImage->textureFileData.dataLength(0)) } } };
     } else {
-        desc = { { 0, 0, { inImage->data, int(inImage->dataSizeInBytes) } } };
+        desc = { { 0, 0, { inImage->data, inImage->dataSizeInBytes } } };
     }
     auto *rub = rhi->nextResourceUpdateBatch();
     rub->uploadTexture(sourceTexture, desc);
@@ -234,7 +233,7 @@ QString renderToKTXFileInternal(const char *name, const QString &inPath, const Q
     QRhiSampler *sampler = rhiContext->sampler(samplerDesc);
 
     // Load shader and setup render pipeline
-    QSSGRef<QSSGRhiShaderPipeline> envMapShaderStages = shaderCache->loadBuiltinForRhi("environmentmap");
+    const auto &envMapShaderStages = shaderCache->loadBuiltinForRhi("environmentmap");
 
     // Vertex Buffer - Just a single cube that will be viewed from inside
     QRhiBuffer *vertexBuffer = rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, sizeof(cube));
@@ -379,7 +378,7 @@ QString renderToKTXFileInternal(const char *name, const QString &inPath, const Q
     }
 
     // Load the prefilter shader stages
-    QSSGRef<QSSGRhiShaderPipeline> prefilterShaderStages;
+    QSSGRhiShaderPipelinePtr prefilterShaderStages;
     if (isRGBE)
         prefilterShaderStages = shaderCache->loadBuiltinForRhi("environmentmapprefilter_rgbe");
     else
@@ -489,21 +488,18 @@ QString renderToKTXFileInternal(const char *name, const QString &inPath, const Q
 
     // Prepare Key/Value array
     {
-        std::map<std::string, std::string> keyValueList;
+        // Add a key to the metadata to know it was created by our IBL baker
+        static const char key[] = "QT_IBL_BAKER_VERSION";
+        static const char value[] = "1";
 
-        // Add a key to the metadata to know it was created by our IBL baker and what version was used.
-        keyValueList["QT_IBL_BAKER_VERSION"] = "1";
+        constexpr size_t keyAndValueByteSize = sizeof(key) + sizeof(value);   // NB: 2x null terminator
+        appendBinaryVector(keyValueData, keyAndValueByteSize);
+        appendBinaryVector(keyValueData, key);
+        appendBinaryVector(keyValueData, value);
 
-        for (auto &kv : keyValueList) {
-            quint32 keyAndValueByteSize = quint32(kv.first.size() + kv.second.size() + 2); // NB: 2x null terminator
-            appendBinaryVector(keyValueData, keyAndValueByteSize);
-            appendBinaryVector(keyValueData, kv.first);
-            appendBinaryVector(keyValueData, kv.second);
-
-            const quint32 padding = 3 - ((keyAndValueByteSize + 3) % 4); // Pad until next multiple of 4
-            for (quint32 i = 0; i < padding; i++)
-                keyValueData.push_back(char(0x00));
-        }
+        // Pad until next multiple of 4
+        const size_t padding = 3 - ((keyAndValueByteSize + 3) % 4); // Pad until next multiple of 4
+        keyValueData.resize(keyValueData.size() + padding);
     }
 
     // Header

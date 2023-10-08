@@ -95,6 +95,7 @@ private slots:
     void pressedCanceledOnWindowDeactivate();
     void doubleClick_data() { acceptedButton_data(); }
     void doubleClick();
+    void doubleTap();
     void clickTwice_data() { acceptedButton_data(); }
     void clickTwice();
     void invalidClick_data() { rejectedButton_data(); }
@@ -110,6 +111,8 @@ private slots:
     void subtreeHoverEnabled();
     void hoverWhenDisabled();
     void disableAfterPress();
+    void disableParentOnPress_data();
+    void disableParentOnPress();
     void onWheel();
     void transformedMouseArea_data();
     void transformedMouseArea();
@@ -136,11 +139,14 @@ private slots:
     void settingHiddenInPressUngrabs();
     void negativeZStackingOrder();
     void containsMouseAndVisibility();
+    void containsMouseAndVisibilityMasked();
+    void containsMouseAndHoverDisabled();
     void doubleClickToHide();
     void releaseFirstTouchAfterSecond();
 #if QT_CONFIG(tabletevent)
     void tabletStylusTap();
 #endif
+    void syntheticRightClick();
 
 private:
     int startDragDistance() const {
@@ -148,7 +154,7 @@ private:
     }
     void acceptedButton_data();
     void rejectedButton_data();
-    QPointingDevice *device = QTest::createTouchDevice();
+    QPointingDevice *device = QTest::createTouchDevice(); // TODO const after fixing QTBUG-107864
 };
 
 Q_DECLARE_METATYPE(Qt::MouseButton)
@@ -929,6 +935,61 @@ void tst_QQuickMouseArea::doubleClick()
     QCOMPARE(window.rootObject()->property("released").toInt(), 2);
 }
 
+void tst_QQuickMouseArea::doubleTap() // QTBUG-112434
+{
+    QQuickView window;
+    QVERIFY(QQuickTest::showView(window, testFileUrl("doubleclick.qml")));
+
+    QQuickMouseArea *mouseArea = window.rootObject()->findChild<QQuickMouseArea *>("mousearea");
+    QVERIFY(mouseArea);
+    QPoint p1 = mouseArea->mapToScene(mouseArea->boundingRect().center()).toPoint();
+
+    QTest::touchEvent(&window, device).press(0, p1);
+    QQuickTouchUtils::flush(&window);
+    QTest::touchEvent(&window, device).release(0, p1);
+    QQuickTouchUtils::flush(&window);
+    QCOMPARE(window.rootObject()->property("released").toInt(), 1);
+    QCOMPARE(window.rootObject()->property("clicked").toInt(), 1);
+
+    p1 += QPoint(1, -1); // movement less than QPlatformTheme::TouchDoubleTapDistance
+    QTest::touchEvent(&window, device).press(1, p1); // touchpoint ID is different the second time
+    QQuickTouchUtils::flush(&window);
+    QCOMPARE(mouseArea->pressed(), true);
+    // at this time QQuickDeliveryAgentPrivate::deliverTouchAsMouse() synthesizes the double-click event
+    QCOMPARE(window.rootObject()->property("doubleClicked").toInt(), 1);
+
+    QTest::touchEvent(&window, device).release(1, p1);
+    QQuickTouchUtils::flush(&window);
+    QCOMPARE(window.rootObject()->property("released").toInt(), 2);
+    QCOMPARE(mouseArea->pressed(), false);
+    QCOMPARE(window.rootObject()->property("clicked").toInt(), 1);
+
+    // now tap with two fingers simultaneously: only one of them generates synth-mouse
+    QPoint p2 = p1 + QPoint(50, 5);
+    QTest::touchEvent(&window, device).press(2, p1).press(3, p2);
+    QQuickTouchUtils::flush(&window);
+    QCOMPARE(mouseArea->pressed(), true);
+    QTest::touchEvent(&window, device).release(2, p1).release(3, p2);
+    QQuickTouchUtils::flush(&window);
+    QCOMPARE(window.rootObject()->property("released").toInt(), 3);
+    QCOMPARE(window.rootObject()->property("clicked").toInt(), 2);
+    QCOMPARE(window.rootObject()->property("doubleClicked").toInt(), 1);
+    QCOMPARE(mouseArea->pressed(), false);
+
+    // tap with two fingers simultaneously again: get another double-click from one point
+    p1 -= QPoint(1, -1);
+    p2 += QPoint(1, -1);
+    QTest::touchEvent(&window, device).press(4, p1).press(5, p2);
+    QQuickTouchUtils::flush(&window);
+    QCOMPARE(mouseArea->pressed(), true);
+    QTest::touchEvent(&window, device).release(4, p1).release(5, p2);
+    QQuickTouchUtils::flush(&window);
+    QCOMPARE(window.rootObject()->property("released").toInt(), 4);
+    QCOMPARE(window.rootObject()->property("clicked").toInt(), 2);
+    QCOMPARE(window.rootObject()->property("doubleClicked").toInt(), 2);
+    QCOMPARE(mouseArea->pressed(), false); // make sure it doesn't get stuck
+}
+
 // QTBUG-14832
 void tst_QQuickMouseArea::clickTwice()
 {
@@ -1532,6 +1593,53 @@ void tst_QQuickMouseArea::disableAfterPress()
     QCOMPARE(mouseReleaseSpy.size(), 0);
 }
 
+void tst_QQuickMouseArea::disableParentOnPress_data()
+{
+    QTest::addColumn<const QPointingDevice *>("device");
+
+    QTest::newRow("core pointer") << QPointingDevice::primaryPointingDevice();
+    QTest::newRow("touch") << static_cast<const QPointingDevice *>(device); // TODO QTBUG-107864
+}
+
+void tst_QQuickMouseArea::disableParentOnPress() // QTBUG-39806 and QTBUG-103788
+{
+    QFETCH(const QPointingDevice *, device);
+
+    QQuickView window;
+    QVERIFY(QQuickTest::showView(window, testFileUrl("disableParentOnPress.qml")));
+    QQuickItem *root = window.rootObject();
+    QVERIFY(root);
+    QQuickMouseArea *mouseArea = root->findChild<QQuickMouseArea*>();
+    QVERIFY(mouseArea);
+
+    QSignalSpy pressedChangedSpy(mouseArea, &QQuickMouseArea::pressedChanged);
+    QSignalSpy canceledSpy(mouseArea, &QQuickMouseArea::canceled);
+    QSignalSpy enabledSpy(mouseArea, &QQuickMouseArea::enabledChanged);
+    QSignalSpy parentEnabledSpy(root, &QQuickItem::enabledChanged);
+    const QPoint p(100, 100);
+
+    QQuickTest::pointerPress(device, &window, 0, p);
+    QTRY_COMPARE(parentEnabledSpy.size(), 1);
+    QCOMPARE(root->isEnabled(), false);
+    QCOMPARE(mouseArea->isEnabled(), true); // enabled is independent, unfortunately (inverse of QTBUG-38364)
+    QCOMPARE(QQuickItemPrivate::get(mouseArea)->effectiveEnable, false);
+    // bug fix: it knows it got effectively disabled, so now it's no longer pressed
+    QCOMPARE(mouseArea->pressed(), false);
+    QCOMPARE(canceledSpy.size(), 1); // ...because the press was canceled
+    QCOMPARE(pressedChangedSpy.size(), 2); // kerchunk
+    QQuickTest::pointerRelease(device, &window, 0, p);
+
+    // now re-enable it and try again
+    root->setEnabled(true);
+    QQuickTest::pointerPress(device, &window, 0, p);
+    QTRY_COMPARE(root->isEnabled(), false);
+    QCOMPARE(QQuickItemPrivate::get(mouseArea)->effectiveEnable, false);
+    QCOMPARE(mouseArea->pressed(), false);
+    QCOMPARE(canceledSpy.size(), 2);
+    QCOMPARE(pressedChangedSpy.size(), 4);
+    QQuickTest::pointerRelease(device, &window, 0, p);
+}
+
 void tst_QQuickMouseArea::onWheel()
 {
     QQuickView window;
@@ -1857,7 +1965,12 @@ void tst_QQuickMouseArea::nestedStopAtBounds()
     QTest::mouseMove(&window, position);
     axis += invert ? threshold : -threshold;
     QTest::mouseMove(&window, position);
-    QTRY_COMPARE(outer->drag()->active(), true);
+
+    // outer drag will not receive mouse event, when the focus has been stolen.
+    // => try to regain and time out if it fails.
+    while (!QTest::qWaitFor([&outer]() { return outer->drag()->active(); }))
+        window.raise();
+
     QCOMPARE(inner->drag()->active(), false);
     QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, position);
 
@@ -2404,6 +2517,68 @@ void tst_QQuickMouseArea::containsMouseAndVisibility()
     QVERIFY(!mouseArea->hovered());
 }
 
+// QTBUG-109567
+void tst_QQuickMouseArea::containsMouseAndVisibilityMasked()
+{
+    QQuickView window;
+    QVERIFY(QQuickTest::showView(window, testFileUrl("containsMouseMasked.qml")));
+
+    QQuickMouseArea *mouseArea1 = window.rootObject()->findChild<QQuickMouseArea *>("mouseArea1");
+    QVERIFY(mouseArea1 != nullptr);
+    QVERIFY(mouseArea1->isVisible());
+
+    QQuickMouseArea *mouseArea2 = window.rootObject()->findChild<QQuickMouseArea *>("mouseArea2");
+    QVERIFY(mouseArea2 != nullptr);
+    QVERIFY(mouseArea2->isVisible());
+
+    QTest::mouseMove(&window, QPoint(window.width() / 2, window.height() / 2));
+
+    // Check that mouseArea" (i.e. the masking MouseArea) is the only hovered MouseArea.
+    QTRY_VERIFY(!mouseArea1->hovered());
+    QTRY_VERIFY(mouseArea2->hovered());
+
+    // Toggle the visibility of the masked MouseArea (mouseArea1).
+    mouseArea1->setVisible(false);
+    QVERIFY(!mouseArea1->isVisible());
+
+    mouseArea1->setVisible(true);
+    QVERIFY(mouseArea1->isVisible());
+
+    // Check that the masked MouseArea is not now hovered depite being under the mouse after
+    // changing the visibility to visible. mouseArea2 should be the only hovered MouseArea still.
+    QTRY_VERIFY(!mouseArea1->hovered());
+    QTRY_VERIFY(mouseArea2->hovered());
+
+    QTest::mouseMove(&window, QPoint(10, 10));
+
+    QTRY_VERIFY(mouseArea1->hovered());
+    QTRY_VERIFY(!mouseArea2->hovered());
+
+    // Toggle the visibility of the masked MouseArea (mouseArea1).
+    mouseArea1->setVisible(false);
+    QVERIFY(!mouseArea1->isVisible());
+
+    mouseArea1->setVisible(true);
+    QVERIFY(mouseArea1->isVisible());
+
+    QTRY_VERIFY(mouseArea1->hovered());
+    QTRY_VERIFY(!mouseArea2->hovered());
+}
+
+// QTBUG-110594
+void tst_QQuickMouseArea::containsMouseAndHoverDisabled()
+{
+    QQuickView window;
+    QVERIFY(QQuickTest::showView(window, testFileUrl("containsMouseAndHoverDisabled.qml")));
+
+    QQuickMouseArea *mouseArea = window.rootObject()->findChild<QQuickMouseArea *>("mouseArea");
+    QVERIFY(mouseArea != nullptr);
+    QVERIFY(!mouseArea->hoverEnabled());
+
+    QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
+    QTRY_VERIFY(!mouseArea->hovered());
+}
+
 // QTBUG-35995 and QTBUG-102158
 void tst_QQuickMouseArea::doubleClickToHide()
 {
@@ -2476,6 +2651,34 @@ void tst_QQuickMouseArea::tabletStylusTap()
     QCOMPARE(pressSpy.size(), 1);
 }
 #endif
+
+void tst_QQuickMouseArea::syntheticRightClick()
+{
+    QQuickView window;
+    QVERIFY(QQuickTest::showView(window, testFileUrl("simple.qml")));
+    QQuickMouseArea *mouseArea = window.rootObject()->findChild<QQuickMouseArea *>();
+    QVERIFY(mouseArea);
+    mouseArea->setAcceptedButtons(Qt::RightButton);
+
+    QSignalSpy clickSpy(mouseArea, &QQuickMouseArea::clicked);
+    const QPointF p(20, 20);
+    quint64 timestamp = 10;
+
+    // The right-click is probably synthesized from a touch long-press IRL, but it doesn't matter for the DA's logic.
+    // We could set QT_QUICK_ALLOW_SYNTHETIC_RIGHT_CLICK=0 to opt out, but otherwise it's allowed.
+    QMouseEvent press(QEvent::MouseButtonPress, p, mouseArea->mapToScene(p), mouseArea->mapToGlobal(p),
+                      Qt::RightButton, Qt::RightButton, Qt::NoModifier, Qt::MouseEventSynthesizedBySystem);
+    press.setTimestamp(timestamp++);
+    QGuiApplication::sendEvent(&window, &press);
+    QCOMPARE(mouseArea->pressedButtons(), Qt::RightButton);
+
+    QMouseEvent release(QEvent::MouseButtonRelease, p, mouseArea->mapToScene(p), mouseArea->mapToGlobal(p),
+                        Qt::RightButton, Qt::RightButton, Qt::NoModifier, Qt::MouseEventSynthesizedBySystem);
+    release.setTimestamp(timestamp);
+    QGuiApplication::sendEvent(&window, &release);
+    QCOMPARE(mouseArea->pressedButtons(), Qt::NoButton);
+    QCOMPARE(clickSpy.size(), 1);
+}
 
 QTEST_MAIN(tst_QQuickMouseArea)
 

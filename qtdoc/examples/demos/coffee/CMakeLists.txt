@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(coffee LANGUAGES CXX)
 
@@ -20,11 +23,11 @@ set_target_properties(coffee PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_link_libraries(coffee PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
+target_link_libraries(coffee PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
 )
 
 # Resources:
@@ -66,7 +69,7 @@ set(qml_resource_files
     "qtquickcontrols2.conf"
 )
 
-qt6_add_resources(coffee "qml"
+qt_add_resources(coffee "qml"
     PREFIX
         "/"
     FILES

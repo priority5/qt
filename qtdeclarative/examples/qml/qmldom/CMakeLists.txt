@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.18)
 project(qmldomloadeditwrite LANGUAGES CXX)
 
@@ -22,8 +25,8 @@ qt_add_executable(qmldomloadeditwrite
 )
 
 target_link_libraries(qmldomloadeditwrite PUBLIC
-    Qt::Core
-    Qt::Qml
+    Qt6::Core
+    Qt6::Qml
     qmldomlib
 )
 

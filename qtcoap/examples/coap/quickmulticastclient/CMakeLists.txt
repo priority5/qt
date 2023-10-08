@@ -1,7 +1,8 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(quickmulticastclient LANGUAGES CXX)
-
-set(CMAKE_AUTOMOC ON)
 
 if(NOT DEFINED INSTALL_EXAMPLESDIR)
     set(INSTALL_EXAMPLESDIR "examples")
@@ -11,9 +12,10 @@ set(INSTALL_EXAMPLEDIR "${INSTALL_EXAMPLESDIR}/coap/quickmulticastclient")
 
 find_package(Qt6 REQUIRED COMPONENTS Coap Core Gui Qml Quick)
 
+qt_standard_project_setup(REQUIRES 6.5)
+
 qt_add_executable(quickmulticastclient
     main.cpp
-    qmlcoapmulticastclient.cpp qmlcoapmulticastclient.h
 )
 
 set_target_properties(quickmulticastclient PROPERTIES
@@ -21,28 +23,21 @@ set_target_properties(quickmulticastclient PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_compile_definitions(quickmulticastclient PUBLIC
-    QT_DEPRECATED_WARNINGS
+target_link_libraries(quickmulticastclient PRIVATE
+    Qt6::Coap
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
 )
 
-target_link_libraries(quickmulticastclient PUBLIC
-    Qt::Coap
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
-)
-
-# Resources:
-set(qml_resource_files
-    "main.qml"
-)
-
-qt6_add_resources(quickmulticastclient "qml"
-    PREFIX
-        "/"
-    FILES
-        ${qml_resource_files}
+qt_add_qml_module(quickmulticastclient
+    URI CoapClientModule
+    VERSION 1.0
+    SOURCES
+        qmlcoapmulticastclient.cpp qmlcoapmulticastclient.h
+    QML_FILES
+        Main.qml
 )
 
 install(TARGETS quickmulticastclient

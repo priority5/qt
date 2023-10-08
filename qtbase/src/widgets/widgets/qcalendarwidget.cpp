@@ -37,12 +37,12 @@ enum {
     MinimumDayOffset = 1
 };
 
-namespace {
-
 static QString formatNumber(int number, int fieldWidth)
 {
     return QString::number(number).rightJustified(fieldWidth, u'0');
 }
+
+namespace QtPrivate {
 
 class QCalendarDateSectionValidator
 {
@@ -398,9 +398,11 @@ struct SectionToken {
     QCalendarDateSectionValidator *validator;
     int repeat;
 };
-} // unnamed namespace
-Q_DECLARE_TYPEINFO(SectionToken, Q_PRIMITIVE_TYPE);
-namespace {
+} // namespace QtPrivate
+
+Q_DECLARE_TYPEINFO(QtPrivate::SectionToken, Q_PRIMITIVE_TYPE);
+
+namespace QtPrivate {
 
 class QCalendarDateValidator
 {
@@ -727,7 +729,7 @@ bool QCalendarTextNavigator::eventFilter(QObject *o, QEvent *e)
 {
     if (m_widget) {
         if (e->type() == QEvent::KeyPress || e->type() == QEvent::KeyRelease) {
-            QKeyEvent* ke = (QKeyEvent*)e;
+            QKeyEvent *ke = static_cast<QKeyEvent *>(e);
             if ((ke->text().size() > 0 && ke->text().at(0).isPrint()) || m_dateFrame) {
                 if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter || ke->key() == Qt::Key_Select) {
                     applyDate();
@@ -1606,7 +1608,20 @@ protected:
     }
 };
 
-} // unnamed namespace
+} // namespace QtPrivate
+
+using QCalendarDateSectionValidator = QtPrivate::QCalendarDateSectionValidator;
+using QCalendarDayValidator = QtPrivate::QCalendarDayValidator;
+using QCalendarMonthValidator = QtPrivate::QCalendarMonthValidator;
+using QCalendarYearValidator = QtPrivate::QCalendarYearValidator;
+using QCalendarDateValidator = QtPrivate::QCalendarDateValidator;
+using QPrevNextCalButton = QtPrivate::QPrevNextCalButton;
+using QCalendarDelegate = QtPrivate::QCalendarDelegate;
+using QCalToolButton = QtPrivate::QCalToolButton;
+using QCalendarDelegate = QtPrivate::QCalendarDelegate;
+using QCalendarModel = QtPrivate::QCalendarModel;
+using QCalendarView = QtPrivate::QCalendarView;
+using QCalendarTextNavigator = QtPrivate::QCalendarTextNavigator;
 
 class QCalendarWidgetPrivate : public QWidgetPrivate
 {
@@ -2477,8 +2492,7 @@ void QCalendarWidget::showToday()
     \snippet code/src_gui_widgets_qcalendarwidget.cpp 1
     \endtable
 
-    By default, the minimum date is the earliest date that the QDate
-    class can handle.
+    The default minimum date is November 25, 4714 BCE.
 
     When setting a minimum date, the maximumDate and selectedDate
     properties are adjusted if the selection range becomes invalid. If
@@ -2528,8 +2542,7 @@ void QCalendarWidget::setMinimumDate(QDate date)
     \snippet code/src_gui_widgets_qcalendarwidget.cpp 2
     \endtable
 
-    By default, the maximum date is the last day the QDate class can
-    handle.
+    The default maximum date is December 31, 9999 CE.
 
     When setting a maximum date, the minimumDate and selectedDate
     properties are adjusted if the selection range becomes invalid. If

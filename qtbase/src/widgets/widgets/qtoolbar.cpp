@@ -24,6 +24,7 @@
 #include <qtimer.h>
 #include <private/qwidgetaction_p.h>
 #include <private/qmainwindowlayout_p.h>
+#include <private/qhighdpiscaling_p.h>
 
 #ifdef Q_OS_MACOS
 #include <qpa/qplatformnativeinterface.h>
@@ -309,7 +310,12 @@ bool QToolBarPrivate::mouseMoveEvent(QMouseEvent *event)
         const QPoint globalPressPos = q->mapToGlobal(q->isRightToLeft() ? rtl : state->pressPos);
         int pos = 0;
 
-        QPoint delta = event->globalPosition().toPoint() - globalPressPos;
+        const QWindow *handle = q->window() ? q->window()->windowHandle() : nullptr;
+        const QPoint delta = handle
+                ? QHighDpi::fromNativePixels(event->globalPosition(), handle).toPoint()
+                  - QHighDpi::fromNativePixels(globalPressPos, handle)
+                : event->globalPosition().toPoint() - globalPressPos;
+
         if (orientation == Qt::Vertical) {
             pos = q->y() + delta.y();
         } else {
@@ -352,6 +358,10 @@ void QToolBarPrivate::plug(const QRect &r)
     \ingroup mainwindow-classes
     \inmodule QtWidgets
 
+    A toolbar is typically created by calling
+    \l QMainWindow::addToolBar(const QString &title), but it can also
+    be added as the first widget in a QVBoxLayout, for example.
+
     Toolbar buttons are added by adding \e actions, using addAction()
     or insertAction(). Groups of buttons can be separated using
     addSeparator() or insertSeparator(). If a toolbar button is not
@@ -375,7 +385,7 @@ void QToolBarPrivate::plug(const QRect &r)
     addWidget(). Please use widget actions created by inheriting QWidgetAction
     and implementing QWidgetAction::createWidget() instead.
 
-    \sa QToolButton, QMenu, QAction, {Qt Widgets - Application Example}
+    \sa QToolButton, QMenu, QAction
 */
 
 /*!

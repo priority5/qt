@@ -176,7 +176,7 @@ void Open62541AsyncBackend::writeAttributes(quint64 handle, UA_NodeId id, QOpcUa
 
 void Open62541AsyncBackend::enableMonitoring(quint64 handle, UA_NodeId id, QOpcUa::NodeAttributes attr, const QOpcUaMonitoringParameters &settings)
 {
-    UaDeleter<UA_NodeId> nodeIdDeleter(&id, UA_NodeId_deleteMembers);
+    UaDeleter<UA_NodeId> nodeIdDeleter(&id, UA_NodeId_clear);
 
     QOpen62541Subscription *usedSubscription = nullptr;
 
@@ -295,7 +295,7 @@ void Open62541AsyncBackend::callMethod(quint64 handle, UA_NodeId objectId, UA_No
 
     if (args.size()) {
         inputArgs = static_cast<UA_Variant *>(UA_Array_new(args.size(), &UA_TYPES[UA_TYPES_VARIANT]));
-        for (int i = 0; i < args.size(); ++i)
+        for (qsizetype i = 0; i < args.size(); ++i)
             inputArgs[i] = QOpen62541ValueConverter::toOpen62541Variant(args[i].first, args[i].second);
     }
 
@@ -328,7 +328,7 @@ void Open62541AsyncBackend::resolveBrowsePath(quint64 handle, UA_NodeId startNod
     UA_TranslateBrowsePathsToNodeIdsRequest req;
     UA_TranslateBrowsePathsToNodeIdsRequest_init(&req);
     UaDeleter<UA_TranslateBrowsePathsToNodeIdsRequest> requestDeleter(
-                &req,UA_TranslateBrowsePathsToNodeIdsRequest_deleteMembers);
+                &req,UA_TranslateBrowsePathsToNodeIdsRequest_clear);
 
     req.browsePathsSize = 1;
     req.browsePaths = UA_BrowsePath_new();
@@ -337,7 +337,7 @@ void Open62541AsyncBackend::resolveBrowsePath(quint64 handle, UA_NodeId startNod
     req.browsePaths->relativePath.elementsSize = path.size();
     req.browsePaths->relativePath.elements = static_cast<UA_RelativePathElement *>(UA_Array_new(path.size(), &UA_TYPES[UA_TYPES_RELATIVEPATHELEMENT]));
 
-    for (int i = 0 ; i < path.size(); ++i) {
+    for (qsizetype i = 0 ; i < path.size(); ++i) {
         req.browsePaths->relativePath.elements[i].includeSubtypes = path[i].includeSubtypes();
         req.browsePaths->relativePath.elements[i].isInverse = path[i].isInverse();
         req.browsePaths->relativePath.elements[i].referenceTypeId = Open62541Utils::nodeIdFromQString(path[i].referenceTypeId());
@@ -423,7 +423,7 @@ void Open62541AsyncBackend::findServers(const QUrl &url, const QStringList &loca
     UA_String *uaServerUris = nullptr;
     if (!serverUris.isEmpty()) {
         uaServerUris = static_cast<UA_String *>(UA_Array_new(serverUris.size(), &UA_TYPES[UA_TYPES_STRING]));
-        for (int i = 0; i < serverUris.size(); ++i)
+        for (qsizetype i = 0; i < serverUris.size(); ++i)
             QOpen62541ValueConverter::scalarFromQt(serverUris.at(i), &uaServerUris[i]);
     }
     UaArrayDeleter<UA_TYPES_STRING> serverUrisDeleter(uaServerUris, serverUris.size());
@@ -431,7 +431,7 @@ void Open62541AsyncBackend::findServers(const QUrl &url, const QStringList &loca
     UA_String *uaLocaleIds = nullptr;
     if (!localeIds.isEmpty()) {
         uaLocaleIds = static_cast<UA_String *>(UA_Array_new(localeIds.size(), &UA_TYPES[UA_TYPES_STRING]));
-        for (int i = 0; i < localeIds.size(); ++i)
+        for (qsizetype i = 0; i < localeIds.size(); ++i)
             QOpen62541ValueConverter::scalarFromQt(localeIds.at(i), &uaLocaleIds[i]);
     }
     UaArrayDeleter<UA_TYPES_STRING> localeIdsDeleter(uaLocaleIds, localeIds.size());
@@ -466,13 +466,13 @@ void Open62541AsyncBackend::readNodeAttributes(const QList<QOpcUaReadItem> &node
 
     UA_ReadRequest req;
     UA_ReadRequest_init(&req);
-    UaDeleter<UA_ReadRequest> requestDeleter(&req, UA_ReadRequest_deleteMembers);
+    UaDeleter<UA_ReadRequest> requestDeleter(&req, UA_ReadRequest_clear);
 
     req.nodesToReadSize = nodesToRead.size();
     req.nodesToRead = static_cast<UA_ReadValueId *>(UA_Array_new(nodesToRead.size(), &UA_TYPES[UA_TYPES_READVALUEID]));
     req.timestampsToReturn = UA_TIMESTAMPSTORETURN_BOTH;
 
-    for (int i = 0; i < nodesToRead.size(); ++i) {
+    for (qsizetype i = 0; i < nodesToRead.size(); ++i) {
         UA_ReadValueId_init(&req.nodesToRead[i]);
         req.nodesToRead[i].attributeId = QOpen62541ValueConverter::toUaAttributeId(nodesToRead.at(i).attribute());
         req.nodesToRead[i].nodeId = Open62541Utils::nodeIdFromQString(nodesToRead.at(i).nodeId());
@@ -503,12 +503,12 @@ void Open62541AsyncBackend::writeNodeAttributes(const QList<QOpcUaWriteItem> &no
 
     UA_WriteRequest req;
     UA_WriteRequest_init(&req);
-    UaDeleter<UA_WriteRequest> requestDeleter(&req, UA_WriteRequest_deleteMembers);
+    UaDeleter<UA_WriteRequest> requestDeleter(&req, UA_WriteRequest_clear);
 
     req.nodesToWriteSize = nodesToWrite.size();
     req.nodesToWrite = static_cast<UA_WriteValue *>(UA_Array_new(nodesToWrite.size(), &UA_TYPES[UA_TYPES_WRITEVALUE]));
 
-    for (int i = 0; i < nodesToWrite.size(); ++i) {
+    for (qsizetype i = 0; i < nodesToWrite.size(); ++i) {
         const auto &currentItem = nodesToWrite.at(i);
         auto &currentUaItem = req.nodesToWrite[i];
         currentUaItem.attributeId = QOpen62541ValueConverter::toUaAttributeId(currentItem.attribute());
@@ -600,7 +600,7 @@ void Open62541AsyncBackend::addNode(const QOpcUaAddNodeItem &nodeToAdd)
 {
     UA_AddNodesRequest req;
     UA_AddNodesRequest_init(&req);
-    UaDeleter<UA_AddNodesRequest> requestDeleter(&req, UA_AddNodesRequest_deleteMembers);
+    UaDeleter<UA_AddNodesRequest> requestDeleter(&req, UA_AddNodesRequest_clear);
     req.nodesToAddSize = 1;
     req.nodesToAdd = UA_AddNodesItem_new();
     UA_AddNodesItem_init(req.nodesToAdd);
@@ -644,7 +644,7 @@ void Open62541AsyncBackend::deleteNode(const QString &nodeId, bool deleteTargetR
 {
     UA_DeleteNodesRequest request;
     UA_DeleteNodesRequest_init(&request);
-    UaDeleter<UA_DeleteNodesRequest> requestDeleter(&request, UA_DeleteNodesRequest_deleteMembers);
+    UaDeleter<UA_DeleteNodesRequest> requestDeleter(&request, UA_DeleteNodesRequest_clear);
 
     request.nodesToDeleteSize = 1;
     request.nodesToDelete = UA_DeleteNodesItem_new();
@@ -673,7 +673,7 @@ void Open62541AsyncBackend::addReference(const QOpcUaAddReferenceItem &reference
 {
     UA_AddReferencesRequest request;
     UA_AddReferencesRequest_init(&request);
-    UaDeleter<UA_AddReferencesRequest> requestDeleter(&request, UA_AddReferencesRequest_deleteMembers);
+    UaDeleter<UA_AddReferencesRequest> requestDeleter(&request, UA_AddReferencesRequest_clear);
 
     request.referencesToAddSize = 1;
     request.referencesToAdd = UA_AddReferencesItem_new();
@@ -712,7 +712,7 @@ void Open62541AsyncBackend::deleteReference(const QOpcUaDeleteReferenceItem &ref
 {
     UA_DeleteReferencesRequest request;
     UA_DeleteReferencesRequest_init(&request);
-    UaDeleter<UA_DeleteReferencesRequest> requestDeleter(&request, UA_DeleteReferencesRequest_deleteMembers);
+    UaDeleter<UA_DeleteReferencesRequest> requestDeleter(&request, UA_DeleteReferencesRequest_clear);
 
     request.referencesToDeleteSize = 1;
     request.referencesToDelete = UA_DeleteReferencesItem_new();
@@ -810,10 +810,6 @@ void Open62541AsyncBackend::clientStateCallback(UA_Client *client,
 
     // UA_Client_disconnect() must be called from outside this callback or open62541 will crash
     backend->m_disconnectAfterStateChangeTimer.start();
-
-    // Use a queued connection to make sure the subscription is not deleted if the callback was triggered
-    // inside of one of its methods.
-    QMetaObject::invokeMethod(backend, "cleanupSubscriptions", Qt::QueuedConnection);
 }
 
 void Open62541AsyncBackend::inactivityCallback(UA_Client *client)
@@ -861,9 +857,9 @@ void Open62541AsyncBackend::connectToEndpoint(const QOpcUaEndpointDescription &e
         UA_ByteString localCertificate;
         UA_ByteString privateKey;
         UA_ByteString *trustList = nullptr;
-        int trustListSize = 0;
+        qsizetype trustListSize = 0;
         UA_ByteString *revocationList = nullptr;
-        int revocationListSize = 0;
+        qsizetype revocationListSize = 0;
 
         bool success = loadFileToByteString(pkiConfig.clientCertificateFile(), &localCertificate);
 
@@ -875,7 +871,7 @@ void Open62541AsyncBackend::connectToEndpoint(const QOpcUaEndpointDescription &e
             return;
         }
 
-        UaDeleter<UA_ByteString> clientCertDeleter(&localCertificate, &UA_ByteString_deleteMembers);
+        UaDeleter<UA_ByteString> clientCertDeleter(&localCertificate, &UA_ByteString_clear);
 
         success = loadFileToByteString(pkiConfig.privateKeyFile(), &privateKey);
 
@@ -887,7 +883,7 @@ void Open62541AsyncBackend::connectToEndpoint(const QOpcUaEndpointDescription &e
             return;
         }
 
-        UaDeleter<UA_ByteString> privateKeyDeleter(&privateKey, &UA_ByteString_deleteMembers);
+        UaDeleter<UA_ByteString> privateKeyDeleter(&privateKey, &UA_ByteString_clear);
 
         success = loadAllFilesInDirectory(pkiConfig.trustListDirectory(), &trustList, &trustListSize);
 
@@ -956,7 +952,8 @@ void Open62541AsyncBackend::connectToEndpoint(const QOpcUaEndpointDescription &e
     } else if (authInfo.authenticationType() == QOpcUaUserTokenPolicy::TokenType::Username) {
 
         bool suitableTokenFound = false;
-        for (const auto &token : endpoint.userIdentityTokens()) {
+        const auto userIdentityTokens = endpoint.userIdentityTokens();
+        for (const auto &token : userIdentityTokens) {
             if (token.tokenType() == QOpcUaUserTokenPolicy::Username &&
                     m_clientImpl->supportedSecurityPolicies().contains(token.securityPolicy())) {
                 suitableTokenFound = true;
@@ -1278,7 +1275,7 @@ void Open62541AsyncBackend::asyncReadCallback(UA_Client *client, void *userdata,
 
     const auto res = static_cast<UA_ReadResponse *>(response);
 
-    for (int i = 0; i < context.results.size(); ++i) {
+    for (qsizetype i = 0; i < context.results.size(); ++i) {
         // Use the service result as status code if there is no specific result for the current value.
         // This ensures a result for each attribute when UA_Client_Service_read is called for a disconnected client.
         if (static_cast<size_t>(i) >= res->resultsSize) {
@@ -1389,7 +1386,7 @@ void Open62541AsyncBackend::asyncBatchReadCallback(UA_Client *client, void *user
     } else {
         QList<QOpcUaReadResult> ret;
 
-        for (int i = 0; i < context.nodesToRead.size(); ++i) {
+        for (qsizetype i = 0; i < context.nodesToRead.size(); ++i) {
             QOpcUaReadResult item;
             item.setAttribute(context.nodesToRead.at(i).attribute());
             item.setNodeId(context.nodesToRead.at(i).nodeId());
@@ -1431,7 +1428,7 @@ void Open62541AsyncBackend::asyncBatchWriteCallback(UA_Client *client, void *use
     } else {
         QList<QOpcUaWriteResult> ret;
 
-        for (int i = 0; i < context.nodesToWrite.size(); ++i) {
+        for (qsizetype i = 0; i < context.nodesToWrite.size(); ++i) {
             QOpcUaWriteResult item;
             item.setAttribute(context.nodesToWrite.at(i).attribute());
             item.setNodeId(context.nodesToWrite.at(i).nodeId());
@@ -1528,7 +1525,7 @@ bool Open62541AsyncBackend::loadFileToByteString(const QString &location, UA_Byt
     return UA_ByteString_copy(&temp, target) == UA_STATUSCODE_GOOD;
 }
 
-bool Open62541AsyncBackend::loadAllFilesInDirectory(const QString &location, UA_ByteString **target, int *size) const
+bool Open62541AsyncBackend::loadAllFilesInDirectory(const QString &location, UA_ByteString **target, qsizetype *size) const
 {
     if (location.isEmpty()) {
         qCWarning(QT_OPCUA_PLUGINS_OPEN62541) << "Unable to read from empty file path";
@@ -1552,7 +1549,7 @@ bool Open62541AsyncBackend::loadAllFilesInDirectory(const QString &location, UA_
         return true;
     }
 
-    const int tempSize = entries.size();
+    const qsizetype tempSize = entries.size();
     UA_ByteString *list = static_cast<UA_ByteString *>(UA_Array_new(tempSize, &UA_TYPES[UA_TYPES_BYTESTRING]));
 
     if (!list) {
@@ -1560,7 +1557,7 @@ bool Open62541AsyncBackend::loadAllFilesInDirectory(const QString &location, UA_
         return false;
     }
 
-    for (int i = 0; i < entries.size(); ++i) {
+    for (qsizetype i = 0; i < entries.size(); ++i) {
         if (!loadFileToByteString(dir.filePath(entries.at(i)), &list[i])) {
             qCWarning(QT_OPCUA_PLUGINS_OPEN62541) << "Failed to open file" << entries.at(i);
             UA_Array_delete(list, tempSize, &UA_TYPES[UA_TYPES_BYTESTRING]);

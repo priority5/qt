@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(photosurface LANGUAGES CXX)
 
@@ -9,12 +12,14 @@ endif()
 
 set(INSTALL_EXAMPLEDIR "${INSTALL_EXAMPLESDIR}/demos/photosurface")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick ShaderTools)
+
+qt_standard_project_setup(REQUIRES 6.5)
 
 if (WIN32)
 #! [appicon_windows]
     set(app_icon_resource_windows "${CMAKE_CURRENT_SOURCE_DIR}/resources/photosurface.rc")
-    qt_add_executable(photosurface main.cpp ${app_icon_resource_windows})
+    qt_add_executable(photosurfaceexample main.cpp ${app_icon_resource_windows})
 #! [appicon_windows]
 elseif (APPLE)
 #! [appicon_macOS]
@@ -28,39 +33,41 @@ elseif (APPLE)
     set_source_files_properties(${app_icon_macos} PROPERTIES
            MACOSX_PACKAGE_LOCATION "Resources")
 
-    qt_add_executable(photosurface MACOSX_BUNDLE main.cpp ${app_icon_macos})
+    qt_add_executable(photosurfaceexample MACOSX_BUNDLE main.cpp ${app_icon_macos})
 #! [appicon_macOS]
 else()
-    qt_add_executable(photosurface main.cpp)
+    qt_add_executable(photosurfaceexample main.cpp)
 endif()
 
-target_link_libraries(photosurface PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
+target_link_libraries(photosurfaceexample PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
 )
 
-# Resources:
-set(photosurface_resource_files
-    "photosurface.qml"
-    "resources/folder.png"
+qt_add_qml_module(photosurfaceexample
+    URI photosurface
+    QML_FILES
+      "photosurface.qml"
+      "resources/MomentumAnimation.qml"
+      "resources/SlideShow.qml"
+    RESOURCES
+      "resources/folder.png"
+      "resources/welcome.pdf"
 )
 
-qt6_add_resources(photosurface "photosurface"
+qt_add_shaders(photosurfaceexample "shaders"
+    BATCHABLE
+    PRECOMPILE
+    OPTIMIZED
     PREFIX
-        "/"
+        "/qt/qml/photosurface"
     FILES
-        ${photosurface_resource_files}
+        "resources/shaders/gneiss.frag"
 )
 
-if(TARGET Qt::Widgets)
-    target_link_libraries(photosurface PUBLIC
-        Qt::Widgets
-    )
-endif()
-
-install(TARGETS photosurface
+install(TARGETS photosurfaceexample
     RUNTIME DESTINATION "${INSTALL_EXAMPLEDIR}"
     BUNDLE DESTINATION "${INSTALL_EXAMPLEDIR}"
     LIBRARY DESTINATION "${INSTALL_EXAMPLEDIR}"

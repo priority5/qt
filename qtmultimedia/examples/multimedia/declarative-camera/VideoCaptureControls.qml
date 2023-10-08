@@ -98,7 +98,7 @@ FocusScope {
 
         currentZoom: captureSession.camera.zoomFactor
         maximumZoom: captureSession.camera.maximumZoomFactor
-        onZoomTo: captureSession.camera.zoomFactor = value
+        onZoomTo: captureSession.camera.zoomFactor = target
     }
 
     states: [

@@ -149,6 +149,9 @@ QString CodeMarker::extraSynopsis(const Node *node, Section::Style style)
                 extra << "virtual";
             }
 
+            if (func->isExplicit()) extra << "explicit";
+            if (func->isConstexpr()) extra << "constexpr";
+
             if (func->access() == Access::Protected)
                 extra << "protected";
             else if (func->access() == Access::Private)
@@ -171,7 +174,7 @@ QString CodeMarker::extraSynopsis(const Node *node, Section::Style style)
             break;
         case Node::Property: {
             auto propertyNode = static_cast<const PropertyNode *>(node);
-            if (propertyNode->propertyType() == PropertyNode::Bindable)
+            if (propertyNode->propertyType() == PropertyNode::PropertyType::BindableProperty)
                 extra << "bindable";
             if (!propertyNode->isWritable())
                 extra << "read-only";
@@ -329,6 +332,7 @@ QString CodeMarker::taggedNode(const Node *node)
     case Node::Enum:
         tag = QLatin1String("@enum");
         break;
+    case Node::TypeAlias:
     case Node::Typedef:
         tag = QLatin1String("@typedef");
         break;
@@ -358,15 +362,12 @@ QString CodeMarker::taggedQmlNode(const Node *node)
     if (node->isFunction()) {
         const auto *fn = static_cast<const FunctionNode *>(node);
         switch (fn->metaness()) {
-        case FunctionNode::JsSignal:
         case FunctionNode::QmlSignal:
             tag = QLatin1String("@signal");
             break;
-        case FunctionNode::JsSignalHandler:
         case FunctionNode::QmlSignalHandler:
             tag = QLatin1String("@signalhandler");
             break;
-        case FunctionNode::JsMethod:
         case FunctionNode::QmlMethod:
             tag = QLatin1String("@method");
             break;
@@ -374,7 +375,7 @@ QString CodeMarker::taggedQmlNode(const Node *node)
             tag = QLatin1String("@unknown");
             break;
         }
-    } else if (node->isQmlProperty() || node->isJsProperty()) {
+    } else if (node->isQmlProperty()) {
         tag = QLatin1String("@property");
     } else {
         tag = QLatin1String("@unknown");

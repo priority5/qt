@@ -1,43 +1,6 @@
 #!/usr/bin/env bash
-
-#############################################################################
-##
-## Copyright (C) 2018 The Qt Company Ltd.
-## Contact: https://www.qt.io/licensing/
-##
-## This file is part of the provisioning scripts of the Qt Toolkit.
-##
-## $QT_BEGIN_LICENSE:LGPL$
-## Commercial License Usage
-## Licensees holding valid commercial Qt licenses may use this file in
-## accordance with the commercial license agreement provided with the
-## Software or, alternatively, in accordance with the terms contained in
-## a written agreement between you and The Qt Company. For licensing terms
-## and conditions see https://www.qt.io/terms-conditions. For further
-## information use the contact form at https://www.qt.io/contact-us.
-##
-## GNU Lesser General Public License Usage
-## Alternatively, this file may be used under the terms of the GNU Lesser
-## General Public License version 3 as published by the Free Software
-## Foundation and appearing in the file LICENSE.LGPL3 included in the
-## packaging of this file. Please review the following information to
-## ensure the GNU Lesser General Public License version 3 requirements
-## will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-##
-## GNU General Public License Usage
-## Alternatively, this file may be used under the terms of the GNU
-## General Public License version 2.0 or (at your option) the GNU General
-## Public license version 3 or any later version approved by the KDE Free
-## Qt Foundation. The licenses are as published by the Free Software
-## Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-## included in the packaging of this file. Please review the following
-## information to ensure the GNU General Public License requirements will
-## be met: https://www.gnu.org/licenses/gpl-2.0.html and
-## https://www.gnu.org/licenses/gpl-3.0.html.
-##
-## $QT_END_LICENSE$
-##
-#############################################################################
+# Copyright (C) 2018 The Qt Company Ltd.
+# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 # provides: python development libraries
 # version: provided by default Linux distribution repository
@@ -54,9 +17,9 @@ PROVISIONING_DIR="$(dirname "$0")/../"
 # https://raw.githubusercontent.com/linux-on-ibm-z/scripts/master/Python3/build_python3.sh
 export PACKAGE_NAME="python"
 python2Version="2.7.18"
-python3Version="3.7.6"
+python3Version="3.8.16"
 python2Sha="678d4cf483a1c92efd347ee8e1e79326dc82810b"
-python3Sha="55a2cce72049f0794e9a11a84862e9039af9183603b78bc60d89539f82cf533f"
+python3Sha="d85dbb3774132473d8081dcb158f34a10ccad7a90b96c7e50ea4bb61f5ce4562"
 
 
 function InstallPython {
@@ -64,7 +27,7 @@ function InstallPython {
     PACKAGE_VERSION=$1
     PACKAGE_SHA=$2
 
-    $CMD_PKG_INSTALL  ncurses zlib-devel libffi-devel libopenssl-devel
+    $CMD_PKG_INSTALL  ncurses zlib-devel libffi-devel
 
     echo 'Configuration and Installation started'
 
@@ -108,9 +71,6 @@ python3 --version | fgrep "$python3Version"
 pip3 install --user wheel
 pip3 install --user virtualenv
 
-# Install all needed packages in a special wheel cache directory
-pip3 wheel --wheel-dir "$HOME/python3-wheels" -r "${BASH_SOURCE%/*}/../common/shared/requirements.txt"
-
 # shellcheck source=../common/unix/SetEnvVar.sh
 source "${BASH_SOURCE%/*}/../common/unix/SetEnvVar.sh"
-SetEnvVar "PYTHON3_WHEEL_CACHE" "$HOME/python3-wheels"
+SetEnvVar "PYTHON3_PATH" "/usr/local/bin"

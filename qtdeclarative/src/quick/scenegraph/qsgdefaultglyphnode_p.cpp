@@ -361,6 +361,8 @@ QSGTextMaskMaterial::QSGTextMaskMaterial(QSGRenderContext *rc, const QVector4D &
 
 QSGTextMaskMaterial::~QSGTextMaskMaterial()
 {
+    if (m_retainedFontEngine != nullptr)
+        m_rc->unregisterFontengineForCleanup(m_retainedFontEngine);
     delete m_texture;
 }
 
@@ -408,7 +410,8 @@ void QSGTextMaskMaterial::updateCache(QFontEngine::GlyphFormat glyphFormat)
         qreal devicePixelRatio;
         void *cacheKey;
         Q_ASSERT(m_rhi);
-        cacheKey = m_rhi;
+        Q_ASSERT(m_rc);
+        cacheKey = m_rc;
         // Get the dpr the modern way. This value retrieved via the
         // rendercontext matches what RenderState::devicePixelRatio()
         // exposes to the material shaders later on.
@@ -423,6 +426,12 @@ void QSGTextMaskMaterial::updateCache(QFontEngine::GlyphFormat glyphFormat)
         if (!m_glyphCache || int(m_glyphCache->glyphFormat()) != glyphFormat) {
             m_glyphCache = new QSGRhiTextureGlyphCache(m_rc, glyphFormat, glyphCacheTransform, color);
             fontEngine->setGlyphCache(cacheKey, m_glyphCache.data());
+            if (m_retainedFontEngine != nullptr)
+                m_rc->unregisterFontengineForCleanup(m_retainedFontEngine);
+
+            // Note: This is reference counted by the render context, so it will stay alive until
+            // we release that reference
+            m_retainedFontEngine = fontEngine;
             m_rc->registerFontengineForCleanup(fontEngine);
         }
     }
@@ -472,9 +481,11 @@ void QSGTextMaskMaterial::populate(const QPointF &p,
     bool supportsSubPixelPositions = fontD->fontEngine->supportsHorizontalSubPixelPositions();
     for (int i=0; i<glyphIndexes.size(); ++i) {
          QPointF glyphPosition = glyphPositions.at(i) + position;
+         QFixedPoint fixedPointPosition = fixedPointPositions.at(i);
+
          QFixed subPixelPosition;
          if (supportsSubPixelPositions)
-             subPixelPosition = fontD->fontEngine->subPixelPositionForX(QFixed::fromReal(glyphPosition.x() * glyphCacheScaleX));
+             subPixelPosition = fontD->fontEngine->subPixelPositionForX(QFixed::fromReal(fixedPointPosition.x.toReal() * glyphCacheScaleX));
 
          QTextureGlyphCache::GlyphAndSubPixelPosition glyph(glyphIndexes.at(i),
                                                             QFixedPoint(subPixelPosition, 0));

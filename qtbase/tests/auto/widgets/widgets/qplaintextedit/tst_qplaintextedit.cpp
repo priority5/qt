@@ -132,6 +132,7 @@ private slots:
     void appendTextWhenInvisible();
     void placeholderVisibility_data();
     void placeholderVisibility();
+    void scrollBarSignals();
 
 private:
     void createSelection();
@@ -994,7 +995,7 @@ void tst_QPlainTextEdit::copyAvailable_data()
 //Tests the copyAvailable slot for several cases
 void tst_QPlainTextEdit::copyAvailable()
 {
-    QFETCH(pairListType,keystrokes);
+    QFETCH(const pairListType, keystrokes);
     QFETCH(QList<bool>, copyAvailable);
     QFETCH(QString, function);
 
@@ -1007,9 +1008,8 @@ void tst_QPlainTextEdit::copyAvailable()
     QSignalSpy spyCopyAvailabe(ed, SIGNAL(copyAvailable(bool)));
 
     //Execute Keystrokes
-    foreach(keyPairType keyPair, keystrokes) {
+    for (keyPairType keyPair : keystrokes)
         QTest::keyClick(ed, keyPair.first, keyPair.second );
-    }
 
     //Execute ed->"function"
     if (function == "cut")
@@ -1917,6 +1917,31 @@ void tst_QPlainTextEdit::placeholderVisibility()
     plainTextEdit.show();
     QVERIFY(QTest::qWaitForWindowExposed(&plainTextEdit));
     QTRY_VERIFY(plainTextEdit_d->placeholderVisible == placeholderVisible);
+}
+
+
+void tst_QPlainTextEdit::scrollBarSignals()
+{
+    QPlainTextEdit plainTextEdit;
+    QString longText;
+    for (uint i = 0; i < 500; ++i)
+        longText += "This is going to be a very long text for scroll signal testing.\n";
+    plainTextEdit.setPlainText(longText);
+    QScrollBar *vbar = plainTextEdit.verticalScrollBar();
+    plainTextEdit.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&plainTextEdit));
+    QSignalSpy spy(vbar, &QScrollBar::valueChanged);
+
+    QTest::keyClick(vbar, Qt::Key_Down);
+    QTRY_COMPARE(spy.count(), 1);
+    QTest::keyClick(vbar, Qt::Key_PageDown);
+    QTRY_COMPARE(spy.count(), 2);
+    QTest::keyClick(vbar, Qt::Key_PageDown);
+    QTRY_COMPARE(spy.count(), 3);
+    QTest::keyClick(vbar, Qt::Key_Up);
+    QTRY_COMPARE(spy.count(), 4);
+    QTest::keyClick(vbar, Qt::Key_PageUp);
+    QTRY_COMPARE(spy.count(), 5);
 }
 
 QTEST_MAIN(tst_QPlainTextEdit)

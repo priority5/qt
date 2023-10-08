@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 qt_internal_add_example(quick-accessibility)
 qt_internal_add_example(animation)
 qt_internal_add_example(draganddrop)
@@ -12,7 +15,6 @@ qt_internal_add_example(views)
 add_subdirectory(tableview)
 qt_internal_add_example(mousearea)
 qt_internal_add_example(positioners)
-qt_internal_add_example(righttoleft)
 add_subdirectory(scenegraph)
 qt_internal_add_example(shadereffects)
 qt_internal_add_example(text)
@@ -26,13 +28,15 @@ qt_internal_add_example(window)
 add_subdirectory(particles)
 qt_internal_add_example(delegatechooser)
 qt_internal_add_example(shapes)
+qt_internal_add_example(itemvariablerefreshrate)
+add_subdirectory(multieffect)
 if(QT_FEATURE_opengl OR QT_FEATURE_opengles2 OR QT_FEATURE_opengles3)
     add_subdirectory(rendercontrol)
 endif()
-if(TARGET Qt::Widgets)
+if(TARGET Qt6::Widgets)
     qt_internal_add_example(embeddedinwidgets)
 endif()
-if(TARGET Qt::QuickWidgets AND TARGET Qt::Widgets AND (QT_FEATURE_opengl OR QT_FEATURE_opengles2 OR QT_FEATURE_opengles3))
+if(TARGET Qt6::QuickWidgets AND TARGET Qt6::Widgets AND (QT_FEATURE_opengl OR QT_FEATURE_opengles2 OR QT_FEATURE_opengles3))
     add_subdirectory(quickwidgets)
 endif()
 
@@ -43,7 +47,6 @@ set(reused_dir_targets
     canvas_shared
     views_shared
     positioners_shared
-    righttoleft_shared
     text_shared
     threading_shared
     touchinteraction_shared
@@ -58,12 +61,14 @@ set(reused_dir_targets
     itemparticle_shared
     system_shared
     draganddrop_shared
+    testbed_shared
+    itemswitcher_shared
 )
 
 foreach(target IN LISTS reused_dir_targets)
     if(TARGET ${target})
         qt_autogen_tools(${target} ENABLE_AUTOGEN_TOOLS moc rcc)
-        if(TARGET Qt::Widgets)
+        if(TARGET Qt6::Widgets)
             qt_autogen_tools(${target} ENABLE_AUTOGEN_TOOLS uic)
         endif()
     endif()

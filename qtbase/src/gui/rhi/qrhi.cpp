@@ -677,23 +677,28 @@ Q_LOGGING_CATEGORY(QRHI_LOG_INFO, "qt.rhi.general")
     can be set via
     \l{QRhiGraphicsPipeline::setPatchControlPointCount()}{setPatchControlPointCount()},
     and shaders for tessellation control and evaluation can be specified in the
-    QRhiShaderStage list. \b{Tessellation is considered an experimental feature
-    in QRhi and can only be expected to be supported with Vulkan, OpenGL and
-    OpenGL ES for the time being}, assuming the implementation reports it as
-    supported at run time. Tessellation shaders have portability issues between
+    QRhiShaderStage list. Tessellation shaders have portability issues between
     APIs (for example, translating GLSL/SPIR-V to HLSL is problematic due to
     the way hull shaders are structured, whereas Metal uses a somewhat
-    different tessellation pipeline than others), and therefore no guarantees
-    can be given for a universal solution for now.
+    different tessellation pipeline than others), and therefore unexpected
+    issues may still arise, even though basic functionality is implemented
+    across all the underlying APIs. For Direct 3D in particular, handwritten
+    HLSL hull and domain shaders must be injected into each QShader for the
+    tessellation control and evaluation stages, respectively, since qsb cannot
+    generate these from SPIR-V. Note that isoline tessellation should be
+    avoided as it will not be supported by all backends. The maximum patch
+    control point count portable between backends is 32.
 
     \value GeometryShader Indicates that the geometry shader stage is
     supported. When supported, a geometry shader can be specified in the
-    QRhiShaderStage list. \b{Geometry Shaders are considered an experimental
+    QRhiShaderStage list. Geometry Shaders are considered an experimental
     feature in QRhi and can only be expected to be supported with Vulkan,
-    OpenGL (3.2+) and OpenGL ES (3.2+) for the time being}, assuming the
-    implementation reports it as supported at run time. Geometry shaders have
-    portability issues between APIs, and therefore no guarantees can be given
-    for a universal solution for now.
+    Direct 3D, OpenGL (3.2+) and OpenGL ES (3.2+), assuming the implementation
+    reports it as supported at run time. Geometry shaders have portability
+    issues between APIs, and therefore no guarantees can be given for a
+    universal solution. They will never be supported with Metal. Whereas with
+    Direct 3D a handwritten HLSL geometry shader must be injected into each
+    QShader for the geometry stage since qsb cannot generate this from SPIR-V.
 
     \value TextureArrayRange Indicates that for
     \l{QRhi::newTextureArray()}{texture arrays} it is possible to specify a
@@ -722,6 +727,15 @@ Q_LOGGING_CATEGORY(QRHI_LOG_INFO, "qt.rhi.general")
     for changing the mode to Line is to get wireframe rendering. This however
     is not available as a core OpenGL ES feature, and is optional with Vulkan
     as well as some mobile GPUs may not offer the feature.
+
+    \value OneDimensionalTextures Indicates that 1D textures are supported.
+    In practice this feature will be unsupported on OpenGL ES.
+
+    \value OneDimensionalTextureMipmaps Indicates that 1D texture mipmaps and
+    1D texture render targets are supported. In practice this feature will be
+    unsupported on backends that do not report support for
+    \l{OneDimensionalTextures}, and Metal.
+
  */
 
 /*!
@@ -1177,7 +1191,7 @@ QDebug operator<<(QDebug dbg, const QRhiScissor &s)
     \note \a stepRate other than 1 is only supported when
     QRhi::CustomInstanceStepRate is reported to be supported.
  */
-QRhiVertexInputBinding::QRhiVertexInputBinding(quint32 stride, Classification cls, int stepRate)
+QRhiVertexInputBinding::QRhiVertexInputBinding(quint32 stride, Classification cls, quint32 stepRate)
     : m_stride(stride),
       m_classification(cls),
       m_instanceStepRate(stepRate)
@@ -1398,6 +1412,83 @@ QDebug operator<<(QDebug dbg, const QRhiVertexInputAttribute &a)
     return dbg;
 }
 #endif
+
+QRhiVertexInputAttribute::Format QRhiImplementation::shaderDescVariableFormatToVertexInputFormat(QShaderDescription::VariableType type) const
+{
+    switch (type) {
+    case QShaderDescription::Vec4:
+        return QRhiVertexInputAttribute::Float4;
+    case QShaderDescription::Vec3:
+        return QRhiVertexInputAttribute::Float3;
+    case QShaderDescription::Vec2:
+        return QRhiVertexInputAttribute::Float2;
+    case QShaderDescription::Float:
+        return QRhiVertexInputAttribute::Float;
+
+    case QShaderDescription::Int4:
+        return QRhiVertexInputAttribute::SInt4;
+    case QShaderDescription::Int3:
+        return QRhiVertexInputAttribute::SInt3;
+    case QShaderDescription::Int2:
+        return QRhiVertexInputAttribute::SInt2;
+    case QShaderDescription::Int:
+        return QRhiVertexInputAttribute::SInt;
+
+    case QShaderDescription::Uint4:
+        return QRhiVertexInputAttribute::UInt4;
+    case QShaderDescription::Uint3:
+        return QRhiVertexInputAttribute::UInt3;
+    case QShaderDescription::Uint2:
+        return QRhiVertexInputAttribute::UInt2;
+    case QShaderDescription::Uint:
+        return QRhiVertexInputAttribute::UInt;
+
+    default:
+        Q_UNREACHABLE_RETURN(QRhiVertexInputAttribute::Float);
+    }
+}
+
+quint32 QRhiImplementation::byteSizePerVertexForVertexInputFormat(QRhiVertexInputAttribute::Format format) const
+{
+    switch (format) {
+    case QRhiVertexInputAttribute::Float4:
+        return 4 * sizeof(float);
+    case QRhiVertexInputAttribute::Float3:
+        return 4 * sizeof(float); // vec3 still takes 16 bytes
+    case QRhiVertexInputAttribute::Float2:
+        return 2 * sizeof(float);
+    case QRhiVertexInputAttribute::Float:
+        return sizeof(float);
+
+    case QRhiVertexInputAttribute::UNormByte4:
+        return 4 * sizeof(quint8);
+    case QRhiVertexInputAttribute::UNormByte2:
+        return 2 * sizeof(quint8);
+    case QRhiVertexInputAttribute::UNormByte:
+        return sizeof(quint8);
+
+    case QRhiVertexInputAttribute::UInt4:
+        return 4 * sizeof(quint32);
+    case QRhiVertexInputAttribute::UInt3:
+        return 4 * sizeof(quint32); // ivec3 still takes 16 bytes
+    case QRhiVertexInputAttribute::UInt2:
+        return 2 * sizeof(quint32);
+    case QRhiVertexInputAttribute::UInt:
+        return sizeof(quint32);
+
+    case QRhiVertexInputAttribute::SInt4:
+        return 4 * sizeof(qint32);
+    case QRhiVertexInputAttribute::SInt3:
+        return 4 * sizeof(qint32); // uvec3 still takes 16 bytes
+    case QRhiVertexInputAttribute::SInt2:
+        return 2 * sizeof(qint32);
+    case QRhiVertexInputAttribute::SInt:
+        return sizeof(qint32);
+
+    default:
+        Q_UNREACHABLE_RETURN(1);
+    }
+}
 
 /*!
     \class QRhiVertexInputLayout
@@ -1767,7 +1858,7 @@ QRhiTextureSubresourceUploadDescription::QRhiTextureSubresourceUploadDescription
 
     \a data can safely be destroyed or changed once this function returns.
  */
-QRhiTextureSubresourceUploadDescription::QRhiTextureSubresourceUploadDescription(const void *data, int size)
+QRhiTextureSubresourceUploadDescription::QRhiTextureSubresourceUploadDescription(const void *data, quint32 size)
     : m_data(reinterpret_cast<const char *>(data), size)
 {
 }
@@ -1846,19 +1937,22 @@ QRhiTextureUploadEntry::QRhiTextureUploadEntry(int layer, int level,
         QList<QRhiTextureUploadEntry> entries;
         for (int i = 0; i < 6; ++i)
           entries.append(QRhiTextureUploadEntry(i, 0, faces[i]));
-        QRhiTextureUploadDescription desc(entries);
+        QRhiTextureUploadDescription desc;
+        desc.setEntries(entries.cbegin(), entries.cend());
         resourceUpdates->uploadTexture(texture, desc);
     \endcode
 
     Another example that specifies mip images for a compressed texture:
 
     \badcode
-        QRhiTextureUploadDescription desc;
+        QList<QRhiTextureUploadEntry> entries;
         const int mipCount = rhi->mipLevelsForSize(compressedTexture->pixelSize());
         for (int level = 0; level < mipCount; ++level) {
             const QByteArray compressedDataForLevel = ..
-            desc.append(QRhiTextureUploadEntry(0, level, compressedDataForLevel));
+            entries.append(QRhiTextureUploadEntry(0, level, compressedDataForLevel));
         }
+        QRhiTextureUploadDescription desc;
+        desc.setEntries(entries.cbegin(), entries.cend());
         resourceUpdates->uploadTexture(compressedTexture, desc);
     \endcode
 
@@ -2073,11 +2167,17 @@ QRhiResource::~QRhiResource()
     requirement of not altering QRhiResource objects that are referenced by the
     frame being recorded.
 
+    If the QRhi that created this object is already destroyed, the object is
+    deleted immediately.
+
     \sa destroy()
  */
 void QRhiResource::deleteLater()
 {
-    m_rhi->addDeleteLater(this);
+    if (m_rhi)
+        m_rhi->addDeleteLater(this);
+    else
+        delete this;
 }
 
 /*!
@@ -2122,6 +2222,17 @@ void QRhiResource::setName(const QByteArray &name)
 quint64 QRhiResource::globalResourceId() const
 {
     return m_id;
+}
+
+/*!
+    \return the QRhi that created this resource.
+
+    If the QRhi that created this object is already destroyed, the result is
+    \nullptr.
+ */
+QRhi *QRhiResource::rhi() const
+{
+    return m_rhi ? m_rhi->q : nullptr;
 }
 
 /*!
@@ -2235,7 +2346,7 @@ quint64 QRhiResource::globalResourceId() const
 /*!
     \internal
  */
-QRhiBuffer::QRhiBuffer(QRhiImplementation *rhi, Type type_, UsageFlags usage_, int size_)
+QRhiBuffer::QRhiBuffer(QRhiImplementation *rhi, Type type_, UsageFlags usage_, quint32 size_)
     : QRhiResource(rhi),
       m_type(type_), m_usage(usage_), m_size(size_)
 {
@@ -3396,7 +3507,7 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::uniformBuffer(
     unexpected errors may occur.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::uniformBuffer(
-        int binding, StageFlags stage, QRhiBuffer *buf, int offset, int size)
+        int binding, StageFlags stage, QRhiBuffer *buf, quint32 offset, quint32 size)
 {
     Q_ASSERT(size > 0);
     QRhiShaderResourceBinding b;
@@ -3433,7 +3544,7 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::uniformBuffer(
     unexpected errors may occur.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
-        int binding, StageFlags stage, QRhiBuffer *buf, int size)
+        int binding, StageFlags stage, QRhiBuffer *buf, quint32 size)
 {
     Q_ASSERT(size > 0);
     QRhiShaderResourceBinding b;
@@ -3647,6 +3758,13 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::sampler(int binding, StageF
    pipelines. Such a pipeline must then always be used together with another,
    layout compatible QRhiShaderResourceBindings with resources present passed
    to QRhiCommandBuffer::setShaderResources().
+
+   \note Image load/store is only guaranteed to be available within a compute
+   pipeline. While some backends may support using these resources in a
+   graphics pipeline as well, this is not universally supported, and even when
+   it is, unexpected problems may arise when it comes to barriers and
+   synchronization. Therefore, avoid using such resources with shaders other
+   than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::imageLoad(
         int binding, StageFlags stage, QRhiTexture *tex, int level)
@@ -3675,6 +3793,13 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::imageLoad(
    pipelines. Such a pipeline must then always be used together with another,
    layout compatible QRhiShaderResourceBindings with resources present passed
    to QRhiCommandBuffer::setShaderResources().
+
+   \note Image load/store is only guaranteed to be available within a compute
+   pipeline. While some backends may support using these resources in a
+   graphics pipeline as well, this is not universally supported, and even when
+   it is, unexpected problems may arise when it comes to barriers and
+   synchronization. Therefore, avoid using such resources with shaders other
+   than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::imageStore(
         int binding, StageFlags stage, QRhiTexture *tex, int level)
@@ -3703,6 +3828,13 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::imageStore(
    pipelines. Such a pipeline must then always be used together with another,
    layout compatible QRhiShaderResourceBindings with resources present passed
    to QRhiCommandBuffer::setShaderResources().
+
+   \note Image load/store is only guaranteed to be available within a compute
+   pipeline. While some backends may support using these resources in a
+   graphics pipeline as well, this is not universally supported, and even when
+   it is, unexpected problems may arise when it comes to barriers and
+   synchronization. Therefore, avoid using such resources with shaders other
+   than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::imageLoadStore(
         int binding, StageFlags stage, QRhiTexture *tex, int level)
@@ -3729,6 +3861,13 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::imageLoadStore(
     suitable for creating pipelines. Such a pipeline must then always be used
     together with another, layout compatible QRhiShaderResourceBindings with
     resources present passed to QRhiCommandBuffer::setShaderResources().
+
+    \note Buffer load/store is only guaranteed to be available within a compute
+    pipeline. While some backends may support using these resources in a
+    graphics pipeline as well, this is not universally supported, and even when
+    it is, unexpected problems may arise when it comes to barriers and
+    synchronization. Therefore, avoid using such resources with shaders other
+    than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferLoad(
         int binding, StageFlags stage, QRhiBuffer *buf)
@@ -3757,9 +3896,16 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferLoad(
     suitable for creating pipelines. Such a pipeline must then always be used
     together with another, layout compatible QRhiShaderResourceBindings with
     resources present passed to QRhiCommandBuffer::setShaderResources().
+
+    \note Buffer load/store is only guaranteed to be available within a compute
+    pipeline. While some backends may support using these resources in a
+    graphics pipeline as well, this is not universally supported, and even when
+    it is, unexpected problems may arise when it comes to barriers and
+    synchronization. Therefore, avoid using such resources with shaders other
+    than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferLoad(
-        int binding, StageFlags stage, QRhiBuffer *buf, int offset, int size)
+        int binding, StageFlags stage, QRhiBuffer *buf, quint32 offset, quint32 size)
 {
     Q_ASSERT(size > 0);
     QRhiShaderResourceBinding b;
@@ -3785,6 +3931,13 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferLoad(
     suitable for creating pipelines. Such a pipeline must then always be used
     together with another, layout compatible QRhiShaderResourceBindings with
     resources present passed to QRhiCommandBuffer::setShaderResources().
+
+    \note Buffer load/store is only guaranteed to be available within a compute
+    pipeline. While some backends may support using these resources in a
+    graphics pipeline as well, this is not universally supported, and even when
+    it is, unexpected problems may arise when it comes to barriers and
+    synchronization. Therefore, avoid using such resources with shaders other
+    than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferStore(
         int binding, StageFlags stage, QRhiBuffer *buf)
@@ -3813,9 +3966,16 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferStore(
     suitable for creating pipelines. Such a pipeline must then always be used
     together with another, layout compatible QRhiShaderResourceBindings with
     resources present passed to QRhiCommandBuffer::setShaderResources().
+
+    \note Buffer load/store is only guaranteed to be available within a compute
+    pipeline. While some backends may support using these resources in a
+    graphics pipeline as well, this is not universally supported, and even when
+    it is, unexpected problems may arise when it comes to barriers and
+    synchronization. Therefore, avoid using such resources with shaders other
+    than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferStore(
-        int binding, StageFlags stage, QRhiBuffer *buf, int offset, int size)
+        int binding, StageFlags stage, QRhiBuffer *buf, quint32 offset, quint32 size)
 {
     Q_ASSERT(size > 0);
     QRhiShaderResourceBinding b;
@@ -3841,6 +4001,13 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferStore(
     suitable for creating pipelines. Such a pipeline must then always be used
     together with another, layout compatible QRhiShaderResourceBindings with
     resources present passed to QRhiCommandBuffer::setShaderResources().
+
+    \note Buffer load/store is only guaranteed to be available within a compute
+    pipeline. While some backends may support using these resources in a
+    graphics pipeline as well, this is not universally supported, and even when
+    it is, unexpected problems may arise when it comes to barriers and
+    synchronization. Therefore, avoid using such resources with shaders other
+    than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferLoadStore(
         int binding, StageFlags stage, QRhiBuffer *buf)
@@ -3869,9 +4036,16 @@ QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferLoadStore(
     suitable for creating pipelines. Such a pipeline must then always be used
     together with another, layout compatible QRhiShaderResourceBindings with
     resources present passed to QRhiCommandBuffer::setShaderResources().
+
+    \note Buffer load/store is only guaranteed to be available within a compute
+    pipeline. While some backends may support using these resources in a
+    graphics pipeline as well, this is not universally supported, and even when
+    it is, unexpected problems may arise when it comes to barriers and
+    synchronization. Therefore, avoid using such resources with shaders other
+    than compute.
  */
 QRhiShaderResourceBinding QRhiShaderResourceBinding::bufferLoadStore(
-        int binding, StageFlags stage, QRhiBuffer *buf, int offset, int size)
+        int binding, StageFlags stage, QRhiBuffer *buf, quint32 offset, quint32 size)
 {
     Q_ASSERT(size > 0);
     QRhiShaderResourceBinding b;
@@ -3962,8 +4136,7 @@ bool operator==(const QRhiShaderResourceBinding &a, const QRhiShaderResourceBind
         }
         break;
     default:
-        Q_UNREACHABLE();
-        return false;
+        Q_UNREACHABLE_RETURN(false);
     }
 
     return true;
@@ -4705,6 +4878,35 @@ QRhiResource::Type QRhiSwapChain::resourceType() const
  */
 
 /*!
+    \enum QRhiSwapChain::StereoTargetBuffer
+    Selects the backbuffer to use with a stereoscopic swapchain.
+
+    \value LeftBuffer
+    \value RightBuffer
+ */
+
+/*!
+    \return a render target that can be used with beginPass() in order to
+    render to the swapchain's left or right backbuffer. This overload should be
+    used only with stereoscopic rendering, that is, when the associated QWindow
+    is backed by two color buffers, one for each eye, instead of just one.
+
+    When stereoscopic rendering is not supported, the return value will be
+    the default target. For the time being the only backend and 3D API where traditional
+    stereoscopic rendering is supported is OpenGL (excluding OpenGL ES), in
+    combination with \l QSurfaceFormat::StereoBuffers, assuming it is supported
+    by the graphics and display driver stack at run time. All other backends
+    are going to return the default render target from this overload.
+
+    \note the value must not be cached and reused between frames
+ */
+QRhiRenderTarget *QRhiSwapChain::currentFrameRenderTarget(StereoTargetBuffer targetBuffer)
+{
+    Q_UNUSED(targetBuffer);
+    return currentFrameRenderTarget();
+}
+
+/*!
     \fn bool QRhiSwapChain::createOrResize()
 
     Creates the swapchain if not already done and resizes the swapchain buffers
@@ -4913,7 +5115,7 @@ QRhiResource::Type QRhiCommandBuffer::resourceType() const
     return CommandBuffer;
 }
 
-static const char *resourceTypeStr(QRhiResource *res)
+static const char *resourceTypeStr(const QRhiResource *res)
 {
     switch (res->resourceType()) {
     case QRhiResource::Buffer:
@@ -4942,8 +5144,7 @@ static const char *resourceTypeStr(QRhiResource *res)
         return "CommandBuffer";
     }
 
-    Q_UNREACHABLE();
-    return "";
+    Q_UNREACHABLE_RETURN("");
 }
 
 QRhiImplementation::~QRhiImplementation()
@@ -4965,8 +5166,10 @@ QRhiImplementation::~QRhiImplementation()
             qWarning("QRhi %p going down with %d unreleased resources that own native graphics objects. This is not nice.",
                      q, int(resources.size()));
         }
-        for (QRhiResource *res : std::as_const(resources)) {
-            if (leakCheck)
+        for (auto it = resources.cbegin(), end = resources.cend(); it != end; ++it) {
+            QRhiResource *res = it.key();
+            const bool ownsNativeResources = it.value();
+            if (leakCheck && ownsNativeResources)
                 qWarning("  %s resource %p (%s)", resourceTypeStr(res), res, res->m_objectName.constData());
 
             // Null out the resource's rhi pointer. This is why it makes sense to do null
@@ -5310,10 +5513,10 @@ QRhi::~QRhi()
     if (!d)
         return;
 
+    runCleanup();
+
     qDeleteAll(d->pendingDeleteResources);
     d->pendingDeleteResources.clear();
-
-    runCleanup();
 
     d->destroy();
     delete d;
@@ -5445,6 +5648,49 @@ bool QRhi::probe(QRhi::Implementation impl, QRhiInitParams *params)
 }
 
 /*!
+    \struct QRhiSwapChainProxyData
+    \internal
+    \inmodule QtGui
+ */
+
+/*!
+    Generates and returns a QRhiSwapChainProxyData struct containing opaque
+    data specific to the backend and graphics API specified by \a impl. \a
+    window is the QWindow a swapchain is targeting.
+
+    The returned struct can be passed to QRhiSwapChain::setProxyData(). This
+    makes sense in threaded rendering systems: this static function is expected
+    to be called on the \b{main (gui) thread}, unlike all QRhi operations, then
+    transferred to the thread working with the QRhi and QRhiSwapChain and passed
+    on to the swapchain. This allows doing native platform queries that are
+    only safe to be called on the main thread, for example to query the
+    CAMetalLayer from a NSView, and then passing on the data to the
+    QRhiSwapChain living on the rendering thread. With the Metal example, doing
+    the view.layer access on a dedicated rendering thread causes a warning in
+    the Xcode Thread Checker. With the data proxy mechanism, this is avoided.
+
+    When threads are not involved, generating and passing on the
+    QRhiSwapChainProxyData is not required: backends are guaranteed to be able
+    to query whatever is needed on their own, and if everything lives on the
+    main (gui) thread, that should be sufficient.
+
+    \note \a impl should match what the QRhi is created with. For example,
+    calling with QRhi::Metal on a non-Apple platform will not generate any
+    useful data.
+ */
+QRhiSwapChainProxyData QRhi::updateSwapChainProxyData(QRhi::Implementation impl, QWindow *window)
+{
+#if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
+    if (impl == Metal)
+        return QRhiMetal::updateSwapChainProxyData(window);
+#else
+    Q_UNUSED(impl);
+    Q_UNUSED(window);
+#endif
+    return {};
+}
+
+/*!
     \return the backend type for this QRhi.
  */
 QRhi::Implementation QRhi::backend() const
@@ -5453,11 +5699,12 @@ QRhi::Implementation QRhi::backend() const
 }
 
 /*!
-    \return the backend type as string for this QRhi.
+    \return a friendly name for the backend \a impl, usually the name of the 3D
+    API in use.
  */
-const char *QRhi::backendName() const
+const char *QRhi::backendName(Implementation impl)
 {
-    switch (d->implType) {
+    switch (impl) {
     case QRhi::Null:
         return "Null";
     case QRhi::Vulkan:
@@ -5470,8 +5717,15 @@ const char *QRhi::backendName() const
         return "Metal";
     }
 
-    Q_UNREACHABLE();
-    return nullptr;
+    Q_UNREACHABLE_RETURN("Unknown");
+}
+
+/*!
+    \return the backend type as string for this QRhi.
+ */
+const char *QRhi::backendName() const
+{
+    return backendName(d->implType);
 }
 
 /*!
@@ -5524,8 +5778,7 @@ static inline const char *deviceTypeStr(QRhiDriverInfo::DeviceType type)
         return "Cpu";
     }
 
-    Q_UNREACHABLE();
-    return nullptr;
+    Q_UNREACHABLE_RETURN(nullptr);
 }
 QDebug operator<<(QDebug dbg, const QRhiDriverInfo &info)
 {
@@ -5748,7 +6001,7 @@ bool QRhiResourceUpdateBatch::hasOptimalCapacity() const
     multiple native underneath can be safely ignored when using the QRhi and
     QRhiResourceUpdateBatch.
  */
-void QRhiResourceUpdateBatch::updateDynamicBuffer(QRhiBuffer *buf, int offset, int size, const void *data)
+void QRhiResourceUpdateBatch::updateDynamicBuffer(QRhiBuffer *buf, quint32 offset, quint32 size, const void *data)
 {
     if (size > 0) {
         const int idx = d->activeBufferOpCount++;
@@ -5768,7 +6021,7 @@ void QRhiResourceUpdateBatch::updateDynamicBuffer(QRhiBuffer *buf, int offset, i
     are specified by \a data which must have at least \a size bytes available.
     \a data can safely be destroyed or changed once this function returns.
  */
-void QRhiResourceUpdateBatch::uploadStaticBuffer(QRhiBuffer *buf, int offset, int size, const void *data)
+void QRhiResourceUpdateBatch::uploadStaticBuffer(QRhiBuffer *buf, quint32 offset, quint32 size, const void *data)
 {
     if (size > 0) {
         const int idx = d->activeBufferOpCount++;
@@ -5818,7 +6071,7 @@ void QRhiResourceUpdateBatch::uploadStaticBuffer(QRhiBuffer *buf, const void *da
 
    \sa readBackTexture(), QRhi::isFeatureSupported(), QRhi::resourceLimit()
  */
-void QRhiResourceUpdateBatch::readBackBuffer(QRhiBuffer *buf, int offset, int size, QRhiBufferReadbackResult *result)
+void QRhiResourceUpdateBatch::readBackBuffer(QRhiBuffer *buf, quint32 offset, quint32 size, QRhiBufferReadbackResult *result)
 {
     const int idx = d->activeBufferOpCount++;
     if (idx < d->bufferOps.size())
@@ -5992,6 +6245,16 @@ void QRhiResourceUpdateBatch::generateMips(QRhiTexture *tex)
  */
 QRhiResourceUpdateBatch *QRhi::nextResourceUpdateBatch()
 {
+    // By default we prefer spreading out the utilization of the 64 batches as
+    // much as possible, meaning we won't pick the first one even if it's free,
+    // but prefer picking one after the last picked one. Relevant due to how
+    // QVLA and QRhiBufferData allocations behind the bufferOps are reused; in
+    // typical Qt Quick scenes this leads to a form of (eventually) seeding all
+    // the 64 resource batches with buffer operation data allocations which are
+    // then reused in subsequent frames. This comes at the expense of using
+    // more memory, but has proven good results when (CPU) profiling typical
+    // Quick/Quick3D apps.
+
     auto nextFreeBatch = [this]() -> QRhiResourceUpdateBatch * {
         auto isFree = [this](int i) -> QRhiResourceUpdateBatch * {
             const quint64 mask = 1ULL << quint64(i);
@@ -6042,7 +6305,15 @@ void QRhiResourceUpdateBatchPrivate::free()
     rhi->resUpdPoolMap &= ~mask;
     poolIndex = -1;
 
+    // textureOps is cleared, to not keep the potentially large image pixel
+    // data alive, but it is expected that the container keeps the list alloc
+    // at least. Only trimOpList() goes for the more aggressive route with squeeze.
     textureOps.clear();
+
+    // bufferOps is not touched, to allow reusing allocations (incl. in the
+    // elements' QRhiBufferData) as much as possible when this batch is used
+    // again in the future, which is important for performance, in particular
+    // with Qt Quick.
 }
 
 void QRhiResourceUpdateBatchPrivate::merge(QRhiResourceUpdateBatchPrivate *other)
@@ -6072,11 +6343,21 @@ void QRhiResourceUpdateBatchPrivate::trimOpLists()
 {
     Q_ASSERT(poolIndex == -1); // must not be in use
 
+    // Unlike free(), this is expected to aggressively deallocate all memory
+    // used by both the buffer and texture operation lists. (i.e. using
+    // squeeze() to only keep the stack prealloc of the QVLAs)
+    //
+    // This (e.g. just the destruction of bufferOps elements) may have a
+    // non-negligible performance impact e.g. with Qt Quick with scenes where
+    // there are lots of buffer operations per frame.
+
     activeBufferOpCount = 0;
     bufferOps.clear();
+    bufferOps.squeeze();
 
     activeTextureOpCount = 0;
     textureOps.clear();
+    textureOps.squeeze();
 }
 
 /*!
@@ -6893,6 +7174,11 @@ bool QRhi::isDeviceLost() const
 
     See EnablePipelineCacheDataSave for further details about this feature.
 
+    \note Minimize the number of calls to this function. Retrieving the blob is
+    not always a cheap operation, and therefore this function should only be
+    called at a low frequency, ideally only once e.g. when closing the
+    application.
+
     \sa setPipelineCacheData(), create(), isFeatureSupported()
  */
 QByteArray QRhi::pipelineCacheData()
@@ -6942,6 +7228,11 @@ QByteArray QRhi::pipelineCacheData()
     visible at all in case other caching mechanisms outside of Qt's control are
     already active.
 
+    \note Minimize the number of calls to this function. Loading the blob is
+    not always a cheap operation, and therefore this function should only be
+    called at a low frequency, ideally only once e.g. when starting the
+    application.
+
     \sa pipelineCacheData(), isFeatureSupported()
  */
 void QRhi::setPipelineCacheData(const QByteArray &data)
@@ -6950,7 +7241,7 @@ void QRhi::setPipelineCacheData(const QByteArray &data)
 }
 
 /*!
-    \struct QRhiMemAllocStats
+    \struct QRhiStats
     \internal
     \inmodule QtGui
 
@@ -6958,10 +7249,12 @@ void QRhi::setPipelineCacheData(const QByteArray &data)
  */
 
 #ifndef QT_NO_DEBUG_STREAM
-QDebug operator<<(QDebug dbg, const QRhiMemAllocStats &info)
+QDebug operator<<(QDebug dbg, const QRhiStats &info)
 {
     QDebugStateSaver saver(dbg);
-    dbg.nospace() << "QRhiMemAllocStats(blockCount=" << info.blockCount
+    dbg.nospace() << "QRhiStats("
+                  << "totalPipelineCreationTime=" << info.totalPipelineCreationTime
+                  << " blockCount=" << info.blockCount
                   << " allocCount=" << info.allocCount
                   << " usedBytes=" << info.usedBytes
                   << " unusedBytes=" << info.unusedBytes
@@ -6971,21 +7264,43 @@ QDebug operator<<(QDebug dbg, const QRhiMemAllocStats &info)
 #endif
 
 /*!
-    Gathers and returns some statistics about the memory allocation of graphics
-    resources. Only supported with some backends. With graphics APIs where
-    there is no lower level control over resource memory allocations, this will
-    never be supported and all fields in the results are 0.
+    Gathers and returns statistics about the timings and allocations of
+    graphics resources.
 
-    With Vulkan, the values are valid always, and are queried from the
-    underlying memory allocator library. This gives an insight into the memory
-    requirements of the active buffers and textures.
+    Data about memory allocations is only available with some backends, where
+    such operations are under Qt's control. With graphics APIs where there is
+    no lower level control over resource memory allocations, this will never be
+    supported and all relevant fields in the results are 0.
 
-    \note Gathering the data may not be free, and therefore the function should
-    not be called at a high frequency.
+    With Vulkan in particular, the values are valid always, and are queried
+    from the underlying memory allocator library. This gives an insight into
+    the memory requirements of the active buffers and textures.
+
+    Additional data, such as the total time in milliseconds spent in graphics
+    and compute pipeline creation (which usually involves shader compilation or
+    cache lookups, and potentially expensive processing) is available with most
+    backends.
+
+    \note The elapsed times for operations such as pipeline creation may be
+    affected by various factors. The results should not be compared between
+    different backends since the concept of "pipelines" and what exactly
+    happens under the hood during, for instance, a call to
+    QRhiGraphicsPipeline::create(), differ greatly between graphics APIs and
+    their implementations.
+
+    \note Additionally, many drivers will likely employ various caching
+    strategies for shaders, programs, pipelines. (independently of Qt's own
+    similar facilities, such as setPipelineCacheData() or the OpenGL-specific
+    program binary disk cache). Because such internal behavior is transparent
+    to the API client, Qt and QRhi have no knowledge or control over the exact
+    caching strategy, persistency, invalidation of the cached data, etc. When
+    reading timings, such as the time spent on pipeline creation, the potential
+    presence and unspecified behavior of driver-level caching mechanisms should
+    be kept in mind.
  */
-QRhiMemAllocStats QRhi::graphicsMemoryAllocationStatistics() const
+QRhiStats QRhi::statistics() const
 {
-    return d->graphicsMemoryAllocationStatistics();
+    return d->statistics();
 }
 
 /*!
@@ -7037,7 +7352,7 @@ QRhiShaderResourceBindings *QRhi::newShaderResourceBindings()
  */
 QRhiBuffer *QRhi::newBuffer(QRhiBuffer::Type type,
                             QRhiBuffer::UsageFlags usage,
-                            int size)
+                            quint32 size)
 {
     return d->createBuffer(type, usage, size);
 }
@@ -7072,13 +7387,20 @@ QRhiRenderBuffer *QRhi::newRenderBuffer(QRhiRenderBuffer::Type type,
 }
 
 /*!
-    \return a new 2D texture with the specified \a format, \a pixelSize, \a
+    \return a new 1D or 2D texture with the specified \a format, \a pixelSize, \a
     sampleCount, and \a flags.
+
+    A 1D texture array must have QRhiTexture::OneDimensional set in \a flags.  This
+    function will implicitly set this flag if the \a pixelSize height is 0.
 
     \note \a format specifies the requested internal and external format,
     meaning the data to be uploaded to the texture will need to be in a
     compatible format, while the native texture may (but is not guaranteed to,
     in case of OpenGL at least) use this format internally.
+
+    \note 1D textures are only functional when the OneDimensionalTextures feature is
+    reported as supported at run time. Further, mipmaps on 1D textures are only
+    functional when the OneDimensionalTextureMipmaps feature is reported at run time.
 
     \sa QRhiResource::destroy()
  */
@@ -7087,21 +7409,31 @@ QRhiTexture *QRhi::newTexture(QRhiTexture::Format format,
                               int sampleCount,
                               QRhiTexture::Flags flags)
 {
+    if (pixelSize.height() == 0)
+        flags |= QRhiTexture::OneDimensional;
+
     return d->createTexture(format, pixelSize, 1, 0, sampleCount, flags);
 }
 
 /*!
-    \return a new 2D or 3D texture with the specified \a format, \a width, \a
+    \return a new 1D, 2D or 3D texture with the specified \a format, \a width, \a
     height, \a depth, \a sampleCount, and \a flags.
 
     This overload is suitable for 3D textures because it allows specifying \a
     depth. A 3D texture must have QRhiTexture::ThreeDimensional set in \a
     flags, but using this overload that can be omitted because the flag is set
-    implicitly whenever \a depth is greater than 0. For 2D and cube textures \a
+    implicitly whenever \a depth is greater than 0. For 1D, 2D and cube textures \a
     depth should be set to 0.
+
+    A 1D texture must have QRhiTexture::OneDimensional set in \a flags.  This overload
+    will implicitly set this flag if both \a height and \a depth are 0.
 
     \note 3D textures are only functional when the ThreeDimensionalTextures
     feature is reported as supported at run time.
+
+    \note 1D textures are only functional when the OneDimensionalTextures feature is
+    reported as supported at run time. Further, mipmaps on 1D textures are only
+    functional when the OneDimensionalTextureMipmaps feature is reported at run time.
 
     \overload
  */
@@ -7113,17 +7445,23 @@ QRhiTexture *QRhi::newTexture(QRhiTexture::Format format,
     if (depth > 0)
         flags |= QRhiTexture::ThreeDimensional;
 
+    if (height == 0 && depth == 0)
+        flags |= QRhiTexture::OneDimensional;
+
     return d->createTexture(format, QSize(width, height), depth, 0, sampleCount, flags);
 }
 
 /*!
-    \return a new 2D texture array with the specified \a format, \a arraySize,
+    \return a new 1D or 2D texture array with the specified \a format, \a arraySize,
     \a pixelSize, \a sampleCount, and \a flags.
 
     This function implicitly sets QRhiTexture::TextureArray in \a flags.
 
+    A 1D texture array must have QRhiTexture::OneDimensional set in \a flags.  This
+    function will implicitly set this flag if the \a pixelSize height is 0.
+
     \note Do not confuse texture arrays with arrays of textures. A QRhiTexture
-    created by this function is usable with 2D array samplers in the shader, for
+    created by this function is usable with 1D or 2D array samplers in the shader, for
     example: \c{layout(binding = 1) uniform sampler2DArray texArr;}. Arrays of
     textures refers to a list of textures that are exposed to the shader via
     QRhiShaderResourceBinding::sampledTextures() and a count > 1, and declared
@@ -7132,6 +7470,11 @@ QRhiTexture *QRhi::newTexture(QRhiTexture::Format format,
 
     \note This is only functional when the TextureArrays feature is reported as
     supported at run time.
+
+    \note 1D textures are only functional when the OneDimensionalTextures feature is
+    reported as supported at run time. Further, mipmaps on 1D textures are only
+    functional when the OneDimensionalTextureMipmaps feature is reported at run time.
+
 
     \sa newTexture()
  */
@@ -7142,6 +7485,10 @@ QRhiTexture *QRhi::newTextureArray(QRhiTexture::Format format,
                                    QRhiTexture::Flags flags)
 {
     flags |= QRhiTexture::TextureArray;
+
+    if (pixelSize.height() == 0)
+        flags |= QRhiTexture::OneDimensional;
+
     return d->createTexture(format, pixelSize, 1, arraySize, sampleCount, flags);
 }
 
@@ -7452,7 +7799,7 @@ int QRhi::ubufAlignment() const
     return d->ubufAlignment();
 }
 
-static QBasicAtomicInteger<QRhiGlobalObjectIdGenerator::Type> counter = Q_BASIC_ATOMIC_INITIALIZER(0);
+Q_CONSTINIT static QBasicAtomicInteger<QRhiGlobalObjectIdGenerator::Type> counter = Q_BASIC_ATOMIC_INITIALIZER(0);
 
 QRhiGlobalObjectIdGenerator::Type QRhiGlobalObjectIdGenerator::newId()
 {
@@ -7564,8 +7911,7 @@ QRhiPassResourceTracker::BufferStage QRhiPassResourceTracker::toPassTrackerBuffe
     if (stages.testFlag(QRhiShaderResourceBinding::GeometryStage))
         return QRhiPassResourceTracker::BufGeometryStage;
 
-    Q_UNREACHABLE();
-    return QRhiPassResourceTracker::BufVertexStage;
+    Q_UNREACHABLE_RETURN(QRhiPassResourceTracker::BufVertexStage);
 }
 
 QRhiPassResourceTracker::TextureStage QRhiPassResourceTracker::toPassTrackerTextureStage(QRhiShaderResourceBinding::StageFlags stages)
@@ -7584,8 +7930,7 @@ QRhiPassResourceTracker::TextureStage QRhiPassResourceTracker::toPassTrackerText
     if (stages.testFlag(QRhiShaderResourceBinding::GeometryStage))
         return QRhiPassResourceTracker::TexGeometryStage;
 
-    Q_UNREACHABLE();
-    return QRhiPassResourceTracker::TexVertexStage;
+    Q_UNREACHABLE_RETURN(QRhiPassResourceTracker::TexVertexStage);
 }
 
 QT_END_NAMESPACE

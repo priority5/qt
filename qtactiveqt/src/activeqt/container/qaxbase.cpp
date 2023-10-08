@@ -31,6 +31,7 @@
 #include <private/qobject_p.h>
 #include <private/qmetaobject_p.h>
 #include <private/qmetaobjectbuilder_p.h>
+#include <private/qtools_p.h>
 
 #include <qt_windows.h>
 #include <ocidl.h>
@@ -2284,7 +2285,7 @@ void MetaObjectGenerator::addSetterSlot(const QByteArray &property)
     if (isupper(prototype.at(0))) {
         prototype.insert(0, "Set");
     } else {
-        prototype[0] = char(toupper(prototype[0]));
+        prototype[0] = QtMiscUtils::toAsciiUpper(prototype[0]);
         prototype.insert(0, "set");
     }
     const QByteArray type = propertyType(property);
@@ -2482,7 +2483,7 @@ void MetaObjectGenerator::readFuncsInfo(ITypeInfo *typeinfo, ushort nFuncs)
                     set = "Set";
                 } else {
                     set = "set";
-                    prototype[0] = char(toupper(prototype[0]));
+                    prototype[0] = QtMiscUtils::toAsciiUpper(prototype[0]);
                 }
 
                 prototype = set + prototype;
@@ -3451,7 +3452,7 @@ int QAxBase::internalInvoke(QMetaObject::Call call, int index, void **v)
 
     // get return value
     if (hres == S_OK && ret.vt != VT_EMPTY) {
-        QVariantToVoidStar(VARIANTToQVariant(ret, slot.typeName()), v[0], slot.typeName());
+        QVariantToVoidStar(VARIANTToQVariant(ret, slot.typeName(), slot.returnType()), v[0], slot.typeName());
         if (ret.vt != VT_DISPATCH)
             clearVARIANT(&ret);
         else
@@ -3770,7 +3771,7 @@ bool QAxBase::dynamicCallHelper(const char *name, void *inout, QList<QVariant> &
         hres = Invoke(disp, dispid, IID_NULL, LOCALE_USER_DEFAULT, disptype, &params, nullptr, &excepinfo, &argerr);
     }
 
-    if (disptype == (DISPATCH_METHOD|DISPATCH_PROPERTYGET) && hres == S_OK && varc) {
+    if ((disptype & (DISPATCH_METHOD|DISPATCH_PROPERTYGET)) && hres == S_OK && varc) {
         for (qsizetype i = 0; i < varc; ++i)
             if ((arg[varc-i-1].vt & VT_BYREF) || outArgs[i]) // update out-parameters
                 vars[i] = VARIANTToQVariant(arg[varc-i-1], vars.at(i).typeName());

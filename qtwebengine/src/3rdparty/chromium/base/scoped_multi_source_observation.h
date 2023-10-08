@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,7 @@ class ScopedMultiSourceObservation {
   // Remove the object passed to the constructor as an observer from |source|.
   void RemoveObservation(Source* source) {
     auto it = base::ranges::find(sources_, source);
-    DCHECK(it != sources_.end());
+    CHECK(it != sources_.end());
     sources_.erase(it);
     (source->*RemoveObsFn)(observer_);
   }

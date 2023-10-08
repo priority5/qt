@@ -49,7 +49,7 @@ public:
     static void singleShot(int msec, const QObject *receiver, const char *member);
     static void singleShot(int msec, Qt::TimerType timerType, const QObject *receiver, const char *member);
 
-#ifdef Q_CLANG_QDOC
+#ifdef Q_QDOC
     template<typename PointerToMemberFunction>
     static void singleShot(int msec, const QObject *receiver, PointerToMemberFunction method);
     template<typename PointerToMemberFunction>
@@ -63,7 +63,7 @@ public:
     template<typename Functor, int>
     static void singleShot(int msec, Qt::TimerType timerType, const QObject *context, Functor functor);
     template <typename Functor>
-    QMetaObject::Connection callOnTimeout(Functor slot, Qt::ConnectionType connectionType = Qt::AutoConnection);
+    QMetaObject::Connection callOnTimeout(Functor slot);
     template <typename Functor>
     QMetaObject::Connection callOnTimeout(const QObject *context, Functor slot, Qt::ConnectionType connectionType = Qt::AutoConnection);
     template <typename MemberFunction>

@@ -31,6 +31,7 @@
     \li \l{Qt Creator: Connecting iOS Devices}{Connecting iOS Devices}
     \li \l{Porting to iOS}
     \li \l{Qt for iOS - Building from Source}{Building Qt from Sources}
+    \li \l{In-App purchasing demo}
     \endlist
 
     \section1 Qt Quick Examples for iOS
@@ -48,7 +49,6 @@
         \li \l{Qt Quick Examples - Animation}{Animation}
         \li \l{Qt Quick Examples - Canvas}{Canvas}
         \li \l{Qt Quick Examples - Positioners}{Positioners}
-        \li \l{Qt Quick Examples - Right to Left}{Right to Left}
         \li \l{Qt Quick Examples - Shader Effects}{Shader Effects}
         \endlist
     \enddiv

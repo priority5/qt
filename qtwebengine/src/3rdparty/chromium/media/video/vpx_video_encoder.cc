@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -427,12 +427,20 @@ void VpxVideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
     }
   }
 
-  const bool is_yuv = IsYuvPlanar(frame->format());
-  if (frame->visible_rect().size() != options_.frame_size || !is_yuv) {
+  // Unfortunately libyuv lacks direct NV12 to I010 conversion, and we
+  // have to do an extra conversion to I420.
+  // TODO(https://crbug.com/libyuv/954) Use NV12ToI010() when implemented
+  const bool vp9_p2_needs_nv12_to_i420 =
+      frame->format() == PIXEL_FORMAT_NV12 && profile_ == VP9PROFILE_PROFILE2;
+  const bool needs_conversion_to_i420 =
+      !IsYuvPlanar(frame->format()) || vp9_p2_needs_nv12_to_i420;
+  if (frame->visible_rect().size() != options_.frame_size ||
+      needs_conversion_to_i420) {
+    auto new_pixel_format =
+        needs_conversion_to_i420 ? PIXEL_FORMAT_I420 : frame->format();
     auto resized_frame = frame_pool_.CreateFrame(
-        is_yuv ? frame->format() : PIXEL_FORMAT_I420, options_.frame_size,
-        gfx::Rect(options_.frame_size), options_.frame_size,
-        frame->timestamp());
+        new_pixel_format, options_.frame_size, gfx::Rect(options_.frame_size),
+        options_.frame_size, frame->timestamp());
 
     if (!resized_frame) {
       std::move(done_cb).Run(
@@ -454,6 +462,7 @@ void VpxVideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
 
   switch (profile_) {
     case VP9PROFILE_PROFILE2:
+      DCHECK_EQ(frame->format(), PIXEL_FORMAT_I420);
       // Profile 2 uses 10bit color,
       libyuv::I420ToI010(
           frame->visible_data(VideoFrame::kYPlane),
@@ -540,7 +549,7 @@ void VpxVideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
     }
   }
 
-  TRACE_EVENT0("media", "vpx_codec_encode");
+  TRACE_EVENT1("media", "vpx_codec_encode", "timestamp", frame->timestamp());
   auto vpx_error = vpx_codec_encode(codec_.get(), &vpx_image_, timestamp_us,
                                     duration_us, flags, deadline);
 
@@ -717,7 +726,7 @@ void VpxVideoEncoder::DrainOutputs(int temporal_id,
       result.timestamp = ts;
       result.color_space = color_space;
       result.size = pkt->data.frame.sz;
-      result.data.reset(new uint8_t[result.size]);
+      result.data = std::make_unique<uint8_t[]>(result.size);
       memcpy(result.data.get(), pkt->data.frame.buf, result.size);
       output_cb_.Run(std::move(result), {});
     }

@@ -7,12 +7,16 @@
 #include <QtCore/QMap>
 #include <QtMqtt/QMqttClient>
 
+#include <QtQml/qqml.h>
+
 class QmlMqttClient : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString hostname READ hostname WRITE setHostname NOTIFY hostnameChanged)
     Q_PROPERTY(int port READ port WRITE setPort NOTIFY portChanged)
     Q_PROPERTY(QMqttClient::ClientState state READ state WRITE setState NOTIFY stateChanged)
+    QML_NAMED_ELEMENT(MqttClient)
+    QML_EXTENDED_NAMESPACE(QMqttClient)
 public:
 
     QmlMqttClient(QObject *parent = nullptr);

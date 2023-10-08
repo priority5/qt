@@ -1,9 +1,7 @@
 // Copyright (C) 2019 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
-#ifndef WINVER
-#  define WINVER 0x0A00 // Enable pointer functions for MinGW
-#endif
+#include <QtCore/qt_windows.h>
 
 #include "qwindowspointerhandler.h"
 #include "qwindowsmousehandler.h"
@@ -443,6 +441,8 @@ bool QWindowsPointerHandler::translateTouchEvent(QWindow *window, HWND hwnd,
             if (id != -1)
                 m_lastTouchPoints.remove(id);
         }
+        // Send LeaveEvent to reset hover when the last finger leaves the touch screen (QTBUG-62912)
+        QWindowSystemInterface::handleEnterLeaveEvent(nullptr, window);
     }
 
     // Only handle down/up/update, ignore others like WM_POINTERENTER, WM_POINTERLEAVE, etc.
@@ -774,7 +774,7 @@ bool QWindowsPointerHandler::translateMouseEvent(QWindow *window,
     // X11 and macOS.
     bool discardEvent = false;
     if (msg.message == WM_MOUSEMOVE) {
-        static QPoint lastMouseMovePos;
+        Q_CONSTINIT static QPoint lastMouseMovePos;
         if (msg.wParam == 0 && (m_windowUnderPointer.isNull() || globalPos == lastMouseMovePos))
             discardEvent = true;
         lastMouseMovePos = globalPos;

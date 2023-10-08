@@ -7,9 +7,9 @@
 #include <stdlib.h>
 
 //! [0]
-const int DataSize = 100000;
+constexpr int DataSize = 100000;
 
-const int BufferSize = 8192;
+constexpr int BufferSize = 8192;
 char buffer[BufferSize];
 
 QSemaphore freeBytes(BufferSize);
@@ -36,7 +36,6 @@ public:
 class Consumer : public QThread
 //! [3] //! [4]
 {
-    Q_OBJECT
 public:
     void run() override
     {
@@ -64,5 +63,3 @@ int main(int argc, char *argv[])
     return 0;
 }
 //! [6]
-
-#include "semaphores.moc"

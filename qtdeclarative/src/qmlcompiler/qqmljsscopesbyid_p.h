@@ -25,12 +25,17 @@ QT_BEGIN_NAMESPACE
 class QQmlJSScopesById
 {
 public:
+    bool componentsAreBound() const { return m_componentsAreBound; }
     void setComponentsAreBound(bool bound) { m_componentsAreBound = bound; }
 
-    QString id(const QQmlJSScope::ConstPtr &scope) const
+    void setSignaturesAreEnforced(bool enforced) { m_signaturesAreEnforced = enforced; }
+    bool signaturesAreEnforced() const { return m_signaturesAreEnforced; }
+
+    QString id(const QQmlJSScope::ConstPtr &scope, const QQmlJSScope::ConstPtr &referrer) const
     {
+        const QQmlJSScope::ConstPtr referrerRoot = componentRoot(referrer);
         for (auto it = m_scopesById.begin(), end = m_scopesById.end(); it != end; ++it) {
-            if (*it == scope)
+            if (*it == scope && isComponentVisible(componentRoot(*it), referrerRoot))
                 return it.key();
         }
         return QString();
@@ -103,6 +108,7 @@ private:
 
     QMultiHash<QString, QQmlJSScope::ConstPtr> m_scopesById;
     bool m_componentsAreBound = false;
+    bool m_signaturesAreEnforced = true;
 };
 
 QT_END_NAMESPACE

@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 #####################################################################
 ## IIOSensorProxySensorPlugin Plugin:
 #####################################################################
@@ -11,6 +14,12 @@ qt_internal_add_plugin(IIOSensorProxySensorPlugin
         iiosensorproxyorientationsensor.cpp iiosensorproxyorientationsensor.h
         iiosensorproxysensorbase.cpp iiosensorproxysensorbase.h
         main.cpp
+    NO_UNITY_BUILD_SOURCES
+        # Duplicate symbol definition between, iiosensorproxycompass.cpp, and
+        # the followings
+        # TODO: dbusPath() can probably be implemented as a static data member
+        iiosensorproxylightsensor.cpp
+        iiosensorproxyorientationsensor.cpp
     DBUS_INTERFACE_SOURCES
         org.freedesktop.DBus.Properties.xml
         net.hadess.SensorProxy.xml

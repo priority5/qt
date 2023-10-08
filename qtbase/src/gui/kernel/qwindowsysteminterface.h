@@ -101,18 +101,18 @@ public:
                                        quint32 nativeScanCode, quint32 nativeVirtualKey,
                                        quint32 nativeModifiers,
                                        const QString& text = QString(), bool autorep = false,
-                                       ushort count = 1, bool tryShortcutOverride = true);
+                                       ushort count = 1);
     static bool handleExtendedKeyEvent(QWindow *window, ulong timestamp, QEvent::Type type, int key, Qt::KeyboardModifiers modifiers,
                                        quint32 nativeScanCode, quint32 nativeVirtualKey,
                                        quint32 nativeModifiers,
                                        const QString& text = QString(), bool autorep = false,
-                                       ushort count = 1, bool tryShortcutOverride = true);
+                                       ushort count = 1);
     static bool handleExtendedKeyEvent(QWindow *window, ulong timestamp, const QInputDevice *device,
                                        QEvent::Type type, int key, Qt::KeyboardModifiers modifiers,
                                        quint32 nativeScanCode, quint32 nativeVirtualKey,
                                        quint32 nativeModifiers,
                                        const QString& text = QString(), bool autorep = false,
-                                       ushort count = 1, bool tryShortcutOverride = true);
+                                       ushort count = 1);
     static bool handleWheelEvent(QWindow *window, const QPointF &local, const QPointF &global,
                                  QPoint pixelDelta, QPoint angleDelta,
                                  Qt::KeyboardModifiers mods = Qt::NoModifier,
@@ -252,6 +252,8 @@ public:
                                                      Qt::MouseButtons buttons = {}, int xTilt = 0, int yTilt = 0,
                                                      qreal tangentialPressure = 0, qreal rotation = 0, int z = 0,
                                                      Qt::KeyboardModifiers modifiers = Qt::NoModifier);
+
+    // The following 4 functions are deprecated (QTBUG-114560)
     static bool handleTabletEnterProximityEvent(ulong timestamp, int deviceType, int pointerType, qint64 uid);
     static void handleTabletEnterProximityEvent(int deviceType, int pointerType, qint64 uid);
     static bool handleTabletLeaveProximityEvent(ulong timestamp, int deviceType, int pointerType, qint64 uid);

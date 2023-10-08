@@ -7,6 +7,7 @@
 #include <QtCore/qcoreapplication.h>
 #include <QtCore/qthread.h>
 #include <QtCore/qsocketnotifier.h>
+#include <QtCore/private/qstdweb_p.h>
 
 #include "emscripten.h"
 #include <emscripten/html5.h>
@@ -32,14 +33,20 @@ Q_LOGGING_CATEGORY(lcEventDispatcherTimers, "qt.eventdispatcher.timers");
 // track Qts own usage of asyncify.
 static bool g_is_asyncify_suspended = false;
 
-EM_JS(bool, qt_have_asyncify_js, (), {
-    return typeof Asyncify != "undefined";
-});
+#if defined(QT_STATIC)
+
+static bool useAsyncify()
+{
+    return qstdweb::haveAsyncify();
+}
 
 EM_JS(void, qt_asyncify_suspend_js, (), {
+    if (Module.qtSuspendId === undefined)
+        Module.qtSuspendId = 0;
     let sleepFn = (wakeUp) => {
         Module.qtAsyncifyWakeUp = wakeUp;
     };
+    ++Module.qtSuspendId;
     return Asyncify.handleSleep(sleepFn);
 });
 
@@ -48,20 +55,38 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     if (wakeUp == undefined)
         return;
     Module.qtAsyncifyWakeUp = undefined;
+    const suspendId = Module.qtSuspendId;
 
     // Delayed wakeup with zero-timer. Workaround/fix for
     // https://github.com/emscripten-core/emscripten/issues/10515
-    setTimeout(wakeUp);
+    setTimeout(() => {
+        // Another suspend occurred while the timeout was in queue.
+        if (Module.qtSuspendId !== suspendId)
+            return;
+        wakeUp();
+    });
 });
 
-// Returns true if asyncify is available.
-bool qt_have_asyncify()
+#else
+
+// EM_JS is not supported for side modules; disable asyncify
+
+static bool useAsyncify()
 {
-    static bool have_asyncify = []{
-        return qt_have_asyncify_js();
-    }();
-    return have_asyncify;
+    return false;
 }
+
+void qt_asyncify_suspend_js()
+{
+    Q_UNREACHABLE();
+}
+
+void qt_asyncify_resume_js()
+{
+    Q_UNREACHABLE();
+}
+
+#endif // defined(QT_STATIC)
 
 // Suspends the main thread until qt_asyncify_resume() is called. Returns
 // false immediately if Qt has already suspended the main thread (recursive
@@ -182,12 +207,9 @@ bool QEventDispatcherWasm::isValidEventDispatcherPointer(QEventDispatcherWasm *e
 
 bool QEventDispatcherWasm::processEvents(QEventLoop::ProcessEventsFlags flags)
 {
+    qCDebug(lcEventDispatcher) << "QEventDispatcherWasm::processEvents flags" << flags;
+
     emit awake();
-
-    bool hasPendingEvents = qGlobalPostedEventsCount() > 0;
-
-    qCDebug(lcEventDispatcher) << "QEventDispatcherWasm::processEvents flags" << flags
-                               << "pending events" << hasPendingEvents;
 
     if (isMainThreadEventDispatcher()) {
         if (flags & QEventLoop::DialogExec)
@@ -196,25 +218,28 @@ bool QEventDispatcherWasm::processEvents(QEventLoop::ProcessEventsFlags flags)
             handleApplicationExec();
     }
 
-    hasPendingEvents = qGlobalPostedEventsCount() > 0;
+    QCoreApplication::sendPostedEvents();
+    processWindowSystemEvents(flags);
 
-    if (!hasPendingEvents && (flags & QEventLoop::WaitForMoreEvents))
-        wait();
+    // The processPostedEvents() call above may process an event which deletes the
+    // application object and the event dispatcher; stop event processing in that case.
+    if (!isValidEventDispatcherPointer(this))
+        return false;
 
     if (m_interrupted) {
         m_interrupted = false;
         return false;
     }
 
+    if (flags & QEventLoop::WaitForMoreEvents)
+        wait();
+
     if (m_processTimers) {
         m_processTimers = false;
         processTimers();
     }
 
-    hasPendingEvents = qGlobalPostedEventsCount() > 0;
-    QCoreApplication::sendPostedEvents();
-    processWindowSystemEvents(flags);
-    return hasPendingEvents;
+    return false;
 }
 
 void QEventDispatcherWasm::processWindowSystemEvents(QEventLoop::ProcessEventsFlags flags)
@@ -368,7 +393,7 @@ void QEventDispatcherWasm::handleApplicationExec()
 
 void QEventDispatcherWasm::handleDialogExec()
 {
-    if (!qt_have_asyncify()) {
+    if (!useAsyncify()) {
         qWarning() << "Warning: exec() is not supported on Qt for WebAssembly in this configuration. Please build"
                    << "with asyncify support, or use an asynchronous API like QDialog::open()";
         emscripten_sleep(1); // This call never returns
@@ -397,7 +422,7 @@ bool QEventDispatcherWasm::wait(int timeout)
 #endif
     Q_ASSERT(emscripten_is_main_runtime_thread());
     Q_ASSERT(isMainThreadEventDispatcher());
-    if (qt_have_asyncify()) {
+    if (useAsyncify()) {
         if (timeout > 0)
             qWarning() << "QEventDispatcherWasm asyncify wait with timeout is not supported; timeout will be ignored"; // FIXME
 

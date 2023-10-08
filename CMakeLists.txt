@@ -1,6 +1,6 @@
 # The real minimum version will be checked by the qtbase project.
 # 3.16 is the absolute minimum though.
-cmake_minimum_required(VERSION 3.16...3.20)
+cmake_minimum_required(VERSION 3.16...3.21)
 
 
 # set QT_SUPERBUILD early, so that qtbase/.cmake.conf can check it
@@ -12,7 +12,12 @@ include("${__qt6_qtbase_src_path}/.cmake.conf")
 
 # Run platform auto-detection /before/ the first project() call and thus
 # before the toolchain file is loaded.
-include("${__qt6_qtbase_src_path}/cmake/QtAutoDetect.cmake")
+# Don't run auto-detection when doing standalone tests. In that case, the detection
+# results are taken from either QtBuildInternals or the qt.toolchain.cmake file.
+
+if(NOT QT_BUILD_STANDALONE_TESTS)
+    include("${__qt6_qtbase_src_path}/cmake/QtAutoDetect.cmake")
+endif()
 
 project(Qt
     VERSION "${QT_REPO_MODULE_VERSION}"
@@ -24,8 +29,6 @@ project(Qt
 # Required so we can call ctest from the root build directory
 enable_testing()
 
-set(qt_module_prop_prefix "__qt_prop_")
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 if (NOT QT_BUILD_STANDALONE_TESTS)
     list(APPEND CMAKE_MODULE_PATH "${__qt6_qtbase_src_path}/cmake")
@@ -34,7 +37,7 @@ if (NOT QT_BUILD_STANDALONE_TESTS)
     list(APPEND CMAKE_MODULE_PATH "${__qt6_qtbase_src_path}/cmake/3rdparty/kwin")
 endif()
 
-include("QtTopLevelHelpers")
+include(QtTopLevelHelpers)
 include(ECMOptionalAddSubdirectory)
 
 # Also make sure the CMake config files do not recreate the already-existing targets
@@ -52,12 +55,21 @@ if(NOT QT_BUILD_SUBMODULES)
 endif()
 set(QT_BUILD_SUBMODULES "${QT_BUILD_SUBMODULES}" CACHE STRING "Submodules to build")
 
+foreach(module IN LISTS QT_BUILD_SUBMODULES)
+    if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${module}/CMakeLists.txt)
+        message(FATAL_ERROR
+            "Module '${module}' cannot be found. Please double-check the "
+            "spelling and try again. Or run `./init-repository` to get "
+            "the submodules.")
+    endif()
+endforeach()
+
 qt_internal_sort_module_dependencies("${QT_BUILD_SUBMODULES}" QT_BUILD_SUBMODULES)
 
 foreach(module IN LISTS QT_BUILD_SUBMODULES)
     # Check for unmet dependencies
     if(NOT DEFINED BUILD_${module} OR BUILD_${module})
-        message(NOTICE "Checking dependencies of submodule '${module}'")
+        message(STATUS "Checking dependencies of submodule '${module}'")
         get_property(required_deps GLOBAL PROPERTY QT_REQUIRED_DEPS_FOR_${module})
         get_property(dependencies GLOBAL PROPERTY QT_DEPS_FOR_${module})
         foreach(dep IN LISTS dependencies)
@@ -84,7 +96,7 @@ foreach(module IN LISTS QT_BUILD_SUBMODULES)
                         "but ${error_reason}.\n"
                         "Note: Use '-skip ${module}' to exclude it from the build.")
                 else()
-                    message(NOTICE "Skipping optional dependency '${dep}' of '${module}', "
+                    message(STATUS "Skipping optional dependency '${dep}' of '${module}', "
                         "because ${error_reason}.")
                 endif()
             endif()
@@ -92,8 +104,12 @@ foreach(module IN LISTS QT_BUILD_SUBMODULES)
     endif()
 endforeach()
 
+if(NOT DEFINED CMAKE_MESSAGE_CONTEXT_SHOW)
+    set(CMAKE_MESSAGE_CONTEXT_SHOW TRUE)
+endif()
+
 foreach(module IN LISTS QT_BUILD_SUBMODULES)
-    message(NOTICE "Configuring submodule '${module}'")
+    message(STATUS "Configuring submodule '${module}'")
     ecm_optional_add_subdirectory("${module}")
 
     if(module STREQUAL "qtbase")

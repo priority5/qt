@@ -5,6 +5,7 @@
     \page configure-linux-device.html
     \title Configure an Embedded Linux Device
     \brief Provides information about how to configure an Embedded Linux device in Qt.
+    \ingroup explanations-platforms
 
     Cross-compiling Qt for a given device requires a \b toolchain and a \b sysroot. The
     toolchain is expected to contain a version of gcc, or another compiler, and associated
@@ -60,6 +61,8 @@
     \badcode
     ./configure -release -opengl es2 -device linux-rasp-pi2-g++ -device-option CROSS_COMPILE=$TOOLCHAIN/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian/bin/arm-linux-gnueabihf- -sysroot $ROOTFS -prefix /usr/local/qt5
     \endcode
+
+    \include use-ninja-note.qdocinc ninja-note
 
     With Qt 6 and CMake, this approach is \b{no longer sufficient} on its own. Rather, a
     \l{https://cmake.org/cmake/help/latest/manual/cmake-toolchains.7.html}{CMake toolchain

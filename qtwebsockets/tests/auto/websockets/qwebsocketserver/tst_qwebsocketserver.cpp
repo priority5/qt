@@ -6,8 +6,8 @@
 #include <QTcpSocket>
 #include <QTcpServer>
 #include <QtCore/QScopedPointer>
-#include <QtNetwork/qsslpresharedkeyauthenticator.h>
 #ifndef QT_NO_SSL
+#include <QtNetwork/qsslpresharedkeyauthenticator.h>
 #include <QtNetwork/qsslcipher.h>
 #include <QtNetwork/qsslkey.h>
 #include <QtNetwork/qsslsocket.h>
@@ -44,6 +44,7 @@ public:
     QByteArray m_psk;
 
 public slots:
+#if QT_CONFIG(ssl)
     void providePsk(QSslPreSharedKeyAuthenticator *authenticator)
     {
         QVERIFY(authenticator);
@@ -65,6 +66,7 @@ public slots:
             QCOMPARE(authenticator->preSharedKey(), m_psk);
         }
     }
+#endif
 };
 
 class tst_QWebSocketServer : public QObject
@@ -84,7 +86,9 @@ private Q_SLOTS:
     void tst_connectivity();
     void tst_protocols_data();
     void tst_protocols();
+#if QT_CONFIG(ssl)
     void tst_preSharedKey();
+#endif
     void tst_maxPendingConnections();
     void tst_serverDestroyedWhileSocketConnected();
     void tst_scheme(); // qtbug-55927
@@ -256,7 +260,7 @@ void tst_QWebSocketServer::tst_settersAndGetters()
 
     server.setHandshakeTimeout(64);
     QCOMPARE(server.handshakeTimeoutMS(), 64);
-#if QT_HAS_INCLUDE(<chrono>)
+#if __has_include(<chrono>)
     auto expected = std::chrono::milliseconds(64);
     QCOMPARE(server.handshakeTimeout(), expected);
 
@@ -409,6 +413,7 @@ void tst_QWebSocketServer::tst_protocols()
     QCOMPARE(serverSocket->handshakeOptions().subprotocols(), clientProtocols + headerProtocols);
 }
 
+#if QT_CONFIG(ssl)
 void tst_QWebSocketServer::tst_preSharedKey()
 {
     if (m_shouldSkipUnsupportedIpv6Test)
@@ -491,6 +496,7 @@ void tst_QWebSocketServer::tst_preSharedKey()
     QCOMPARE(sslErrorsSpy.size(), 0);
     QCOMPARE(serverErrorSpy.size(), 0);
 }
+#endif
 
 void tst_QWebSocketServer::tst_maxPendingConnections()
 {
@@ -811,7 +817,7 @@ void tst_QWebSocketServer::tst_handshakeTimeout()
         QCOMPARE(secureServerConnectionSpy.size(), 0);
 
         QWebSocket secureSocket;
-        connect(&secureSocket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error),
+        connect(&secureSocket, &QWebSocket::errorOccurred,
                 [](QAbstractSocket::SocketError error) {
                     // This shouldn't print but it's useful for debugging when/if it does.
                     qDebug() << "Error occurred in the client:" << error;

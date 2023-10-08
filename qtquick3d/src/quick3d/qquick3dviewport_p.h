@@ -24,6 +24,7 @@
 
 #include "qquick3dsceneenvironment_p.h"
 #include "qquick3drenderstats_p.h"
+#include "qquick3dlightmapbaker_p.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -93,12 +94,18 @@ public:
 
     void processPointerEventFromRay(const QVector3D &origin, const QVector3D &direction, QPointerEvent *event);
 
+    QQuick3DLightmapBaker *maybeLightmapBaker();
+    QQuick3DLightmapBaker *lightmapBaker();
+
+    Q_INVOKABLE void bakeLightmap();
+
 protected:
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
     QSGNode *updatePaintNode(QSGNode *, UpdatePaintNodeData *) override;
     void itemChange(QQuickItem::ItemChange change, const QQuickItem::ItemChangeData &value) override;
 
     bool event(QEvent *) override;
+    void componentComplete() override;
 
 public Q_SLOTS:
     void setCamera(QQuick3DCamera *camera);
@@ -114,7 +121,8 @@ public Q_SLOTS:
 
 private Q_SLOTS:
     void invalidateSceneGraph();
-    void cleanupResources();
+    void updateInputProcessing();
+    void onReleaseCachedResources();
 
 Q_SIGNALS:
     void cameraChanged();
@@ -128,12 +136,13 @@ private:
     Q_DISABLE_COPY(QQuick3DViewport)
     QQuick3DSceneRenderer *getRenderer() const;
     void updateDynamicTextures();
+    QSGNode *setupOffscreenRenderer(QSGNode *node);
+    QSGNode *setupInlineRenderer(QSGNode *node);
     void setupDirectRenderer(RenderMode mode);
     bool checkIsVisible() const;
     bool internalPick(QPointerEvent *event, const QVector3D &origin = QVector3D(), const QVector3D &direction = QVector3D()) const;
     QQuick3DPickResult processPickResult(const QSSGRenderPickResult &pickResult) const;
     QQuick3DSceneManager *findChildSceneManager(QQuick3DObject *inObject, QQuick3DSceneManager *manager = nullptr);
-
     QQuick3DCamera *m_camera = nullptr;
     QQuick3DSceneEnvironment *m_environment = nullptr;
     QQuick3DSceneRootNode *m_sceneRoot = nullptr;
@@ -145,8 +154,9 @@ private:
     RenderMode m_renderMode = Offscreen;
     QQuickShaderEffectSource::Format m_renderFormat = QQuickShaderEffectSource::RGBA8;
     QQuick3DRenderStats *m_renderStats = nullptr;
-    QHash<QObject*, QMetaObject::Connection> m_connections;
-    bool m_enableInputProcessing = true;
+    bool m_enableInputProcessing = false;
+    QQuick3DLightmapBaker *m_lightmapBaker = nullptr;
+    Q_QUICK3D_PROFILE_ID
 };
 
 QT_END_NAMESPACE

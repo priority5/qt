@@ -1,5 +1,5 @@
 // Copyright (C) 2016 The Qt Company Ltd.
-// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
 #include <QtGui/QGuiApplication>
 #include <QtCore/QDir>
@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
     QObject::connect(viewer.engine(), &QQmlEngine::quit, &viewer, &QWindow::close);
     //! [4]
 
-    viewer.setTitle(QStringLiteral("QML scatter example"));
+    viewer.setTitle(QStringLiteral("Simple Scatter Graph"));
 
     //! [3]
     viewer.setSource(QUrl("qrc:/qml/qmlscatter/main.qml"));

@@ -21,6 +21,9 @@
 #include "qiosmenu.h"
 #include "qiosfiledialog.h"
 #include "qiosmessagedialog.h"
+#include "qioscolordialog.h"
+#include "qiosfontdialog.h"
+#include "qiosscreen.h"
 #endif
 
 QT_BEGIN_NAMESPACE
@@ -98,6 +101,8 @@ bool QIOSTheme::usePlatformNativeDialog(QPlatformTheme::DialogType type) const
     switch (type) {
     case FileDialog:
     case MessageDialog:
+    case ColorDialog:
+    case FontDialog:
         return !qt_apple_isApplicationExtension();
     default:
         return false;
@@ -113,6 +118,12 @@ QPlatformDialogHelper *QIOSTheme::createPlatformDialogHelper(QPlatformTheme::Dia
         break;
     case MessageDialog:
         return new QIOSMessageDialog();
+        break;
+    case ColorDialog:
+        return new QIOSColorDialog();
+        break;
+    case FontDialog:
+        return new QIOSFontDialog();
         break;
 #endif
     default:
@@ -132,15 +143,22 @@ QVariant QIOSTheme::themeHint(ThemeHint hint) const
     }
 }
 
-QPlatformTheme::Appearance QIOSTheme::appearance() const
+Qt::ColorScheme QIOSTheme::colorScheme() const
 {
-    if (UIWindow *window = qt_apple_sharedApplication().windows.lastObject) {
-        return window.rootViewController.traitCollection.userInterfaceStyle
-                == UIUserInterfaceStyleDark
-                ? QPlatformTheme::Appearance::Dark
-                : QPlatformTheme::Appearance::Light;
+    // Set the appearance based on the QUIWindow
+    // Fallback to the UIScreen if no window is created yet
+    UIUserInterfaceStyle appearance = UIScreen.mainScreen.traitCollection.userInterfaceStyle;
+    NSArray<UIWindow *> *windows = qt_apple_sharedApplication().windows;
+    for (UIWindow *window in windows) {
+        if ([window isKindOfClass:[QUIWindow class]]) {
+            appearance = static_cast<QUIWindow*>(window).traitCollection.userInterfaceStyle;
+            break;
+        }
     }
-    return QPlatformTheme::Appearance::Unknown;
+
+    return appearance == UIUserInterfaceStyleDark
+                       ? Qt::ColorScheme::Dark
+                       : Qt::ColorScheme::Light;
 }
 
 const QFont *QIOSTheme::font(Font type) const

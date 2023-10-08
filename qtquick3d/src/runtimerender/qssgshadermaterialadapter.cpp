@@ -40,20 +40,20 @@ bool QSSGShaderMaterialAdapter::hasCustomShaderSnippet(QSSGShaderCache::ShaderTy
 }
 
 QByteArray QSSGShaderMaterialAdapter::customShaderSnippet(QSSGShaderCache::ShaderType,
-                                                          const QSSGRef<QSSGShaderLibraryManager> &)
+                                                          QSSGShaderLibraryManager &)
 {
     return QByteArray();
 }
 
 bool QSSGShaderMaterialAdapter::hasCustomShaderFunction(QSSGShaderCache::ShaderType,
                                                         const QByteArray &,
-                                                        const QSSGRef<QSSGShaderLibraryManager> &)
+                                                        QSSGShaderLibraryManager &)
 {
     return false;
 }
 
 void QSSGShaderMaterialAdapter::setCustomPropertyUniforms(char *,
-                                                          QSSGRef<QSSGRhiShaderPipeline> &,
+                                                          QSSGRhiShaderPipeline &,
                                                           const QSSGRenderContextInterface &)
 {
 }
@@ -281,9 +281,7 @@ bool QSSGShaderCustomMaterialAdapter::isSpecularEnabled()
 
 bool QSSGShaderCustomMaterialAdapter::isVertexColorsEnabled()
 {
-    // qt_varColor must always be present. Works also if the mesh does not have
-    // colors, it will assume vec4(1.0).
-    return true;
+    return m_material.m_renderFlags.testFlag(QSSGRenderCustomMaterial::RenderFlag::VarColor);
 }
 
 bool QSSGShaderCustomMaterialAdapter::isClearcoatEnabled()
@@ -464,26 +462,26 @@ bool QSSGShaderCustomMaterialAdapter::hasCustomShaderSnippet(QSSGShaderCache::Sh
 }
 
 QByteArray QSSGShaderCustomMaterialAdapter::customShaderSnippet(QSSGShaderCache::ShaderType type,
-                                                                const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager)
+                                                                QSSGShaderLibraryManager &shaderLibraryManager)
 {
     if (hasCustomShaderSnippet(type))
-        return shaderLibraryManager->getShaderSource(m_material.m_shaderPathKey, type);
+        return shaderLibraryManager.getShaderSource(m_material.m_shaderPathKey, type);
 
     return QByteArray();
 }
 
 bool QSSGShaderCustomMaterialAdapter::hasCustomShaderFunction(QSSGShaderCache::ShaderType shaderType,
                                                               const QByteArray &funcName,
-                                                              const QSSGRef<QSSGShaderLibraryManager> &shaderLibraryManager)
+                                                              QSSGShaderLibraryManager &shaderLibraryManager)
 {
     if (hasCustomShaderSnippet(shaderType))
-        return shaderLibraryManager->getShaderMetaData(m_material.m_shaderPathKey, shaderType).customFunctions.contains(funcName);
+        return shaderLibraryManager.getShaderMetaData(m_material.m_shaderPathKey, shaderType).customFunctions.contains(funcName);
 
     return false;
 }
 
 void QSSGShaderCustomMaterialAdapter::setCustomPropertyUniforms(char *ubufData,
-                                                                QSSGRef<QSSGRhiShaderPipeline> &shaderPipeline,
+                                                                QSSGRhiShaderPipeline &shaderPipeline,
                                                                 const QSSGRenderContextInterface &context)
 {
     context.customMaterialSystem()->applyRhiShaderPropertyValues(ubufData, m_material, shaderPipeline);

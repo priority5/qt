@@ -1,27 +1,21 @@
 // Copyright (C) 2017 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
 
-
-
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include <QtWidgets/qmainwindow.h>
-
 #include "ui_mainwindow.h"
 
+#include <QMainWindow>
 #include <QtTextToSpeech>
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 public:
-    MainWindow(QWidget *parent = 0);
+    explicit MainWindow(QWidget *parent = nullptr);
 
 public slots:
-    void speak();
-    void stop();
-
     void setRate(int);
     void setPitch(int);
     void setVolume(int volume);
@@ -35,8 +29,8 @@ public slots:
 
 private:
     Ui::MainWindow ui;
-    QTextToSpeech *m_speech;
+    QTextToSpeech *m_speech = nullptr;
     QList<QVoice> m_voices;
 };
 
-#endif
+#endif // MAINWINDOW_H

@@ -21,9 +21,6 @@ Q_DECLARE_LOGGING_CATEGORY(QT_BT_ANDROID)
 
 #define USE_FALLBACK true
 
-// ### Needs to be moved to qjniobject.h in qtbase
-Q_DECLARE_METATYPE(QJniObject)
-
 Q_BLUETOOTH_EXPORT bool useReverseUuidWorkAroundConnect = true;
 
 /* BluetoothSocket.connect() can block up to 10s. Therefore it must be

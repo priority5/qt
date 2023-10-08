@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 project(samegame LANGUAGES CXX)
 
@@ -20,12 +23,12 @@ set_target_properties(samegame PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
-target_link_libraries(samegame PUBLIC
-    Qt::Core
-    Qt::Gui
-    Qt::Qml
-    Qt::Quick
-    Qt::Sql
+target_link_libraries(samegame PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::Sql
 )
 
 # Resources:
@@ -101,7 +104,7 @@ set(samegame_resource_files
     "samegame.qml"
 )
 
-qt6_add_resources(samegame "samegame"
+qt_add_resources(samegame "samegame"
     PREFIX
         "/demos/samegame"
     FILES

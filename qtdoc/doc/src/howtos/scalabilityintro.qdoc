@@ -6,8 +6,7 @@
     \page scalability.html
     \brief How to develop applications that scale well on devices with different
     screen configurations and UI conventions.
-
-    \ingroup best-practices
+    \ingroup explanations-accessibility
 
     When you develop applications for several different mobile device platforms,
     you face the following challenges:
@@ -276,7 +275,7 @@
     that is used to scale graphics output: allocate larger buffers and set a
     scaling transform.
 
-    The advantage of this approach is that that vector graphics and fonts scale
+    The advantage of this approach is that vector graphics and fonts scale
     automatically and existing applications tend to work unmodified. For raster
     content, high-resolution alternative resources are needed, however.
 

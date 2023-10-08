@@ -10,7 +10,6 @@
 #include <QtCore/qnamespace.h>
 #include <QtCore/qobjectdefs.h>
 
-#include <QtCore/q20functional.h>
 #include <tuple>
 #include <type_traits>
 
@@ -36,21 +35,26 @@ struct FunctionTraitsHelper
 };
 
 template<typename T>
-struct FunctionTraits;
+struct FunctionTraitsImpl;
 
 template<typename T>
-struct FunctionTraits : public FunctionTraits<decltype(&q20::remove_cvref_t<T>::operator())>{};
+struct FunctionTraitsImpl : public FunctionTraitsImpl<decltype(&T::operator())>
+{
+};
 
 template<typename ReturnT, typename... Args>
-struct FunctionTraits<ReturnT (*)(Args...)> : public FunctionTraitsHelper<ReturnT, Args...>
+struct FunctionTraitsImpl<ReturnT (*)(Args...)> : public FunctionTraitsHelper<ReturnT, Args...>
 {
 };
 
 template<class ReturnT, class ClassT, class... Args>
-struct FunctionTraits<ReturnT (ClassT::*)(Args...) const>
+struct FunctionTraitsImpl<ReturnT (ClassT::*)(Args...) const>
     : public FunctionTraitsHelper<ReturnT, Args...>
 {
 };
+
+template<typename T>
+using FunctionTraits = FunctionTraitsImpl<std::decay_t<T>>;
 
 template<typename ... T>
 struct CheckAny {

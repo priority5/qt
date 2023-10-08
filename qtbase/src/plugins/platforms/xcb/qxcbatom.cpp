@@ -54,6 +54,8 @@ static const char *xcb_atomnames = {
 
     "_QT_CLOSE_CONNECTION\0"
 
+    "_QT_GET_TIMESTAMP\0"
+
     "_MOTIF_WM_HINTS\0"
 
     "DTWM_IS_RUNNING\0"
@@ -234,8 +236,10 @@ void QXcbAtom::initializeAllAtoms(xcb_connection_t *connection) {
 
     for (i = 0; i < QXcbAtom::NAtoms; ++i) {
         xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(connection, cookies[i], nullptr);
-        m_allAtoms[i] = reply->atom;
-        free(reply);
+        if (reply) {
+            m_allAtoms[i] = reply->atom;
+            free(reply);
+        }
     }
 }
 

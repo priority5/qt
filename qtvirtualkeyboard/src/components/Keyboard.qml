@@ -19,6 +19,12 @@ Item {
     property alias style: styleLoader.item
     property alias wordCandidateView: wordCandidateView
     property alias shadowInputControl: shadowInputControl
+    property alias alternativeKeys: alternativeKeys
+    property alias characterPreview: characterPreview
+    property alias wordCandidateContextMenu: wordCandidateContextMenu
+    property alias fullScreenModeSelectionControl: fullScreenModeSelectionControl
+    property alias naviationHighlight: naviationHighlight
+    property alias keyboardInputArea: keyboardInputArea
     property Item activeKey: null
     property TouchPoint activeTouchPoint
     property int localeIndex: -1
@@ -57,6 +63,9 @@ Item {
     readonly property bool languagePopupListActive: languagePopupList.enabled
     property alias soundEffect: soundEffect
     property alias keyboardLayoutLoader: keyboardLayoutLoader
+    property real screenHeight: parent.parent ? parent.parent.height : Screen.height
+    property bool noAnimations
+    property int pressAndHoldDelay: 500
 
     function initDefaultInputMethod() {
         try {
@@ -68,7 +77,7 @@ Item {
     Component.onCompleted: InputContext.priv.registerInputPanel(parent)
 
     width: keyboardBackground.width
-    height: keyboardBackground.height + (VirtualKeyboardSettings.wordCandidateList.alwaysVisible ? wordCandidateView.height : 0)
+    height: keyboardBackground.height
     onActiveChanged: {
         hideLanguagePopup()
         if (active && symbolMode && !preferNumbers)
@@ -90,10 +99,6 @@ Item {
             updateDefaultLocale()
             if (!isValidLocale(localeIndex) || VirtualKeyboardSettings.locale)
                 localeIndex = defaultLocaleIndex
-        }
-        function onFullScreenModeChanged() {
-            wordCandidateView.disableAnimation = VirtualKeyboardSettings.fullScreenMode
-            keyboard.fullScreenMode = VirtualKeyboardSettings.fullScreenMode
         }
         function onDefaultInputMethodDisabledChanged() {
             updateInputMethod()
@@ -206,22 +211,19 @@ Item {
                     }
                 }
                 initialKey = keyboardInputArea.initialKey
-                if (!keyboardInputArea.navigateToNextKey(-1, 0, false)) {
+                if (!keyboardInputArea.navigateToNextKey(-1 * direction, 0, false)) {
                     keyboardInputArea.initialKey = initialKey
                     if (!keyboardInputArea.navigateToNextKey(0, -1 * direction, false)) {
                         if (wordCandidateView.count) {
-                            if (wordCandidateView.count) {
-                                wordCandidateView.currentIndex =
-                                        wordCandidateView.effectiveLayoutDirection == Qt.LeftToRight ?
-                                            (wordCandidateView.count - 1) : 0
-                                break
-                            }
+                            wordCandidateView.currentIndex =
+                                    wordCandidateView.effectiveLayoutDirection == Qt.LeftToRight ?
+                                        (wordCandidateView.count - 1) : 0
                             break
                         }
                         keyboardInputArea.initialKey = initialKey
                         keyboardInputArea.navigateToNextKey(0, -1 * direction, true)
                     }
-                    keyboardInputArea.navigateToNextKey(-1, 0, true)
+                    keyboardInputArea.navigateToNextKey(-1 * direction, 0, true)
                 }
                 break
             case Qt.Key_Up:
@@ -318,7 +320,7 @@ Item {
                     }
                 }
                 initialKey = keyboardInputArea.initialKey
-                if (!keyboardInputArea.navigateToNextKey(1, 0, false)) {
+                if (!keyboardInputArea.navigateToNextKey(1 * direction, 0, false)) {
                     keyboardInputArea.initialKey = initialKey
                     if (!keyboardInputArea.navigateToNextKey(0, 1 * direction, false)) {
                         if (wordCandidateView.count) {
@@ -330,7 +332,7 @@ Item {
                         keyboardInputArea.initialKey = initialKey
                         keyboardInputArea.navigateToNextKey(0, 1 * direction, true)
                     }
-                    keyboardInputArea.navigateToNextKey(1, 0, true)
+                    keyboardInputArea.navigateToNextKey(1 * direction, 0, true)
                 }
                 break
             case Qt.Key_Down:
@@ -507,7 +509,7 @@ Item {
     }
     Timer {
         id: pressAndHoldTimer
-        interval: 500
+        interval: keyboard.pressAndHoldDelay
         onTriggered: {
             if (keyboard.activeKey && keyboard.activeKey === keyboardInputArea.initialKey) {
                 var origin = keyboard.mapFromItem(activeKey, activeKey.width / 2, 0)
@@ -619,12 +621,8 @@ Item {
         }
         // Note: without "highlightItem.x - highlightItem.x" the binding does not work for alternativeKeys
         property var highlightItemOffset: highlightItem ? keyboard.mapFromItem(highlightItem, highlightItem.x - highlightItem.x, highlightItem.y - highlightItem.y) : ({x:0, y:0})
-        property int moveDuration: 200
-        property int resizeDuration: 200
-        property alias xAnimation: xAnimation
-        property alias yAnimation: yAnimation
-        property alias widthAnimation: widthAnimation
-        property alias heightAnimation: heightAnimation
+        property int moveDuration: !keyboard.noAnimations ? 200 : 0
+        property int resizeDuration: !keyboard.noAnimations ? 200 : 0
         z: 2
         x: highlightItemOffset.x
         y: highlightItemOffset.y
@@ -653,8 +651,9 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: wordCandidateView.top
-        height: (keyboard.parent.parent ? keyboard.parent.parent.height : Screen.height) -
-                keyboard.height - (wordCandidateView.visibleCondition && !VirtualKeyboardSettings.wordCandidateList.alwaysVisible ? wordCandidateView.height : 0)
+        height: keyboard.screenHeight -
+                keyboard.height -
+                wordCandidateView.height
         visible: fullScreenMode && (shadowInputControlVisibleTimer.running || InputContext.animating)
 
         Connections {
@@ -681,6 +680,7 @@ Item {
     }
 
     SelectionControl {
+        id: fullScreenModeSelectionControl
         objectName: "fullScreenModeSelectionControl"
         inputContext: InputContext.priv.shadow
         anchors.top: shadowInputControl.top
@@ -693,13 +693,12 @@ Item {
         objectName: "wordCandidateView"
         clip: true
         z: -2
-        property bool disableAnimation: VirtualKeyboardSettings.fullScreenMode
         property bool empty: true
-        readonly property bool visibleCondition: (((!wordCandidateView.empty || wordCandidateViewAutoHideTimer.running || shadowInputControl.visible) &&
+        readonly property bool visibleCondition: (((!wordCandidateView.empty || wordCandidateViewAutoHideTimer.running) &&
                                                    InputContext.inputEngine.wordCandidateListVisibleHint) || VirtualKeyboardSettings.wordCandidateList.alwaysVisible) &&
-                                                 (keyboard.active || shadowInputControl.visible)
-        readonly property real visibleYOffset: VirtualKeyboardSettings.wordCandidateList.alwaysVisible ? 0 : -height
-        readonly property real currentYOffset: visibleCondition || wordCandidateViewTransition.running ? visibleYOffset : 0
+                                                 keyboard.active
+        readonly property real visibleYOffset: -height
+        readonly property real currentYOffset: visibleCondition ? visibleYOffset : 0
         height: style ? style.selectionListHeight : 0
         anchors.left: parent.left
         anchors.right: parent.right
@@ -710,8 +709,8 @@ Item {
         highlight: style.selectionListHighlight ? style.selectionListHighlight : defaultHighlight
         highlightMoveDuration: 0
         highlightResizeDuration: 0
-        add: style.selectionListAdd
-        remove: style.selectionListRemove
+        add: !keyboard.noAnimations ? style.selectionListAdd : null
+        remove: !keyboard.noAnimations ? style.selectionListRemove : null
         keyNavigationWraps: true
         model: InputContext.inputEngine.wordCandidateListModel
         onCurrentItemChanged: if (currentItem) soundEffect.register(currentItem.soundEffect)
@@ -750,18 +749,29 @@ Item {
             id: defaultHighlight
             Item {}
         }
-        states: State {
-            name: "visible"
-            when: wordCandidateView.visibleCondition
-            PropertyChanges {
-                target: wordCandidateView
-                y: wordCandidateView.visibleYOffset
+        states: [
+            State {
+                name: "visible"
+                when: wordCandidateView.visibleCondition
+                PropertyChanges {
+                    target: wordCandidateView
+                    y: wordCandidateView.visibleYOffset
+                }
+            },
+            State {
+                name: "alwaysVisible"
+                when: keyboard.fullScreenMode || VirtualKeyboardSettings.wordCandidateList.alwaysVisible
+                PropertyChanges {
+                    target: wordCandidateView
+                    y: wordCandidateView.visibleYOffset
+                }
             }
-        }
+        ]
         transitions: Transition {
             id: wordCandidateViewTransition
+            from: ""
             to: "visible"
-            enabled: !InputContext.animating && !VirtualKeyboardSettings.wordCandidateList.alwaysVisible && !wordCandidateView.disableAnimation
+            enabled: !InputContext.animating && !keyboard.noAnimations
             reversible: true
             ParallelAnimation {
                 NumberAnimation {
@@ -870,16 +880,22 @@ Item {
                     target: keyboardLayoutLoader
                     property: "source"
                     value: keyboard.layout
-                    when: keyboard.layout.length > 0
-                    restoreMode: Binding.RestoreBinding
+                    when: keyboard.width > 0 && keyboard.layout.length > 0
+                    restoreMode: Binding.RestoreNone
                 }
 
                 onItemChanged: {
+                    if (!item)
+                        return
+
                     // Reset input mode if the new layout wants to override it
-                    if (item && item.inputMode !== -1)
+                    if (item.inputMode !== -1)
                         inputModeNeedsReset = true
-                    if (item)
-                        notifyLayoutChanged()
+
+                    if (!InputContext.inputEngine.inputMethod)
+                        updateInputMethod()
+
+                    notifyLayoutChanged()
                 }
 
                 MultiPointTouchArea {
@@ -1200,8 +1216,8 @@ Item {
             model: languageListModel
             delegate: keyboard.style ? keyboard.style.languageListDelegate : null
             highlight: keyboard.style ? keyboard.style.languageListHighlight : defaultHighlight
-            add: keyboard.style ? keyboard.style.languageListAdd : null
-            remove: keyboard.style ? keyboard.style.languageListRemove : null
+            add: keyboard.style && !keyboard.noAnimations ? keyboard.style.languageListAdd : null
+            remove: keyboard.style && !keyboard.noAnimations ? keyboard.style.languageListRemove : null
             property rect previewRect: Qt.rect(keyboard.x + languagePopupList.x,
                                                keyboard.y + languagePopupList.y,
                                                languagePopupList.width,
@@ -1294,7 +1310,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: keyboard.parent.parent ? keyboard.parent.parent.height : Screen.height
+        height: keyboard.screenHeight
         onPressed: keyboard.hideWordCandidateContextMenu()
         enabled: wordCandidateContextMenuList.enabled
     }

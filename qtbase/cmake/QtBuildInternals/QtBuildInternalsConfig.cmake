@@ -1,5 +1,8 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 # These values should be kept in sync with those in qtbase/.cmake.conf
-cmake_minimum_required(VERSION 3.16...3.20)
+cmake_minimum_required(VERSION 3.16...3.21)
 
 ###############################################
 #
@@ -12,8 +15,8 @@ cmake_minimum_required(VERSION 3.16...3.20)
 #
 # The returned dependencies are topologically sorted.
 #
-# Example output for qtimageformats:
-# qtbase;qtshadertools;qtsvg;qtdeclarative;qttools
+# Example output for qtdeclarative:
+# qtbase;qtimageformats;qtlanguageserver;qtshadertools;qtsvg
 #
 function(qt_internal_read_repo_dependencies out_var repo_dir)
     set(seen ${ARGN})
@@ -227,11 +230,20 @@ if(NOT QT_BUILD_INTERNALS_SKIP_SYSTEM_PREFIX_ADJUSTMENT)
     qt_build_internals_set_up_system_prefixes()
 endif()
 
-macro(qt_build_internals_set_up_private_api)
+# The macro sets all the necessary pre-conditions and setup consistent environment for building
+# the Qt repository. It has to be called right after the find_package(Qt6 COMPONENTS BuildInternals)
+# call. Otherwise we cannot make sure that all the required policies will be applied to the Qt
+# components that are involved in build procedure.
+macro(qt_internal_project_setup)
     # Check for the minimum CMake version.
     include(QtCMakeVersionHelpers)
     qt_internal_require_suitable_cmake_version()
     qt_internal_upgrade_cmake_policies()
+endmacro()
+
+macro(qt_build_internals_set_up_private_api)
+    # TODO: this call needs to be removed once all repositories got the qtbase update
+    qt_internal_project_setup()
 
     # Qt specific setup common for all modules:
     include(QtSetup)
@@ -296,24 +308,19 @@ function(qt_build_internals_add_toplevel_targets)
 endfunction()
 
 macro(qt_enable_cmake_languages)
-    include(CheckLanguage)
     set(__qt_required_language_list C CXX)
-    set(__qt_optional_language_list )
+    set(__qt_platform_required_language_list )
 
-    # https://gitlab.kitware.com/cmake/cmake/-/issues/20545
     if(APPLE)
-        list(APPEND __qt_optional_language_list OBJC OBJCXX)
+        list(APPEND __qt_platform_required_language_list OBJC OBJCXX)
     endif()
 
     foreach(__qt_lang ${__qt_required_language_list})
         enable_language(${__qt_lang})
     endforeach()
 
-    foreach(__qt_lang ${__qt_optional_language_list})
-        check_language(${__qt_lang})
-        if(CMAKE_${__qt_lang}_COMPILER)
-            enable_language(${__qt_lang})
-        endif()
+    foreach(__qt_lang ${__qt_platform_required_language_list})
+        enable_language(${__qt_lang})
     endforeach()
 
     # The qtbase call is handled in qtbase/CMakeLists.txt.
@@ -379,6 +386,8 @@ macro(qt_internal_prepare_single_repo_target_set_build)
 endmacro()
 
 macro(qt_build_repo_begin)
+    list(APPEND CMAKE_MESSAGE_CONTEXT "${PROJECT_NAME}")
+
     qt_build_internals_set_up_private_api()
 
     # Prevent installation in non-prefix builds.
@@ -416,6 +425,16 @@ macro(qt_build_repo_begin)
         add_dependencies(install_docs install_html_docs install_qch_docs)
     endif()
 
+    if(NOT TARGET sync_headers)
+        add_custom_target(sync_headers)
+    endif()
+
+    # The special target that we use to sync 3rd-party headers before the gn run when building
+    # qtwebengine in top-level builds.
+    if(NOT TARGET thirdparty_sync_headers)
+        add_custom_target(thirdparty_sync_headers)
+    endif()
+
     # Add global qt_plugins, qpa_plugins and qpa_default_plugins convenience custom targets.
     # Internal executables will add a dependency on the qpa_default_plugins target,
     # so that building and running a test ensures it won't fail at runtime due to a missing qpa
@@ -427,6 +446,31 @@ macro(qt_build_repo_begin)
     endif()
 
     string(TOLOWER ${PROJECT_NAME} project_name_lower)
+
+    # Target to build all plugins that are part of the current repo.
+    set(qt_repo_plugins "qt_plugins_${project_name_lower}")
+    if(NOT TARGET ${qt_repo_plugins})
+        add_custom_target(${qt_repo_plugins})
+    endif()
+
+    # Target to build all plugins that are part of the current repo and the current repo's
+    # dependencies plugins. Used for external project example dependencies.
+    set(qt_repo_plugins_recursive "${qt_repo_plugins}_recursive")
+    if(NOT TARGET ${qt_repo_plugins_recursive})
+        add_custom_target(${qt_repo_plugins_recursive})
+        add_dependencies(${qt_repo_plugins_recursive} "${qt_repo_plugins}")
+    endif()
+
+    qt_internal_read_repo_dependencies(qt_repo_deps "${PROJECT_SOURCE_DIR}")
+    if(qt_repo_deps)
+        foreach(qt_repo_dep IN LISTS qt_repo_deps)
+            if(TARGET qt_plugins_${qt_repo_dep})
+                message(DEBUG
+                    "${qt_repo_plugins_recursive} depends on qt_plugins_${qt_repo_dep}")
+                add_dependencies(${qt_repo_plugins_recursive} "qt_plugins_${qt_repo_dep}")
+            endif()
+        endforeach()
+    endif()
 
     set(qt_repo_targets_name ${project_name_lower})
     set(qt_docs_target_name docs_${project_name_lower})
@@ -471,6 +515,10 @@ macro(qt_build_repo_begin)
     if(NOT TARGET benchmark)
         add_custom_target(benchmark)
     endif()
+
+    if(QT_INTERNAL_SYNCED_MODULES)
+        set_property(GLOBAL PROPERTY _qt_synced_modules ${QT_INTERNAL_SYNCED_MODULES})
+    endif()
 endmacro()
 
 macro(qt_build_repo_end)
@@ -507,6 +555,22 @@ macro(qt_build_repo_end)
     if(NOT QT_SUPERBUILD)
         qt_print_build_instructions()
     endif()
+
+    get_property(synced_modules GLOBAL PROPERTY _qt_synced_modules)
+    if(synced_modules)
+        set(QT_INTERNAL_SYNCED_MODULES ${synced_modules} CACHE INTERNAL
+            "List of the synced modules. Prevents running syncqt.cpp after the first configuring.")
+    endif()
+
+    if(NOT QT_SUPERBUILD)
+        qt_internal_save_previously_visited_packages()
+    endif()
+
+    if(QT_INTERNAL_FRESH_REQUESTED)
+        set(QT_INTERNAL_FRESH_REQUESTED "FALSE" CACHE INTERNAL "")
+    endif()
+
+    list(POP_BACK CMAKE_MESSAGE_CONTEXT)
 endmacro()
 
 macro(qt_build_repo)
@@ -548,6 +612,10 @@ macro(qt_build_repo_impl_src)
             add_subdirectory(src)
         endif()
     endif()
+    if(QT_FEATURE_lttng AND NOT TARGET LTTng::UST)
+        qt_find_package(LTTngUST PROVIDED_TARGETS LTTng::UST
+                        MODULE_NAME global QMAKE_LIB lttng-ust)
+    endif()
 endmacro()
 
 macro(qt_build_repo_impl_tools)
@@ -571,6 +639,7 @@ macro(qt_build_repo_impl_examples)
     if(QT_BUILD_EXAMPLES
             AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt"
             AND NOT QT_BUILD_STANDALONE_TESTS)
+        message(STATUS "Configuring examples.")
         add_subdirectory(examples)
     endif()
 endmacro()
@@ -610,6 +679,8 @@ function(qt_internal_get_standalone_tests_config_file_name out_var)
 endfunction()
 
 macro(qt_build_tests)
+    set(CMAKE_UNITY_BUILD OFF)
+
     if(QT_BUILD_STANDALONE_TESTS)
         # Find location of TestsConfig.cmake. These contain the modules that need to be
         # find_package'd when testing.
@@ -669,7 +740,7 @@ macro(qt_build_tests)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/auto/CMakeLists.txt")
         add_subdirectory(auto)
     endif()
-    if(NOT QT_BUILD_MINIMAL_STATIC_TESTS)
+    if(NOT QT_BUILD_MINIMAL_STATIC_TESTS AND NOT QT_BUILD_MINIMAL_ANDROID_MULTI_ABI_TESTS)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/baseline/CMakeLists.txt")
             add_subdirectory(baseline)
         endif()
@@ -680,6 +751,8 @@ macro(qt_build_tests)
             add_subdirectory(manual)
         endif()
     endif()
+
+    set(CMAKE_UNITY_BUILD ${QT_UNITY_BUILD})
 endmacro()
 
 function(qt_compute_relative_path_from_cmake_config_dir_to_prefix)
@@ -765,19 +838,22 @@ macro(qt_examples_build_begin)
 
     cmake_parse_arguments(arg "${options}" "${singleOpts}" "${multiOpts}" ${ARGN})
 
+    set(CMAKE_UNITY_BUILD OFF)
+
     # Use by qt_internal_add_example.
     set(QT_EXAMPLE_BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
     if(arg_EXTERNAL_BUILD AND QT_BUILD_EXAMPLES_AS_EXTERNAL)
         # Examples will be built using ExternalProject.
-        # We always depend on all plugins so as to prevent opportunities for
+        # We depend on all plugins built as part of the current repo as well as current repo's
+        # dependencies plugins, to prevent opportunities for
         # weird errors associated with loading out-of-date plugins from
         # unrelated Qt modules.
         # We also depend on all targets from this repo's src and tools subdirectories
         # to ensure that we've built anything that a find_package() call within
         # an example might use. Projects can add further dependencies if needed,
         # but that should rarely be necessary.
-        set(QT_EXAMPLE_DEPENDENCIES qt_plugins ${arg_DEPENDS})
+        set(QT_EXAMPLE_DEPENDENCIES ${qt_repo_plugins_recursive} ${arg_DEPENDS})
 
         if(TARGET ${qt_repo_targets_name}_src)
             list(APPEND QT_EXAMPLE_DEPENDENCIES ${qt_repo_targets_name}_src)
@@ -852,7 +928,6 @@ macro(qt_examples_build_begin)
     # annotate where each example is installed to, to be able to derive a relative rpath, and it
     # seems there's no way to query such information from CMake itself.
     set(CMAKE_INSTALL_RPATH "${_default_install_rpath}")
-    set(QT_DISABLE_QT_ADD_PLUGIN_COMPATIBILITY TRUE)
 
     install(CODE "
 # Backup CMAKE_INSTALL_PREFIX because we're going to change it in each example subdirectory
@@ -894,12 +969,15 @@ macro(qt_examples_build_end)
         if(TARGET Qt::Widgets)
             qt_autogen_tools(${target} ENABLE_AUTOGEN_TOOLS "uic")
         endif()
+        set_target_properties(${target} PROPERTIES UNITY_BUILD OFF)
     endforeach()
 
     install(CODE "
 # Restore backed up CMAKE_INSTALL_PREFIX.
 set(CMAKE_INSTALL_PREFIX \"\${_qt_internal_examples_cmake_install_prefix_backup}\")
 ")
+
+    set(CMAKE_UNITY_BUILD ${QT_UNITY_BUILD})
 endmacro()
 
 function(qt_internal_add_example subdir)
@@ -1337,4 +1415,14 @@ function(qt_internal_run_common_config_tests)
     qt_internal_static_link_order_test()
     qt_internal_check_cmp0099_available()
     qt_configure_end_summary_section()
+endfunction()
+
+# It is used in QtWebEngine to replace the REALPATH with ABSOLUTE path, which is
+# useful for building Qt in Homebrew.
+function(qt_internal_get_filename_path_mode out_var)
+    set(mode REALPATH)
+    if(APPLE AND QT_ALLOW_SYMLINK_IN_PATHS)
+        set(mode ABSOLUTE)
+    endif()
+    set(${out_var} ${mode} PARENT_SCOPE)
 endfunction()

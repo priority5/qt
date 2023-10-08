@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Generated from qtspeech.pro.
 
 cmake_minimum_required(VERSION 3.16)
@@ -17,5 +20,6 @@ if(NOT TARGET Qt::QmlIntegration)
     message(NOTICE "Skipping the build as the condition \"TARGET Qt::QmlIntegration\" is not met.")
     return()
 endif()
+qt_internal_project_setup()
 
 qt_build_repo()

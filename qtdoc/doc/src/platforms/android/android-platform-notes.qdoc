@@ -5,12 +5,12 @@
     \title Android Platform Notes
     \ingroup androidplatform
     \previouspage Supporting Google Emoji Font Policy
-    \nextpage android_runtime_licensing_notes.html
+    \nextpage Android GNU C++ Run-time Licensing
     \brief Information particular to building and running Qt applications on Android.
 
     This page contains information particular to building and running Qt
-    applications on Android. Qt supports Android versions 6.0 (API level 23) or
-    later.
+    applications on Android. See \l{android_support}{Supported Android Versions}
+    for what Android versions and API levels are supported.
 
     \section1 Android Development in Qt Creator
 
@@ -37,6 +37,15 @@
     must be listed in the application's dependencies. For more information, see
     \l{Dependencies Detection}.
 
+    \section1 Qt Gui Dependency
+
+    Given that Android apps typically include GUI elements, the Qt for Android
+    plugin is built mainly to provide a GUI, so it implements the various QPA
+    abstractions. As a result, deploying a Qt for Android app is expected to
+    involve a dependency on \l [QtGui]{Qt GUI}. Moreover, it's worth noting that Qt
+    Creator only supports Gradle builds and deployments, meaning that command
+    line or shell executions are not supported out of the box.
+
     \section1 Text Special Considerations
 
     Because of a bug in some OpenGL drivers, the mechanism used by Qt to cache
@@ -56,9 +65,7 @@
     a suitable OpenGL context, set the requested version via
     \l{QSurfaceFormat::setVersion()}.
 
-    \note The header files, such as \e{gl31.h}, are only available in recent API
-    levels, and therefore you need to target API level 21. Keep in mind also that
-    using OpenGL ES 3.x features will result in the application breaking on older
+    \note Using OpenGL ES 3.x features will result in the application breaking on older
     devices that only support 2.0.
 
     \section1 Assets File System

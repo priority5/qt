@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required(VERSION 3.16)
 
 include(.cmake.conf)
@@ -11,6 +14,7 @@ project(QtDataVisualization
 find_package(Qt6 ${PROJECT_VERSION} CONFIG REQUIRED COMPONENTS BuildInternals)
 find_package(Qt6 ${PROJECT_VERSION} CONFIG OPTIONAL_COMPONENTS
     Core OpenGL Quick Qml Gui Widgets QuickTest Test)
+qt_internal_project_setup()
 
 macro(assertTargets)
     foreach(qtTarget IN ITEMS ${ARGN})
