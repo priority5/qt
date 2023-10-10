@@ -976,15 +976,15 @@ void QFontDialogPrivate::setVisible(bool visible)
     Q_Q(QFontDialog);
     if (q->testAttribute(Qt::WA_WState_ExplicitShowHide) && q->testAttribute(Qt::WA_WState_Hidden) != visible)
         return;
-    if (canBeNativeDialog())
+
+    if (canBeNativeDialog()) {
         setNativeDialogVisible(visible);
-    if (nativeDialogInUse) {
+
         // Set WA_DontShowOnScreen so that QDialog::setVisible(visible) below
         // updates the state correctly, but skips showing the non-native version:
-        q->setAttribute(Qt::WA_DontShowOnScreen, true);
-    } else {
-        q->setAttribute(Qt::WA_DontShowOnScreen, false);
+        q->setAttribute(Qt::WA_DontShowOnScreen, nativeDialogInUse);
     }
+
     QDialogPrivate::setVisible(visible);
 }
 

@@ -2160,17 +2160,19 @@ void QColorDialogPrivate::setVisible(bool visible)
     if (visible)
         selectedQColor = QColor();
 
-    if (nativeDialogInUse) {
-        if (setNativeDialogVisible(visible)) {
-            // Set WA_DontShowOnScreen so that QDialog::setVisible(visible) below
-            // updates the state correctly, but skips showing the non-native version:
-            q->setAttribute(Qt::WA_DontShowOnScreen);
+    if (canBeNativeDialog()) {
+        if (nativeDialogInUse) {
+            if (setNativeDialogVisible(visible)) {
+                // Set WA_DontShowOnScreen so that QDialog::setVisible(visible) below
+                // updates the state correctly, but skips showing the non-native version:
+                q->setAttribute(Qt::WA_DontShowOnScreen);
+            } else {
+                initWidgets();
+            }
         } else {
-            initWidgets();
+            q->setAttribute(Qt::WA_DontShowOnScreen, false);
         }
-    } else {
-        q->setAttribute(Qt::WA_DontShowOnScreen, false);
-    }
+   }
 
     QDialogPrivate::setVisible(visible);
 }
